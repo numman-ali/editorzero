@@ -19,6 +19,22 @@ See `docs/brief.md` for framing, invariants, and assumptions.
 ## Hard invariants (do not break)
 Enumerated in `docs/brief.md` § Hard invariants. Property tests enforce them (Phase 3+).
 
+## Verification stack — what "done" means
+
+Every change must pass, in order:
+
+1. **Types** — `tsc --noEmit` clean across the monorepo.
+2. **Lint + format** — zero warnings.
+3. **Unit tests** — pure logic.
+4. **Property tests** — CRDT convergence, Markdown round-trip fixed-point (ADR 0013), inverse-restore (ADR 0017), permission invariants.
+5. **Integration tests** — capabilities against a real SQLite and a real Postgres (ADR 0007 conformance suite).
+6. **Contract tests** — API/CLI/MCP/UI parity matrix, generated from the capability registry (ADR 0009, 0015).
+7. **E2E tests** — Playwright, including `@axe-core/playwright` for WCAG 2.1 AA coverage (red-team #22).
+8. **Smoke deploy** — ephemeral compose env spins up, hits `/health`, creates a doc, tears down.
+9. **Observability check** — traces export, no unexpected error spans (ADR 0019).
+
+A PR that fails any step is red; "fix it in the next commit" is not acceptable.
+
 ## Working rules
 
 1. **No feature code without an ADR.** No ADR without alternatives considered.
