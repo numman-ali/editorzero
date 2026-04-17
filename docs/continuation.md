@@ -1,6 +1,6 @@
 # Continuation — rolling work state
 
-*This file is the rolling work-state journal. AGENTS.md is canonical and durable; this file is what an agent updates as work progresses. Edit freely; commit with each phase-boundary update.*
+*Rolling work-state journal. `AGENTS.md` (= `CLAUDE.md`) is already in your context — it is auto-loaded on every session. This file is what an agent updates as work progresses; commit with each phase-boundary update.*
 
 ---
 
@@ -22,11 +22,11 @@ Produce `docs/architecture.md` synthesizing ADRs 0001–0020 into a system desig
 
 ## Resume protocol (for a fresh-context agent)
 
-1. **Read this file first** — current phase, immediate focus, open questions.
-2. Read `AGENTS.md` — canonical working rules + invariants.
+1. **`AGENTS.md` is already loaded** via the CLAUDE.md symlink — canonical rules + invariants + gotchas are in your context.
+2. **This file is your next read** — current phase, immediate focus, open questions (below).
 3. Read `docs/brief.md` — Phase 0 framing.
 4. Read `docs/adr/README.md` — ADR index.
-5. Skim `docs/adr/red-team-phase-1.md` + `docs/adr/refresh-research-phase-1.md` for the reasoning trail behind the stack (why we landed here, not just what we landed on).
+5. Skim `docs/adr/red-team-phase-1.md` + `docs/adr/refresh-research-phase-1.md` for the reasoning trail behind the stack (why we landed here, not just what).
 6. `git log --oneline -20` — work-in-progress head.
 7. `TaskList` — current-session tasks.
 8. **Do not read all 20 ADRs front-to-back unless necessary.** Read only those relevant to the immediate focus.

@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Canonical, durable working practices for agents (human or AI) contributing to editorzero.
+You are reading `AGENTS.md` (symlinked as `CLAUDE.md`). This file is **auto-loaded into your context on every session** — it is the durable anchor. Treat it as canonical working practices, invariants, verification stack, gotchas. Update it only when a working practice genuinely changes.
 
-**Rolling work state** — what phase we're in, what the current focus is, what's open — lives in [`docs/continuation.md`](docs/continuation.md), **read it first on any new session.**
+**Your next read is [`docs/continuation.md`](docs/continuation.md)** — the rolling work state: current phase, immediate focus, open questions, resume protocol. Time-varying information lives there so this file can stay stable.
 
 ---
 
