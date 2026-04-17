@@ -20,6 +20,9 @@ out/
 *.swp
 *.swo
 
+# Agent-local (Claude Code skills, workspace config)
+.claude/
+
 # Logs / coverage
 *.log
 npm-debug.log*

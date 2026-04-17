@@ -1,81 +1,87 @@
-# ADR 0018 — Unified write path: all mutations flow through the CRDT
+# ADR 0018 — Unified write path: all mutations flow through the CRDT via BlockNote's ServerBlockNoteEditor
 
-**Status:** Accepted (post-red-team)
-**Date:** 2026-04-17
+**Status:** Accepted (post-refresh)
+**Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
 ## Context
-Red-team (#21) called this "the single most important architectural decision in the whole stack." The question: when an AI agent updates a doc via the MCP `doc_update` tool while a human edits the same doc in the browser via Hocuspocus, what is the write path for the agent?
-
-- If the agent's write goes through the CRDT (as a synthetic Yjs client), browser updates and agent updates merge deterministically via Yjs's conflict resolution.
-- If the agent's write goes around the CRDT (directly to the DB or to the Markdown AST), we have two sources of truth and divergence within the first week.
-
-The decision was left implicit in the original ADRs 0003/0006. Making it explicit.
+v1 decided every mutation from every surface goes through the CRDT via Hocuspocus. The refresh surfaced `@blocknote/server-util`'s `ServerBlockNoteEditor` as a ready-made implementation of the "synthetic client" that constructs Yjs updates from typed block operations. This ADR tightens the implementation story.
 
 ## Decision
 
-**Every mutation — from any surface — flows through the CRDT.**
+**Every mutation — API, CLI, MCP, Web UI — flows through the CRDT using `ServerBlockNoteEditor` as the synthetic client.**
 
 ### The write path
+
 ```
-  Request (API / CLI / MCP / Web UI Server Action)
+  Request from any surface
      │
      ▼
-  Capability dispatcher (ADR 0015)  ──►  permission + rate-limit + scope checks
-     │
+  Capability dispatcher (ADR 0015)
+     │   permission + rate-limit + scope checks
      ▼
-  Capability handler constructs a Yjs update
-  against an in-memory Y.Doc for the target document
-     │
-     ▼
-  Update submitted to Hocuspocus (ADR 0006)  ◄── same path browser clients use
-     │
+  Capability handler:
+     1. Load live Y.Doc from Hocuspocus for target doc (or load from
+        doc_snapshots + doc_updates if not resident)
+     2. Construct ServerBlockNoteEditor bound to the Y.XmlFragment
+     3. editor.transact(() => {
+          editor.insertBlocks(...) / updateBlock(...) / removeBlocks(...)
+        })   // all mutations collapse to one undo step
+     4. y-prosemirror produces the Yjs update; the update is applied
+        through the same Hocuspocus pipeline browser clients use
      ▼
   Hocuspocus onChange:
      • enforce resource limits (ADR 0003)
-     • write raw update to doc_updates in a DB tx
-     • emit audit event
-     │
+     • durable write to doc_updates in a DB tx
+     • emit audit event (ADR 0016)
      ▼
-  Broadcast to subscribed clients (browsers AND the handler's "waiter")
-     │
+  onStoreDocument (debounced, non-concurrent in 3.4.x):
+     • write consolidated snapshot when trigger fires (ADR 0007 §compaction)
      ▼
-  Capability handler returns post-apply state to the caller
+  Broadcast to subscribed clients (browsers AND the handler's waiter)
+     ▼
+  Capability handler reads post-apply state from the Y.Doc
+  and returns to the caller
 ```
 
-### What capability handlers look like
+### Why `ServerBlockNoteEditor`
 
-For `doc.update(workspace_id, doc_id, blocks)`:
-1. Load the current `Y.Doc` for `doc_id` (from Hocuspocus's in-memory map, or from `doc_snapshots` + `doc_updates` if not loaded).
-2. Compute the minimal Yjs delta that turns the current state into the caller's requested state. Use `y-protocols` to construct the update.
-3. Submit the update to Hocuspocus as if the handler were a synthetic Yjs client tied to the calling principal.
-4. Wait for the `onChange` callback to confirm durable persistence.
-5. Return the resulting doc view (projected from the updated `Y.Doc` into the caller's requested shape).
+`@blocknote/server-util`'s `ServerBlockNoteEditor`:
+- Gives the capability handler a **headless editor** bound to the live `Y.XmlFragment`.
+- Exposes `insertBlocks(blocks, referenceBlock, placement)`, `updateBlock(blockOrId, update)`, `removeBlocks(blocks)`, and `replaceBlocks(blocksToRemove, blocksToInsert)` — a 1:1 match to agent intent expressed via MCP `doc.update`.
+- `editor.transact(fn)` collapses multi-op work into one ProseMirror transaction → one Yjs update → one `onChange` event → one durable write → one audit row. Atomicity for free.
+- Block IDs are native (ADR 0004). No directive-attribute ID bookkeeping.
+- Does **not** rehydrate history from Markdown (`blocksToYDoc` is explicitly "not a rehydration path" per docs). The correct pattern is **always** "load live Y.Doc → apply transaction → save via the normal pipeline." Documented in AGENTS.md so future contributors don't regress.
 
-### What happens on conflict
+### Mutation from Markdown input (agent authoring)
 
-Two browsers editing the same block simultaneously, or a browser + an agent editing simultaneously, both go through Hocuspocus. Yjs converges them deterministically per ADR 0003 invariant #2. The "latest-write" doesn't exist; both updates apply, and the resulting state is merged by the CRDT.
+An MCP tool call like `doc.update_from_markdown(md)` goes through:
+1. Parse `md` → mdast tree (remark-parse, pinned version).
+2. Convert mdast → BlockNote block array via our per-block-type `fromMarkdown` functions (ADR 0013 v2 fidelity tiers).
+3. Diff against current block array (`reconcileBlocks(current, incoming)` → list of `insert/update/remove` ops).
+4. Apply the ops via `editor.transact`.
 
-For semantic conflicts (e.g., agent wants to delete block X while human inserts block X+1 that references X), we ship the raw CRDT convergence — users see the merged state; if that state is semantically broken, a follow-up edit fixes it. Property tests (ADR 0013) verify convergence on fuzzed concurrent edit sequences.
+The diff step is important: we don't blow away the doc on every Markdown-in call — we compute minimal edits so concurrent human edits aren't clobbered.
 
 ### What this rules out
-
-- **No direct DB writes** to `blocks`, `docs.content`, or any field that mirrors CRDT state. These fields are either removed from the schema or are projected-read-only (materialized from the latest snapshot, rebuilt by a job).
-- **No "fast path"** for API bulk updates that bypasses the CRDT. Bulk updates go through the CRDT in batches; we optimize Yjs batch-update construction, not bypass it.
-- **No surface-specific mutation logic.** Capabilities construct CRDT updates; that's the only mutation primitive the system exposes.
+- No direct DB writes to `blocks` / `docs.content` / any field mirroring CRDT state. Mirror fields are projected-read-only, rebuilt from the latest snapshot by a job.
+- No "fast path" bulk API that bypasses the CRDT. Bulk goes through `editor.transact` with a larger transaction.
+- No surface-specific mutation logic. Capabilities construct block ops (or Markdown that gets parsed to block ops); that's it.
 
 ### Read path
+Reads project from the Y.Doc to stable representations: block array, rendered Markdown (per ADR 0013 v2 fidelity tiers), rendered HTML. Projections are cached; cache invalidated on `onChange`. Reads never touch the write path.
 
-Reads project from the CRDT to a stable representation (Markdown AST, block list, rendered HTML) via a pure function. Projections are cached; cache is invalidated on `onChange` (ADR 0006). Reads never touch the write path — a stale-ish read is cheaper than a write-through check.
+## Conflict semantics
+Two humans, a human + an agent, two agents — any mix, any surface — editing the same doc converge via Yjs. No semantic-layer reconciliation is imposed; if the merged state is semantically broken, a follow-up edit fixes it. Property tests (ADR 0013) verify convergence on fuzzed concurrent edit sequences.
 
 ## Consequences
-- **The four-surface parity invariant holds for mutations by construction.** Every surface produces the same CRDT updates against the same document; there is nothing else to diverge on.
-- **Conflict resolution is free** — Yjs handles it. Concurrent edits from any combination of principals converge.
-- **Performance:** the capability dispatcher is in the hot path for every write. Benchmark at Phase 3. If the synthetic-client overhead is high, optimize by keeping hot docs' `Y.Doc`s in-memory across handler invocations (Hocuspocus already does this).
-- **Complexity:** capability handlers construct Yjs deltas, which is more verbose than "write JSON to the DB." Accept the verbosity for the invariant.
-- **Hot-path hazard:** if the capability handler fails after submitting to Hocuspocus but before the client sees a response, the write is still persisted. Handlers must therefore construct the return value from a post-apply read, not from the input — idempotent-by-construction.
+- Four-surface parity for mutations **holds by construction**. Every surface produces Yjs updates against the same Y.Doc via the same editor primitive.
+- Conflict resolution is Yjs's problem — no custom merge logic.
+- Capability handlers are idempotent-by-construction: the return value is read from the post-apply Y.Doc, not inferred from the input. Safe under retry.
+- Performance: capability dispatcher is in the hot path. Hot docs' Y.Docs stay resident via Hocuspocus's in-memory map. Benchmark in Phase 3 at 20 concurrent editors × 500 ops/sec.
+- Complexity cost: capability handlers construct block ops / Markdown, not raw SQL. Accepted for the invariant.
 
 ## Revisit triggers
-- The synthetic-client overhead on bulk-import workloads is unacceptable and a batched direct-CRDT-insert path is demonstrably safe.
-- A capability emerges that cannot be expressed as a CRDT delta (unlikely).
-- Yjs conflict resolution produces a semantically broken state a property test catches; we then specify the semantic-layer resolution the capability applies before submitting.
+- Synthetic-client overhead on bulk-import workloads (e.g., importing a 50k-block Notion export) is unacceptable and a batched direct-CRDT insert path is demonstrably safe.
+- A capability emerges that cannot be expressed as a block-level op (unlikely given BlockNote's schema).
+- BlockNote's `ServerBlockNoteEditor` API breaks in a version we cannot absorb.

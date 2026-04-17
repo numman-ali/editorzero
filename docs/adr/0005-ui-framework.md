@@ -1,37 +1,57 @@
-# ADR 0005 — UI framework: Next.js 15 App Router
+# ADR 0005 — UI framework: Next.js 16 App Router
 
-**Status:** Accepted (post-red-team)
-**Date:** 2026-04-17
+**Status:** Accepted (post-refresh)
+**Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
 ## Context
-Four UI hot paths: the block editor, the document tree / navigation, real-time collab overlays, and the public published-docs render. The first three are interactive and JS-heavy; the last is SEO-sensitive. Editor ecosystem support (Milkdown, cmdk, Radix, dnd-kit) is deepest in React; Svelte/Solid/Qwik are thinner by material margins in April 2026.
-
-## Options considered
-- **Next.js 15 App Router** — stable, mature App Router (post-v13 shake-out), RSC + Server Actions, static export and ISR for public pages, first-class React 19 support. One build graph, one routing model.
-- **React 19 + Vite + TanStack Start** — attractive but pre-1.0 as of April 2026; breaking changes between minors; thinner SSR streaming story. The red-team flagged "pick one; don't list a fallback." Accepted.
-- **React 19 + Vite + TanStack Start + Astro** (original plan) — three frontend frameworks = two hydration models, two router philosophies, two CSS-ordering bug classes, a shared-component-package `"use client"`-vs-islands seam. Complexity without requirement-level justification.
-- **SvelteKit 2 + Melt UI + svelte-tiptap** — viable but thinner editor bindings; no Milkdown Svelte binding.
-- **SolidStart / Qwik City** — aspirational for this workload in 2026.
+The refresh confirmed Next.js **16** is current (16.0 GA Oct 21 2025; 16.2 Mar 2026). v1 cited Next 15; update to 16 and note the breaking surface.
 
 ## Decision
-**Next.js 15 App Router. One framework, one build graph.**
+**Next.js 16.2 App Router**, React 19.2, one framework, one build graph.
 
-Route groups split the surfaces:
-- **`(app)/`** — authenticated editor, tree, workspace UI, collab overlays. Client-side React components using Milkdown + `y-prosemirror` against Hocuspocus (ADR 0006). RSC for initial data loads; Server Actions for mutations are routed through the capability layer (ADR 0015).
-- **`(public)/[domain]/[slug]`** — published-docs render. Static export or ISR per published doc; zero or near-zero client JS for read-only pages. Custom domains resolved via Caddy → backend `ask` endpoint → `(public)` route (ADR 0011).
-- **`(api)/api/`** — HTTP API handlers; route handlers call into the capability layer.
+Route groups unchanged from v1:
+- **`(app)/`** — authenticated editor, tree, collab. Client components, BlockNote editor (ADR 0004) with `y-prosemirror` against Hocuspocus (ADR 0006). RSC for initial data loads; Server Actions route through the capability registry (ADR 0015).
+- **`(public)/[domain]/[slug]`** — published-docs render. `output: 'export'` static export for the true zero-JS path; `next start` on Node for ISR / custom-domain routing. Cache via **`"use cache"` + `cacheLife`**, not the old `revalidate` export.
+- **`(api)/api/`** — HTTP API handlers into the capability layer.
 
-Shared UI lives in a workspace package (`@editorzero/ui`) consumed by both route groups. No cross-framework island seam; everything is React.
+## Breaking surface to honor (Next 15 → 16)
+- **Turbopack is default** for `next dev` and `next build`. Webpack available via `--webpack`.
+- **Async Request APIs mandatory:** `params`, `searchParams`, `cookies()`, `headers()`, `draftMode()` must be awaited. No sync fallback.
+- **`middleware.ts` deprecated → `proxy.ts`**, which runs on **Node.js, not Edge**. Edge runtime for this layer is not configurable from `proxy`. For us this is a **strict improvement** — direct Postgres / Redis / capability calls from the proxy layer, no cold-start Edge constraint.
+- **Node 20.9+ required.** We're on Node 22 LTS — fine.
+- **Removed:** AMP APIs, `serverRuntimeConfig`, `publicRuntimeConfig`, `next lint`. Use Biome or ESLint directly.
+- **`revalidateTag(tag, cacheLife)`** — second argument added.
+
+## Cache Components
+Caching is now explicit opt-in via `"use cache"` + `cacheLife` + `cacheTag`, gated by the `cacheComponents` flag. The experimental `ppr` and `dynamicIO` flags are gone; PPR is folded into Cache Components. **Cached functions cannot call `cookies()`/`headers()`/`searchParams`** — design cached functions to receive request context as arguments. This affects the capability registry: capability handlers that call cached reads must pass `Principal` / `TenantContext` explicitly.
+
+## React Compiler 1.0
+Stable (opt-in, Babel-backed). **Not enabled by default** for us. Evaluate after we have a stable editor route — BlockNote + Yjs + heavy client code can trip aggressive memoization assumptions. Flip on behind a flag post-Phase-3.
+
+## React 19.2 alignment
+First-class in Next 16. Ecosystem caveats:
+- **Tiptap UI components** reference React 18 in some doc paths — mostly moot since we're on BlockNote.
+- **BlockNote** on React 19 works; use current stable releases.
+- **Better Auth** has official Next 16 integration; known issue: `getServerSession` cannot be called inside a `"use cache"` scope — read session outside cached functions.
+
+## Self-hosted Node deploy
+`next start` on Node 22 is fully supported and first-class. `output: 'standalone'` for our single-Docker-image path. Vercel did **not** push toward lock-in in 16; the **Adapter API** is public and stable, co-designed with OpenNext, Netlify, Cloudflare, AWS Amplify, Google. Net-positive for self-hosting.
+
+## Custom server / embedding in Hono
+Still supported, still discouraged. `proxy.ts` running on Node with full native APIs absorbs most reasons one would front Next with Hono. **Decision:** keep Next as the top-level server; put shared capability-registry logic behind `proxy.ts` + Server Actions + route handlers. Use Hono for the MCP server subprocess or if we split a service later.
+
+## TanStack Start
+Hit v1.0 in March 2026 but **does not support React Server Components** — disqualifying for our `(public)` zero-JS path. Keep on the radar for an internal admin dashboard if we ever split one out.
 
 ## Consequences
-- First-class support for Milkdown, Radix, cmdk, dnd-kit, TanStack Table — no porting, no islands gymnastics.
-- Public render uses Next's static export / ISR; zero-JS-by-default is achievable with `"use server"` components and selective `"use client"` hydration.
+- First-class support for BlockNote, Radix, cmdk, dnd-kit, TanStack Table — no porting.
+- `(public)` path ships near-zero JS via RSC-only pages + `"use cache"`.
 - Single build pipeline; single routing mental model; single deployment artifact.
-- Bundle size for the editor route is dominated by ProseMirror + Yjs + Milkdown extensions, not the framework.
-- Accept Next.js's opinions (App Router conventions, React 19 alignment); the ecosystem moves with them.
+- Turbopack-default changed caching + HMR semantics; retune Docker build cache layers in Phase 3.
+- Bundle size for the editor route dominated by ProseMirror + Yjs + BlockNote — framework choice doesn't move the needle.
 
 ## Revisit triggers
-- A Solid/Qwik-native editor stack reaches parity with React and delivers a perf delta visible on our target hardware.
-- Next.js 15 introduces a paradigm shift we cannot absorb.
-- Published-docs pages prove too JS-heavy despite Next's static export — at that point, reintroduce Astro for the public surface with a clearly-drawn boundary.
+- Next 17 introduces a paradigm shift we cannot absorb cleanly.
+- Cache Components semantics bite capability handlers in ways we cannot engineer around.
+- A Solid/Qwik-native editor stack reaches parity with React for our workload.

@@ -1,39 +1,51 @@
 # ADR 0016 — Principal model: humans and agents as peer types
 
-**Status:** Accepted (post-red-team)
-**Date:** 2026-04-17
+**Status:** Accepted (post-refresh)
+**Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
 ## Context
-Red-team (#10) flagged that "humans and agents as peer principals" was asserted, not designed. Better Auth does not give us this shape out of the box. We need: distinct principal types, per-agent rate limits separate from the owning human, per-agent audit attribution that survives token rotation, revocation that cascades to in-flight MCP sessions, and a scope model narrower than OAuth's default.
+v1 designed a custom principal model. The refresh revealed Better Auth now ships `@better-auth/agent-auth` (v1.5.6, Mar 22 2026) implementing the Agent Auth Protocol plus `@better-auth/api-key` for long-lived revocable scoped tokens. This shrinks the custom work to the principal-spine abstraction plus per-tenant audience handling plus Hocuspocus-specific revocation cascade.
+
+**Principal type stays polymorphic**; Better Auth handles the credential lifecycle.
 
 ## Decision
 
-### `Principal` is polymorphic with a `kind` discriminator
+### `Principal` shape
 
 ```ts
 type Principal =
   | { kind: "user",  id: UserId,  workspace_id: WorkspaceId,
-      roles: Role[],  session_id: SessionId | null }
+      roles: Role[], session_id: SessionId | null }
   | { kind: "agent", id: AgentId, workspace_id: WorkspaceId,
-      owner_user_id: UserId | null,   // nullable: some agents are workspace-owned
+      owner_user_id: UserId | null,
       scopes: Scope[],
       token_id: TokenId,
-      acting_as?: UserId              // optional human delegation
-    }
+      token_kind: "agent-auth" | "api-key",
+      acting_as?: UserId }
 ```
 
-One principal table in the DB, one auth middleware, one audit shape. Joins into `audit_events` carry the full `principal_ref` (kind + id + token_id where applicable) so attribution survives token rotation: if token T1 is rotated to T2, the audit for actions done via T1 still says "agent X acting via token T1."
+One principal table in the DB. One auth middleware produces a `Principal` for every request regardless of credential source (Better Auth session, PAT, API key, agent-auth token). The capability dispatcher (ADR 0015) sees only `Principal`.
 
-### Agent identity is workspace-scoped and owner-attributable
+### Credential sources — delegated
 
-- Agents are created by a human (or by another agent with `agent.create` capability). The creator is recorded in `agent.created_by`.
-- Agents can optionally be workspace-owned (no single human owner) so that a workspace-wide automation does not die when its creator leaves.
-- An agent's tokens are rotatable and individually revocable. Revocation is immediate: in-flight MCP sessions (ADR 0009) see their next message denied; HTTP request middleware rejects on the next call.
+| Credential | Source | Plugin |
+|---|---|---|
+| Human session | cookie | `better-auth` core |
+| Human PAT | bearer | `@better-auth/api-key` with `principal.kind = "user"` tag |
+| Agent token (long-lived, workspace-scoped) | bearer | `@better-auth/api-key` with `principal.kind = "agent"`, `token_kind = "api-key"` tag |
+| Agent token (short-lived, delegated via Agent Auth Protocol) | bearer JWT with `sub` + `act.sub` | `@better-auth/agent-auth`, `token_kind = "agent-auth"` |
+| MCP OAuth 2.1 bearer | bearer | `@better-auth/oauth-provider` → MCP middleware (ADR 0009) |
+| SSO (OIDC/SAML) | auth flow → session | `@better-auth/sso` |
 
-### Scopes
+### Agent creation and ownership
+- Agents created by a human with `agent:create` scope (or by an agent that has `agent:create` in its scopes).
+- `owner_user_id` is set to creator, or nullable for workspace-owned automations.
+- Audit captures creator and workspace.
+- `@better-auth/api-key` carries `referenceId = workspace_id` for per-workspace scoping; scope list lives in the key's `permissions`.
+- Agent tokens are revocable; `@better-auth/api-key`'s revoke API + our audit hook emit `agent_token.revoked` event.
 
-Agent tokens carry scopes narrower than OAuth's default. Scope vocabulary:
+### Scopes (vocabulary — same as v1)
 ```
 doc:read, doc:write, doc:delete, doc:publish
 block:read, block:write
@@ -44,50 +56,47 @@ permission:grant, permission:revoke
 agent:create, agent:revoke
 ```
 
-Scopes are multiplicatively combined with workspace-level permissions: `capability allowed iff (principal has scope) AND (principal has workspace permission)`. An agent with `doc:write` but no `workspace_member` cannot write. An agent with `workspace_member` but no `doc:write` cannot write. Defense-in-depth.
+Multiplicatively combined with workspace-level permissions at capability dispatch (ADR 0015): `allowed iff (token.scopes contains S) AND (principal has workspace permission for S)`.
 
-### `ActingAs` delegation
+### `ActingAs` delegation — delegated to Agent Auth
+`@better-auth/agent-auth`'s `modes: ["delegated", "autonomous"]` covers it. Delegated tokens carry `sub: agent_id` + `act.sub: human_id`. Our capability dispatcher reads both and applies effective permissions as `intersect(agent.scopes, human.permissions)` — an agent cannot exceed the delegator.
 
-Some agent actions are on behalf of a specific human (e.g., a coding agent invoked by Alice to refactor doc X). The token carries `acting_as: alice.user_id`. Audit, rate limits, and permission checks see:
-- **Attribution:** rows show "agent BOT acting_as alice" — both are auditable.
-- **Permission:** effective permission is `intersect(agent.scopes, alice.permissions)` — an agent cannot exceed the delegator.
-- **Rate limits:** the agent's per-agent bucket AND alice's per-user bucket both apply; whichever depletes first rate-limits the action.
+Rate limits apply to both buckets — agent's and human's — whichever depletes first rate-limits the action.
 
 ### Per-principal rate limits
+Per `@better-auth/api-key`'s `rateLimitMax` + `rateLimitTimeWindow` — configurable per key, configurable per workspace default. Audit rate-limit (ADR 0009 §audit rate limiting) applies on top.
 
-Separate buckets from the owning human. No shared ceilings. Default daily caps (configurable):
-- Human PAT: 100k requests/day, 10k writes/day.
-- Agent token: 50k requests/day, 5k writes/day.
-- Per-capability sub-buckets (e.g., `doc.write` at 120/min/principal; see ADR 0009 capability metadata).
-- Audit write rate limit (ADR 0009 #11): 1k events/min with burst 3k; circuit breaker on sustained overflow suspends the principal.
+Defaults (tunable):
+- Human PAT: 100k req/day, 10k writes/day.
+- Agent API-key: 50k req/day, 5k writes/day.
+- Per-capability sub-buckets from capability metadata (ADR 0009).
+- Audit: 1k events/min sustained, burst 3k, circuit-break on sustained overflow.
 
-### Revocation cascade
+### Revocation cascade (ours to own)
+Better Auth revokes the credential; we cascade the consequences across subsystems Better Auth doesn't know about:
+1. Better Auth marks the token `revoked_at`.
+2. HTTP middleware rejects on next call (Better Auth).
+3. **MCP Streamable HTTP sessions bound to the token are forcibly closed** — our code, on the MCP session manager (ADR 0009).
+4. **Hocuspocus WebSocket sessions bound to the token are closed with an auth error** — our code, on Hocuspocus's `onAuthenticate` re-validation path.
+5. **Scheduled jobs enqueued by the principal continue** (they carry their own auth snapshot); future enqueues under the revoked token fail.
+6. Audit records `revoke` with operator.
 
-When a token is revoked:
-1. The token row is marked `revoked_at = now()`.
-2. Active HTTP requests complete (read-only middleware no-op); subsequent requests with that token fail auth.
-3. In-flight MCP Streamable HTTP sessions bound to that token are forcibly closed with an auth-error message.
-4. In-flight Hocuspocus WebSocket sessions bound to that token are closed; the client sees a disconnect and must reauthenticate.
-5. Scheduled jobs the principal enqueued continue (they carry their own authenticated principal snapshot); future enqueues fail.
-6. Audit records `revoke` with human operator who triggered it.
+When an agent token is compromised and revoked, the owning human's session is **unaffected**. Per-token containment.
 
-When a compromised agent token is revoked, the human owner's sessions are not affected. Containment is per-token, not per-owner.
+### Audit integration
+Every credential event (issue, refresh, rotate, revoke), every `acting_as` delegation chain, every capability invocation, every rate-limit breach lands in our `audit_events` table (ADR 0017 retention). Hooks: Better Auth's `hooks.before` / `hooks.after`, Agent Auth's `onEvent`.
 
-### Agent creation flow
-
-1. Human with `agent:create` scope hits `POST /api/agents` with `{ name, scopes, acting_as? }`.
-2. System creates agent principal + mints a long-lived token; token shown once in response.
-3. Audit event `agent.created` with full scope list, creator, workspace.
-4. Agent is usable immediately for MCP / API / CLI.
+### Per-tenant canonical URL / audience — DIY
+Better Auth's `referenceId` plumbing plus our `resolveTenantAudience(host)` helper (ADR 0009 / ADR 0010) owns this. Custom-domain tenants get per-tenant `aud` on issued tokens; token validation checks the Host header maps to the token's audience.
 
 ## Consequences
-- Humans and agents are first-class in every subsystem — auth, audit, rate limits, permissions, revocation — because they share the same `Principal` shape.
-- Token rotation does not break audit attribution (token id is preserved in audit rows even after the token is revoked).
-- Delegation model (`acting_as`) allows agents to act on behalf of a human without forging identity — the delegation is explicit and visible.
-- Compromise is contained per-token, not per-owner.
-- Capability metadata (ADR 0009) + scope intersection (above) give us fine-grained access control without building a policy engine from scratch.
+- The principal spine is ours; credential lifecycle is Better Auth's.
+- Agent-as-first-class is real: distinct `kind`, distinct scope model, distinct rate limits, distinct audit attribution, distinct revocation semantics — none of which are shared with the owning human.
+- Delegation via Agent Auth Protocol gives agents a structured `acting_as` without forging identity; compromise contained per-token.
+- We own Hocuspocus session revocation, MCP session revocation, and per-tenant audience — the three places Better Auth cannot reach.
+- Agent Auth Protocol is marked unstable through 2026-H2; we wrap it behind the `Principal` abstraction so protocol churn doesn't ripple through capability code.
 
 ## Revisit triggers
-- A multi-agent workflow requires an agent to delegate to another agent; currently `acting_as` is single-level. Revisit to support delegation chains.
-- Scope vocabulary grows too coarse; a PBAC-style attribute model may be needed.
-- A compromise class the revocation cascade does not contain (e.g., a forged audit row); harden the attribution pipeline.
+- Multi-agent workflows require multi-level `acting_as` (agent → agent → human) beyond Agent Auth Protocol's single-level support.
+- Agent Auth Protocol breaking changes we cannot pin through.
+- A per-agent capability model emerges (e.g., declarative "this agent may only author blocks of type X") that scope vocabulary cannot express — introduce PBAC-style attributes.

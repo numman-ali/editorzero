@@ -1,75 +1,73 @@
-# ADR 0012 — Deploy artifact: docker-compose, full stop
+# ADR 0012 — Deploy artifact: docker-compose primary + Bun-compiled CLI binary
 
-**Status:** Accepted (post-red-team)
-**Date:** 2026-04-17
+**Status:** Accepted (post-refresh)
+**Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
 ## Context
-Target user: a non-expert self-hoster runs one command, lands at an installer URL, creates a superuser, and writes a doc. Meta-prompt accepts `docker compose up`. The original plan included a Bun `--compile` single-binary stretch goal; the red-team (#20) noted that with sqlite-vec, ONNX runtime, Caddy, and Hocuspocus pulling various native/out-of-process pieces, "single binary" would be aspirational and misleading. Disposition: drop the stretch; be honest.
-
-## Options considered
-- **docker-compose primary + single-binary stretch** (original) — promised more than we can deliver; invites "single binary" bug reports against a multi-process reality.
-- **docker-compose primary, full stop** — honest; mirrors Plausible, Outline, Ghost, Bookstack, Directus, Vaultwarden.
-- **OS packages** — delegated to community for v1.
-- **Nix flake** — delegated to community.
+v1 honestly declared "docker-compose, full stop" because the Bun `--compile` single-binary route was 2026-young with native-dep pitfalls. The refresh confirmed Bun's server runtime is still not boring (ADR 0002) but revealed that **`bun build --compile` is production-grade for CLI distribution** — cross-compilation to Linux/macOS/Windows amd64/arm64, fast cold starts, embedded assets and SQLite, auto-loaded env. That's a real single-binary win for the `editorzero` CLI surface.
 
 ## Decision
-**`docker-compose.yml` is the primary and only officially-supported v1 artifact.**
+**Primary server artifact: `docker-compose.yml`.** **Secondary CLI artifact: Bun-compiled cross-platform binaries.**
 
-### Default self-host (one command, zero configuration)
+### Server artifact (primary)
+
+`docker-compose.yml` with sane defaults. Single-host default: one service running the Next 16 app with embedded Hocuspocus (ADR 0006), SQLite, embedded Web UI. Advanced services (Postgres, Caddy, Redis) are opt-in compose additions.
 
 ```yaml
 services:
   app:
-    image: editorzero/editorzero:1.0.0
+    image: editorzero/editorzero:TAG
     ports: ["3000:3000"]
     volumes: ["./data:/data"]
     environment:
       EDITORZERO_DB: sqlite:///data/editorzero.db
-      EDITORZERO_EMBED_MODE: disabled   # keyword-only search by default
+      EDITORZERO_EMBED_MODE: disabled
 ```
 
-- SQLite file under `./data/`. Attachments under `./data/attachments/`. Hocuspocus doc snapshots under `./data/docs/`.
+- SQLite file under `./data/`. Attachments under `./data/attachments/`. CRDT state under `./data/docs/`. Caddy state (when enabled) under `./data/caddy/`.
 - First boot prints a signed one-time installer URL (Pocketbase pattern) to create the initial superuser.
 - Backup = `tar ./data/`.
 - Health check at `/health`; graceful shutdown on SIGTERM.
+- Migrations run on startup via Atlas CE (ADR 0007).
 
-### Advanced configurations are opt-in compose services
+### CLI artifact (secondary)
 
-- **Postgres mode:** add a `postgres` service; set `EDITORZERO_DB=postgres://...`.
-- **Custom domains:** add a `caddy` service (ADR 0011).
-- **Semantic search:** set `EDITORZERO_EMBED_MODE=local` (bge-small) or `=openai` (with key); adds ~200 MB RAM to app.
-- **HA:** add Redis for Hocuspocus fan-out, point Caddy cert storage at Postgres.
+`editorzero` CLI built with `bun build --compile`:
+- **Targets:** `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, `windows-x64`.
+- **Binary size:** ~60–85 MB per target.
+- **Startup:** ~110 ms cold.
+- **Embedded:** `bun:sqlite` for local cache, SPDX license banners, asset fixtures.
+- **Distribution:** published as release assets on GitHub, signed with cosign, checksummed. Installer curl script: `curl -fsSL https://editorzero.dev/cli.sh | sh`.
+- **Scope:** the CLI is a thin client over the capability registry (ADR 0009 / 0015). It does not embed the server. Users authenticate with a PAT or agent token against a remote editorzero instance.
 
-### Embedded Web UI
-
-Next.js app is built and embedded in the container image. Served directly by the app via Next's Node runtime. No CDN dependency; works air-gapped.
-
-### Upgrades
-
-`docker compose pull && up -d`. Migrations run on startup (Atlas, ADR 0007).
-
-### Release artifacts per version
-
-- Docker image: `editorzero/editorzero:TAG` for `linux/amd64` and `linux/arm64`.
-- `docker-compose.yml` templates (default, with-postgres, with-postgres-caddy-redis).
-- Checksums + cosign signatures.
-- Release notes + CHANGELOG.
-- Sample `systemd` unit for users who prefer running containers via podman + systemd.
+The CLI is where the "single binary" aesthetic lives honestly — short-lived, stateless, native-dep-light. The server stays Node 22 LTS on Docker because that's where the stability premium pays off (ADR 0002).
 
 ### What we do not ship in v1
-- Single binary (native deps + out-of-process components make it misleading).
+- Single-binary server. Multi-process reality (app + optional Postgres + optional Caddy + optional Redis) is honest.
 - OS packages (community can package from the Docker image).
 - Nix flake (community-driven).
-- Windows-native; Windows users run via Docker Desktop / WSL2.
+- Windows-native server; Windows users run via Docker Desktop / WSL2. Windows CLI binary is first-class.
+
+### Release artifacts per version
+- Docker image: `editorzero/editorzero:TAG`, `linux/amd64` + `linux/arm64`, multi-arch manifest.
+- `docker-compose.yml` templates: `default`, `with-postgres`, `with-postgres-caddy`, `with-postgres-caddy-redis`.
+- CLI binaries: 5 target tuples, checksummed and cosigned.
+- Sample `systemd` unit for podman-users.
+- CHANGELOG entry + release notes.
+
+### Upgrades
+- Compose: `docker compose pull && up -d`. Migrations run on startup.
+- CLI: `editorzero self-update`, or re-download.
 
 ## Consequences
-- Honest promise: `docker compose up`, one volume, data lives next to the compose file.
-- Multi-service compose hidden behind defaults; users opting into Postgres/Caddy/Redis add services consciously.
-- Release engineering cost is bounded: one Docker image, two architectures.
-- Not shipping a binary means we cannot court users who refuse Docker; accept that trade-off for now.
+- Docker-first server is honest; no "single binary" marketing against a multi-process reality.
+- CLI-as-single-binary recovers the `curl | sh` aesthetic for the user's client-side experience.
+- Release engineering cost bounded: one Docker image + five CLI target tuples.
+- Cross-platform CLI handled; server cross-platform handled by Docker.
+- CLI binary build happens in CI (Bun builder); adds a build matrix but no new runtime dep.
 
 ## Revisit triggers
-- Node SEA or Bun `--compile` matures to the point a real (not aspirational) single-binary is achievable with native deps — revisit as a community-requested stretch.
-- Windows-native becomes a meaningful demand driver and WSL2 is insufficient.
-- Compose onboarding data shows Docker install is a real cliff for our target self-hosters.
+- Bun ships a formal LTS policy AND issue #29302 closes AND `onnxruntime-node` becomes first-class on Bun → reconsider Bun server runtime (ADR 0002) which would open a single-binary server route.
+- A class of CLI native-module incompatibility that Bun cannot absorb.
+- Compose onboarding friction becomes a documented cliff for our target users.

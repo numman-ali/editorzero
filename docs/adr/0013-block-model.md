@@ -1,51 +1,96 @@
-# ADR 0013 — Block model: Markdown AST as source of truth
+# ADR 0013 — Block model: CRDT-as-source-of-truth with per-block-type Markdown fidelity
 
-**Status:** Accepted (post-red-team)
-**Date:** 2026-04-17
+**Status:** Accepted (post-refresh, supersedes v1 "Markdown AST as source of truth")
+**Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
 ## Context
-The Phase 0 self-critique flagged this as a distinct architectural fork: Notion-style block model (blocks are first-class records; Markdown is lossy export) vs. Markdown AST (mdast tree *is* the model; Markdown round-trip is lossless). This decision shapes the CRDT schema, the editor invariants, and long-term import/export fidelity.
+v1 decided "Markdown AST is the source of truth; CRDT reflects it." That was a direct translation of a naive user pointer (versioned-S3-of-Markdown). The pointer was retracted and the right shape is **CRDT (Yjs) is the source of truth; Markdown is a faithful-where-possible projection with per-block-type fidelity contracts.**
 
-Red-team (#7) flagged the hidden coupling between the Yjs document and the Markdown AST: round-trip determinism requires every Milkdown/ProseMirror operation to produce a remark-directive-preserving serialization whose re-parse reconstructs an identical doc. Any schema or plugin change breaks this silently without a property-test harness.
+Research (Phase 1 v2) surveyed prior art: BlockSuite / Affine ship this model with a named **Transformer (lossless Y.Doc snapshot) vs Adapter (declared-lossy Markdown)** split; Outline runs Yjs-as-truth at scale; Logseq's migration away from Markdown-as-storage confirms the anti-pattern; HedgeDoc v2 is the inverse case. No published RFC formalizes a three-tier fidelity contract; we're the first to write it down cleanly.
 
 ## Options considered
-- **Notion-style block model** — blocks are first-class DB rows with IDs, types, parents, positions; Markdown round-trip is lossy by design.
-- **Markdown AST as source of truth** — the doc *is* a remark mdast tree; blocks = AST nodes; non-Markdown primitives expressed as remark-directives (`:::type`); round-trip is lossless by construction.
+- **(A) Markdown AST as source of truth** (v1). Forces every block to express cleanly as CommonMark + directives; richness ceiling; agents reason in mdast nodes.
+- **(B) Notion-style first-class blocks, Markdown export = lossy by design.** Removes fidelity rigor entirely; git-mirror workflow degrades; portability story weak.
+- **(C) CRDT as source of truth; per-block-type Markdown fidelity contracts.** Lossless where possible, declared-lossy where not; agents reason in blocks; Markdown export honest; portability workflows (git-mirror, ADR 0020) work for the lossless majority.
 
 ## Decision
-**Markdown AST (remark mdast) is the source of truth.** Non-Markdown primitives encoded as **remark-directives** per the CommonMark directive draft (`:::type[attrs]...:::`). Durable block IDs (for deeplinks, per-block comments, drag operations) stored as directive attributes (e.g., `{#id=abc123}`) so Markdown round-trip is preserved.
 
-### Round-trip property test harness (red-team #7) — Phase 3 deliverable
+**Option C. CRDT (Yjs) is the source of truth. Markdown is a per-block-type-declared projection.**
 
-The harness is the lynchpin that makes the whole decision honest. It runs in CI on every PR.
+### Three-tier fidelity contract
 
-**Shape:**
-1. Generate N canonical Markdown documents from a fuzzer (block-type-weighted, with depth and width constraints).
-2. For each doc:
-   a. Parse to mdast (`remark-parse` + directive extensions).
-   b. Construct a Yjs `Y.Doc` reflecting the mdast (via our `mdast ↔ y.doc` bridge).
-   c. Apply R randomized edit operations (insert, delete, move, update block attributes) through the same capability-layer code path that the editor uses.
-   d. Serialize back: `y.doc → mdast → Markdown`.
-   e. Re-parse: `Markdown → mdast'`.
-   f. Assert `mdast' ≡ mdast` structurally, modulo whitespace we've explicitly declared non-semantic.
-3. Corpus: 10k rounds per PR by default, 1M rounds nightly.
+Each block type in our schema (via BlockNote's `createReactBlockSpec`, ADR 0004) declares one of three tiers:
 
-**Invariants the harness enforces:**
-- **Fixed point.** `md → crdt → md` is a fixed point for any canonical input.
-- **Durable IDs.** Every block ID present after edit `i` is either present in the final state (alive) or appears in the delete audit log (removed). IDs never silently disappear.
-- **Structural equivalence of reparsed output.** No serializer loss.
+1. **`lossless`** — block → markdown → block is bit-identical under a declared equivalence relation.
+   Examples: prose, headings, lists, code blocks, tables, links, basic inline formatting (bold, italic, code).
+   Implementation: `toMarkdown` emits canonical CommonMark / GFM per the locked parser version; `fromMarkdown` round-trips through the same parser.
 
-**Failure mode of the test:** any schema change in Milkdown, any remark plugin update, any new block type that doesn't round-trip cleanly fails the harness. CI fails. We cannot land a change that breaks the invariant silently.
+2. **`directive`** — block → markdown → block round-trips through a declared remark-directive shape `:::type{attrs}...:::` or inline `::type[text]{attrs}`.
+   Examples: callouts, Mermaid, KaTeX, embed cards, mentions, admonitions, video/file attachments.
+   Implementation: `toMarkdown` emits the directive with all attributes; `fromMarkdown` parses via `mdast-util-directive` and reconstructs the block. Directive type name carries `namespace:name` flavor (BlockSuite pattern) to prevent third-party collisions.
+
+3. **`opaque`** — block → markdown emits a declared fallback representation that does NOT round-trip to the original block; re-import creates a `opaque` block with `_type` + `id` preserved.
+   Examples: inline databases, interactive embeds, platform-specific components, rich filtered views.
+   Implementation: `toMarkdown` emits an HTML comment capturing block type + attributes (`<!-- editorzero:opaque type="..." id="..." attrs="..." -->`) plus an optional rendered text fallback for human readability. `fromMarkdown` reconstructs an `opaque` placeholder.
+
+### Block IDs
+Native in Yjs / BlockNote — each block has a persistent `id` attribute carried in the CRDT. Survives all CRDT operations. On Markdown export:
+- **`lossless` blocks:** ID encoded as a trailing `<!-- id:abc123 -->` HTML comment only if `preserveBlockIds: true`; stripped by default for clean git diffs.
+- **`directive` / `opaque` blocks:** ID is always an attribute in the directive / HTML-comment wrapper.
+
+On import from Markdown without an ID marker, blocks are assigned fresh CRDT-generated IDs. Users who want stable IDs across round-trip enable `preserveBlockIds`.
+
+### Canonical shapes (references)
+- Directive node shape: `mdast-util-directive`'s JSON (https://github.com/syntax-tree/mdast-util-directive).
+- Block type flavor naming: BlockSuite's `namespace:name` (`@blocksuite/blocks`'s `@blocksuite:code`, `@blocksuite:callout`). We use `editorzero:core/heading`, `editorzero:core/code`, `third-party-plugin:custom-block`.
+
+### Property test harness (Phase 3 deliverable)
+Per-block-type fuzzed round-trip:
+
+```
+for each block type T:
+  for each declared fidelity tier contract:
+    generate N canonical fixtures of T
+    for each fixture block:
+      md = T.toMarkdown(block)
+      block' = T.fromMarkdown(md)
+      assert block ≡ block' under T.equivalence
+```
+
+Plus a **multi-block document round-trip**:
+
+```
+for each fuzzed doc D (N blocks across all types):
+  md = doc_to_markdown(D)
+  D' = markdown_to_doc(md)
+  assert D ≡ D' under "all non-opaque blocks bit-identical; opaque blocks preserve _type + id"
+```
+
+Runs on every PR; 10k rounds default, 1M nightly. A PR that breaks any declared contract fails CI.
+
+### Import determinism
+- Parser version locked (remark-parse + remark-directive, pinned).
+- Unicode NFC normalization applied identically on import and any later diff.
+- Whitespace collapsed identically (one trailing newline, no internal tab-vs-space ambiguity).
+- Directive attributes treated as unordered maps (order-independent equality).
+
+### Git-mirror interaction (ADR 0020)
+The git-mirror writes the multi-block Markdown projection. Lossless + directive blocks round-trip perfectly through the mirror. Opaque blocks surface as HTML comments + human-readable fallback; importing from the mirror reconstructs opaque placeholders. Users see honest diffs and know when a block is round-trip-safe.
+
+### Escape hatch for block-schema migrations
+Per BlockSuite's explicit warning ("no central source of truth in a CRDT editor, add props as *optional*"): schema changes add optional props, never required ones. Mandatory changes go through a CRDT-layer migration job (ADR 0014) that reads old-schema blocks, writes new-schema blocks, and drops the old via soft-delete (ADR 0017).
 
 ## Consequences
-- The round-trip invariant is by construction at the storage layer *and* proven by the property test.
-- Milkdown consumes the same mdast — no editor-vs-storage impedance.
-- New block types contract: (a) directive spec, (b) renderer (React component), (c) CRDT schema entry, (d) property-test coverage. Documented process.
-- Block-ID features (comments, deeplinks, drag) work by attaching attributes to AST nodes; no shadow-block table.
-- Notion imports that use non-Markdown semantics (e.g., synced blocks, databases) are mapped to directives where possible; unsupported constructs are documented as gaps.
+- Markdown round-trip is verifiable, per-contract, not a monolithic claim.
+- Agent authoring via MCP `doc.update` can submit either block JSON (precise) or Markdown (natural) — both land in the CRDT via the unified write path (ADR 0018).
+- Rich block types (inline databases, interactive embeds) are possible without fighting a serializer.
+- Git-mirror (ADR 0020) has honest semantics: users see full fidelity for lossless+directive blocks; opaque blocks are flagged.
+- Property test harness is the lynchpin — fidelity is proven per block type on every PR.
+- We pay a small complexity cost in the block-type registration path (each type declares its tier + implements `toMarkdown`/`fromMarkdown` per the tier contract).
 
 ## Revisit triggers
-- A UX feature that cannot be expressed cleanly as a directive (e.g., block state that must not be in the Markdown).
-- The property-test harness surfaces a class of serializer bugs the Milkdown+remark stack cannot fix.
-- mdast / remark evolves in a direction that breaks directive stability.
+- A required UX feature cannot be expressed in any of the three tiers cleanly (e.g., block state that must not be in the Markdown projection under any representation).
+- Unicode normalization produces unexpected idempotency failures we cannot pin through.
+- The property-test harness surfaces a class of serializer bugs in remark / directive parsing that blocks a release.
+- Demand for a fourth tier emerges (e.g., "partial round-trip" with declared lossy fields).

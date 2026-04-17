@@ -1,69 +1,68 @@
-# ADR 0007 — Database strategy: dual SQLite + Postgres with Kysely + Atlas
+# ADR 0007 — Database strategy: dual SQLite + Postgres, Kysely + Atlas CE
 
-**Status:** Accepted (post-red-team)
-**Date:** 2026-04-17
+**Status:** Accepted (post-refresh)
+**Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
 ## Context
-Meta-prompt mandates dual backend: SQLite for single-node self-hosts (no extra process); Postgres for scale and HA. Schema covers polymorphic principals (users + agents, ADR 0016), workspaces, docs, blocks, versions, audit log, comments, attachments metadata, CRDT state (snapshots + updates log), job queue (ADR 0014), search indexes.
+Meta-prompt mandates dual backend: SQLite for single-node self-hosts, Postgres for scale. Refresh reconsidered Drizzle vs Kysely and re-evaluated Atlas.
 
-The red-team (#5) flagged that dual-dialect support doubles the correctness surface. Disposition: do not drop SQLite (it's a requirement), but declare a ceiling and enforce behavior parity via conformance tests.
-
-## Options considered
-- **Drizzle ORM** — dialect-aware; separate schemas per dialect; CVE-2026-39356 plus `drizzle-kit` esbuild advisories.
-- **Prisma 7** — faster post-Rust-removal but SQLite remains "partial parity" for ops we use (`jsonb`, FTS, arrays).
-- **Kysely + Atlas** — Kysely is a dialect-aware query builder with full type inference; Atlas is declarative migrations with dual-dialect support and CI integrity checks.
-- **Raw SQL + dbmate/goose** — gives up type inference.
+## Options considered (refresh)
+- **Drizzle ORM** — CVE-2026-39356 was patched 0.45.2 / 1.0.0-beta.20 (April 7 2026). But `drizzle-kit` still ships vulnerable esbuild and deprecated `@esbuild-kit/esm-loader`; security issue #5290 open since Jan 2026 with no maintainer response. 1.0.0-beta.9 silently deprecated the `strict` flag so `drizzle-kit push` runs `DROP TABLE` without confirmation — a data-safety regression in an actively-iterated beta. Supply-chain posture is the blocker.
+- **Kysely** — v0.28.16 (April 10 2025), cadence slowed to patch-level. MySQL backslash-escape fix in v0.28.14 (Postgres/SQLite unaffected). kysely-codegen v0.20 added `defineConfig` + `postprocess`. Single maintainer but small, finished-feeling surface.
+- **Prisma 7** — still "partial parity" SQLite.
 
 ## Decision
-**Kysely for queries, Atlas for migrations.** Divergence is expressed at the SQL layer, not hidden.
+**Kysely + Atlas Community Edition.** Schema divergences expressed at SQL; no ORM abstraction fighting dialect features.
 
-### SQLite-mode declared ceiling (red-team #5)
+### Atlas Community Edition note (refresh)
+As of **Atlas v0.38 (Oct 2025), `atlas migrate lint` moved behind the Pro plan** ($9/dev/mo + $59/CI-project/mo). Code remains Apache-2.0 and buildable from source; Community Edition keeps basic analyzers but the deep Postgres rules (PG301–PG311) and PII/nested-tx/SQL-injection analyzers are paywalled.
 
-SQLite mode targets single-node self-hosts. Declared envelope:
+**Our posture:** pin Atlas Community Edition (self-build from source if binary paywall triggers). Cover the missing PG lock/rewrite rules via explicit conformance tests (ADR 0007 §conformance below). Re-evaluate if Atlas CE drops an analyzer we actively depend on.
+
+### SQLite-mode declared ceiling (unchanged from v1)
 - ≤ 50 concurrent authenticated users
 - ≤ 10 concurrent editors per doc
 - ≤ 1 million blocks total across the instance
 - ≤ 100 jobs/min sustained queue throughput (ADR 0014)
-- ≤ 500 updates/sec sustained across all docs (with ADR 0003 per-session caps)
+- ≤ 500 updates/sec sustained across all docs (ADR 0003 per-session caps)
 
-Exceeding the envelope is not a crash — it's a performance cliff — but we do not warrant behavior beyond it. Installer prints this on first run and in `/admin/health`.
+Installer prints this on first run and in `/admin/health`.
 
 ### Conformance test suite
+Every capability (ADR 0015) gets a parameterized test running against both SQLite and Postgres with identical assertions. CI fails if the two drivers diverge on observable behavior for any in-envelope workload.
 
-Every capability (ADR 0015) gets a parameterized test that runs against both SQLite and Postgres with identical assertions. CI fails if the two drivers diverge on observable behavior for any in-envelope workload.
+Additionally, the conformance suite covers the Postgres-specific safety analyzers that Atlas CE no longer ships: destructive-change in migrations (DROP COLUMN / ALTER COLUMN TYPE), long-running index creation without `CONCURRENTLY`, `SELECT ... FOR UPDATE` in migrations, and PII-shaped column renames.
 
-### CRDT state persistence
-
-Snapshot + updates-log hybrid. Two tables:
+### CRDT state persistence (unchanged from v1)
+Snapshot + updates-log hybrid:
 ```
 doc_snapshots(id, doc_id, seq, state BLOB, created_at)
 doc_updates  (id, doc_id, seq, update BLOB, created_at)
 ```
 
-**Compaction spec (red-team #15):**
-- **Trigger:** whichever comes first — 500 updates since last snapshot, 10 MB of updates since last snapshot, or 30 minutes elapsed. Trigger is per-doc and idempotent.
-- **Atomicity:** compaction is a single DB transaction: `INSERT new snapshot → UPDATE doc_snapshots.seq to (max update seq applied) → UPDATE old updates with tombstone.delete_after = now() + 24h`. No updates are deleted in the same transaction; a reaper reclaims tombstoned rows after 24h.
-- **Reader semantics:** document load uses the most-recent snapshot WHERE `seq <= target` plus `doc_updates` WHERE `doc_id = ?` AND `seq > snapshot.seq` AND `tombstone.delete_after IS NULL OR tombstone.delete_after > now()`. Concurrent compaction never invalidates an in-flight read.
-- **Failure recovery:** if compaction is killed mid-transaction, the transaction never commits and the old snapshot + updates remain untouched. No half-compaction states.
-- **GC:** two-phase with 24h grace; tombstoned updates are recoverable until the reaper runs. Monitored via OTel (ADR 0019).
+**Compaction spec** (same as v1):
+- **Trigger:** 500 updates OR 10 MB OR 30 minutes since last snapshot, per doc.
+- **Atomicity:** single DB transaction — INSERT snapshot + UPDATE old-updates tombstone.delete_after in one tx. Old updates not dropped in the same tx; a reaper reclaims tombstoned rows after 24h.
+- **Reader semantics:** latest snapshot WHERE `seq <= target` plus `doc_updates` WHERE `seq > snapshot.seq` AND tombstone-valid. Concurrent compaction never invalidates in-flight reads.
+- **Failure recovery:** killed compaction = transaction never commits; old snapshot + updates remain untouched.
+- **GC:** two-phase with 24h grace.
 
 ### SQLite runtime pragmas
-
-`journal_mode=WAL`, `synchronous=NORMAL`, `wal_autocheckpoint=1000`, `journal_size_limit=67108864`, `foreign_keys=ON`, `busy_timeout=5000`. Batch updates in explicit transactions.
+`journal_mode=WAL`, `synchronous=NORMAL`, `wal_autocheckpoint=1000`, `journal_size_limit=67108864`, `foreign_keys=ON`, `busy_timeout=5000`.
 
 ### libSQL / Turso
-
-Supported as opt-in SQLite-mode replacement for users who want embedded replicas or multi-region reads. **Not default** — default SQLite keeps the stock-system-SQLite promise.
+Supported as opt-in SQLite-mode replacement; not default.
 
 ## Consequences
-- No ORM papering over dialect differences; divergence is named and tested.
-- SQLite-mode ceiling is explicit and installer-visible.
-- Compaction is specified, atomic, and recoverable; the "lose data when OOM killer hits compaction" failure mode is closed.
-- Conformance test suite is part of the Phase 3 harness — every capability runs on both backends every CI run.
+- No ORM papering over dialect differences.
+- Atlas CE covers most lint needs; our conformance suite covers the paywalled Pro analyzers.
+- Kysely's single-maintainer surface is small and stable; bus-factor risk mitigated by the library being "finished."
+- Drizzle's supply-chain posture made the switch unwise despite the validator ergonomics win.
+- The tenant-aware Kysely wrapper (ADR 0015 Layer 2) is the load-bearing construct; switching to Drizzle would require a full rewrite since Drizzle's relational query builder v2 does not expose a compile-time hook equivalent to Kysely's `Expression<T>`.
 
 ## Revisit triggers
-- Kysely maintainership slows or a type-inference regression lands.
-- SQLite WAL growth or write contention exceeds what pragmas + compaction hold, even within envelope.
-- A production outage traced to a dialect-divergence bug the conformance suite missed → expand the suite.
-- libSQL becomes compelling enough to promote to default.
+- Drizzle v1.0 stable ships with a hardened `drizzle-kit` supply chain and the destructive-safety prompt restored.
+- Atlas CE drops a PG analyzer we depend on, or Atlas Pro becomes cheap enough to stop mattering.
+- Kysely's lone maintainer disengages AND a library-level regression lands.
+- libSQL becomes compelling enough to promote to default (embedded replicas justify the fork).
