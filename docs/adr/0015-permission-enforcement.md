@@ -38,6 +38,25 @@ SQLite has no RLS; we rely on Layer 2 and the conformance test suite (ADR 0007) 
 - An MCP tool handler cannot execute without a permission check — it goes through the capability dispatcher.
 - A raw SQL query via `OpsDb` is deliberate, audited (OTel span + audit row), and rare.
 
+### Access path shape — sub-block extension point (resolved 2026-04-17)
+
+Permission checks take a typed `AccessPath`:
+
+```ts
+type AccessPath = {
+  workspace_id: WorkspaceId
+  doc_id?: DocId
+  block_id?: BlockId
+  selector?: SubBlockSelector   // reserved; always null in v1
+}
+```
+
+In v1, granularity is workspace / doc / block. The `selector` field is **reserved but unused** — always `null`. Policy evaluation short-circuits the sub-block tier when `selector` is null, so there is zero runtime cost.
+
+**Reserved for future:** sub-block ACLs (e.g., "this paragraph is draft and hidden from agents," "this table row is PII and only the compliance role may read it," "this comment thread is private to HR"). When/if introduced, the `selector` encodes the sub-structure (block-local position, CRDT fragment path, tagged range) and policy evaluation grows a sub-block tier that reads like the block tier does today. **The three-layer enforcement pattern (dispatch → tenant wrapper → Postgres RLS) does not change shape.**
+
+Not a v1 deliverable. Shape is reserved so adding sub-block ACLs is a clean additive change — new capability metadata field, new policy-rule selector, new property tests — not a permission-layer rewrite.
+
 ## Consequences
 - Permission checks cannot be bypassed per-surface — every surface calls through capability dispatch.
 - Tenant isolation is enforced at query construction AND, in Postgres, at the database.

@@ -39,10 +39,10 @@ An open-source, self-hostable, Markdown-first documentation and collaboration pl
 
 ## Open questions (do not block Phase 1)
 
-- **Scale target.** 10 users or 10k-per-instance? Shapes whether we invest in horizontal collab-server scaling and whether SQLite stays viable end-to-end.
-- **Commercial arm.** OSS-only or OSS + hosted? Changes license calculus and which extension points are baked in.
-- **Sub-block ACLs.** Does permission resolution need to go below block granularity? Spec is ambiguous.
-- **Agent offline-edit.** Do agents get offline/reconcile semantics, or assumed always-online? Default: always-online.
+- ~~**Scale target.**~~ **Resolved 2026-04-17:** production target 500–1,000 users per instance minimum, design headroom for 10,000. Postgres is the production target; SQLite mode is for small-team pilots / dev / home-lab only. See [ADR 0007](adr/0007-database-strategy.md).
+- **Commercial arm.** OSS-only or OSS + hosted? Changes license calculus and which extension points are baked in. **Still open.**
+- ~~**Sub-block ACLs.**~~ **Resolved 2026-04-17:** deferred; permission model reserves an `AccessPath.selector` field so sub-block granularity is a clean additive change. See [ADR 0015](adr/0015-permission-enforcement.md).
+- **Agent offline-edit.** Do agents get offline/reconcile semantics, or assumed always-online? Default: always-online. **Still open.**
 
 I will propose answers in the relevant ADRs; Nomi overrides any of them there.
 

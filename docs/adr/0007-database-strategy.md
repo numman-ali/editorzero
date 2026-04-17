@@ -20,14 +20,19 @@ As of **Atlas v0.38 (Oct 2025), `atlas migrate lint` moved behind the Pro plan**
 
 **Our posture:** pin Atlas Community Edition (self-build from source if binary paywall triggers). Cover the missing PG lock/rewrite rules via explicit conformance tests (ADR 0007 §conformance below). Re-evaluate if Atlas CE drops an analyzer we actively depend on.
 
-### SQLite-mode declared ceiling (unchanged from v1)
+### Production scale target (set 2026-04-17)
+
+- **Postgres mode is the production target:** 500–1,000 active users per instance as a floor; **design headroom extends to 10,000 users** per instance with Hocuspocus Redis fan-out (ADR 0006), pgvector HNSW at the ~1M embedding scale (ADR 0008), and pg-boss queue (ADR 0014). Beyond 10k, reconsider multi-region and sharding.
+- **SQLite mode is for small-team pilots, dev environments, and home-lab installs** inside the declared envelope below. Operators hitting the envelope migrate to Postgres mode via a documented switch (export + reimport on first boot with `EDITORZERO_DB=postgres://…`). Postgres migration is not zero-downtime in v1; documented as such.
+
+### SQLite-mode declared ceiling
 - ≤ 50 concurrent authenticated users
 - ≤ 10 concurrent editors per doc
 - ≤ 1 million blocks total across the instance
 - ≤ 100 jobs/min sustained queue throughput (ADR 0014)
 - ≤ 500 updates/sec sustained across all docs (ADR 0003 per-session caps)
 
-Installer prints this on first run and in `/admin/health`.
+Installer prints both the production target and the SQLite envelope on first run. Admin UI (`/admin/health`) surfaces current vs. envelope utilization so operators know when to migrate.
 
 ### Conformance test suite
 Every capability (ADR 0015) gets a parameterized test running against both SQLite and Postgres with identical assertions. CI fails if the two drivers diverge on observable behavior for any in-envelope workload.

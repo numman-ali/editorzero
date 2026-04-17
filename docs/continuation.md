@@ -34,11 +34,12 @@ Produce `docs/architecture.md` synthesizing ADRs 0001–0020 into a system desig
 
 ## Open questions for @numman
 
-1. **Scale target** (carried from `docs/brief.md`): 10 users/instance, or 10k users/instance? Shapes whether we invest in horizontal Hocuspocus scaling and whether SQLite mode stays viable end-to-end.
-2. **Sub-block ACLs** (carried from `docs/brief.md`): does permission resolution need to go below block granularity?
-3. **Commercial arm** (carried from `docs/brief.md`): OSS-only or OSS + hosted? AGPL-3.0 + DCO (ADR 0001) does not pre-commit the answer; other decisions might if we ever want a paid tier.
+1. ~~**Scale target:** 10 or 10k users/instance?~~ **Resolved 2026-04-17.** Production target is **500–1,000 minimum, with design headroom for 10,000**. Postgres mode is the production target; SQLite mode is for small-team pilots / dev / home-lab and keeps its declared envelope. Folded into [ADR 0007](adr/0007-database-strategy.md).
+2. ~~**Sub-block ACLs:** does permission resolution go below block granularity?~~ **Resolved 2026-04-17.** Defer to a later release; reserve `AccessPath.selector` in the permission model so sub-block granularity is a clean additive change, not a rewrite. Folded into [ADR 0015](adr/0015-permission-enforcement.md).
+3. **Commercial arm** (carried from `docs/brief.md`): OSS-only or OSS + hosted? AGPL-3.0 + DCO (ADR 0001) does not pre-commit the answer; other decisions might if we ever want a paid tier. **Still open; does not block Phase 2.**
+4. **Agent offline-edit** (carried from `docs/brief.md`): do agents get offline/reconcile semantics or are they assumed always-online? Default "always-online" stands unless challenged. **Still open; does not block Phase 2.**
 
-None of these block Phase 2 architecture; propose defaults in the architecture doc and let @numman override there.
+Nothing open blocks Phase 2 architecture. Propose defaults for (3) and (4) in the architecture doc and let @numman override there.
 
 ## Recent history
 
