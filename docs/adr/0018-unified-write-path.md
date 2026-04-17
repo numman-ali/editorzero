@@ -1,15 +1,19 @@
-# ADR 0018 — Unified write path: all mutations flow through the CRDT via BlockNote's ServerBlockNoteEditor
+# ADR 0018 — Unified write path: all mutations flow through the CRDT via Hocuspocus direct connection + BlockNote editor
 
-**Status:** Accepted (post-refresh)
+**Status:** Accepted (post-refresh, API prose corrected 2026-04-17 after BlockNote research pass; updated 2026-04-17 to reflect pass-3 disposition)
 **Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
+> **Updated 2026-04-17 to reflect pass-3 disposition (F76).** Write-path ownership sharpened to match architecture.md §6.1–6.3 exactly: the **dispatcher** owns the single write-path DB tx; **Hocuspocus** provides the per-doc serializer and the DB-tx hook (not audit ownership). The tx commits `doc_updates + outbox(doc.updated) + audit_events + outbox(audit.appended)` together (F31). `onChange` is no longer described as independently writing audit; audit is a dispatcher responsibility inside the same tx.
+
 ## Context
-v1 decided every mutation from every surface goes through the CRDT via Hocuspocus. The refresh surfaced `@blocknote/server-util`'s `ServerBlockNoteEditor` as a ready-made implementation of the "synthetic client" that constructs Yjs updates from typed block operations. This ADR tightens the implementation story.
+v1 decided every mutation from every surface goes through the CRDT via Hocuspocus. The April-2026 BlockNote research pass resolved the implementation primitive: Hocuspocus's `openDirectConnection(docId).transact(ydoc => …)` loads the live `Y.Doc`, and inside that callback `BlockNoteEditor.create({ collaboration: { fragment } })` binds a headless block editor to the doc's `Y.XmlFragment`. Typed block ops then produce ProseMirror transactions → Yjs updates through the same pipeline browser clients use.
+
+Note: `@blocknote/server-util`'s `ServerBlockNoteEditor` is a **conversion surface** (blocks ↔ HTML / Markdown / Y.Doc) — it does not expose `transact/insertBlocks/updateBlock/removeBlocks`. Those methods live on `BlockNoteEditor` (accessible via `ServerBlockNoteEditor.editor` or constructed directly). The write path uses `BlockNoteEditor` directly.
 
 ## Decision
 
-**Every mutation — API, CLI, MCP, Web UI — flows through the CRDT using `ServerBlockNoteEditor` as the synthetic client.**
+**Every mutation — API, CLI, MCP, Web UI — flows through the CRDT as a headless `BlockNoteEditor` bound to the live `Y.Doc` via Hocuspocus `openDirectConnection`.**
 
 ### The write path
 
@@ -18,48 +22,59 @@ v1 decided every mutation from every surface goes through the CRDT via Hocuspocu
      │
      ▼
   Capability dispatcher (ADR 0015)
-     │   permission + rate-limit + scope checks
+     │   permission + rate-limit + scope checks; owns the write-path DB tx
      ▼
-  Capability handler:
-     1. Load live Y.Doc from Hocuspocus for target doc (or load from
-        doc_snapshots + doc_updates if not resident)
-     2. Construct ServerBlockNoteEditor bound to the Y.XmlFragment
-     3. editor.transact(() => {
-          editor.insertBlocks(...) / updateBlock(...) / removeBlocks(...)
-        })   // all mutations collapse to one undo step
-     4. y-prosemirror produces the Yjs update; the update is applied
-        through the same Hocuspocus pipeline browser clients use
+  Capability handler calls ctx.transact(doc_id, fn):
+     1. hocuspocus.openDirectConnection(doc_id, ctx) acquires the
+        live Y.Doc (hydrating from doc_snapshots + doc_updates if
+        not resident). Per-doc serializer queues this closure.
+     2. direct.transact((ydoc) => {
+          const fragment = ydoc.getXmlFragment("prosemirror");
+          const editor = BlockNoteEditor.create({
+            collaboration: { fragment, user: principalAsYUser }
+          });
+          editor.transact(() => {
+            editor.insertBlocks(...) / updateBlock(...) / removeBlocks(...)
+          }); // collapses to one ProseMirror tx → one Yjs update u
+        })
+     3. Resource limits enforced on u (ADR 0003).
+     4. Dispatcher captures post-state from the editor and computes
+        capability.audit.effectOnAllow(input, postState).
      ▼
-  Hocuspocus onChange:
-     • enforce resource limits (ADR 0003)
-     • durable write to doc_updates in a DB tx
-     • emit audit event (ADR 0016)
+  Dispatcher-owned write-path DB tx (runs inside Hocuspocus's DB-tx hook;
+  single commit boundary — F31):
+     BEGIN DB tx:
+       allocate seq via doc_counters row-lock (architecture.md §6.4)
+       INSERT doc_updates(seq, blob, principal, session, …)
+       INSERT outbox("doc.updated", doc_id, seq, …)
+       INSERT audit_events(capability_id, outcome="allow", effect, …)
+       INSERT outbox("audit.appended", audit_id, …)
+     COMMIT
      ▼
-  onStoreDocument (debounced, non-concurrent in 3.4.x):
-     • write consolidated snapshot when trigger fires (ADR 0007 §compaction)
-     ▼
-  Broadcast to subscribed clients (browsers AND the handler's waiter)
+  Hocuspocus broadcasts u to subscribers after the dispatcher tx commits.
+  onStoreDocument (debounced, non-concurrent per doc):
+     • consolidated snapshot written to doc_snapshots (ADR 0007 §compaction)
+     • does NOT write audit; does NOT own the write-path tx
      ▼
   Capability handler reads post-apply state from the Y.Doc
   and returns to the caller
 ```
 
-### Why `ServerBlockNoteEditor`
+### Why this composition
 
-`@blocknote/server-util`'s `ServerBlockNoteEditor`:
-- Gives the capability handler a **headless editor** bound to the live `Y.XmlFragment`.
-- Exposes `insertBlocks(blocks, referenceBlock, placement)`, `updateBlock(blockOrId, update)`, `removeBlocks(blocks)`, and `replaceBlocks(blocksToRemove, blocksToInsert)` — a 1:1 match to agent intent expressed via MCP `doc.update`.
-- `editor.transact(fn)` collapses multi-op work into one ProseMirror transaction → one Yjs update → one `onChange` event → one durable write → one audit row. Atomicity for free.
+- Hocuspocus `openDirectConnection(docId).transact(ydoc => …)` is the canonical server-side write into a live Y.Doc. MIT, part of `@hocuspocus/server`. It serializes against other direct writers and resident browser sessions, and routes through the same `onChange` pipeline — the invariant "one write path" holds because there **is** only one path.
+- `BlockNoteEditor.create({ collaboration: { fragment, user } })` inside that callback gives the capability handler a **headless block editor** against the live `Y.XmlFragment`. It exposes `insertBlocks(blocks, referenceBlock, placement)`, `updateBlock(blockOrId, update)`, `removeBlocks(blocks)`, `replaceBlocks(remove, insert)` — a 1:1 match to agent intent expressed via MCP `doc.update`.
+- `editor.transact(fn)` collapses multi-op work into one ProseMirror transaction → one Yjs update → one `onChange` event → one durable `doc_updates` row. The dispatcher commits `doc_updates + outbox(doc.updated) + audit_events + outbox(audit.appended)` in a single DB transaction inside Hocuspocus's DB-tx hook (F31 / architecture.md §6.1–6.3). Atomicity is a property of the composition, not of any single layer.
 - Block IDs are native (ADR 0004). No directive-attribute ID bookkeeping.
-- Does **not** rehydrate history from Markdown (`blocksToYDoc` is explicitly "not a rehydration path" per docs). The correct pattern is **always** "load live Y.Doc → apply transaction → save via the normal pipeline." Documented in AGENTS.md so future contributors don't regress.
+- `@blocknote/server-util`'s `ServerBlockNoteEditor` is used for **conversions** (blocks ↔ HTML/Markdown/Y.Doc for initial import, projections, agent readbacks) — not for writes. Its `blocksToYDoc` is explicitly "not a rehydration path" per BlockNote docs; the correct pattern is **always** "direct-connection to live Y.Doc → apply transaction → dispatcher writes audit → pipeline broadcasts." Documented in AGENTS.md so future contributors don't regress.
 
 ### Mutation from Markdown input (agent authoring)
 
 An MCP tool call like `doc.update_from_markdown(md)` goes through:
 1. Parse `md` → mdast tree (remark-parse, pinned version).
 2. Convert mdast → BlockNote block array via our per-block-type `fromMarkdown` functions (ADR 0013 v2 fidelity tiers).
-3. Diff against current block array (`reconcileBlocks(current, incoming)` → list of `insert/update/remove` ops).
-4. Apply the ops via `editor.transact`.
+3. Diff against current block array (`reconcileBlocks(current, incoming)` → list of `insert/update/remove` ops) using the reconcile contract in architecture.md §6.6 (state-vector check + `mode=reconcile|replace` + `preserve_orphans`).
+4. Apply the ops via `editor.transact` inside the same `openDirectConnection.transact` callback.
 
 The diff step is important: we don't blow away the doc on every Markdown-in call — we compute minimal edits so concurrent human edits aren't clobbered.
 
@@ -81,7 +96,11 @@ Two humans, a human + an agent, two agents — any mix, any surface — editing 
 - Performance: capability dispatcher is in the hot path. Hot docs' Y.Docs stay resident via Hocuspocus's in-memory map. Benchmark in Phase 3 at 20 concurrent editors × 500 ops/sec.
 - Complexity cost: capability handlers construct block ops / Markdown, not raw SQL. Accepted for the invariant.
 
+## Open verification (before ADR 0018 locks in Phase 3)
+- **Smoke integration test:** `BlockNoteEditor.create({ collaboration: { fragment } })` inside `openDirectConnection.transact()` under concurrent human + agent edits; assert no cursor-awareness leakage, no orphan writes, correct broadcast to browser sessions.
+- **Bulk-import baseline:** construct-editor-per-op vs construct-editor-once-per-transact overhead at 50k blocks; numbers inform whether bulk import needs an alternative batching strategy.
+
 ## Revisit triggers
 - Synthetic-client overhead on bulk-import workloads (e.g., importing a 50k-block Notion export) is unacceptable and a batched direct-CRDT insert path is demonstrably safe.
 - A capability emerges that cannot be expressed as a block-level op (unlikely given BlockNote's schema).
-- BlockNote's `ServerBlockNoteEditor` API breaks in a version we cannot absorb.
+- `BlockNoteEditor` API breaks in a version we cannot absorb, or `@blocknote/core` stalls (DINUM/ZenDiS funding lapses; release cadence > 6 months).

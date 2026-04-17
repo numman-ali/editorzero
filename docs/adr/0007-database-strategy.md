@@ -48,10 +48,10 @@ doc_updates  (id, doc_id, seq, update BLOB, created_at)
 
 **Compaction spec** (same as v1):
 - **Trigger:** 500 updates OR 10 MB OR 30 minutes since last snapshot, per doc.
-- **Atomicity:** single DB transaction — INSERT snapshot + UPDATE old-updates tombstone.delete_after in one tx. Old updates not dropped in the same tx; a reaper reclaims tombstoned rows after 24h.
+- **Atomicity:** single DB transaction — INSERT snapshot + UPDATE old-updates tombstone.delete_after in one tx. Old updates not dropped in the same tx; a reaper reclaims tombstoned rows after the retention floor (below).
 - **Reader semantics:** latest snapshot WHERE `seq <= target` plus `doc_updates` WHERE `seq > snapshot.seq` AND tombstone-valid. Concurrent compaction never invalidates in-flight reads.
 - **Failure recovery:** killed compaction = transaction never commits; old snapshot + updates remain untouched.
-- **GC:** two-phase with 24h grace.
+- **GC retention floor:** tombstoned `doc_updates` rows are retained for **max(72h, RPO window)** before the reaper drops them. 72h is the architecture §18.1 invariant — it guarantees a backup + PITR round-trip completes before any CRDT update vanishes. Operators running Postgres with >72h WAL archives should raise the floor accordingly.
 
 ### SQLite runtime pragmas
 `journal_mode=WAL`, `synchronous=NORMAL`, `wal_autocheckpoint=1000`, `journal_size_limit=67108864`, `foreign_keys=ON`, `busy_timeout=5000`.

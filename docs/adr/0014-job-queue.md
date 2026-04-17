@@ -1,8 +1,10 @@
 # ADR 0014 — Job queue: pg-boss on Postgres, custom in-DB on SQLite
 
-**Status:** Accepted (post-red-team)
+**Status:** Accepted (post-red-team; updated 2026-04-17 to reflect pass-3 disposition)
 **Date:** 2026-04-17
 **Deciders:** @numman
+
+> **Updated 2026-04-17 to reflect pass-3 disposition (F74).** Outbox-driven enqueue contract tightened: the poller claims `outbox.forwarded_at` and inserts into `pgboss.job` (or SQLite `jobs`) in **one DB transaction**. Any failure on the downstream insert → `ROLLBACK` undoes the claim, leaving the row for the next poll. "Mark forwarded then enqueue" is a forbidden ordering — an earlier phrasing in this ADR that suggested it has been corrected.
 
 ## Context
 Phase 0 self-critique flagged the missing primitive: webhook delivery, notification fanout, embedding generation, search indexing, CRDT update-log compaction, import/export, email delivery. All need durability + retry + exponential backoff + dead-worker recovery. Queue must work in both SQLite-mode (default self-host, declared ceiling, ADR 0007) and Postgres-mode (scale).
@@ -58,6 +60,8 @@ Workers poll (`WHERE status='pending' AND run_after <= now()`), claim (`UPDATE .
 ### Postgres driver (pg-boss)
 
 Thin adapter that maps `enqueue/subscribe/getJob/cancelJob` to `boss.send / boss.work / boss.getJobById / boss.cancel`. pg-boss features we rely on from day one: `singletonKey` (dedupe), `startAfter` (delay), `retryLimit` + `retryBackoff`, `archiveCompletedAfterSeconds`.
+
+**Outbox-driven enqueue (HA-safe, single-tx; F74):** Every outbox row forwarded by the transactional-outbox poller (architecture.md §6.3) passes `singletonKey = outbox.id` on `boss.send`. The claim UPDATE on `outbox.forwarded_at` and the `INSERT INTO pgboss.job` commit in **one** DB transaction; if the insert fails, ROLLBACK undoes the claim, leaving the row available for the next poll. This makes the enqueue idempotent across concurrent pollers in HA mode (even if two app nodes' pollers claim the same row in a rebalance, only one pg-boss job lands) AND crash-safe (no claim is durable without its matching job). The SQLite driver applies the same single-tx discipline: the outbox row's `forwarded_at` UPDATE and the downstream `jobs` INSERT commit together in `BEGIN IMMEDIATE`.
 
 ### Observability
 - Per-queue depth gauge (OTel, ADR 0019).

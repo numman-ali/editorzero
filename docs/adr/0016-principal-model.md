@@ -1,8 +1,10 @@
 # ADR 0016 — Principal model: humans and agents as peer types
 
-**Status:** Accepted (post-refresh)
+**Status:** Accepted (post-refresh; updated 2026-04-17 to reflect pass-3 disposition)
 **Date:** 2026-04-17 (v2)
 **Deciders:** @numman
+
+> **Updated 2026-04-17 to reflect pass-3 disposition (F78).** Session registry keys aligned with architecture.md §10.3: indexes by `token_id`, `principal_id`, and `acting_as_user_id`; `member.remove` emits `revoked:{principal_id}` for each active token bound to that user in addition to `revoked-delegator:{user_id}`.
 
 ## Context
 v1 designed a custom principal model. The refresh revealed Better Auth now ships `@better-auth/agent-auth` (v1.5.6, Mar 22 2026) implementing the Agent Auth Protocol plus `@better-auth/api-key` for long-lived revocable scoped tokens. This shrinks the custom work to the principal-spine abstraction plus per-tenant audience handling plus Hocuspocus-specific revocation cascade.
@@ -82,6 +84,15 @@ Better Auth revokes the credential; we cascade the consequences across subsystem
 6. Audit records `revoke` with operator.
 
 When an agent token is compromised and revoked, the owning human's session is **unaffected**. Per-token containment.
+
+### Delegation revocation (`acting_as`)
+A delegated token binds two principals: the agent (`sub`) and the delegator (`act.sub`). When the *delegator* is revoked (workspace membership removed, session terminated, user deleted), delegated sessions under that user must close even though the agent's own token is still valid.
+
+- Session-registry (architecture.md §10.3) indexes open sessions by **three** keys: `token_id`, `principal_id`, and `acting_as_user_id` (when set) — F78.
+- `member.remove(user_id)` walks the principal's active tokens and emits `revoked:{principal_id}` for every active token bound to that user, and additionally emits `revoked-delegator:{user_id}` on the EventBus.
+- `user.delete(user_id)` emits the same pair.
+- Hocuspocus and MCP session managers subscribe to all three revocation-event kinds: `revoked:{token_id}`, `revoked:{principal_id}`, `revoked-delegator:{user_id}`.
+- Effective-permission intersection (`intersect(agent.scopes, human.permissions)`) still fires per request — but closing the open socket is the end-of-story guarantee.
 
 ### Audit integration
 Every credential event (issue, refresh, rotate, revoke), every `acting_as` delegation chain, every capability invocation, every rate-limit breach lands in our `audit_events` table (ADR 0017 retention). Hooks: Better Auth's `hooks.before` / `hooks.after`, Agent Auth's `onEvent`.

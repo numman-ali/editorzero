@@ -1,8 +1,10 @@
 # ADR 0006 — Real-time transport: Hocuspocus embedded
 
-**Status:** Accepted (post-refresh)
+**Status:** Accepted (post-refresh; updated 2026-04-17 to reflect pass-3 disposition)
 **Date:** 2026-04-17 (v2)
 **Deciders:** @numman
+
+> **Updated 2026-04-17 to reflect pass-3 disposition (F76).** Ownership boundary between dispatcher and Hocuspocus rewritten to match architecture.md §6.1–6.3 exactly: the **dispatcher** owns the write-path DB tx (single commit boundary); **Hocuspocus** provides the per-doc serializer and the DB-tx hook, not audit ownership. `doc_updates`, `audit_events`, and both `outbox` rows (`doc.updated`, `audit.appended`) commit in a single DB transaction. Earlier wording that read like Hocuspocus's `onChange` wrote audit independently has been replaced.
 
 ## Context
 Server-side Yjs sync with auth hooks, durable persistence, awareness/presence, first-class non-browser client support. Original v1 decision (Hocuspocus over y-sweet) stands. Refresh surfaced Hocuspocus 3.4.x behavior changes worth encoding in the durability spec.
@@ -19,28 +21,33 @@ Server-side Yjs sync with auth hooks, durable persistence, awareness/presence, f
   Capability dispatcher (ADR 0015)  ──►  permission + rate-limit + scope checks
      │
      ▼
-  Capability handler constructs a Yjs update via
-  ServerBlockNoteEditor (ADR 0004) bound to the live Y.Doc
+  Capability handler calls ctx.transact(doc_id, fn):
+     • Hocuspocus openDirectConnection(doc_id) acquires the live Y.Doc;
+       per-doc serializer queues this closure
+     • fn(editor) binds BlockNoteEditor.create({ collaboration: { fragment } })
+       and runs editor.transact(...) → one Yjs update u
+     • Resource limits enforced on u (ADR 0003)
      │
      ▼
-  Update submitted to Hocuspocus  ◄── same path browser clients use
+  Dispatcher owns the write-path DB tx (single commit boundary):
+     BEGIN DB tx (runs inside Hocuspocus's per-doc DB-tx hook):
+       allocate seq via doc_counters row-lock (architecture.md §6.4)
+       INSERT doc_updates(seq, blob, principal, session, …)
+       INSERT outbox("doc.updated", doc_id, seq, …)
+       INSERT audit_events(capability_id, outcome="allow", effect, …)
+       INSERT outbox("audit.appended", audit_id, …)
+     COMMIT
      │
      ▼
-  Hocuspocus onChange (sync handler):
-     • enforce resource limits (ADR 0003)
-     • write raw update to doc_updates in a DB tx
-     • emit audit event
+  Hocuspocus broadcasts u to subscribers after the dispatcher tx commits.
      │
      ▼
-  Broadcast to subscribed clients (browsers AND the handler's waiter)
-     │
-     ▼
-  onStoreDocument (debounced, non-concurrent):
-     • write consolidated snapshot to doc_snapshots (ADR 0007 §compaction)
-     • compaction trigger if applicable
+  onStoreDocument (debounced, non-concurrent per doc):
+     • consolidated snapshot written to doc_snapshots (ADR 0007 §compaction)
+     • does NOT write audit; does NOT own the write-path tx
 ```
 
-**Every byte of every accepted update is durable on disk before the client sees the ack.** Crash recovery loads the latest snapshot + replays `doc_updates` since.
+**Every byte of every accepted update is durable on disk before the client sees the ack.** Crash recovery loads the latest snapshot + replays `doc_updates` since. `doc_updates` + `audit_events` + both `outbox` rows share a single commit boundary — there is no window in which one exists without the others (architecture.md §6.1–6.3, F31).
 
 ### 3.4.x behavior notes (refresh findings)
 - `onStoreDocument` is now **non-concurrent** per doc — multiple triggers serialize. Handler must be idempotent (insert snapshot WHERE `seq > latest_snapshot_seq`; no-op if nothing new).
@@ -52,7 +59,7 @@ Server-side Yjs sync with auth hooks, durable persistence, awareness/presence, f
 Redis-backed fan-out using the **worker-nodes + single-manager topology** (per Hocuspocus 3.x Redis scaling docs) — not symmetrical. Single-node SQLite-mode does not need Redis; Postgres-mode HA deploys do.
 
 ### Unified write path (see ADR 0018)
-API, CLI, MCP, and Web UI mutations all flow through a `ServerBlockNoteEditor.transact()` that emits a Yjs update applied through Hocuspocus's standard pipeline. One write path for every surface.
+API, CLI, MCP, and Web UI mutations all flow through `ctx.transact(doc_id, fn)`, which opens a Hocuspocus direct connection, binds a `BlockNoteEditor<BlockSpecSchema>` to the live `Y.XmlFragment`, and runs `editor.transact(...)` → one Yjs update → the same Hocuspocus pipeline browser clients use. `@blocknote/server-util`'s `ServerBlockNoteEditor` is a conversion surface only — **explicitly wrong to treat as a write primitive** — its `blocksToYDoc` is not a rehydration path (loses history) and it does not expose `transact/insertBlocks/updateBlock/removeBlocks`. See ADR 0018 for the full write path and AGENTS.md gotchas.
 
 ## Consequences
 - One process to run, monitor, observe.
