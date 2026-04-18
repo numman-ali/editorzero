@@ -26,7 +26,6 @@ function stubCapability(id: string) {
         kind: "audit.access_log",
         principal_kind: "user",
         capability_id: CapabilityId(id),
-        collapsed_count: 1,
       }),
       effectOnDeny: (_input, reason) => ({
         kind: "deny",

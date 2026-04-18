@@ -76,9 +76,13 @@
   },
 
   // `**/*.test.ts` excluded from build emit so co-located unit tests
-  // don't land in `dist/`. Tests are typechecked by `pnpm test` /
-  // `vitest run` via its own TS transform; add `tsconfig.test.json`
-  // per-package if you need `tsc --noEmit` on tests in the pre-commit
-  // gate (first package that needs it documents the pattern).
+  // don't land in `dist/`. For typechecking tests, each package with
+  // tests carries a sibling `tsconfig.test.json` that extends its
+  // `tsconfig.json` and overrides this exclude to re-include tests
+  // with `noEmit: true`. The package's `typecheck` script runs both
+  // configs in sequence; drift (e.g. a wrong `AuditEffect.kind` in a
+  // test) is caught at pre-commit, not only at runtime. Pattern first
+  // established by `packages/dispatcher` (after an audit.access_log
+  // drift slipped past vitest's type-stripping transform).
   "exclude": ["node_modules", "dist", "build", ".next", "**/*.test.ts"]
 }

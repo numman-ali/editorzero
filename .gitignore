@@ -6,6 +6,8 @@ out/
 .next/
 .turbo/
 *.tsbuildinfo
+*.tsbuildinfo.test
+.tsbuildinfo.test
 .pnpm-store/
 
 # Lefthook / tooling caches

@@ -26,4 +26,4 @@ export type {
   HandlerError,
   Role,
 } from "./types";
-export type { AuditWriteInput, AuditWriter } from "./writer";
+export type { AuditTx, AuditWriteInput, AuditWriter } from "./writer";

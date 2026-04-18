@@ -119,7 +119,6 @@ function buildDocReadCapability(
         kind: "audit.access_log",
         principal_kind: "user",
         capability_id: DOC_READ_ID,
-        collapsed_count: 1,
       }),
       effectOnDeny: () => ({
         kind: "deny",

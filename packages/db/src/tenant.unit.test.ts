@@ -53,7 +53,7 @@ const DOCS_DDL = `
   );
 `;
 
-function seedRow(id: string, workspace_id: string, title: string, created_by: string) {
+function seedRow(id: DocId, workspace_id: WorkspaceId, title: string, created_by: UserId) {
   return {
     id,
     workspace_id,
@@ -137,10 +137,14 @@ describe("WorkspaceScopingPlugin — INSERT", () => {
 
     // `insertInto(...).values({...without workspace_id...})` — Kysely
     // emits an INSERT with an explicit columns list; the plugin
-    // appends `workspace_id` to both columns and row values.
+    // appends `workspace_id` to both columns and row values at AST-
+    // transform time, after Kysely's types have already decided the
+    // call site is "incomplete". The type error below is the cost
+    // of asserting runtime behavior the static types can't model.
     const row = seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE);
     const { workspace_id: _, ...rowWithoutScope } = row;
     void _;
+    // @ts-expect-error workspace_id intentionally omitted — plugin injects it at runtime.
     await a.insertInto("docs").values(rowWithoutScope).execute();
 
     const seen = await a.selectFrom("docs").selectAll().execute();
