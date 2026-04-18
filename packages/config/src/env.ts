@@ -1,8 +1,11 @@
 /**
  * Startup-only runtime configuration derived from the process environment.
  *
- * Product code never reads `process.env` directly (arch-lint rule
- * `no-process-env` — §16.8). Instead, `loadEnvConfig` parses + validates
+ * Product code never reads `process.env` directly — the planned
+ * `no-process-env` arch-lint rule (§16.8) will fail the commit on any
+ * non-config `process.env` reference (F89 — `@editorzero/arch-lint` is
+ * not yet implemented; today the discipline is review + this package
+ * being the only legitimate consumer). Instead, `loadEnvConfig` parses + validates
  * at boot and hands the rest of the system a typed value object. Any
  * further config access goes through `RuntimeConfig` or the secret
  * providers (`./secrets`).

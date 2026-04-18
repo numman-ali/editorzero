@@ -1007,7 +1007,7 @@ Crash during an update-write: the tx either commits or does not. Partial writes 
 - **No raw writes to `blocks`, `docs.content`, or any CRDT-mirror field.** Projection jobs rebuild those from the `doc.updated` outbox event.
 - **Markdown-in is parsed to block ops then applied via the same transact.** See [§6.6](#66-markdown-from-agent-authoring-reconcile).
 - **`ServerBlockNoteEditor.blocksToYDoc` is forbidden** — it loses history (AGENTS.md gotcha).
-- **Capability handlers must call `ctx.transact` at most once.** Enforced by a runtime assertion in `CapabilityContext` and by `@editorzero/arch-lint`. Multiple mutations on the same doc batch into one transact; mutations across docs each get their own handler invocation.
+- **Capability handlers must call `ctx.transact` at most once.** Enforced by a runtime assertion in the dispatcher today; the planned `@editorzero/arch-lint` package will add a static `transact-called-at-most-once` rule (F89 — arch-lint is not yet implemented). Multiple mutations on the same doc batch into one transact; mutations across docs each get their own handler invocation.
 - **Native moves emit `move` ops, not `remove+insert` (F33).** BlockNote drag-handle reordering and programmatic `replaceBlocks` calls that preserve block IDs produce `{ op: "move", block_id, new_parent_block_id, new_order_key }` entries in the `doc.update_batch` effect (§16.3). Downstream reducers reapply ordering without mistakenly treating a move as a delete+create, which otherwise corrupts comment anchors, attachment refs, and CRDT history attribution.
 
 **Content mutations flow through CRDT; metadata mutations are dispatcher-tx-only (F41 + F54).** A small enumerated set of capabilities mutates only relational metadata — no Y.Doc content changes, no CRDT convergence needed:
@@ -1125,8 +1125,8 @@ SQLite mode has Layer 1 + 2; Postgres mode adds Layer 3 as a database-level back
 
 SQLite has no RLS. Layer 2 (`TenantScopedDb`) is the last line of defense. That's adequate only if Layer 2 is **actually unbypassable**, and that requires more than a wrapper — it requires:
 
-- **Architecture lint rule `no-raw-kysely-outside-db`:** `Kysely`, `sql<T>` raw template, and `db.connection()` are importable only inside `packages/db/**`. Anywhere else, an import failure at pre-commit. Capabilities and services reach the DB through `ctx.db` (a `TenantScopedDb`) or through `dbRepo.<method>` (which internally uses `TenantScopedDb`).
-- **`OpsDb` escape hatch is opt-in, audited, and enumerated.** `OpsDb` is a distinct type that requires a `@ops-audited("reason")` decorator at the call site, captured by `@editorzero/arch-lint`'s `ops-db-audit` rule. Un-audited `OpsDb` usage fails the commit. Each legitimate use site is listed in `ops/ops-db-registry.md` with owner + rationale.
+- **Architecture lint rule `no-raw-kysely-outside-db`:** `Kysely`, `sql<T>` raw template, and `db.connection()` are importable only inside `packages/db/**`. Anywhere else, an import failure at pre-commit. Today this is enforced by `scripts/coherence.ts` via import-string grep; when `@editorzero/arch-lint` ships (F89) the rule moves to a proper static check, but the invariant is gated from day one. Capabilities and services reach the DB through `ctx.db` (a `TenantScopedDb`) or through `dbRepo.<method>` (which internally uses `TenantScopedDb`).
+- **`OpsDb` escape hatch is opt-in, audited, and enumerated.** `OpsDb` is a distinct type that requires a `@ops-audited("reason")` decorator at the call site. The planned `ops-db-audit` rule in `@editorzero/arch-lint` will fail the commit on an un-audited construction once the package ships (F89 — not yet implemented; discipline + review today). Each legitimate use site is listed in `ops/ops-db-registry.md` with owner + rationale.
 - **Cross-tenant leak fuzzer is a first-class invariant test.** `packages/db/test/tenant-isolation.prop.ts` runs against **both** SQLite and Postgres drivers: for every `(capability, principal_workspace, target_workspace)` combination, assert that no tenant-scoped row from `target_workspace ≠ principal_workspace` is reachable through any capability call. Default fuzz: 1k rounds per driver per commit; 100k nightly.
 - **Postgres RLS is enabled-by-default on Postgres mode** but verified the same way the fuzzer verifies SQLite. The fuzzer's invariant is stronger than RLS — it also asserts that the capability returns the correct result, not merely zero rows.
 
@@ -2064,7 +2064,7 @@ async function handler(ctx: CapabilityContext, input: I): Promise<O>
 
 No `req`, no `res`, no `userId` positional arg, no `db` positional arg. The handler cannot cheat.
 
-`ctx.transact` may be called **at most once per handler invocation**. This is asserted at runtime by the dispatcher and lint-enforced by `@editorzero/arch-lint`'s `transact-called-at-most-once` rule. Handlers that mutate across multiple docs must do so at the service layer across multiple capability invocations (typically via a job) — cross-doc atomicity is not a CRDT primitive.
+`ctx.transact` may be called **at most once per handler invocation**. This is asserted at runtime by the dispatcher; the planned `transact-called-at-most-once` rule in `@editorzero/arch-lint` will add a static backstop once the package ships (F89 — arch-lint is not yet implemented). Handlers that mutate across multiple docs must do so at the service layer across multiple capability invocations (typically via a job) — cross-doc atomicity is not a CRDT primitive.
 
 ### 16.5 `BlockTypeSpec` — the primitive every block type declares (ADR 0013)
 
@@ -2164,13 +2164,20 @@ CI step `pnpm pins:check` fails the build if `package.json` drops below any min 
 
 ### 16.8 Architecture lint rules
 
-Implemented as a small set of Biome rules + a custom `@editorzero/arch-lint` package using `ts-morph`:
+Target shape: a small set of Biome rules + a custom `@editorzero/arch-lint` package using `ts-morph`. The `arch-lint` package is not yet implemented (F89). The rule roster below is the v1 target; actual enforcement-today column distinguishes what is already gated vs. what is written-but-not-yet-bite.
+
+| Rule | Enforcement today | Target home |
+|---|---|---|
+| `no-raw-kysely-outside-db` (F4) — `Kysely`, `sql<T>` raw importable only inside `packages/db/**` | **Enforced** by `scripts/coherence.ts` at pre-commit | `@editorzero/arch-lint` (ts-morph) |
+| All other rules below | Not yet enforced — review + types + `scripts/coherence.ts`'s other checks are the backstop | `@editorzero/arch-lint` |
+
+Target rule roster (all `@editorzero/arch-lint` except where noted):
 
 - `forbidden-import-direction` — layer → layer matrix (see §16.2).
 - `no-deep-import` — cross-package imports must go through `package/index.ts`.
 - `capability-id-matches-path` — every `capabilities/<group>/<name>.ts` defines exactly one capability whose `id === "<group>.<name>"`.
 - `no-raw-ydoc-access` — `Y.Doc`, `Y.XmlFragment`, etc. are only importable by `packages/sync/**`. Handlers use `ctx.transact`.
-- `no-raw-kysely-outside-db` (F4) — `Kysely`, `sql<T>` raw, `db.connection()` importable only inside `packages/db/**`.
+- `no-raw-kysely-outside-db` (F4) — `Kysely`, `sql<T>` raw, `db.connection()` importable only inside `packages/db/**`. **Currently enforced by coherence script**; will move to `@editorzero/arch-lint` when that package ships.
 - `no-raw-kysely-in-capabilities` — `Kysely` is not importable from `packages/capabilities/**`. Handlers use `ctx.db` (`TenantScopedDb`).
 - `ops-db-audit` (F4) — every `OpsDb` construction site requires an `@ops-audited("reason")` decorator and an entry in `ops/ops-db-registry.md`.
 - `no-raw-audit-events-query` (F26) — direct Kysely access to `audit_events` is allowed only in `packages/db/repos/audit.ts`.
@@ -2178,10 +2185,10 @@ Implemented as a small set of Biome rules + a custom `@editorzero/arch-lint` pac
 - `audit-effect-exhaustiveness` — every `kind` in `AuditEffect` has a reducer branch in the audit-replay test.
 - `json-normalization` — any JSON column has an adjacent `z.ZodType` + canonical-form serializer. Prevents silent schema drift.
 - `no-blocknote-xl-in-v1` (F25) — `@blocknote/xl-*` packages are forbidden imports until the commercial-arm question resolves (brief §Open Q1 / ADR 0001).
-- `transact-called-at-most-once` (F3) — static analysis of capability handlers: at most one lexical `ctx.transact(...)` call per handler; runtime assertion in `CapabilityContext` is the backstop.
+- `transact-called-at-most-once` (F3) — static analysis of capability handlers: at most one lexical `ctx.transact(...)` call per handler; the dispatcher's runtime at-most-once backstop is what enforces the invariant today.
 - `collapse-only-for-reads` (F2) — if `cap.category === "mutation"`, `cap.audit.collapsePolicy.collapsible` must be `false`.
 
-These rules run pre-commit. A violation blocks the commit.
+Enforced rules today run at pre-commit and block the commit on violation. The rest are discipline-plus-review until the arch-lint package ships.
 
 ### 16.9 Test layout and naming
 
@@ -2380,8 +2387,8 @@ These rules are what keep four surfaces and a CRDT backbone from drifting as cap
 | 4 | Same input on all surfaces produces same output + audit | **Contract** | `packages/contract-tests/test/cross-surface-fixture.ts` |
 | 5 | Permission checks in capability layer | **Contract + integration** | `packages/capabilities/test/permission-matrix.ts` (allow/deny fuzz) + `packages/db/test/tenant-isolation.prop.ts` (F4 cross-tenant fuzz against both drivers) |
 | 6 | Soft-deletes recoverable via first-class capability | **Property** | `packages/capabilities/test/inverse-restore.prop.ts` (ADR 0017) |
-| 7a | All **content** mutations flow through CRDT via `ctx.transact` | **Static + integration** | `@editorzero/arch-lint` rules (`no-raw-ydoc-access`, `transact-called-at-most-once`) + `packages/capabilities/test/write-path.integration.ts` |
-| 7b | Enumerated **metadata** capabilities (`block.set_visibility, doc.publish, doc.unpublish, doc.move, collection.*`) legally skip `ctx.transact` | **Static + integration** | `@editorzero/arch-lint` whitelist in `transact-called-at-most-once` (zero calls allowed for enumerated set) + `packages/capabilities/test/metadata-only-set.integration.ts` |
+| 7a | All **content** mutations flow through CRDT via `ctx.transact` | **Static + integration** | Planned `@editorzero/arch-lint` rules (`no-raw-ydoc-access`, `transact-called-at-most-once`) — F89, not yet implemented; until then: dispatcher runtime backstop + `packages/capabilities/test/write-path.integration.ts` |
+| 7b | Enumerated **metadata** capabilities (`block.set_visibility, doc.publish, doc.unpublish, doc.move, collection.*`) legally skip `ctx.transact` | **Static + integration** | Planned `@editorzero/arch-lint` whitelist in `transact-called-at-most-once` (zero calls allowed for enumerated set) — F89, not yet implemented; `packages/scopes` `METADATA_ONLY_CAPABILITIES` export + coherence script's triple-consistency check enforce the list's shape today, and `packages/capabilities/test/metadata-only-set.integration.ts` asserts the runtime behaviour |
 | 8 | Agents are first-class principals | **Contract** | `packages/capabilities/test/agent-parity.ts` — every human-usable capability has an agent-usable analog or a declared `humanOnly` rationale |
 | — | Published-cache visibility (F5) | **Property** | `packages/app/test/public-cache-invariance.prop.ts` |
 | — | Reconcile does not clobber concurrent edits (F8) | **Property** | `packages/docs/test/reconcile.prop.ts` |

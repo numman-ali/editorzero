@@ -5,8 +5,9 @@
  * surface is intentionally narrow: callers ask for a per-workspace
  * handle via `scoped(workspace_id)` and never hold the unscoped
  * `Kysely<Database>`. `exec` is the opt-in migration / test escape
- * hatch; arch-lint eventually restricts its call sites to
- * `packages/db/**` and test files (architecture.md §8.1a).
+ * hatch; its call-site restriction is enforced by the
+ * `no-raw-kysely-outside-db` coherence check today (future:
+ * `@editorzero/arch-lint` — see architecture.md §8.1a / §17).
  *
  * Why `better-sqlite3` and not `node:sqlite`? ADR 0007 compared the
  * two: `better-sqlite3` has mature Kysely integration, sync API
@@ -35,8 +36,10 @@ export interface SqliteDriver {
   close(): Promise<void>;
   /**
    * Raw sync DDL / migration escape hatch. Not for capability handlers
-   * — the future arch-lint rule restricts this to `packages/db/**` and
-   * `*.test.ts`. Used by Atlas migration application and test setup.
+   * — `no-raw-kysely-outside-db` (coherence script; future arch-lint)
+   * keeps raw Kysely imports pinned to `packages/db/**`, and a
+   * companion rule will narrow this method's call sites to migrations
+   * and test setup. Used by Atlas migration application and test setup.
    */
   exec(sql: string): void;
 }

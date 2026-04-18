@@ -3,8 +3,10 @@
  * effect kind (architecture.md §16.3).
  *
  * The replay reducer in `packages/audit/test/replay.prop.ts` must have
- * a branch for every `kind`; the `audit-effect-exhaustiveness` arch-lint
- * enforces exhaustive switches at compile time.
+ * a branch for every `kind`; the planned `audit-effect-exhaustiveness`
+ * arch-lint rule will enforce exhaustive switches at compile time
+ * (F89 — `@editorzero/arch-lint` is not yet implemented; today the
+ * discipline is TypeScript's exhaustive-switch narrowing plus review).
  *
  * Every row in the Appendix A capability matrix whose "Audit effect kind"
  * column names a mutation has a corresponding variant here; the coherence

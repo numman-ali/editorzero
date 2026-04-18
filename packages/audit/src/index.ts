@@ -4,8 +4,9 @@
  * `AuditEffect` is the load-bearing discriminated union for invariant 3a
  * (§9.1): replaying `effect` rows in `created_at` order reproduces
  * `PersistentWorkspaceState`. Any new `kind` must add a reducer branch
- * in the replay test; the arch-lint rule `audit-effect-exhaustiveness`
- * backstops it.
+ * in the replay test; the planned `audit-effect-exhaustiveness`
+ * arch-lint rule will backstop it once `@editorzero/arch-lint` ships
+ * (F89 — not yet implemented).
  *
  * `AuditRecord` is the envelope actually persisted; `outcome ∈ {allow,
  * deny, error}` discriminates whether the `effect` is an `AuditEffect`,

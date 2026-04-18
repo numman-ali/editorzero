@@ -8,7 +8,7 @@
  * that types alone cannot catch (cross-doc references, hand-maintained
  * enumerations that must match a source-of-truth list in code).
  *
- * v1 checks (active):
+ * Active checks (each fails the commit on violation):
  *   [1] ADR cross-reference integrity — `docs/adr/NNNN-*.md` files that
  *       are referenced from anywhere must exist.
  *   [2] Architecture section reference integrity — `§N.M` / `§N.Ma`
@@ -16,14 +16,21 @@
  *   [3] METADATA_ONLY_CAPABILITIES triple-consistency —
  *       `packages/scopes` ↔ `docs/architecture.md` §6.5 ↔ `AGENTS.md`
  *       invariant 7 list agree on the exact membership.
+ *   [4] `no-raw-kysely-outside-db` (F89) — no production or test file
+ *       outside `packages/db/**` imports from `kysely`. Enforces the
+ *       single-chokepoint claim architecture.md §8.1a / §17 rests on.
+ *       This is the load-bearing rule the future `@editorzero/arch-lint`
+ *       package will eventually own; until that package lands, the
+ *       coherence script enforces it.
  *
- * Deferred checks (stub hooks for when the source-of-truth lands):
- *   [4] Capability registry ↔ Appendix A matrix 1:1 — activates when
- *       `packages/capabilities/src/registry.ts` exists.
- *   [5] AuditEffect union ↔ Appendix A effect-kind column — activates
- *       when `packages/audit/src/effect.ts` exists.
- *   [6] Numeric literal leak — any literal outside `packages/constants`
- *       matching a constant value should reference the named export.
+ * Deferred checks (no-ops today; activate when the real comparison is
+ * implemented, not when a source file merely exists):
+ *   [D1] Capability registry ↔ Appendix A matrix 1:1. The registry
+ *        package exists; the appendix parser and diff do not.
+ *   [D2] AuditEffect union ↔ Appendix A effect-kind column. The effect
+ *        module exists; the appendix parser and diff do not.
+ *   [D3] Numeric literal leak — any literal outside `packages/constants`
+ *        matching a constant value should reference the named export.
  *
  * Exits non-zero on any error. Warnings are printed but do not fail.
  */
@@ -380,31 +387,81 @@ function diffLists(
   }
 }
 
-// ── Deferred checks (stubs activating when sources exist) ──────────────────
+// ── Check 4 — no-raw-kysely-outside-db ─────────────────────────────────────
+//
+// architecture.md §8.1a + §17 claim that `Kysely` and `sql<T>` are
+// importable only inside `packages/db/**`, so the workspace-scoping
+// plugin cannot be bypassed by accident. Until `@editorzero/arch-lint`
+// ships the real static rule, the coherence script enforces it by
+// import-string grep.
+//
+// Scope: `.ts`, `.tsx`, `.mts`, `.cts` files under `packages/` (every
+// workspace package). The only legal imports of `kysely` live under
+// `packages/db/src/**`. Violations fail the commit with a file + line
+// pointer. Test files inside `packages/db/**` are also allowed — the
+// rule is about the package boundary, not the file boundary.
 
-async function checkCapabilityRegistry(report: Report): Promise<void> {
-  const registryPath = join(ROOT, "packages", "capabilities", "src", "registry.ts");
-  if (!(await pathExists(registryPath))) {
-    return; // not yet scaffolded; silent
+async function checkNoRawKyselyOutsideDb(report: Report): Promise<void> {
+  const packagesDir = join(ROOT, "packages");
+  if (!(await pathExists(packagesDir))) return;
+
+  const allTs = await listTypeScriptFiles(packagesDir);
+  const allowed = join(ROOT, "packages", "db") + "/";
+  const importRe = /^\s*import\b[^;]*?\bfrom\s+["']kysely(?:\/[^"']+)?["']/gm;
+
+  for (const file of allTs) {
+    if (file.startsWith(allowed)) continue;
+    const src = await readFile(file, "utf8");
+    for (const { match, line } of findMatches(src, importRe)) {
+      report.add({
+        severity: "error",
+        file,
+        line,
+        message:
+          `no-raw-kysely-outside-db: illegal import "${match[0].trim()}" — ` +
+          `\`kysely\` may only be imported inside \`packages/db/**\`. ` +
+          `Capability handlers reach the DB through \`ctx.db\` (TenantScopedDb).`,
+      });
+    }
   }
-  // TODO(P3.5): parse registry, parse Appendix A, diff.
-  report.add({
-    severity: "info",
-    message: "capability registry ↔ Appendix A check is stubbed pending P3.5",
-  });
 }
 
-async function checkAuditEffectUnion(report: Report): Promise<void> {
-  const effectPath = join(ROOT, "packages", "audit", "src", "effect.ts");
-  if (!(await pathExists(effectPath))) {
-    return; // not yet scaffolded; silent
-  }
-  // TODO: parse AuditEffect union, parse Appendix A "Audit effect kind"
-  // column, diff.
-  report.add({
-    severity: "info",
-    message: "AuditEffect ↔ Appendix A check is stubbed pending audit package",
-  });
+async function listTypeScriptFiles(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  const { readdir } = await import("node:fs/promises");
+  const walk = async (d: string): Promise<void> => {
+    const entries = await readdir(d, { withFileTypes: true });
+    for (const e of entries) {
+      if (e.name.startsWith(".") || e.name === "node_modules" || e.name === "dist") continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) {
+        await walk(p);
+      } else if (e.isFile() && /\.(ts|tsx|mts|cts)$/.test(e.name)) {
+        out.push(p);
+      }
+    }
+  };
+  if (await pathExists(dir)) await walk(dir);
+  return out;
+}
+
+// ── Deferred stubs — no enforcement today ──────────────────────────────────
+//
+// Both of the below print nothing and are not wired into `main()`. They
+// stay in the file as named no-ops so the Appendix-A / registry-diff
+// work lands as a rewrite of a known entry point rather than a new
+// function search. When the parser + diff lands, wire the result into
+// the `Promise.all` below and the top-file docstring in the same commit
+// so the overclaim Codex flagged at F89 cannot recur.
+
+async function _checkCapabilityRegistry(_report: Report): Promise<void> {
+  // Deferred (D1). `packages/capabilities/src/registry.ts` exists; the
+  // Appendix A parser does not. Do not print info; silence is honest.
+}
+
+async function _checkAuditEffectUnion(_report: Report): Promise<void> {
+  // Deferred (D2). `packages/audit/src/effect.ts` exists; the Appendix
+  // A effect-kind parser does not.
 }
 
 // ── Entrypoint ─────────────────────────────────────────────────────────────
@@ -415,8 +472,7 @@ async function main(): Promise<void> {
     checkAdrReferences(report),
     checkArchitectureSectionRefs(report),
     checkMetadataOnlyCapabilities(report),
-    checkCapabilityRegistry(report),
-    checkAuditEffectUnion(report),
+    checkNoRawKyselyOutsideDb(report),
   ]);
   report.print();
   if (report.errorCount > 0) {

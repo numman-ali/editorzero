@@ -1,8 +1,10 @@
 /**
  * Typed secret primitives (architecture.md §16.12).
  *
- * Product code never reads `process.env` directly — the `no-process-env`
- * arch-lint rule (§16.8) enforces it. Secrets flow through this layer so
+ * Product code never reads `process.env` directly — the planned
+ * `no-process-env` arch-lint rule (§16.8) will enforce this once
+ * `@editorzero/arch-lint` ships (F89 — not yet implemented; review
+ * is the backstop today). Secrets flow through this layer so
  * the source (`file | env | vault`) is typed and rotation hooks land in
  * one place. Rotation splits into two classes (F79):
  *

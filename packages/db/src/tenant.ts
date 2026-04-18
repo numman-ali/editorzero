@@ -15,11 +15,12 @@
  * time.
  *
  * The unscoped `Kysely<Database>` is intentionally not exported; the
- * only public construction path is `createTenantScopedDb`. An
- * arch-lint rule (ADR 0015 §8.1a — `no-raw-kysely-outside-db`) will
- * eventually enforce that `Kysely` and `sql<T>` cannot be imported
- * outside `packages/db/**`, making the Layer-2 guarantee truly
- * unbypassable. Until that lint rule lands, the discipline is review.
+ * only public construction path is `createTenantScopedDb`. The
+ * `no-raw-kysely-outside-db` rule (ADR 0015 §8.1a) is enforced today
+ * by `scripts/coherence.ts` at pre-commit — any `import … from "kysely"`
+ * outside `packages/db/**` fails the hook. When `@editorzero/arch-lint`
+ * ships, that package will take ownership of the same rule as a
+ * proper static check; the coherence-script version is the interim.
  *
  * AST strategy: the plugin is a `KyselyPlugin` whose `transformQuery`
  * hook runs a custom `OperationNodeTransformer` over the root node,
@@ -81,8 +82,10 @@ import { TENANT_SCOPED_TABLES } from "./schema";
 /**
  * A `Kysely<Database>` whose every query auto-applies the
  * `workspace_id` predicate. The alias carries no structural brand —
- * the invariant is enforced by the arch-lint rule that prevents raw
- * `Kysely` construction outside this package (architecture.md §8.1a).
+ * the invariant rests on the `no-raw-kysely-outside-db` rule
+ * (coherence script today; `@editorzero/arch-lint` eventually — see
+ * architecture.md §8.1a / §17), which prevents any raw `Kysely`
+ * construction outside this package.
  */
 export type TenantScopedDb = Kysely<Database>;
 

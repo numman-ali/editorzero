@@ -106,9 +106,11 @@ export type QueueName = (typeof QUEUE_NAMES)[number];
  * block of the Y.Doc, so `doc.rename` is a content mutation via
  * `ctx.transact` like any other.
  *
- * The `transact-called-at-most-once` arch-lint rule allows zero
- * `ctx.transact` calls for capabilities in this set; a contract test
- * asserts `capability.category === "mutation"` for every member.
+ * The planned `transact-called-at-most-once` arch-lint rule will
+ * allow zero `ctx.transact` calls for capabilities in this set
+ * (F89 — the `@editorzero/arch-lint` package is not yet implemented).
+ * A contract test asserts `capability.category === "mutation"` for
+ * every member.
  */
 export const METADATA_ONLY_CAPABILITIES = [
   "block.set_visibility",

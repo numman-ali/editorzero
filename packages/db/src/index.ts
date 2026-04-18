@@ -5,9 +5,9 @@
  * unscoped `Kysely<Database>` base instance is intentionally *not*
  * exported; downstream packages receive `TenantScopedDb` from the
  * driver's `scoped(workspace_id)` method and have no way to reach
- * the unscoped handle. The forthcoming arch-lint rule
- * `no-raw-kysely-outside-db` enforces that `Kysely` and `sql<T>`
- * imports are legal only within this package.
+ * the unscoped handle. The `no-raw-kysely-outside-db` rule (enforced
+ * today by `scripts/coherence.ts`; future home `@editorzero/arch-lint`)
+ * prevents any `Kysely` / `sql<T>` import outside this package.
  */
 
 export type { SqliteDriver, SqliteDriverOptions } from "./drivers/sqlite";
