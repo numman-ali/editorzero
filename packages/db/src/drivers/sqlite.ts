@@ -26,7 +26,7 @@ import type { WorkspaceId } from "@editorzero/ids";
 import BetterSqlite3 from "better-sqlite3";
 import { Kysely, SqliteDialect } from "kysely";
 
-import type { Database as DatabaseSchema } from "../schema";
+import type { SystemDatabase } from "../schema";
 import { createTenantScopedDb, type TenantScopedDb } from "../tenant";
 
 export interface SqliteDriverOptions {
@@ -39,6 +39,22 @@ export interface SqliteDriverOptions {
 export interface SqliteDriver {
   /** Workspace-scoped handle; every query auto-applies `workspace_id`. */
   scoped(workspace_id: WorkspaceId): TenantScopedDb;
+  /**
+   * Unscoped `Kysely<SystemDatabase>` — full table surface, no
+   * plugin, no `workspace_id` rewriting. This is the dispatcher /
+   * outbox-poller / audit-writer escape hatch, used for the
+   * write-path tx (`doc_updates` + `outbox` + `audit_events` +
+   * `doc_counters.next_seq` allocation in a single commit) and for
+   * the system-level poller that drains `outbox` across workspaces.
+   *
+   * Not for capability handlers. `no-raw-kysely-outside-db`
+   * (coherence script today; future arch-lint) pins imports of
+   * `SystemDatabase` / `Kysely` to `packages/db/**` + the dispatcher
+   * / runtime / audit-writer packages. Composition code hands the
+   * result of `system()` to those specific consumers; handlers
+   * receive `scoped()`.
+   */
+  system(): Kysely<SystemDatabase>;
   /** Shut down Kysely + the underlying SQLite connection. */
   close(): Promise<void>;
   /**
@@ -105,10 +121,11 @@ export function createSqliteDriver(options: SqliteDriverOptions): SqliteDriver {
   const conn = new BetterSqlite3(options.path, { readonly });
   applyRuntimePragmas(conn, readonly);
   const dialect = new SqliteDialect({ database: conn });
-  const base = new Kysely<DatabaseSchema>({ dialect });
+  const base = new Kysely<SystemDatabase>({ dialect });
 
   return {
     scoped: (workspace_id) => createTenantScopedDb(base, workspace_id),
+    system: () => base,
     close: async () => {
       await base.destroy();
     },

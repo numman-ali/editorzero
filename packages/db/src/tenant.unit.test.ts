@@ -540,20 +540,19 @@ describe("WorkspaceScopingPlugin — new tenant-scoped tables", () => {
   });
 });
 
-// ── `outbox` is NOT tenant-scoped — system-level poller reads across ─────
+// ── Internal tables (outbox / doc_counters) are NOT on the handler surface
 
-describe("WorkspaceScopingPlugin — outbox is not tenant-scoped", () => {
-  it("handler-emitted outbox rows carry workspace_id but SELECT returns both", async () => {
-    // The poller drains outbox rows across workspaces. The scoped
-    // handle does NOT hide them — this test proves the plugin
-    // deliberately leaves `outbox` alone. Handler writers must still
-    // set `workspace_id` manually (the dispatcher's write-path tx
-    // populates it from the principal); the plugin isn't their
-    // backstop here because the invariant isn't workspace isolation
-    // but cross-workspace observability for the poller.
-    const a = driver.scoped(WORKSPACE_A);
+describe("TenantScopedDb narrows away internal tables (F98)", () => {
+  it("outbox is reachable through driver.system() — the poller's escape hatch", async () => {
+    // The outbox poller is a system-level service; it drains rows
+    // across workspaces. It uses `driver.system()` (no plugin, no
+    // `workspace_id` predicate) so it can see every pending event.
+    // Handler-facing code cannot reach `outbox` through the scoped
+    // handle — the type signature hides it, and the compile-test
+    // below pins that narrowing in place.
+    const sys = driver.system();
 
-    await a
+    await sys
       .insertInto("outbox")
       .values([
         {
@@ -577,7 +576,43 @@ describe("WorkspaceScopingPlugin — outbox is not tenant-scoped", () => {
       ])
       .execute();
 
-    const seen = await a.selectFrom("outbox").selectAll().execute();
+    const seen = await sys.selectFrom("outbox").selectAll().execute();
     expect(seen.map((r) => r.id).sort()).toEqual(["out-a", "out-b"]);
+  });
+
+  it("doc_counters is reachable through driver.system() — the dispatcher's write-path tx", async () => {
+    // `doc_counters` has no `workspace_id` column; seq allocation
+    // inside the write-path tx uses `driver.system()` so the scoping
+    // plugin doesn't try to predicate it. Proof that the system
+    // handle can INSERT and SELECT the counter row.
+    const sys = driver.system();
+    const a = driver.scoped(WORKSPACE_A);
+
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+    await sys
+      .insertInto("doc_counters")
+      .values({ doc_id: DOC_A1, next_seq: 1, updated_at: 1 })
+      .execute();
+
+    const seen = await sys
+      .selectFrom("doc_counters")
+      .select(["doc_id", "next_seq"])
+      .where("doc_id", "=", DOC_A1)
+      .execute();
+    expect(seen).toEqual([{ doc_id: DOC_A1, next_seq: 1 }]);
+  });
+
+  it("handler-facing TenantScopedDb cannot name outbox or doc_counters (compile-time guard)", () => {
+    const a = driver.scoped(WORKSPACE_A);
+    // If either of these stops erroring, a regression widened the
+    // handler-visible `Database` type — F98's narrowing is the point.
+    // @ts-expect-error — outbox lives on SystemDatabase, not Database
+    a.selectFrom("outbox");
+    // @ts-expect-error — doc_counters lives on SystemDatabase, not Database
+    a.selectFrom("doc_counters");
+    expect(true).toBe(true);
   });
 });

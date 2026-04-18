@@ -76,16 +76,27 @@ import {
   WhereNode,
 } from "kysely";
 
-import type { Database, TenantScopedTable } from "./schema";
+import type { Database, SystemDatabase, TenantScopedTable } from "./schema";
 import { TENANT_SCOPED_TABLES } from "./schema";
 
 /**
  * A `Kysely<Database>` whose every query auto-applies the
  * `workspace_id` predicate. The alias carries no structural brand —
- * the invariant rests on the `no-raw-kysely-outside-db` rule
- * (coherence script today; `@editorzero/arch-lint` eventually — see
- * architecture.md §8.1a / §17), which prevents any raw `Kysely`
- * construction outside this package.
+ * the invariant rests on two stacked guards:
+ *
+ *  1. **Type narrowing (F98):** `Database` omits `doc_counters` and
+ *     `outbox`, so the handler cannot even *name* those tables in a
+ *     query expression. They live on `SystemDatabase` and are
+ *     reachable only via the driver's `system()` escape hatch.
+ *  2. **Runtime scoping plugin:** every query against the remaining
+ *     tenant-scoped tables is rewritten to carry
+ *     `workspace_id = <scope>` in WHERE/UPDATE/DELETE and as an
+ *     INSERT column.
+ *
+ *  `no-raw-kysely-outside-db` (coherence script today;
+ *  `@editorzero/arch-lint` eventually — see architecture.md §8.1a /
+ *  §17) prevents any raw `Kysely` construction outside this package,
+ *  which is what stops a caller from manufacturing a wider handle.
  */
 export type TenantScopedDb = Kysely<Database>;
 
@@ -116,16 +127,24 @@ export class TenantScopeViolationError extends Error {
 }
 
 /**
- * Wrap a base `Kysely<Database>` with the plugin. The returned handle
- * is safe to pass to capability handlers. `withPlugin` on Kysely
- * returns a fresh instance sharing the underlying driver connection
- * pool, so per-request scoping is cheap.
+ * Wrap the driver's `Kysely<SystemDatabase>` with the scoping plugin
+ * and narrow the result to `Kysely<Database>`. The plugin rewrites
+ * every query on a tenant-scoped table to carry `workspace_id`;
+ * narrowing the type removes `doc_counters` and `outbox` from the
+ * handler's view entirely.
+ *
+ * `withPlugin` on Kysely returns a fresh instance sharing the
+ * underlying driver connection pool, so per-request scoping is cheap.
+ * The `as Kysely<Database>` cast reflects the intentional narrowing —
+ * `SystemDatabase extends Database`, so every operation valid on the
+ * narrow type is also valid on the wide runtime instance; we are just
+ * hiding the extra tables from the caller's view.
  */
 export function createTenantScopedDb(
-  base: Kysely<Database>,
+  base: Kysely<SystemDatabase>,
   workspace_id: WorkspaceId,
 ): TenantScopedDb {
-  return base.withPlugin(new WorkspaceScopingPlugin(workspace_id));
+  return base.withPlugin(new WorkspaceScopingPlugin(workspace_id)) as unknown as Kysely<Database>;
 }
 
 export class WorkspaceScopingPlugin implements KyselyPlugin {

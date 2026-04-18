@@ -29,6 +29,7 @@ export type {
   DocsTable,
   DocUpdatesTable,
   OutboxTable,
+  SystemDatabase,
   TenantScopedTable,
 } from "./schema";
 export { TENANT_SCOPED_TABLES } from "./schema";

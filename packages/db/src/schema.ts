@@ -198,15 +198,47 @@ export interface OutboxTable {
 }
 
 /**
- * Root schema type. Kysely consumers parametrise as `Kysely<Database>`.
- * Extend by adding table interfaces here; the plugin's `workspace_id`
- * enforcement keys off `TENANT_SCOPED_TABLES`, not this type.
+ * Handler-visible schema. Every table here is tenant-scoped
+ * (`TENANT_SCOPED_TABLES` is a subset of `keyof Database` by
+ * construction) and every query through `TenantScopedDb` is
+ * auto-filtered on `workspace_id`.
+ *
+ * `doc_counters` and `outbox` are deliberately *absent* from this
+ * type (F98). They are write-path internals that the dispatcher, the
+ * outbox poller, and the audit writer reach through `SystemDatabase`
+ * instead — a handler with a `TenantScopedDb` must not even be able
+ * to type-check a reference to them. The scoping plugin is a runtime
+ * guard; narrowing the type is the compile-time guard. Defence in
+ * depth against a capability handler that accidentally escapes its
+ * tenant via an internal table.
+ *
+ * Extend by adding tenant-scoped table interfaces here AND to
+ * `TENANT_SCOPED_TABLES`. Internal tables go on `SystemDatabase`.
  */
 export interface Database {
   readonly docs: DocsTable;
   readonly doc_snapshots: DocSnapshotsTable;
   readonly doc_updates: DocUpdatesTable;
-  readonly doc_counters: DocCountersTable;
   readonly audit_events: AuditEventsTable;
+}
+
+/**
+ * The internal, full-fat schema. Callers: dispatcher write-path tx
+ * (inserts `doc_updates` + `outbox` + `audit_events` + allocates
+ * `doc_counters.next_seq`), outbox poller, audit writer, migration
+ * runner. These callers sit *inside* `packages/db`'s trust boundary
+ * or are trusted peers (the dispatcher) that the composition package
+ * (`@editorzero/runtime`) wires up from the driver's `system()`
+ * method.
+ *
+ * This type extends `Database`, so `Kysely<SystemDatabase>` can run
+ * every query `Kysely<Database>` can — but also the write-path
+ * internals. Handler code never receives `Kysely<SystemDatabase>`;
+ * `no-raw-kysely-outside-db` (coherence script; future arch-lint)
+ * pins all imports of this type to the db / dispatcher / runtime /
+ * audit-writer packages.
+ */
+export interface SystemDatabase extends Database {
+  readonly doc_counters: DocCountersTable;
   readonly outbox: OutboxTable;
 }
