@@ -7,6 +7,7 @@
     { "path": "./packages/ids" },
     { "path": "./packages/scopes" },
     { "path": "./packages/audit" },
+    { "path": "./packages/blocks" },
     { "path": "./packages/capabilities" },
     { "path": "./packages/config" },
     { "path": "./packages/errors" },
