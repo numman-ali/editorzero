@@ -82,10 +82,14 @@ export interface DispatcherDeps<TEditor = unknown> {
   readonly tracer: Tracer;
   readonly logger: Logger;
   readonly now: () => number;
-  readonly makeContextExtras: (
-    principal: Principal,
-    tenant: TenantContext,
-  ) => CapabilityContextExtras<TEditor>;
+  /**
+   * Factory for the IO-bound slice of `CapabilityContext` (`db`,
+   * `outbox`, `transact`). The dispatcher derives tenant scope from
+   * `principal.workspace_id` — there is deliberately no separate
+   * `tenant` parameter so the factory cannot produce a `db` scoped to
+   * a different workspace than the authorizing principal (F86).
+   */
+  readonly makeContextExtras: (principal: Principal) => CapabilityContextExtras<TEditor>;
   /**
    * Audit-tx handle for the writer call. The concrete dispatcher
    * passes the same handle it used for the write-path DB tx (F31).
@@ -98,11 +102,15 @@ export interface DispatchInvocation {
   readonly capability_id: CapabilityId;
   readonly input: unknown;
   readonly principal: Principal;
-  readonly tenant: TenantContext;
   /**
    * The AccessPath the dispatcher hands to the permission gate. Until
    * the codegen step that derives this from typed `doc_id` /
    * `block_id` fields lands, callers pass it in explicitly.
+   *
+   * `access.workspace_id` MUST equal `principal.workspace_id`. The
+   * dispatcher asserts this at entry; mismatch is an adapter bug
+   * (F86) and throws `TenantMismatchError` before any gate check or
+   * db access.
    */
   readonly access: AccessPath;
   /**
@@ -111,6 +119,30 @@ export interface DispatchInvocation {
    * tests and pre-instrumented CLI paths.
    */
   readonly trace_id: string | null;
+}
+
+/**
+ * Thrown when an adapter submits a `DispatchInvocation` whose
+ * `access.workspace_id` does not equal `principal.workspace_id`
+ * (F86). This is structurally a caller bug — both fields are
+ * independently supplied and nothing in the type system has forced
+ * them to agree. The assertion fires before any gate or audit, so
+ * the illegal invocation leaves no audit trail. Adapters are
+ * responsible for deriving `access.workspace_id` from the principal.
+ */
+export class TenantMismatchError extends Error {
+  override readonly name = "TenantMismatchError";
+  readonly principal_workspace_id: string;
+  readonly access_workspace_id: string;
+
+  constructor(principal_workspace_id: string, access_workspace_id: string) {
+    super(
+      `access.workspace_id (${access_workspace_id}) does not match principal.workspace_id ` +
+        `(${principal_workspace_id}); this is an adapter bug — derive access from principal.`,
+    );
+    this.principal_workspace_id = principal_workspace_id;
+    this.access_workspace_id = access_workspace_id;
+  }
 }
 
 export interface Dispatcher<TEditor = unknown> {
@@ -216,7 +248,16 @@ export function createDispatcher<TEditor = unknown>(
   deps: DispatcherDeps<TEditor>,
 ): Dispatcher<TEditor> {
   const dispatch = async (invocation: DispatchInvocation): Promise<unknown> => {
-    const { capability_id, input, principal, tenant, access, trace_id } = invocation;
+    const { capability_id, input, principal, access, trace_id } = invocation;
+
+    // F86: tenant is not caller-supplied — it is derived from the
+    // principal, which is the authorizing identity. `access.workspace_id`
+    // is cross-checked against the principal before anything runs, so
+    // Layer 1 and Layer 2 cannot disagree by construction.
+    if (access.workspace_id !== principal.workspace_id) {
+      throw new TenantMismatchError(principal.workspace_id, access.workspace_id);
+    }
+    const tenant: TenantContext = { workspace_id: principal.workspace_id };
 
     return deps.tracer.span("capability.invoke", async (span) => {
       span.setAttribute("capability.id", capability_id);
@@ -281,7 +322,7 @@ export function createDispatcher<TEditor = unknown>(
       }
 
       // 3. Build context + invoke handler
-      const extras = deps.makeContextExtras(principal, tenant);
+      const extras = deps.makeContextExtras(principal);
       const ctx: CapabilityContext<TEditor> = {
         principal,
         tenant: { workspace_id: tenant.workspace_id },

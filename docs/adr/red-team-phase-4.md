@@ -23,8 +23,8 @@ Continuing the F-series: F85–F95.
 
 | ID | Severity | Title | Disposition | Applied |
 |---|---|---|---|---|
-| F85 | **BLOCKER** | Typecheck hole not actually closed — hook calls `exec tsc -b`, skipping per-package `tsconfig.test.json`; root `tsconfig.json` missing `dispatcher` + `db` references | Accepted → Applied | 2026-04-18 (pending commit) |
-| F86 | **BLOCKER** | Cross-tenant read possible — `DispatchInvocation.principal`, `.tenant`, `.access` are independent, so Layer 1 can authorize A while Layer 2 reads B | Accepted | Pending |
+| F85 | **BLOCKER** | Typecheck hole not actually closed — hook calls `exec tsc -b`, skipping per-package `tsconfig.test.json`; root `tsconfig.json` missing `dispatcher` + `db` references | Accepted → Applied | 2026-04-18 `ec5f46f` |
+| F86 | **BLOCKER** | Cross-tenant read possible — `DispatchInvocation.principal`, `.tenant`, `.access` are independent, so Layer 1 can authorize A while Layer 2 reads B | Accepted → Applied | 2026-04-18 (pending commit) |
 | F87 | **BLOCKER** | `WorkspaceScopingPlugin` is neither alias-aware nor join-aware — aliased tables emit invalid SQL (`no such column: docs.workspace_id`); JOINed tenant tables never get the predicate | Accepted | Pending |
 | F88 | HIGH | Post-parse deny has no audit path — `PermissionDeniedError` thrown from a handler is rethrown without a deny row; comment claims "handler emits its own deny audit" but handlers have no audit writer | Accepted | Pending |
 | F89 | HIGH | Coherence script + `@editorzero/arch-lint` described as present-tense enforcement, but key checks are stubs and the arch-lint package doesn't exist | Accepted | Pending |

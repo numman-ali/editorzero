@@ -17,6 +17,6 @@ export type {
   DispatcherDeps,
   DispatchInvocation,
 } from "./dispatcher";
-export { createDispatcher } from "./dispatcher";
+export { createDispatcher, TenantMismatchError } from "./dispatcher";
 export type { CapabilityGateMeta, GateResult, PermissionGate } from "./gate";
 export { AGENT_SCOPE_TIERS, scopeOnlyGate } from "./gate";

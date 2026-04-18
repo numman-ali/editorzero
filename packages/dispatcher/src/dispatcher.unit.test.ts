@@ -28,7 +28,7 @@ import type { AccessPath, UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { CapabilityContextExtras } from "./index";
-import { createDispatcher, scopeOnlyGate } from "./index";
+import { createDispatcher, scopeOnlyGate, TenantMismatchError } from "./index";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -171,7 +171,6 @@ describe("dispatcher", () => {
       capability_id: DOC_READ_ID,
       input: { doc_id: "abc" },
       principal: testUser(),
-      tenant: { workspace_id: WORKSPACE_ID },
       access: testAccess(),
       trace_id: null,
     });
@@ -202,7 +201,6 @@ describe("dispatcher", () => {
         capability_id: DOC_READ_ID,
         input: { doc_id: "abc" },
         principal: guest,
-        tenant: { workspace_id: WORKSPACE_ID },
         access: testAccess(),
         trace_id: null,
       }),
@@ -227,7 +225,6 @@ describe("dispatcher", () => {
         capability_id: DOC_READ_ID,
         input: { doc_id: 123 }, // zod expects a string
         principal: testUser(),
-        tenant: { workspace_id: WORKSPACE_ID },
         access: testAccess(),
         trace_id: null,
       }),
@@ -255,7 +252,6 @@ describe("dispatcher", () => {
         capability_id: DOC_READ_ID,
         input: { doc_id: "abc" },
         principal: testUser(),
-        tenant: { workspace_id: WORKSPACE_ID },
         access: testAccess(),
         trace_id: null,
       }),
@@ -269,4 +265,31 @@ describe("dispatcher", () => {
       expect(row.record.error.kind).toBe("internal");
     }
   });
+
+  it(
+    "F86 invariant: access.workspace_id disagreeing with principal.workspace_id " +
+      "throws TenantMismatchError before gate or audit",
+    async () => {
+      const { dispatcher, auditWriter } = mountDispatcher(
+        buildDocReadCapability(async () => ({ doc_id: "x", title: "x" })),
+      );
+
+      const OTHER_WORKSPACE = WorkspaceId("018f0000-0000-7000-8000-000000000099");
+      const mismatchedAccess: AccessPath = { workspace_id: OTHER_WORKSPACE };
+
+      await expect(
+        dispatcher.dispatch({
+          capability_id: DOC_READ_ID,
+          input: { doc_id: "abc" },
+          principal: testUser(),
+          access: mismatchedAccess,
+          trace_id: null,
+        }),
+      ).rejects.toBeInstanceOf(TenantMismatchError);
+
+      // Illegal invocations leave no audit trail — the dispatcher hasn't
+      // committed to a workspace yet, so there's nothing to audit against.
+      expect(auditWriter.rows).toHaveLength(0);
+    },
+  );
 });
