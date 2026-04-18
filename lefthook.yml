@@ -42,7 +42,14 @@ pre-push:
     full-lint:
       run: pnpm lint
     property:
-      run: pnpm test:prop
+      # Vitest `--project prop` activates when a project config declares it;
+      # until any package ships a property test suite there is nothing to run.
+      run: |
+        if find packages -type d -name prop 2>/dev/null | grep -q .; then
+          pnpm test:prop
+        else
+          echo "skip: no property tests scaffolded yet"
+        fi
     integration:
       # SQLite + Postgres conformance suite (ADR 0007 / §17.1).
       # Activates when `packages/db/test/integration/` exists.
