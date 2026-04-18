@@ -29,6 +29,19 @@
  * chosen primitives (`WhereNode.cloneWithOperation`,
  * `InsertQueryNode.cloneWith`) are Kysely 0.28's documented plugin
  * surface — see `packages/db/README.md` (TODO) for the reference map.
+ *
+ * Alias- and join-awareness: SELECT and DELETE walk both `from.froms`
+ * and `joins[].table`; UPDATE walks its primary `table` plus any
+ * Postgres-style `from.froms` and `joins`. For each tenant-scoped
+ * occurrence we resolve a `{ tableNode, refNode }` pair — `refNode` is
+ * the alias when the FROM/JOIN uses `AS`, the table otherwise — and
+ * emit the predicate against `refNode`. This is what makes aliased
+ * queries like `selectFrom("docs as d")` emit legal SQL
+ * (`d.workspace_id = ?`, not `docs.workspace_id = ?`) and makes a
+ * self-join on tenant tables scope every participant. Unrecognised
+ * FROM/JOIN shapes (subqueries, table-valued expressions) are skipped
+ * rather than blocked; discipline + the property fuzzer are the final
+ * guards.
  */
 
 import type { WorkspaceId } from "@editorzero/ids";
@@ -38,7 +51,9 @@ import {
   BinaryOperationNode,
   ColumnNode,
   type DeleteQueryNode,
+  IdentifierNode,
   type InsertQueryNode,
+  type JoinNode,
   type Kysely,
   type KyselyPlugin,
   type OperationNode,
@@ -136,13 +151,38 @@ function isTenantScoped(name: string): name is TenantScopedTable {
 }
 
 /**
- * Extract the underlying `TableNode` from a FROM item (which may be a
- * plain `TableNode` or an `AliasNode` wrapping one). Returns null for
- * subqueries and any shape we can't statically pin to a single table.
+ * A tenant-scoped table occurrence. `tableNode` is the real table (used
+ * for the `isTenantScoped` check); `refNode` is what we reference in
+ * the emitted predicate — the alias when one is present, the table
+ * otherwise. Splitting the two is what lets the plugin emit legal SQL
+ * against aliased FROM/JOIN items: `SELECT … FROM docs AS d` must
+ * produce `d.workspace_id = ?`, not `docs.workspace_id = ?`.
  */
-function unwrapTableNode(node: OperationNode): TableNode | null {
-  if (TableNode.is(node)) return node;
-  if (AliasNode.is(node) && TableNode.is(node.node)) return node.node;
+interface ScopedRef {
+  readonly tableNode: TableNode;
+  readonly refNode: TableNode;
+}
+
+/**
+ * Resolve a FROM item or JOIN target (`JoinNode.table`) into a
+ * `ScopedRef` when the node is a single table — plain or aliased.
+ * Returns null for subqueries, raw expressions, and any other shape we
+ * can't statically pin to one table.
+ *
+ * Alias handling: `AliasNode { node: TableNode, alias: IdentifierNode }`
+ * is the shape Kysely emits for `selectFrom("docs as d")`. We build a
+ * synthetic `TableNode.create(aliasName)` as the refNode — its
+ * `ReferenceNode` rendering is `d.workspace_id`, exactly what aliased
+ * SQL requires.
+ */
+function refFor(node: OperationNode): ScopedRef | null {
+  if (TableNode.is(node)) return { tableNode: node, refNode: node };
+  if (AliasNode.is(node) && TableNode.is(node.node) && IdentifierNode.is(node.alias)) {
+    return {
+      tableNode: node.node,
+      refNode: TableNode.create(node.alias.name),
+    };
+  }
   return null;
 }
 
@@ -150,9 +190,9 @@ function tableName(node: TableNode): string {
   return node.table.identifier.name;
 }
 
-function workspacePredicate(table: TableNode, workspace_id: WorkspaceId): OperationNode {
+function workspacePredicate(ref: TableNode, workspace_id: WorkspaceId): OperationNode {
   return BinaryOperationNode.create(
-    ReferenceNode.create(ColumnNode.create("workspace_id"), table),
+    ReferenceNode.create(ColumnNode.create("workspace_id"), ref),
     OperatorNode.create("="),
     ValueNode.create(workspace_id),
   );
@@ -172,6 +212,27 @@ function appendAnd(existing: WhereNode | undefined, predicate: OperationNode): W
     : WhereNode.cloneWithOperation(existing, "And", predicate);
 }
 
+/**
+ * Collect every tenant-scoped table occurrence from a FROM list and
+ * (optionally) a JOIN list. Each element becomes a `ScopedRef`
+ * contributing one `<ref>.workspace_id = ?` predicate to the emitted
+ * WHERE. Non-scoped tables and unrecognised shapes are silently
+ * skipped.
+ */
+function collectScopedRefs(
+  fromItems: readonly OperationNode[] | undefined,
+  joins: readonly JoinNode[] | undefined,
+): ScopedRef[] {
+  const out: ScopedRef[] = [];
+  const visit = (node: OperationNode): void => {
+    const ref = refFor(node);
+    if (ref !== null && isTenantScoped(tableName(ref.tableNode))) out.push(ref);
+  };
+  for (const from of fromItems ?? []) visit(from);
+  for (const join of joins ?? []) visit(join.table);
+  return out;
+}
+
 class WorkspaceScopingTransformer extends OperationNodeTransformer {
   readonly #workspace_id: WorkspaceId;
 
@@ -182,13 +243,10 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
 
   protected override transformSelectQuery(node: SelectQueryNode): SelectQueryNode {
     const transformed = super.transformSelectQuery(node);
-    const tenantTables = (transformed.from?.froms ?? [])
-      .map(unwrapTableNode)
-      .filter((t): t is TableNode => t !== null)
-      .filter((t) => isTenantScoped(tableName(t)));
-    if (tenantTables.length === 0) return transformed;
+    const refs = collectScopedRefs(transformed.from?.froms, transformed.joins);
+    if (refs.length === 0) return transformed;
     const predicate = conjunctionOver(
-      tenantTables.map((t) => workspacePredicate(t, this.#workspace_id)),
+      refs.map((r) => workspacePredicate(r.refNode, this.#workspace_id)),
     );
     return { ...transformed, where: appendAnd(transformed.where, predicate) };
   }
@@ -197,21 +255,26 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
     const transformed = super.transformUpdateQuery(node);
     const target = transformed.table;
     if (target === undefined) return transformed;
-    const table = unwrapTableNode(target);
-    if (table === null || !isTenantScoped(tableName(table))) return transformed;
-    const predicate = workspacePredicate(table, this.#workspace_id);
+    const refs: ScopedRef[] = [];
+    const primary = refFor(target);
+    if (primary !== null && isTenantScoped(tableName(primary.tableNode))) refs.push(primary);
+    // Postgres-flavour `UPDATE t SET … FROM other` and join-style updates
+    // need every tenant-scoped participant pinned to the current scope,
+    // otherwise the secondary tables leak rows into the join product.
+    refs.push(...collectScopedRefs(transformed.from?.froms, transformed.joins));
+    if (refs.length === 0) return transformed;
+    const predicate = conjunctionOver(
+      refs.map((r) => workspacePredicate(r.refNode, this.#workspace_id)),
+    );
     return { ...transformed, where: appendAnd(transformed.where, predicate) };
   }
 
   protected override transformDeleteQuery(node: DeleteQueryNode): DeleteQueryNode {
     const transformed = super.transformDeleteQuery(node);
-    const tenantTables = (transformed.from.froms ?? [])
-      .map(unwrapTableNode)
-      .filter((t): t is TableNode => t !== null)
-      .filter((t) => isTenantScoped(tableName(t)));
-    if (tenantTables.length === 0) return transformed;
+    const refs = collectScopedRefs(transformed.from.froms, transformed.joins);
+    if (refs.length === 0) return transformed;
     const predicate = conjunctionOver(
-      tenantTables.map((t) => workspacePredicate(t, this.#workspace_id)),
+      refs.map((r) => workspacePredicate(r.refNode, this.#workspace_id)),
     );
     return { ...transformed, where: appendAnd(transformed.where, predicate) };
   }

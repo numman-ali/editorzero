@@ -214,3 +214,122 @@ describe("WorkspaceScopingPlugin — DELETE", () => {
     expect(bStillThere).toHaveLength(1);
   });
 });
+
+// ── F87: alias-aware + join-aware scoping ────────────────────────────────
+//
+// The predicate must target whichever identifier the surrounding SQL
+// uses. For an unaliased `docs` that's `docs.workspace_id`; for
+// `docs AS d` the emitted SQL is invalid unless the predicate says
+// `d.workspace_id`. Same story for joined tenant tables — every
+// participant must be scoped independently, or the join product leaks
+// cross-workspace rows.
+
+describe("WorkspaceScopingPlugin — alias awareness (F87)", () => {
+  it("SELECT with an alias emits the predicate against the alias (legal SQL)", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const { sql, parameters } = a.selectFrom("docs as d").selectAll().compile();
+    expect(sql).toContain('"d"."workspace_id" = ?');
+    expect(sql).not.toContain('"docs"."workspace_id" = ?');
+    expect(parameters).toContain(WORKSPACE_A);
+  });
+
+  it("SELECT with an alias runs against SQLite and honours the scope", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+    await b
+      .insertInto("docs")
+      .values(seedRow(DOC_B1, WORKSPACE_B, "B1", BOB))
+      .execute();
+
+    // Before F87 this threw `no such column: docs.workspace_id` because
+    // the plugin emitted the un-aliased table in the predicate.
+    const rows = await a.selectFrom("docs as d").selectAll().execute();
+    expect(rows.map((r) => r.id)).toEqual([DOC_A1]);
+  });
+
+  it("DELETE with an alias emits the alias predicate and only touches the scope", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+    await b
+      .insertInto("docs")
+      .values(seedRow(DOC_B1, WORKSPACE_B, "B1", BOB))
+      .execute();
+
+    const compiled = a.deleteFrom("docs as d").compile();
+    expect(compiled.sql).toContain('"d"."workspace_id" = ?');
+
+    const result = await a.deleteFrom("docs as d").executeTakeFirst();
+    expect(result.numDeletedRows).toBe(1n);
+
+    const bStillThere = await b.selectFrom("docs").selectAll().execute();
+    expect(bStillThere).toHaveLength(1);
+  });
+
+  it("UPDATE with an alias emits the alias predicate and only touches the scope", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+    await b
+      .insertInto("docs")
+      .values(seedRow(DOC_B1, WORKSPACE_B, "B1", BOB))
+      .execute();
+
+    const compiled = a.updateTable("docs as d").set({ title: "renamed" }).compile();
+    expect(compiled.sql).toContain('"d"."workspace_id" = ?');
+
+    const result = await a.updateTable("docs as d").set({ title: "renamed" }).executeTakeFirst();
+    expect(result.numUpdatedRows).toBe(1n);
+
+    const bRows = await b.selectFrom("docs").selectAll().execute();
+    expect(bRows[0]?.title).toBe("B1");
+  });
+});
+
+describe("WorkspaceScopingPlugin — join awareness (F87)", () => {
+  it("aliased self-join scopes every tenant participant independently", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+    await a
+      .insertInto("docs")
+      .values([
+        seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE),
+        seedRow(DOC_A2, WORKSPACE_A, "A2", ALICE),
+      ])
+      .execute();
+    await b
+      .insertInto("docs")
+      .values([seedRow(DOC_B1, WORKSPACE_B, "B1", BOB)])
+      .execute();
+
+    // `parent INNER JOIN child ON child.id = parent.id` is a self-join
+    // that pairs each doc with itself — one row per scoped doc. Before
+    // F87, neither `parent` nor `child` got a workspace predicate, so
+    // cross-workspace rows could appear in the join product.
+    const compiled = a
+      .selectFrom("docs as parent")
+      .innerJoin("docs as child", "child.id", "parent.id")
+      .select(["parent.id as p_id", "child.id as c_id"])
+      .compile();
+    expect(compiled.sql).toContain('"parent"."workspace_id" = ?');
+    expect(compiled.sql).toContain('"child"."workspace_id" = ?');
+
+    const rows = await a
+      .selectFrom("docs as parent")
+      .innerJoin("docs as child", "child.id", "parent.id")
+      .select(["parent.id as p_id", "child.id as c_id"])
+      .execute();
+    expect(rows.map((r) => r.p_id).sort()).toEqual([DOC_A1, DOC_A2].sort());
+    expect(rows.every((r) => r.p_id === r.c_id)).toBe(true);
+  });
+});
