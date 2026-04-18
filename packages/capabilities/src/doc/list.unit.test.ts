@@ -12,6 +12,7 @@
  * semantics on the real db.
  */
 
+import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
 import { createSqliteDriver, type SqliteDriver } from "@editorzero/db";
 import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
@@ -260,7 +261,10 @@ describe("doc.list", () => {
     expect(policy.collapsible).toBe(true);
     if (policy.collapsible) {
       expect(policy.collapseKey({})).toBe("doc.list");
-      expect(policy.window_ms).toBe(1000);
+      // F93: window sourced from `@editorzero/constants`, not a local
+      // literal — the collapse-window floor moves workspace-wide if
+      // the SSOT constant changes.
+      expect(policy.window_ms).toBe(AUDIT_READ_COLLAPSE_WINDOW_MS);
     }
   });
 });

@@ -18,6 +18,7 @@
  * plain strings without a cast at the boundary.
  */
 
+import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
 import { CapabilityId, CollectionId, DocId } from "@editorzero/ids";
 import { z } from "zod";
 
@@ -84,13 +85,15 @@ export const docList: Capability<Input, Output> = {
       error_code: "internal",
       retriable: false,
     }),
-    // Reads collapse: identical calls within 1s fold into one row
-    // with `collapsed_count > 1` on the envelope. `collapseKey` is a
-    // constant because `doc.list` has no input — two calls with the
-    // same principal always collapse.
+    // Reads collapse: identical calls within the audit-read-collapse
+    // window fold into one row with `collapsed_count > 1` on the
+    // envelope (§9.3). `collapseKey` is a constant because `doc.list`
+    // has no input — two calls with the same principal always
+    // collapse. Window sourced from `@editorzero/constants` so the
+    // floor is set once repo-wide.
     collapsePolicy: {
       collapsible: true,
-      window_ms: 1000,
+      window_ms: AUDIT_READ_COLLAPSE_WINDOW_MS,
       collapseKey: () => "doc.list",
     },
   },

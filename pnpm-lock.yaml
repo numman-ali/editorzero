@@ -103,6 +103,9 @@ importers:
       '@editorzero/audit':
         specifier: workspace:*
         version: link:../audit
+      '@editorzero/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@editorzero/db':
         specifier: workspace:*
         version: link:../db

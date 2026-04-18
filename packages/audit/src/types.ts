@@ -85,10 +85,20 @@ export interface AuditError {
 
 // ── Collapse policy (§9.3) ─────────────────────────────────────────────────
 
-/** Only `category = "read"` capabilities may set `collapsible: true`. */
+/**
+ * Only `category = "read"` capabilities may set `collapsible: true`.
+ *
+ * `window_ms` is typed as `number` (not a literal) so capabilities can
+ * source it from `@editorzero/constants.AUDIT_READ_COLLAPSE_WINDOW_MS`
+ * without a cast. The spec intent is "all read-collapse windows share
+ * one floor" — a type-level literal would duplicate the SSOT here and
+ * force a sweep every time the constant changes. Callers MUST import
+ * the constant; a future coherence / arch-lint rule will enforce that
+ * `window_ms` is never a literal at the call site (F93).
+ */
 export type CollapsePolicy =
   | { collapsible: false }
-  | { collapsible: true; collapseKey: (input: unknown) => string; window_ms: 1_000 };
+  | { collapsible: true; collapseKey: (input: unknown) => string; window_ms: number };
 
 // ── Audit envelope (§9.3) ──────────────────────────────────────────────────
 //
