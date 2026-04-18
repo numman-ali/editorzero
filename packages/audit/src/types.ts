@@ -2,6 +2,7 @@
  * Audit supporting types — envelope, outcomes, block/doc shapes.
  */
 
+import type { DenyReason, HandlerError } from "@editorzero/errors";
 import type {
   AgentId,
   AttachmentId,
@@ -19,10 +20,13 @@ import type {
   WebhookId,
   WorkspaceId,
 } from "@editorzero/ids";
-import type { Role, Scope, SubjectKind } from "@editorzero/scopes";
+import type { Role, Scope } from "@editorzero/scopes";
 
-// Re-export so audit consumers don't need `@editorzero/scopes` for Role alone.
-export type { Role };
+// Re-exported from their owning packages so an audit consumer only
+// needs `@editorzero/audit`. `DenyReason` / `HandlerError` live with
+// `EditorZeroError` in `@editorzero/errors` (each subclass owns the
+// projection to `HandlerError`); `Role` lives in `@editorzero/scopes`.
+export type { DenyReason, HandlerError, Role };
 
 // ── Visibility enums (§3.5, §3.6) ──────────────────────────────────────────
 
@@ -58,23 +62,12 @@ export interface DocPurgePreimage {
   snapshot_seq_at_purge: number;
 }
 
-// ── Deny / Error variants (F32 — §9.3) ─────────────────────────────────────
-
-export type DenyReason =
-  | { kind: "missing_scope"; required: Scope[]; principal_scopes: Scope[] }
-  | { kind: "cross_workspace" }
-  | { kind: "human_only" }
-  | { kind: "rate_limited"; bucket: string; retry_after_ms: number }
-  | { kind: "acl_deny"; scope: { doc_id: DocId } | { collection_id: CollectionId } }
-  | { kind: "sub_block_acl_not_implemented" };
-
-export type HandlerError =
-  | { kind: "validation"; issues: unknown }
-  | { kind: "not_found"; subject_kind: SubjectKind; subject_id: string }
-  | { kind: "conflict" }
-  | { kind: "resource_limit"; detail: string }
-  | { kind: "upstream"; service: string; status: number }
-  | { kind: "internal"; trace_id: string };
+// ── Deny / Error audit envelopes (F32 — §9.3) ──────────────────────────────
+//
+// `DenyReason` / `HandlerError` themselves live in `@editorzero/errors`
+// (re-exported at the top of this file). The envelopes below are the
+// flattened shape persisted to `audit_events` — reason / error code,
+// retriable flag, etc.
 
 export interface AuditDeny {
   kind: "deny";

@@ -1,5 +1,5 @@
 {
-  "name": "@editorzero/errors",
+  "name": "@editorzero/dispatcher",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,8 +18,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@editorzero/audit": "workspace:*",
+    "@editorzero/capabilities": "workspace:*",
+    "@editorzero/errors": "workspace:*",
     "@editorzero/ids": "workspace:*",
-    "@editorzero/scopes": "workspace:*"
+    "@editorzero/observability": "workspace:*",
+    "@editorzero/principal": "workspace:*",
+    "@editorzero/scopes": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",

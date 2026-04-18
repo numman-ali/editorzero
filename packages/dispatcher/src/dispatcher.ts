@@ -1,0 +1,449 @@
+/**
+ * Capability dispatcher (architecture.md §6.1).
+ *
+ * The dispatcher is the single orchestration path between surface
+ * adapters (API, CLI, MCP, UI) and capability handlers. It owns:
+ *
+ *  1. Input parsing (zod) — rejects with `ValidationError`.
+ *  2. Permission gate — delegates to the injected `PermissionGate`.
+ *     Deny → writes the `effectOnDeny` audit row, throws
+ *     `PermissionDeniedError`.
+ *  3. Handler invocation — supplies the capability its
+ *     `CapabilityContext` via the injected `makeContextExtras` factory.
+ *  4. Output parsing (zod) — rejects with `InternalError` (handler
+ *     contract violation).
+ *  5. Audit — writes the `effectOnAllow` / `effectOnError` row; the
+ *     writer runs inside the write-path tx the caller owns (F31 — the
+ *     concrete `@editorzero/db`-backed dispatcher will open it).
+ *  6. Tracing — wraps everything in a `capability.invoke` span with
+ *     standardised attributes.
+ *
+ * What this skeleton does NOT do yet (deferred to `@editorzero/db` +
+ * `@editorzero/sync`):
+ *  - Open the single write-path DB tx and commit
+ *    `doc_updates + outbox(doc.updated) + audit_events + outbox(audit.appended)`
+ *    atomically (F31).
+ *  - Run the handler inside a Hocuspocus direct connection for content
+ *    mutations (ADR 0018). `ctx.transact` is a caller-provided stub.
+ *  - Per-principal / per-workspace rate limiting. Capability's
+ *    `rateLimit` is read but not enforced until `@editorzero/ratelimit`
+ *    ships.
+ *  - AccessPath derivation from typed `doc_id` / `block_id` input
+ *    fields. Callers pass the path in explicitly until the codegen
+ *    step that synthesises it from the capability's zod input lands.
+ *
+ * **Type discipline:** no `as` casts, no `any`, no untyped field bags.
+ * Error projection is owned by each `EditorZeroError` subclass via
+ * `toHandlerError()` — the dispatcher calls that single method instead
+ * of pattern-matching on string codes.
+ */
+
+import type { AuditEffect, AuditRecord, AuditWriteInput, AuditWriter } from "@editorzero/audit";
+import type { AnyCapability, CapabilityContext, Registry } from "@editorzero/capabilities";
+import type { HandlerError } from "@editorzero/errors";
+import {
+  EditorZeroError,
+  InternalError,
+  PermissionDeniedError,
+  ValidationError,
+} from "@editorzero/errors";
+import type { CapabilityId } from "@editorzero/ids";
+import type { Logger, Tracer } from "@editorzero/observability";
+import {
+  type AccessPath,
+  isAgent,
+  isDelegated,
+  type Principal,
+  type TenantContext,
+} from "@editorzero/principal";
+
+import type { PermissionGate } from "./gate";
+
+// ── Dependency surface ─────────────────────────────────────────────────────
+
+/**
+ * Partial context factory — the dispatcher fills in `principal`,
+ * `tenant`, `logger`, `tracer`, and `now`; the caller-provided
+ * `makeContextExtras` supplies the IO-bound fields (`db`, `outbox`,
+ * `transact`) that `@editorzero/db` + `@editorzero/sync` implement.
+ * Keeping those behind a factory lets this package stay dep-light and
+ * lets tests swap in in-memory fakes.
+ */
+export interface CapabilityContextExtras<TEditor = unknown> {
+  readonly db: CapabilityContext<TEditor>["db"];
+  readonly outbox: CapabilityContext<TEditor>["outbox"];
+  readonly transact: CapabilityContext<TEditor>["transact"];
+}
+
+export interface DispatcherDeps<TEditor = unknown> {
+  readonly registry: Registry<TEditor>;
+  readonly gate: PermissionGate;
+  readonly auditWriter: AuditWriter;
+  readonly tracer: Tracer;
+  readonly logger: Logger;
+  readonly now: () => number;
+  readonly makeContextExtras: (
+    principal: Principal,
+    tenant: TenantContext,
+  ) => CapabilityContextExtras<TEditor>;
+  /**
+   * Audit-tx handle for the writer call. The concrete dispatcher
+   * passes the same handle it used for the write-path DB tx (F31).
+   * Skeleton tests supply an opaque branded placeholder.
+   */
+  readonly openAuditTx: () => Parameters<AuditWriter["write"]>[0];
+}
+
+export interface DispatchInvocation {
+  readonly capability_id: CapabilityId;
+  readonly input: unknown;
+  readonly principal: Principal;
+  readonly tenant: TenantContext;
+  /**
+   * The AccessPath the dispatcher hands to the permission gate. Until
+   * the codegen step that derives this from typed `doc_id` /
+   * `block_id` fields lands, callers pass it in explicitly.
+   */
+  readonly access: AccessPath;
+  /**
+   * OpenTelemetry trace id threaded into the audit row's `trace_id`
+   * column for cross-system joins (§9.7). Null is acceptable for
+   * tests and pre-instrumented CLI paths.
+   */
+  readonly trace_id: string | null;
+}
+
+export interface Dispatcher<TEditor = unknown> {
+  readonly dispatch: (invocation: DispatchInvocation) => Promise<unknown>;
+  readonly deps: DispatcherDeps<TEditor>;
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────
+
+/**
+ * Build the principal-dependent slice of `AuditWriteInput`. Uses the
+ * `Principal` discriminant directly so `kind`, `session_id`, `token_id`
+ * and `acting_as_user_id` are typed in both branches — no optional
+ * chaining on a union, no casts.
+ */
+function principalFieldsFor(
+  principal: Principal,
+): Pick<
+  AuditWriteInput,
+  "principal_kind" | "principal_id" | "session_id" | "token_id" | "acting_as_user_id"
+> {
+  if (isAgent(principal)) {
+    return {
+      principal_kind: "agent",
+      principal_id: principal.id,
+      session_id: null,
+      token_id: principal.token_id,
+      acting_as_user_id: isDelegated(principal) ? principal.acting_as : null,
+    };
+  }
+  return {
+    principal_kind: "user",
+    principal_id: principal.id,
+    session_id: principal.session_id,
+    token_id: principal.token_id,
+    acting_as_user_id: null,
+  };
+}
+
+/**
+ * Recursively key-sort an unknown value into a form `JSON.stringify`
+ * produces a canonical hash from. Pure structural narrowing via
+ * `isPlainObject` — no casts, no `any`.
+ */
+function canonicalize(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!isPlainObject(value)) return value;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) sorted[key] = canonicalize(value[key]);
+  return sorted;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
+ * FNV-1a 32-bit hex over the canonicalised JSON. Not a cryptographic
+ * hash — just a short, stable fingerprint for the `input_hash` column
+ * (de-dup within the collapse window, redaction-joins across services).
+ * A real `@editorzero/audit` canonicaliser can replace this later.
+ */
+function stableHash(input: unknown): string {
+  const json = JSON.stringify(canonicalize(input));
+  const source = json ?? "";
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < source.length; i++) {
+    hash ^= source.charCodeAt(i);
+    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+function writeAudit<TEditor>(
+  deps: DispatcherDeps<TEditor>,
+  capability: AnyCapability<TEditor>,
+  principal: Principal,
+  tenant: TenantContext,
+  record: AuditRecord,
+  input: unknown,
+  trace_id: string | null,
+  duration_ms: number,
+): Promise<void> {
+  const subject = capability.audit.subjectFrom(input);
+  const writeInput: AuditWriteInput = {
+    workspace_id: tenant.workspace_id,
+    capability_id: capability.id,
+    ...principalFieldsFor(principal),
+    subject_kind: subject.kind,
+    subject_id: subject.id ?? null,
+    input_hash: stableHash(input),
+    duration_ms,
+    trace_id,
+    record,
+  };
+  return deps.auditWriter.write(deps.openAuditTx(), writeInput);
+}
+
+// ── Pipeline ──────────────────────────────────────────────────────────────
+
+export function createDispatcher<TEditor = unknown>(
+  deps: DispatcherDeps<TEditor>,
+): Dispatcher<TEditor> {
+  const dispatch = async (invocation: DispatchInvocation): Promise<unknown> => {
+    const { capability_id, input, principal, tenant, access, trace_id } = invocation;
+
+    return deps.tracer.span("capability.invoke", async (span) => {
+      span.setAttribute("capability.id", capability_id);
+      span.setAttribute("principal.kind", principal.kind);
+      span.setAttribute("workspace.id", tenant.workspace_id);
+
+      const startedAt = deps.now();
+      const capability = deps.registry.require(capability_id);
+      span.setAttribute("capability.category", capability.category);
+
+      // 1. Parse input
+      //
+      // Input-validation failures write a dispatcher-owned audit row
+      // rather than calling `capability.audit.effectOnError` — the
+      // capability's projections legitimately assume zod-validated
+      // input (their `subjectFrom` / `effectOnError` signatures are
+      // typed over the concrete `I`). Calling them with invalid input
+      // would fail with a ZodError from inside the audit projection,
+      // which is worse than recording a standard validation-error row.
+      const parsedInput = capability.input.safeParse(input);
+      if (!parsedInput.success) {
+        const err = new ValidationError({
+          message: "capability input validation failed",
+          issues: parsedInput.error.issues,
+        });
+        await writeInputValidationAudit(
+          deps,
+          capability.id,
+          principal,
+          tenant,
+          input,
+          err,
+          trace_id,
+          startedAt,
+        );
+        span.setAttribute("outcome", "error");
+        span.recordError(err);
+        throw err;
+      }
+
+      // 2. Permission gate
+      const gateResult = await deps.gate.check(principal, capability, access);
+      if (gateResult.outcome === "deny") {
+        const duration_ms = deps.now() - startedAt;
+        await writeAudit(
+          deps,
+          capability,
+          principal,
+          tenant,
+          {
+            outcome: "deny",
+            reason: gateResult.reason,
+            effect: capability.audit.effectOnDeny(parsedInput.data, gateResult.reason),
+          },
+          parsedInput.data,
+          trace_id,
+          duration_ms,
+        );
+        span.setAttribute("outcome", "deny");
+        span.setAttribute("deny.reason", gateResult.reason.kind);
+        throw new PermissionDeniedError({ reason: gateResult.reason });
+      }
+
+      // 3. Build context + invoke handler
+      const extras = deps.makeContextExtras(principal, tenant);
+      const ctx: CapabilityContext<TEditor> = {
+        principal,
+        tenant: { workspace_id: tenant.workspace_id },
+        db: extras.db,
+        outbox: extras.outbox,
+        transact: extras.transact,
+        logger: deps.logger.child({
+          event: "dispatcher.invoke",
+          capability_id,
+          principal_kind: principal.kind,
+        }),
+        tracer: deps.tracer,
+        now: deps.now,
+      };
+
+      let rawOutput: unknown;
+      try {
+        rawOutput = await capability.invoke(ctx, parsedInput.data);
+      } catch (err) {
+        // PermissionDeniedError from inside a handler is rare but
+        // legitimate (e.g., sub-block ACL). Propagate as-is; the handler
+        // emits its own deny audit. Unknown throws go to error audit.
+        if (err instanceof PermissionDeniedError) throw err;
+        await writeAuditError(
+          deps,
+          capability,
+          principal,
+          tenant,
+          parsedInput.data,
+          err,
+          trace_id,
+          startedAt,
+        );
+        span.setAttribute("outcome", "error");
+        span.recordError(err);
+        throw err;
+      }
+
+      // 4. Parse output
+      const parsedOutput = capability.output.safeParse(rawOutput);
+      if (!parsedOutput.success) {
+        const err = new InternalError({
+          message: "capability output violated its schema",
+          trace_id: trace_id ?? "",
+        });
+        await writeAuditError(
+          deps,
+          capability,
+          principal,
+          tenant,
+          parsedInput.data,
+          err,
+          trace_id,
+          startedAt,
+        );
+        span.setAttribute("outcome", "error");
+        span.recordError(err);
+        throw err;
+      }
+
+      // 5. Allow audit
+      const duration_ms = deps.now() - startedAt;
+      const effect: AuditEffect = capability.audit.effectOnAllow(
+        parsedInput.data,
+        parsedOutput.data,
+      );
+      await writeAudit(
+        deps,
+        capability,
+        principal,
+        tenant,
+        { outcome: "allow", effect },
+        parsedInput.data,
+        trace_id,
+        duration_ms,
+      );
+      span.setAttribute("outcome", "allow");
+      span.setAttribute("duration_ms", duration_ms);
+      return parsedOutput.data;
+    });
+  };
+
+  return { dispatch, deps };
+}
+
+/**
+ * Project a thrown value to a `HandlerError` and emit the error audit
+ * row. The projection is `err.toHandlerError()` for subclasses of
+ * `EditorZeroError`; unknown thrown values get `{ kind: "internal" }`.
+ * Adding a new `EditorZeroError` subclass forces a `toHandlerError`
+ * implementation — no central switch stays in sync manually.
+ *
+ * Caller contract: `input` has been validated by `capability.input` —
+ * the capability's typed audit projections are safe to call. For the
+ * input-validation-failure path use `writeInputValidationAudit`.
+ */
+function writeAuditError<TEditor>(
+  deps: DispatcherDeps<TEditor>,
+  capability: AnyCapability<TEditor>,
+  principal: Principal,
+  tenant: TenantContext,
+  input: unknown,
+  err: unknown,
+  trace_id: string | null,
+  startedAt: number,
+): Promise<void> {
+  const handlerErr: HandlerError =
+    err instanceof EditorZeroError ? err.toHandlerError() : { kind: "internal", trace_id: "" };
+  const duration_ms = deps.now() - startedAt;
+  return writeAudit(
+    deps,
+    capability,
+    principal,
+    tenant,
+    {
+      outcome: "error",
+      error: handlerErr,
+      effect: capability.audit.effectOnError(input, handlerErr),
+    },
+    input,
+    trace_id,
+    duration_ms,
+  );
+}
+
+/**
+ * Emit the audit row for input-validation failure. Uses a
+ * capability-agnostic subject + effect because we cannot trust the
+ * capability's typed projections on invalid input (they'd re-parse
+ * and fail). Captures `capability_id` so operators can still query
+ * "validation errors per capability" from `audit_events`.
+ */
+function writeInputValidationAudit<TEditor>(
+  deps: DispatcherDeps<TEditor>,
+  capability_id: CapabilityId,
+  principal: Principal,
+  tenant: TenantContext,
+  rawInput: unknown,
+  err: ValidationError,
+  trace_id: string | null,
+  startedAt: number,
+): Promise<void> {
+  const duration_ms = deps.now() - startedAt;
+  const writeInput: AuditWriteInput = {
+    workspace_id: tenant.workspace_id,
+    capability_id,
+    ...principalFieldsFor(principal),
+    subject_kind: "system",
+    subject_id: null,
+    input_hash: stableHash(rawInput),
+    duration_ms,
+    trace_id,
+    record: {
+      outcome: "error",
+      error: err.toHandlerError(),
+      effect: {
+        kind: "error",
+        capability: capability_id,
+        error_code: "validation_failed",
+        retriable: false,
+      },
+    },
+  };
+  return deps.auditWriter.write(deps.openAuditTx(), writeInput);
+}

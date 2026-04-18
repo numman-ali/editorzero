@@ -6,5 +6,5 @@
     "tsBuildInfoFile": "./.tsbuildinfo"
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../ids" }, { "path": "../scopes" }]
+  "references": [{ "path": "../errors" }, { "path": "../ids" }, { "path": "../scopes" }]
 }

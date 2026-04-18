@@ -124,8 +124,14 @@ export const METADATA_ONLY_CAPABILITIES = [
 
 export type MetadataOnlyCapabilityId = (typeof METADATA_ONLY_CAPABILITIES)[number];
 
+// `Set<string>` widens the narrow tuple at assignment time (not via a
+// cast) so `.has(arbitraryString)` is well-typed. The set is computed
+// once at module init; `id` becomes a `MetadataOnlyCapabilityId` via
+// the user-defined type guard when membership is confirmed.
+const METADATA_ONLY_CAPABILITY_SET: ReadonlySet<string> = new Set(METADATA_ONLY_CAPABILITIES);
+
 export function isMetadataOnlyCapability(id: string): id is MetadataOnlyCapabilityId {
-  return (METADATA_ONLY_CAPABILITIES as readonly string[]).includes(id);
+  return METADATA_ONLY_CAPABILITY_SET.has(id);
 }
 
 // ── Default agent scope tiers (§8.4) ───────────────────────────────────────

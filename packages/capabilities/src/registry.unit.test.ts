@@ -2,42 +2,50 @@ import { CapabilityId } from "@editorzero/ids";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import type { AnyCapability, Capability } from "./kernel";
-import { createRegistry } from "./registry";
+import type { Capability } from "./kernel";
+import { createRegistry, RegistryLookupError, registerCapability } from "./registry";
 
 /**
- * Minimum-viable capability factory for registry tests. None of the
- * runtime fields are exercised here — the registry only cares about
- * `id` — but we construct a spec-compliant `Capability` so type drift
- * on the shape breaks the test at author time, not at dispatch time.
+ * Minimum-viable registered capability for registry tests. None of the
+ * runtime behaviour is exercised — the registry only reads `id` — but
+ * the object goes through `registerCapability(typedCapability)` so any
+ * drift on `Capability<I, O>`'s shape surfaces at author time, not at
+ * dispatch time. No casts.
  */
-function stubCapability(id: string): AnyCapability {
-  const cap: Capability<unknown, unknown> = {
+function stubCapability(id: string) {
+  const typed: Capability<Record<string, never>, Record<string, never>> = {
     id: CapabilityId(id),
-    category: "query",
+    category: "read",
     summary: `stub capability ${id}`,
-    input: z.object({}).passthrough(),
-    output: z.object({}).passthrough(),
+    input: z.object({}).strict(),
+    output: z.object({}).strict(),
     requires: [],
     audit: {
       subjectFrom: () => ({ kind: "workspace" }),
-      effectOnAllow: () => ({ kind: "observation", capability_id: CapabilityId(id) }),
+      effectOnAllow: () => ({
+        kind: "audit.access_log",
+        principal_kind: "user",
+        capability_id: CapabilityId(id),
+        collapsed_count: 1,
+      }),
       effectOnDeny: (_input, reason) => ({
         kind: "deny",
-        capability_id: CapabilityId(id),
-        reason,
+        capability: CapabilityId(id),
+        required_scopes: [],
+        reason_code: reason.kind,
       }),
-      effectOnError: (_input, error) => ({
+      effectOnError: () => ({
         kind: "error",
-        capability_id: CapabilityId(id),
-        error,
+        capability: CapabilityId(id),
+        error_code: "internal",
+        retriable: false,
       }),
-      collapsePolicy: "per-call",
+      collapsePolicy: { collapsible: false },
     },
     surfaces: ["api"],
     handler: async () => ({}),
   };
-  return cap as AnyCapability;
+  return registerCapability(typed);
 }
 
 describe("createRegistry", () => {
@@ -62,8 +70,13 @@ describe("createRegistry", () => {
       registry.require(CapabilityId("doc.read"));
       expect.fail("expected require to throw");
     } catch (err) {
-      expect((err as Error).name).toBe("RegistryLookupError");
-      expect((err as { capability_id: string }).capability_id).toBe("doc.read");
+      // `instanceof` narrows `err: unknown` to `RegistryLookupError`
+      // without casts — the subclass carries typed fields.
+      expect(err).toBeInstanceOf(RegistryLookupError);
+      if (err instanceof RegistryLookupError) {
+        expect(err.name).toBe("RegistryLookupError");
+        expect(err.capability_id).toBe("doc.read");
+      }
     }
   });
 

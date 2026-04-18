@@ -23,23 +23,27 @@
 
 import type { CapabilityId } from "@editorzero/ids";
 
-import type { AnyCapability, Capability } from "./kernel";
+import type {
+  AnyCapability,
+  Capability,
+  CapabilityAudit,
+  CapabilityContext,
+  RegisteredCapability,
+} from "./kernel";
 
 /**
- * Shape of a compile-time registry map — keys are `CapabilityId`
- * literals, values are `Capability<I, O, TEditor>` with their exact
- * generics preserved. Produced by spreading the concrete capability
- * exports into an object literal and `as const`-ing it; consumers
- * typically interact through the `Registry` interface below rather
- * than this shape directly.
+ * Thrown by `Registry.require` when an id is absent. Subclasses `Error`
+ * so `instanceof RegistryLookupError` narrows cleanly in catch blocks —
+ * no structural-type assertions at call sites.
  */
-export type CapabilityMap<TEditor = unknown> = {
-  readonly [Id in CapabilityId]?: Capability<unknown, unknown, TEditor>;
-};
-
-export interface RegistryLookupError extends Error {
-  readonly name: "RegistryLookupError";
+export class RegistryLookupError extends Error {
+  override readonly name = "RegistryLookupError";
   readonly capability_id: string;
+
+  constructor(capability_id: string) {
+    super(`Capability "${capability_id}" not found in registry`);
+    this.capability_id = capability_id;
+  }
 }
 
 /**
@@ -70,8 +74,72 @@ export interface Registry<TEditor = unknown> {
 }
 
 /**
- * Assemble a registry from a tuple of capability modules. Each
- * capability is indexed by its `id` field; duplicates throw at
+ * Wrap a typed `Capability<I, O, TEditor>` into the heterogeneous
+ * `RegisteredCapability<TEditor>` shape the registry stores and the
+ * dispatcher consumes. The typed `I` / `O` live inside the closure:
+ * `invoke` receives pre-validated input as `unknown` and delegates to
+ * the concrete `handler(ctx, input)`; the `audit` projections are
+ * re-wrapped so each receives typed values while exposing the
+ * `CapabilityAudit<unknown, unknown>` surface to the dispatcher.
+ *
+ * This is the one necessary narrowing at the registration boundary —
+ * but it happens with the concrete `I` / `O` still visible to TS
+ * inside the closure, so no `as` casts leak. The dispatcher calls
+ * `invoke` with an input that it has already validated through
+ * `this.input`, so the zod re-parse inside `invoke` would be
+ * redundant; callers rely on that contract.
+ */
+export function registerCapability<I, O, TEditor = unknown>(
+  capability: Capability<I, O, TEditor>,
+): RegisteredCapability<TEditor> {
+  const invoke = async (
+    ctx: CapabilityContext<TEditor>,
+    validatedInput: unknown,
+  ): Promise<unknown> => {
+    // Validated by the dispatcher against `capability.input`; the parse
+    // result below turns `unknown` into the concrete `I` without a
+    // cast. If the dispatcher's contract is violated (invoke called
+    // with unvalidated input), `parse` throws a ZodError — caller's bug.
+    const typedInput: I = capability.input.parse(validatedInput);
+    const output: O = await capability.handler(ctx, typedInput);
+    return output;
+  };
+
+  const audit: CapabilityAudit<unknown, unknown> = {
+    subjectFrom: (input) => capability.audit.subjectFrom(capability.input.parse(input)),
+    effectOnAllow: (input, output) =>
+      capability.audit.effectOnAllow(
+        capability.input.parse(input),
+        capability.output.parse(output),
+      ),
+    effectOnDeny: (input, reason) =>
+      capability.audit.effectOnDeny(capability.input.parse(input), reason),
+    effectOnError: (input, error) =>
+      capability.audit.effectOnError(capability.input.parse(input), error),
+    collapsePolicy: capability.audit.collapsePolicy,
+  };
+
+  const registered: RegisteredCapability<TEditor> = {
+    id: capability.id,
+    category: capability.category,
+    summary: capability.summary,
+    input: capability.input,
+    output: capability.output,
+    requires: capability.requires,
+    ...(capability.humanOnly !== undefined && { humanOnly: capability.humanOnly }),
+    ...(capability.agentAllowed !== undefined && { agentAllowed: capability.agentAllowed }),
+    ...(capability.rateLimit !== undefined && { rateLimit: capability.rateLimit }),
+    audit,
+    surfaces: capability.surfaces,
+    ...(capability.deprecated !== undefined && { deprecated: capability.deprecated }),
+    invoke,
+  };
+  return registered;
+}
+
+/**
+ * Assemble a registry from a list of registered capability modules.
+ * Each capability is indexed by its `id` field; duplicates throw at
  * construction time (covers the merge-collision case that contract
  * tests would also catch post-hoc). Output is frozen.
  */
@@ -90,8 +158,17 @@ export function createRegistry<TEditor = unknown>(
     byId.set(cap.id, cap);
   }
 
-  const sortedIds: readonly CapabilityId[] = Object.freeze(
-    [...byId.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+  // Build the sorted pair list once. `Map.entries()` preserves the
+  // value type so no lookup-and-narrow dance (and no cast) is needed
+  // downstream.
+  const sortedEntries: readonly (readonly [CapabilityId, AnyCapability<TEditor>])[] = Object.freeze(
+    [...byId.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map((entry) => Object.freeze(entry)),
+  );
+  const sortedIds: readonly CapabilityId[] = Object.freeze(sortedEntries.map(([id]) => id));
+  const sortedCaps: readonly AnyCapability<TEditor>[] = Object.freeze(
+    sortedEntries.map(([, cap]) => cap),
   );
 
   const registry: Registry<TEditor> = {
@@ -99,28 +176,12 @@ export function createRegistry<TEditor = unknown>(
     lookup: (id: CapabilityId) => byId.get(id),
     require: (id: CapabilityId) => {
       const cap = byId.get(id);
-      if (cap === undefined) {
-        const err = new Error(`Capability "${id}" not found in registry`) as Error & {
-          capability_id: string;
-        };
-        err.name = "RegistryLookupError";
-        err.capability_id = id;
-        throw err;
-      }
+      if (cap === undefined) throw new RegistryLookupError(id);
       return cap;
     },
     ids: () => sortedIds,
-    list: () => Object.freeze(sortedIds.map((id) => byId.get(id) as AnyCapability<TEditor>)),
-    entries: () =>
-      Object.freeze(
-        sortedIds.map(
-          (id) =>
-            Object.freeze([id, byId.get(id) as AnyCapability<TEditor>]) as readonly [
-              CapabilityId,
-              AnyCapability<TEditor>,
-            ],
-        ),
-      ),
+    list: () => sortedCaps,
+    entries: () => sortedEntries,
   };
   return Object.freeze(registry);
 }

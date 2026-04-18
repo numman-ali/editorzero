@@ -127,6 +127,54 @@ export interface Capability<I, O, TEditor = unknown> {
   readonly handler: (ctx: CapabilityContext<TEditor>, input: I) => Promise<O>;
 }
 
-// Convenience alias for the registry barrel to hold an editor-uniform
-// set of capabilities without each entry re-declaring the generic.
-export type AnyCapability<TEditor = unknown> = Capability<unknown, unknown, TEditor>;
+/**
+ * Registered form — the shape the registry actually holds and the
+ * dispatcher consumes. A `Capability<I, O>` becomes a `RegisteredCapability`
+ * via `registerCapability` which closes over the concrete `I` / `O` inside
+ * `invoke` (zod parse happens there), then exposes an `invoke` that accepts
+ * `unknown` input and returns `unknown` output. This is how we collect
+ * heterogeneous capabilities in one list without an `any` escape hatch: the
+ * type erasure is paid for by a single typed closure per capability, not
+ * by a cast at the boundary.
+ *
+ * The remaining `audit` projections on the registered form use
+ * `CapabilityAudit<unknown, unknown>` — see `eraseAudit` in `./registry`.
+ * Those are called by the dispatcher with `unknown` inputs that *are* the
+ * runtime-validated concrete `I` / `O`; the projection functions' own
+ * implementations receive typed values via the closure too.
+ */
+export interface RegisteredCapability<TEditor = unknown> {
+  readonly id: CapabilityId;
+  readonly category: CapabilityCategory;
+  readonly summary: string;
+
+  readonly input: ZodType<unknown>;
+  readonly output: ZodType<unknown>;
+
+  readonly requires: readonly Scope[];
+  readonly humanOnly?: boolean;
+  readonly agentAllowed?: AgentAllowance;
+  readonly rateLimit?: RateLimit;
+
+  readonly audit: CapabilityAudit<unknown, unknown>;
+  readonly surfaces: readonly Surface[];
+  readonly deprecated?: Deprecation;
+
+  /**
+   * Invoke the capability's handler on a pre-validated input. The
+   * dispatcher is responsible for running `input` through `this.input`
+   * before calling `invoke`, and for running the return value through
+   * `this.output` afterwards. Keeping zod parsing at the dispatcher lets
+   * it emit the correct `effectOnError` + validation audit row before
+   * `invoke` ever runs.
+   */
+  readonly invoke: (ctx: CapabilityContext<TEditor>, validatedInput: unknown) => Promise<unknown>;
+}
+
+/**
+ * Alias preserved for call-sites that iterate a heterogeneous
+ * collection. Prefer `RegisteredCapability` in new code; `AnyCapability`
+ * stays as the name adapters grep for when they want "any capability in
+ * the registry, editor-uniform".
+ */
+export type AnyCapability<TEditor = unknown> = RegisteredCapability<TEditor>;
