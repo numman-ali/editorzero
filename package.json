@@ -28,6 +28,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
     "lefthook": "^1.11.0",
     "tsx": "^4.19.0",
     "typescript": "catalog:",

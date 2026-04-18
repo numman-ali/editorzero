@@ -23,9 +23,9 @@ import {
 import { createSqliteDriver, type SqliteDriver } from "@editorzero/db";
 import type { DenyReason } from "@editorzero/errors";
 import { PermissionDeniedError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { AgentId, CapabilityId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
-import type { AccessPath, UserPrincipal } from "@editorzero/principal";
+import type { AccessPath, AgentPrincipal, UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { CapabilityContextExtras } from "./index";
@@ -90,6 +90,22 @@ function testUser(overrides: Partial<UserPrincipal> = {}): UserPrincipal {
     roles: ["member"],
     session_id: null,
     token_id: null,
+    ...overrides,
+  };
+}
+
+const AGENT_ID = AgentId("018f0000-0000-7000-8000-0000000000aa");
+const AGENT_TOKEN_ID = TokenId("018f0000-0000-7000-8000-0000000000bb");
+
+function testAgent(overrides: Partial<AgentPrincipal> = {}): AgentPrincipal {
+  return {
+    kind: "agent",
+    id: AGENT_ID,
+    workspace_id: WORKSPACE_ID,
+    owner_user_id: USER_ID,
+    scopes: ["doc:read"],
+    token_id: AGENT_TOKEN_ID,
+    token_kind: "agent-auth",
     ...overrides,
   };
 }
@@ -239,6 +255,95 @@ describe("dispatcher", () => {
       expect(row.record.error.kind).toBe("validation");
     }
   });
+
+  it(
+    'agent principal: principalFieldsFor projects kind="agent" + token_id + ' +
+      "acting_as_user_id so the audit row routes to agent analytics, not user",
+    async () => {
+      const { dispatcher, auditWriter } = mountDispatcher(
+        buildDocReadCapability(async (_ctx: CapabilityContext, input) => ({
+          doc_id: input.doc_id,
+          title: `doc ${input.doc_id}`,
+        })),
+      );
+
+      // A delegated agent: `acting_as` is set, so the projection should
+      // populate `acting_as_user_id` (not left null).
+      const agent = testAgent({ acting_as: USER_ID });
+
+      await dispatcher.dispatch({
+        capability_id: DOC_READ_ID,
+        input: { doc_id: "abc" },
+        principal: agent,
+        access: testAccess(),
+        trace_id: null,
+      });
+
+      expect(auditWriter.rows).toHaveLength(1);
+      const row = auditWriter.rows[0];
+      if (row === undefined) throw new Error("expected one row");
+      expect(row.principal_kind).toBe("agent");
+      expect(row.principal_id).toBe(AGENT_ID);
+      expect(row.token_id).toBe(AGENT_TOKEN_ID);
+      expect(row.session_id).toBeNull();
+      expect(row.acting_as_user_id).toBe(USER_ID);
+    },
+  );
+
+  it("agent principal without acting_as: acting_as_user_id is null", async () => {
+    const { dispatcher, auditWriter } = mountDispatcher(
+      buildDocReadCapability(async (_ctx: CapabilityContext, input) => ({
+        doc_id: input.doc_id,
+        title: `doc ${input.doc_id}`,
+      })),
+    );
+
+    await dispatcher.dispatch({
+      capability_id: DOC_READ_ID,
+      input: { doc_id: "abc" },
+      principal: testAgent(),
+      access: testAccess(),
+      trace_id: null,
+    });
+
+    expect(auditWriter.rows).toHaveLength(1);
+    const row = auditWriter.rows[0];
+    if (row === undefined) throw new Error("expected one row");
+    expect(row.acting_as_user_id).toBeNull();
+  });
+
+  it(
+    "output-validation path: handler returns shape violating zod; " +
+      "dispatcher throws InternalError + writes internal error audit",
+    async () => {
+      const { dispatcher, auditWriter } = mountDispatcher(
+        buildDocReadCapability(
+          // The handler satisfies its type contract via a cast-free but
+          // schema-violating return value: we build the handler via a
+          // typed `Capability` whose handler deliberately ignores the
+          // shape. `vitest` `@ts-expect-error` keeps the type system
+          // honest about this being intentional.
+          // biome-ignore lint/suspicious/noExplicitAny: handler invariant test.
+          (async (): Promise<any> => ({ doc_id: "abc" /* missing title */ })) as never,
+        ),
+      );
+
+      await expect(
+        dispatcher.dispatch({
+          capability_id: DOC_READ_ID,
+          input: { doc_id: "abc" },
+          principal: testUser(),
+          access: testAccess(),
+          trace_id: null,
+        }),
+      ).rejects.toBeInstanceOf(Error); // InternalError is an Error subclass
+
+      expect(auditWriter.rows).toHaveLength(1);
+      const row = auditWriter.rows[0];
+      if (row === undefined) throw new Error("expected one row");
+      expect(row.record.outcome).toBe("error");
+    },
+  );
 
   it("handler-throw path: unknown throw writes internal error audit + re-throws", async () => {
     const thrown = new Error("boom");

@@ -203,9 +203,13 @@ function workspacePredicate(ref: TableNode, workspace_id: WorkspaceId): Operatio
 
 function conjunctionOver(predicates: readonly OperationNode[]): OperationNode {
   const [head, ...rest] = predicates;
+  /* v8 ignore start -- @preserve: every call site rejects `refs.length === 0`
+     first, so an empty predicate list only comes from a broken caller
+     invariant. */
   if (head === undefined) {
     throw new Error("invariant: conjunctionOver called with empty predicate list");
   }
+  /* v8 ignore stop */
   return rest.reduce<OperationNode>((acc, next) => AndNode.create(acc, next), head);
 }
 
@@ -231,8 +235,12 @@ function collectScopedRefs(
     const ref = refFor(node);
     if (ref !== null && isTenantScoped(tableName(ref.tableNode))) out.push(ref);
   };
-  for (const from of fromItems ?? []) visit(from);
-  for (const join of joins ?? []) visit(join.table);
+  if (fromItems !== undefined) {
+    for (const from of fromItems) visit(from);
+  }
+  if (joins !== undefined) {
+    for (const join of joins) visit(join.table);
+  }
   return out;
 }
 
@@ -257,15 +265,24 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
   protected override transformUpdateQuery(node: UpdateQueryNode): UpdateQueryNode {
     const transformed = super.transformUpdateQuery(node);
     const target = transformed.table;
+    /* v8 ignore start -- @preserve: typed `.updateTable(x)` always sets
+       `table`; missing targets only come from a hand-built or drifted AST. */
     if (target === undefined) return transformed;
+    /* v8 ignore stop */
     const refs: ScopedRef[] = [];
     const primary = refFor(target);
     if (primary !== null && isTenantScoped(tableName(primary.tableNode))) refs.push(primary);
     // Postgres-flavour `UPDATE t SET … FROM other` and join-style updates
     // need every tenant-scoped participant pinned to the current scope,
     // otherwise the secondary tables leak rows into the join product.
-    refs.push(...collectScopedRefs(transformed.from?.froms, transformed.joins));
+    if (transformed.from !== undefined) {
+      refs.push(...collectScopedRefs(transformed.from.froms, transformed.joins));
+    }
+    /* v8 ignore start -- @preserve: the current schema only exposes
+       tenant-scoped UPDATE targets; remove once a real non-scoped table is
+       updateable here. */
     if (refs.length === 0) return transformed;
+    /* v8 ignore stop */
     const predicate = conjunctionOver(
       refs.map((r) => workspacePredicate(r.refNode, this.#workspace_id)),
     );
@@ -275,7 +292,11 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
   protected override transformDeleteQuery(node: DeleteQueryNode): DeleteQueryNode {
     const transformed = super.transformDeleteQuery(node);
     const refs = collectScopedRefs(transformed.from.froms, transformed.joins);
+    /* v8 ignore start -- @preserve: the current schema only exposes
+       tenant-scoped DELETE targets; remove once a real non-scoped table is
+       deletable here. */
     if (refs.length === 0) return transformed;
+    /* v8 ignore stop */
     const predicate = conjunctionOver(
       refs.map((r) => workspacePredicate(r.refNode, this.#workspace_id)),
     );
@@ -284,9 +305,16 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
 
   protected override transformInsertQuery(node: InsertQueryNode): InsertQueryNode {
     const transformed = super.transformInsertQuery(node);
+    /* v8 ignore start -- @preserve: typed `.insertInto(x)` always sets
+       `into`; missing targets only come from a hand-built AST. */
     if (transformed.into === undefined) return transformed;
+    /* v8 ignore stop */
     const target = tableName(transformed.into);
+    /* v8 ignore start -- @preserve: the current schema only exposes
+       tenant-scoped INSERT targets; remove once a real non-scoped insert
+       target is added. */
     if (!isTenantScoped(target)) return transformed;
+    /* v8 ignore stop */
     return forceWorkspaceIdInInsert(transformed, target, this.#workspace_id);
   }
 }
@@ -320,8 +348,23 @@ function forceWorkspaceIdInInsert(
     );
   }
 
-  const existingColumns = node.columns ?? [];
+  /* v8 ignore start -- @preserve: typed `.values(...)` always emits an explicit
+     column list; a missing list means a hand-built positional INSERT AST
+     slipped through. */
+  if (node.columns === undefined) {
+    throw new TenantScopeViolationError(
+      target,
+      "insert_missing_columns",
+      `INSERT INTO ${target} without an explicit column list is not permitted: ` +
+        `tenant-scoped inserts must name columns so workspace_id can be injected safely.`,
+    );
+  }
+  /* v8 ignore stop */
+
+  const existingColumns = node.columns;
   const columnNames = existingColumns.map((c) => c.column.name);
+  /* v8 ignore start -- @preserve: typed `.values(...)` emits at least one named
+     column; an empty list is an impossible-by-construction AST today. */
   if (existingColumns.length === 0) {
     throw new TenantScopeViolationError(
       target,
@@ -330,11 +373,15 @@ function forceWorkspaceIdInInsert(
         `tenant-scoped inserts must name columns so workspace_id can be injected safely.`,
     );
   }
+  /* v8 ignore stop */
 
   const hasWorkspaceCol = columnNames.includes("workspace_id");
 
   const values = node.values;
 
+  /* v8 ignore start -- @preserve: once `defaultValues` is rejected, typed
+     Kysely always emits `values`; missing values imply a hand-built or drifted
+     AST. */
   if (values === undefined) {
     throw new TenantScopeViolationError(
       target,
@@ -342,6 +389,7 @@ function forceWorkspaceIdInInsert(
       `INSERT INTO ${target} has no values and no defaultValues: shape unsupported.`,
     );
   }
+  /* v8 ignore stop */
 
   if (SelectQueryNode.is(values)) {
     throw new TenantScopeViolationError(
@@ -353,6 +401,9 @@ function forceWorkspaceIdInInsert(
     );
   }
 
+  /* v8 ignore start -- @preserve: Kysely currently emits only `ValuesNode` or
+     `SelectQueryNode`; a third shape must fail closed until we design its
+     scoping rules. */
   if (!ValuesNode.is(values)) {
     throw new TenantScopeViolationError(
       target,
@@ -360,6 +411,7 @@ function forceWorkspaceIdInInsert(
       `INSERT INTO ${target} has an unsupported values shape: ${values.kind}.`,
     );
   }
+  /* v8 ignore stop */
 
   if (hasWorkspaceCol) {
     assertValuesColumnMatchesScope(values, columnNames, target, workspace_id);
@@ -379,9 +431,13 @@ function appendValueToRow(
   row: ValueListNode | PrimitiveValueListNode,
   workspace_id: WorkspaceId,
 ): ValueListNode | PrimitiveValueListNode {
+  /* v8 ignore start -- @preserve: our typed callers only use object-form
+     `.values({...})`; `PrimitiveValueListNode` is Kysely's positional fast
+     path and cannot be reached here today. */
   if (PrimitiveValueListNode.is(row)) {
     return PrimitiveValueListNode.create([...row.values, workspace_id]);
   }
+  /* v8 ignore stop */
   return ValueListNode.create([...row.values, ValueNode.create(workspace_id)]);
 }
 
@@ -407,14 +463,15 @@ function assertValuesColumnMatchesScope(
 }
 
 function extractRowValueAt(row: ValueListNode | PrimitiveValueListNode, idx: number): unknown {
+  /* v8 ignore start -- @preserve: same rationale as `appendValueToRow`; our
+     typed callers cannot reach Kysely's positional `PrimitiveValueListNode`
+     path today. */
   if (PrimitiveValueListNode.is(row)) {
     return row.values[idx];
   }
+  /* v8 ignore stop */
   const node = row.values[idx];
   if (node !== undefined && ValueNode.is(node)) return node.value;
-  // An expression that isn't a literal ValueNode (e.g. a subquery,
-  // parameter binding pattern) — we can't validate statically, so
-  // treat as a violation in the strictest mode.
   return Symbol("non-literal");
 }
 

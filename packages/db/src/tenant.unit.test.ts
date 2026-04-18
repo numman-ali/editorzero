@@ -14,6 +14,7 @@
  */
 
 import { DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { sql } from "kysely";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createSqliteDriver, type SqliteDriver } from "./drivers/sqlite";
@@ -129,6 +130,28 @@ describe("WorkspaceScopingPlugin — SELECT", () => {
     const crossed = await a.selectFrom("docs").selectAll().where("title", "=", "B1").execute();
     expect(crossed).toEqual([]);
   });
+
+  it("SELECT from a typed subquery relies on the inner scope and does not add an outer alias predicate", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+    await b
+      .insertInto("docs")
+      .values(seedRow(DOC_B1, WORKSPACE_B, "B1", BOB))
+      .execute();
+
+    const scopedSubquery = a.selectFrom("docs").selectAll().as("d");
+    const compiled = a.selectFrom(scopedSubquery).selectAll().compile();
+    expect(compiled.sql).toContain('from (select * from "docs"');
+    expect(compiled.sql).toContain('"docs"."workspace_id" = ?');
+    expect(compiled.sql).not.toContain('"d"."workspace_id" = ?');
+
+    const rows = await a.selectFrom(scopedSubquery).selectAll().execute();
+    expect(rows.map((r) => r.id)).toEqual([DOC_A1]);
+  });
 });
 
 describe("WorkspaceScopingPlugin — INSERT", () => {
@@ -168,6 +191,56 @@ describe("WorkspaceScopingPlugin — INSERT", () => {
     await expect(() => a.insertInto("docs").values(bogus).execute()).rejects.toBeInstanceOf(
       TenantScopeViolationError,
     );
+  });
+
+  it("rejects non-literal workspace_id expressions because they cannot be statically validated", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    // `sql<WorkspaceId>` gives the expression the typed brand Kysely's
+    // `.values()` expects so this test compiles without casts. At runtime
+    // the plugin sees a `RawNode` wrapping the parameter and falls back to
+    // the non-literal Symbol sentinel, which trips the mismatch check.
+    const expressionBacked = {
+      ...seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE),
+      workspace_id: sql<WorkspaceId>`${WORKSPACE_A}`,
+    };
+
+    await expect(() =>
+      a.insertInto("docs").values(expressionBacked).execute(),
+    ).rejects.toBeInstanceOf(TenantScopeViolationError);
+  });
+
+  it("rejects INSERT … DEFAULT VALUES — no path to set workspace_id", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    await expect(() => a.insertInto("docs").defaultValues().execute()).rejects.toBeInstanceOf(
+      TenantScopeViolationError,
+    );
+  });
+
+  it("rejects INSERT … SELECT — plugin cannot guarantee workspace_id in the SELECT body", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    // `.expression(...)` fills the InsertQueryNode's `values` with a
+    // SelectQueryNode instead of a ValuesNode. The plugin rejects this
+    // because it cannot assert the SELECT projects `workspace_id`.
+    await expect(() =>
+      a
+        .insertInto("docs")
+        .columns([
+          "id",
+          "workspace_id",
+          "collection_id",
+          "title",
+          "slug",
+          "order_key",
+          "visibility",
+          "visibility_version",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "deleted_at",
+        ])
+        .expression((eb) => eb.selectFrom("docs").selectAll())
+        .execute(),
+    ).rejects.toBeInstanceOf(TenantScopeViolationError);
   });
 });
 
@@ -331,5 +404,19 @@ describe("WorkspaceScopingPlugin — join awareness (F87)", () => {
       .execute();
     expect(rows.map((r) => r.p_id).sort()).toEqual([DOC_A1, DOC_A2].sort());
     expect(rows.every((r) => r.p_id === r.c_id)).toBe(true);
+  });
+
+  it("UPDATE ... FROM scopes both the target and joined tenant tables", () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const compiled = a
+      .updateTable("docs as target")
+      .from("docs as source")
+      .set({ title: "renamed" })
+      .whereRef("source.id", "=", "target.id")
+      .compile();
+
+    expect(compiled.sql).toContain('"target"."workspace_id" = ?');
+    expect(compiled.sql).toContain('"source"."workspace_id" = ?');
+    expect(compiled.parameters).toContain(WORKSPACE_A);
   });
 });

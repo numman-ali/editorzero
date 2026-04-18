@@ -15,7 +15,7 @@
     "build": "tsc -b",
     "clean": "rm -rf dist *.tsbuildinfo .tsbuildinfo.test",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run --coverage"
   },
   "dependencies": {
     "@editorzero/audit": "workspace:*",

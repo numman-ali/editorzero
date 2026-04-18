@@ -227,6 +227,34 @@ describe("doc.list", () => {
     expect(effect.kind).toBe("audit.access_log");
   });
 
+  it("projects a workspace subject (no per-row subject for a list read)", () => {
+    const subject = docList.audit.subjectFrom({});
+    expect(subject.kind).toBe("workspace");
+  });
+
+  it("emits a deny effect carrying the reason code when the gate denies", () => {
+    const effect = docList.audit.effectOnDeny(
+      {},
+      { kind: "missing_scope", required: ["doc:read"], principal_scopes: [] },
+    );
+    expect(effect.kind).toBe("deny");
+    if (effect.kind === "deny") {
+      expect(effect.capability).toBe("doc.list");
+      expect(effect.required_scopes).toEqual(["doc:read"]);
+      expect(effect.reason_code).toBe("missing_scope");
+    }
+  });
+
+  it("emits a non-retriable internal error effect when the handler throws", () => {
+    const effect = docList.audit.effectOnError({}, { kind: "internal", trace_id: "" });
+    expect(effect.kind).toBe("error");
+    if (effect.kind === "error") {
+      expect(effect.capability).toBe("doc.list");
+      expect(effect.error_code).toBe("internal");
+      expect(effect.retriable).toBe(false);
+    }
+  });
+
   it("is collapsible with a constant key (no input → always same bucket)", () => {
     const policy = docList.audit.collapsePolicy;
     expect(policy.collapsible).toBe(true);
