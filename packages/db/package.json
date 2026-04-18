@@ -18,6 +18,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@editorzero/audit": "workspace:*",
     "@editorzero/ids": "workspace:*",
     "@editorzero/scopes": "workspace:*",
     "kysely": "catalog:"

@@ -93,20 +93,50 @@ export interface DispatcherDeps<TEditor = unknown> {
   readonly logger: Logger;
   readonly now: () => number;
   /**
-   * Factory for the IO-bound slice of `CapabilityContext` (`db`,
-   * `outbox`, `transact`). The dispatcher derives tenant scope from
-   * `principal.workspace_id` — there is deliberately no separate
-   * `tenant` parameter so the factory cannot produce a `db` scoped to
-   * a different workspace than the authorizing principal (F86).
+   * Run `fn` inside the write-path transaction (F31 / ADR 0018). The
+   * impl opens a SQL tx, builds tx-scoped `CapabilityContextExtras`,
+   * and hands the caller an `AuditTx` bound to the same tx. Commit on
+   * resolve; rollback on throw.
+   *
+   * Called once per ALLOW-path invocation so handler DB writes + the
+   * ALLOW audit INSERT land atomically. DENY / ERROR paths roll this
+   * tx back and record their audit row via `withAuditTx` (separate,
+   * short-lived tx) — otherwise the rollback would take the audit row
+   * down with it.
+   *
+   * Tenant scope is derived from `principal.workspace_id`. There is
+   * no separate `tenant` parameter so the impl cannot scope `db` to a
+   * different workspace than the authorizing principal (F86).
    */
-  readonly makeContextExtras: (principal: Principal) => CapabilityContextExtras<TEditor>;
+  readonly runInWriteTx: <T>(
+    principal: Principal,
+    fn: (extras: CapabilityContextExtras<TEditor>, auditTx: AuditTx) => Promise<T>,
+  ) => Promise<T>;
   /**
-   * Audit-tx handle for the writer call. The concrete dispatcher
-   * passes the same handle it used for the write-path DB tx (F31).
-   * Skeleton tests supply an opaque branded placeholder.
+   * Run `fn` for `category: "read"` capabilities — no SQL transaction.
+   * The handler runs against a tenant-scoped read handle; the allow
+   * audit row is written afterwards in a separate short-lived tx
+   * (`withAuditTx`). Reads must not enter `runInWriteTx` because that
+   * opens `BEGIN IMMEDIATE` and takes the SQLite RESERVED lock — it
+   * would serialise concurrent writers against reads that don't
+   * actually mutate state. Architecture §6.4's atomicity contract
+   * applies to mutations; reads are allowed to proceed without a
+   * writer lock.
    */
-  readonly openAuditTx: () => Parameters<AuditWriter["write"]>[0];
+  readonly runRead: <T>(
+    principal: Principal,
+    fn: (extras: CapabilityContextExtras<TEditor>) => Promise<T>,
+  ) => Promise<T>;
+  /**
+   * Open a short-lived audit-only transaction. Used on the paths where
+   * the write-path tx either didn't open (input validation, gate deny,
+   * read-path allow) or has already rolled back (handler error /
+   * post-parse deny / output validation). Commits on resolve.
+   */
+  readonly withAuditTx: <T>(fn: (auditTx: AuditTx) => Promise<T>) => Promise<T>;
 }
+
+type AuditTx = Parameters<AuditWriter["write"]>[0];
 
 export interface DispatchInvocation {
   readonly capability_id: CapabilityId;
@@ -234,6 +264,7 @@ function writeAudit<TEditor>(
   input: unknown,
   trace_id: string | null,
   duration_ms: number,
+  auditTx: AuditTx,
 ): Promise<void> {
   const subject = capability.audit.subjectFrom(input);
   const writeInput: AuditWriteInput = {
@@ -253,7 +284,7 @@ function writeAudit<TEditor>(
     collapsed_count: 1,
     record,
   };
-  return deps.auditWriter.write(deps.openAuditTx(), writeInput);
+  return deps.auditWriter.write(auditTx, writeInput);
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────────
@@ -297,16 +328,19 @@ export function createDispatcher<TEditor = unknown>(
           message: "capability input validation failed",
           issues: parsedInput.error.issues,
         });
-        await writeInputValidationAudit(
-          deps,
-          capability.id,
-          capability.category,
-          principal,
-          tenant,
-          input,
-          err,
-          trace_id,
-          startedAt,
+        await deps.withAuditTx((auditTx) =>
+          writeInputValidationAudit(
+            deps,
+            capability.id,
+            capability.category,
+            principal,
+            tenant,
+            input,
+            err,
+            trace_id,
+            startedAt,
+            auditTx,
+          ),
         );
         span.setAttribute("outcome", "error");
         span.recordError(err);
@@ -317,151 +351,200 @@ export function createDispatcher<TEditor = unknown>(
       const gateResult = await deps.gate.check(principal, capability, access);
       if (gateResult.outcome === "deny") {
         const duration_ms = deps.now() - startedAt;
-        await writeAudit(
-          deps,
-          capability,
-          principal,
-          tenant,
-          {
-            outcome: "deny",
-            reason: gateResult.reason,
-            effect: capability.audit.effectOnDeny(parsedInput.data, gateResult.reason),
-          },
-          parsedInput.data,
-          trace_id,
-          duration_ms,
-        );
-        span.setAttribute("outcome", "deny");
-        span.setAttribute("deny.reason", gateResult.reason.kind);
-        throw new PermissionDeniedError({ reason: gateResult.reason });
-      }
-
-      // 3. Build context + invoke handler
-      const extras = deps.makeContextExtras(principal);
-      // F92 runtime backstop: handlers must call `ctx.transact` at most
-      // once per invocation (§16.4 + ADR 0018). The single-write-path-tx
-      // contract (F31) depends on it — a second call would split one
-      // logical mutation into two `doc_updates` rows and two
-      // `outbox(doc.updated)` events, breaking atomicity across CRDT,
-      // audit, and outbox. A dev-time `@editorzero/arch-lint` rule will
-      // eventually catch this syntactically; until then this wrapper
-      // throws on the second call so the violation surfaces as a normal
-      // error audit row instead of silently corrupting the write-path.
-      let transactCalled = false;
-      const transactOnce = async <T>(
-        doc_id: DocId,
-        fn: (editor: TEditor) => T | Promise<T>,
-      ): Promise<T> => {
-        if (transactCalled) {
-          throw new TransactCalledTwiceError({ capability_id, doc_id });
-        }
-        transactCalled = true;
-        return extras.transact(doc_id, fn);
-      };
-      const ctx: CapabilityContext<TEditor> = {
-        principal,
-        tenant: { workspace_id: tenant.workspace_id },
-        db: extras.db,
-        outbox: extras.outbox,
-        transact: transactOnce,
-        logger: deps.logger.child({
-          event: "dispatcher.invoke",
-          capability_id,
-          principal_kind: principal.kind,
-        }),
-        tracer: deps.tracer,
-        now: deps.now,
-      };
-
-      let rawOutput: unknown;
-      try {
-        rawOutput = await capability.invoke(ctx, parsedInput.data);
-      } catch (err) {
-        // F88 post-parse deny channel. Handlers throw
-        // `PermissionDeniedError` for deny decisions that cannot be
-        // made before the handler runs — sub-block ACL, quota state
-        // tied to tenant reads, etc. The handler has no audit writer
-        // (intentional: one dispatcher-owned shape), so the dispatcher
-        // writes the deny row using `capability.audit.effectOnDeny`
-        // against the parsed input + the error's `DenyReason`. The
-        // error is then rethrown unchanged so adapters see the same
-        // exception type they see for gate denies.
-        if (err instanceof PermissionDeniedError) {
-          const duration_ms = deps.now() - startedAt;
-          await writeAudit(
+        await deps.withAuditTx((auditTx) =>
+          writeAudit(
             deps,
             capability,
             principal,
             tenant,
             {
               outcome: "deny",
-              reason: err.reason,
-              effect: capability.audit.effectOnDeny(parsedInput.data, err.reason),
+              reason: gateResult.reason,
+              effect: capability.audit.effectOnDeny(parsedInput.data, gateResult.reason),
             },
             parsedInput.data,
             trace_id,
             duration_ms,
+            auditTx,
+          ),
+        );
+        span.setAttribute("outcome", "deny");
+        span.setAttribute("deny.reason", gateResult.reason.kind);
+        throw new PermissionDeniedError({ reason: gateResult.reason });
+      }
+
+      // 3. Run handler + parse output.
+      //
+      // Two runner shapes, one branch point:
+      //
+      //   • `category: "read"` → `runRead`: no SQL tx opens. The
+      //     handler runs against a tenant-scoped read handle; the
+      //     allow audit is written afterwards in a separate
+      //     short-lived tx (`withAuditTx`). Reads must not take the
+      //     RESERVED lock `runInWriteTx` holds — §6.4's atomicity
+      //     contract applies to mutations, not reads.
+      //
+      //   • anything else (mutation / auth / admin / system) →
+      //     `runInWriteTx`: opens one `BEGIN IMMEDIATE` against the
+      //     system DB (SQL-side of F31 / ADR 0018 §6.4) and commits
+      //     handler `ctx.db` writes (metadata mirrors + later
+      //     `doc_counters` / outbox rows) and the allow audit row
+      //     atomically. If the handler throws, output parsing fails,
+      //     or a post-parse `PermissionDeniedError` surfaces, the
+      //     entire tx rolls back and the deny/error audit is
+      //     recorded in a separate short-lived tx via `withAuditTx`
+      //     — otherwise the rollback would also drop the audit row.
+      //
+      // Content mutations (capabilities that call `ctx.transact`)
+      // are **not yet** atomic with this tx. Invariant 7 routes
+      // CRDT writes through Hocuspocus; closing that atomicity
+      // window is P3.6c's job — Hocuspocus's `onStoreDocument`
+      // hook will run the Y.Doc persist inside this same SQL tx so
+      // `doc_updates` + `audit_events` + `outbox` commit together.
+      // Metadata-only mutations (`block.set_visibility`,
+      // `doc.publish`, `collection.*`) are fully covered today.
+      const buildCtx = (extras: CapabilityContextExtras<TEditor>): CapabilityContext<TEditor> => {
+        // F92 runtime backstop: handlers must call `ctx.transact` at
+        // most once per invocation (§16.4 + ADR 0018). The single-
+        // write-path-tx contract (F31) depends on it — a second call
+        // would split one logical mutation into two `doc_updates`
+        // rows and two `outbox(doc.updated)` events, breaking
+        // atomicity across CRDT, audit, and outbox. A dev-time
+        // `@editorzero/arch-lint` rule will eventually catch this
+        // syntactically; until then this wrapper throws on the
+        // second call so the violation surfaces as a normal error
+        // audit row instead of silently corrupting the write-path.
+        let transactCalled = false;
+        const transactOnce = async <T>(
+          doc_id: DocId,
+          fn: (editor: TEditor) => T | Promise<T>,
+        ): Promise<T> => {
+          if (transactCalled) {
+            throw new TransactCalledTwiceError({ capability_id, doc_id });
+          }
+          transactCalled = true;
+          return extras.transact(doc_id, fn);
+        };
+        return {
+          principal,
+          tenant: { workspace_id: tenant.workspace_id },
+          db: extras.db,
+          outbox: extras.outbox,
+          transact: transactOnce,
+          logger: deps.logger.child({
+            event: "dispatcher.invoke",
+            capability_id,
+            principal_kind: principal.kind,
+          }),
+          tracer: deps.tracer,
+          now: deps.now,
+        };
+      };
+
+      const invokeAndParse = async (
+        extras: CapabilityContextExtras<TEditor>,
+      ): Promise<ReturnType<typeof capability.output.parse>> => {
+        const ctx = buildCtx(extras);
+        const rawOutput = await capability.invoke(ctx, parsedInput.data);
+        const parsedOutput = capability.output.safeParse(rawOutput);
+        if (!parsedOutput.success) {
+          throw new InternalError({
+            message: "capability output violated its schema",
+            trace_id: trace_id ?? "",
+          });
+        }
+        return parsedOutput.data;
+      };
+
+      try {
+        if (capability.category === "read") {
+          const output = await deps.runRead(principal, (extras) => invokeAndParse(extras));
+          const duration_ms = deps.now() - startedAt;
+          const effect: AuditEffect = capability.audit.effectOnAllow(parsedInput.data, output);
+          await deps.withAuditTx((auditTx) =>
+            writeAudit(
+              deps,
+              capability,
+              principal,
+              tenant,
+              { outcome: "allow", effect },
+              parsedInput.data,
+              trace_id,
+              duration_ms,
+              auditTx,
+            ),
+          );
+          span.setAttribute("outcome", "allow");
+          span.setAttribute("duration_ms", duration_ms);
+          return output;
+        }
+
+        return await deps.runInWriteTx(principal, async (extras, auditTx) => {
+          const output = await invokeAndParse(extras);
+          const duration_ms = deps.now() - startedAt;
+          const effect: AuditEffect = capability.audit.effectOnAllow(parsedInput.data, output);
+          await writeAudit(
+            deps,
+            capability,
+            principal,
+            tenant,
+            { outcome: "allow", effect },
+            parsedInput.data,
+            trace_id,
+            duration_ms,
+            auditTx,
+          );
+          span.setAttribute("outcome", "allow");
+          span.setAttribute("duration_ms", duration_ms);
+          return output;
+        });
+      } catch (err) {
+        // The write-path tx has rolled back. Record the audit in a
+        // fresh short-lived tx so the outcome persists regardless.
+        if (err instanceof PermissionDeniedError) {
+          // F88 post-parse deny channel. Handlers throw
+          // `PermissionDeniedError` for deny decisions that cannot be
+          // made before the handler runs — sub-block ACL, quota state
+          // tied to tenant reads, etc.
+          const duration_ms = deps.now() - startedAt;
+          await deps.withAuditTx((auditTx) =>
+            writeAudit(
+              deps,
+              capability,
+              principal,
+              tenant,
+              {
+                outcome: "deny",
+                reason: err.reason,
+                effect: capability.audit.effectOnDeny(parsedInput.data, err.reason),
+              },
+              parsedInput.data,
+              trace_id,
+              duration_ms,
+              auditTx,
+            ),
           );
           span.setAttribute("outcome", "deny");
           span.setAttribute("deny.reason", err.reason.kind);
           throw err;
         }
-        await writeAuditError(
-          deps,
-          capability,
-          principal,
-          tenant,
-          parsedInput.data,
-          err,
-          trace_id,
-          startedAt,
+        await deps.withAuditTx((auditTx) =>
+          writeAuditError(
+            deps,
+            capability,
+            principal,
+            tenant,
+            parsedInput.data,
+            err,
+            trace_id,
+            startedAt,
+            auditTx,
+          ),
         );
         span.setAttribute("outcome", "error");
         span.recordError(err);
         throw err;
       }
-
-      // 4. Parse output
-      const parsedOutput = capability.output.safeParse(rawOutput);
-      if (!parsedOutput.success) {
-        const err = new InternalError({
-          message: "capability output violated its schema",
-          trace_id: trace_id ?? "",
-        });
-        await writeAuditError(
-          deps,
-          capability,
-          principal,
-          tenant,
-          parsedInput.data,
-          err,
-          trace_id,
-          startedAt,
-        );
-        span.setAttribute("outcome", "error");
-        span.recordError(err);
-        throw err;
-      }
-
-      // 5. Allow audit
-      const duration_ms = deps.now() - startedAt;
-      const effect: AuditEffect = capability.audit.effectOnAllow(
-        parsedInput.data,
-        parsedOutput.data,
-      );
-      await writeAudit(
-        deps,
-        capability,
-        principal,
-        tenant,
-        { outcome: "allow", effect },
-        parsedInput.data,
-        trace_id,
-        duration_ms,
-      );
-      span.setAttribute("outcome", "allow");
-      span.setAttribute("duration_ms", duration_ms);
-      return parsedOutput.data;
     });
   };
 
@@ -488,6 +571,7 @@ function writeAuditError<TEditor>(
   err: unknown,
   trace_id: string | null,
   startedAt: number,
+  auditTx: AuditTx,
 ): Promise<void> {
   const handlerErr: HandlerError =
     err instanceof EditorZeroError ? err.toHandlerError() : { kind: "internal", trace_id: "" };
@@ -505,6 +589,7 @@ function writeAuditError<TEditor>(
     input,
     trace_id,
     duration_ms,
+    auditTx,
   );
 }
 
@@ -525,6 +610,7 @@ function writeInputValidationAudit<TEditor>(
   err: ValidationError,
   trace_id: string | null,
   startedAt: number,
+  auditTx: AuditTx,
 ): Promise<void> {
   const duration_ms = deps.now() - startedAt;
   const writeInput: AuditWriteInput = {
@@ -549,5 +635,5 @@ function writeInputValidationAudit<TEditor>(
       },
     },
   };
-  return deps.auditWriter.write(deps.openAuditTx(), writeInput);
+  return deps.auditWriter.write(auditTx, writeInput);
 }

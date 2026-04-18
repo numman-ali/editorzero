@@ -159,7 +159,7 @@ function buildDocReadCapability(
 function mountDispatcher(capability: Capability<DocReadInput, DocReadOutput>) {
   const registry = createRegistry([registerCapability(capability)]);
   const auditWriter = memoryAuditWriter();
-  const openAuditTx = (): AuditTx => ({ __brand: "AuditTx" });
+  const dummyAuditTx = (): AuditTx => ({ __brand: "AuditTx" });
   let tick = 0;
   const dispatcher = createDispatcher({
     registry,
@@ -171,8 +171,9 @@ function mountDispatcher(capability: Capability<DocReadInput, DocReadOutput>) {
       tick += 1;
       return tick;
     },
-    makeContextExtras: () => testExtras(),
-    openAuditTx,
+    runInWriteTx: async (_principal, fn) => fn(testExtras(), dummyAuditTx()),
+    runRead: async (_principal, fn) => fn(testExtras()),
+    withAuditTx: async (fn) => fn(dummyAuditTx()),
   });
   return { dispatcher, auditWriter };
 }
@@ -452,7 +453,7 @@ describe("dispatcher", () => {
         ),
       ]);
       const auditWriter = memoryAuditWriter();
-      const openAuditTx = (): AuditTx => ({ __brand: "AuditTx" });
+      const dummyAuditTx = (): AuditTx => ({ __brand: "AuditTx" });
       let tick = 0;
       const dispatcher = createDispatcher({
         registry,
@@ -464,14 +465,26 @@ describe("dispatcher", () => {
           tick += 1;
           return tick;
         },
-        makeContextExtras: () => ({
-          db: driver.scoped(WORKSPACE_ID),
-          outbox: () => {
-            /* unused */
-          },
-          transact: transactStub,
-        }),
-        openAuditTx,
+        runInWriteTx: async (_principal, fn) =>
+          fn(
+            {
+              db: driver.scoped(WORKSPACE_ID),
+              outbox: () => {
+                /* unused */
+              },
+              transact: transactStub,
+            },
+            dummyAuditTx(),
+          ),
+        runRead: async (_principal, fn) =>
+          fn({
+            db: driver.scoped(WORKSPACE_ID),
+            outbox: () => {
+              /* unused */
+            },
+            transact: transactStub,
+          }),
+        withAuditTx: async (fn) => fn(dummyAuditTx()),
       });
 
       const rejection = dispatcher.dispatch({

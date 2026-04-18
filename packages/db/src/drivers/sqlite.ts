@@ -24,7 +24,16 @@
 
 import type { WorkspaceId } from "@editorzero/ids";
 import BetterSqlite3 from "better-sqlite3";
-import { Kysely, SqliteDialect } from "kysely";
+import {
+  CompiledQuery,
+  type DatabaseConnection,
+  type Driver,
+  Kysely,
+  type QueryCompiler,
+  SqliteDialect,
+  type Transaction,
+  type TransactionSettings,
+} from "kysely";
 
 import type { SystemDatabase } from "../schema";
 import { createTenantScopedDb, type TenantScopedDb } from "../tenant";
@@ -55,6 +64,42 @@ export interface SqliteDriver {
    * receive `scoped()`.
    */
   system(): Kysely<SystemDatabase>;
+  /**
+   * Run `fn` inside a single SQL transaction against the system DB
+   * (SQL-side of F31 / ADR 0018 write-path tx; see §6.4). Commits when
+   * `fn` resolves; rolls back if `fn` rejects. The transaction is
+   * opened with `BEGIN IMMEDIATE` — signalled via
+   * `setIsolationLevel("serializable")`, which
+   * `EditorZeroSqliteDriver.beginTransaction` maps to the immediate
+   * begin mode. Writer contention therefore surfaces at tx start
+   * (bounded by `busy_timeout`) rather than mid-tx — §6.4 relies on
+   * this for gapless `doc_counters.next_seq` allocation + outbox
+   * forwarding. Other callers of `system().transaction()` /
+   * `scoped().transaction()` use the default DEFERRED begin, so read
+   * transactions don't grab the RESERVED lock.
+   *
+   * The tx handle is a `Transaction<SystemDatabase>`, which extends
+   * `Kysely<SystemDatabase>`:
+   *  - Pass it to `createTenantScopedDb(tx, workspace_id)` to get a
+   *    handler-visible `TenantScopedDb` whose writes commit/rollback
+   *    atomically with the rest of the tx.
+   *  - Use it directly for system-level writes (`audit_events`,
+   *    `outbox`, `doc_counters`) that the dispatcher and write-path
+   *    composition packages own.
+   *
+   * **Scope.** This is the SQL-only half of the write-path tx. For
+   * content mutations (`doc.*` that call `ctx.transact`), CRDT-side
+   * atomicity is orchestrated by the Hocuspocus `onStoreDocument` hook
+   * that lands in P3.6c — at which point the Y.Doc persist runs inside
+   * the same SQL tx this helper opens. Metadata-only mutations
+   * (`block.set_visibility`, `doc.publish`, `collection.*`) are fully
+   * covered by this primitive today.
+   *
+   * Keeping the tx entry point on the driver (instead of exporting raw
+   * Kysely `transaction()` usage outside `packages/db`) preserves the
+   * `no-raw-kysely-outside-db` discipline.
+   */
+  withSystemTx<T>(fn: (tx: Transaction<SystemDatabase>) => Promise<T>): Promise<T>;
   /** Shut down Kysely + the underlying SQLite connection. */
   close(): Promise<void>;
   /**
@@ -116,16 +161,123 @@ function applyRuntimePragmas(conn: BetterSqlite3.Database, readonly: boolean): v
   for (const stmt of READ_SIDE_PRAGMAS) conn.pragma(stmt);
 }
 
+/**
+ * editorzero SQLite dialect (architecture.md §6.4 + §6.5).
+ *
+ * Extends Kysely's `SqliteDialect` with two project-specific behaviours
+ * layered on top of the stock driver:
+ *
+ * 1. **Isolation-level-gated `BEGIN IMMEDIATE`.** When a transaction
+ *    is opened with `isolationLevel: "serializable"` — the signal
+ *    `withSystemTx` uses via `setIsolationLevel("serializable")` —
+ *    begin SQL becomes `BEGIN IMMEDIATE`. All other transactions fall
+ *    through to the stock `SqliteDriver.beginTransaction`, which uses
+ *    the default DEFERRED begin. This keeps the aggressive lock
+ *    posture scoped to the write-path tx: read transactions opened
+ *    via `system().transaction()` or `scoped().transaction()` don't
+ *    contend on the RESERVED lock, and readonly connections can still
+ *    open read-only transactions without needing a writer lock.
+ *
+ *    Why IMMEDIATE on the write path: §6.4 pins it there because
+ *    `doc_counters` allocation and outbox forwarding use
+ *    SELECT-then-UPDATE. Under plain DEFERRED `BEGIN`, a concurrent
+ *    writer can lock-upgrade between the SELECT and the UPDATE,
+ *    deadlocking the second tx with SQLITE_BUSY mid-commit.
+ *    IMMEDIATE takes the RESERVED lock at BEGIN time — contention
+ *    surfaces at tx start (retryable, bounded by `busy_timeout`)
+ *    instead of mid-tx.
+ *
+ * 2. **Savepoint passthrough.** The stock `SqliteDriver` implements
+ *    `savepoint` / `rollbackToSavepoint` / `releaseSavepoint` — these
+ *    are the hooks Kysely uses when a `ControlledTransaction` (from
+ *    `startTransaction()`) issues `SAVEPOINT` / `ROLLBACK TO` /
+ *    `RELEASE`. The wrap forwards each. Without forwarding, Kysely's
+ *    internal optional-chain on the wrapped driver would silently
+ *    no-op these calls — they'd return successfully while issuing no
+ *    SQL, and writes intended to be rolled back would persist. The
+ *    `Driver` interface marks these optional; the inner driver
+ *    implements them unconditionally.
+ */
+class EditorZeroSqliteDialect extends SqliteDialect {
+  override createDriver(): Driver {
+    return new EditorZeroSqliteDriver(super.createDriver());
+  }
+}
+
+class EditorZeroSqliteDriver implements Driver {
+  constructor(private readonly inner: Driver) {}
+  init(): Promise<void> {
+    return this.inner.init();
+  }
+  acquireConnection(): Promise<DatabaseConnection> {
+    return this.inner.acquireConnection();
+  }
+  releaseConnection(connection: DatabaseConnection): Promise<void> {
+    return this.inner.releaseConnection(connection);
+  }
+  async beginTransaction(
+    connection: DatabaseConnection,
+    settings: TransactionSettings,
+  ): Promise<void> {
+    if (settings.isolationLevel === "serializable") {
+      await connection.executeQuery(CompiledQuery.raw("begin immediate"));
+      return;
+    }
+    await this.inner.beginTransaction(connection, settings);
+  }
+  commitTransaction(connection: DatabaseConnection): Promise<void> {
+    return this.inner.commitTransaction(connection);
+  }
+  rollbackTransaction(connection: DatabaseConnection): Promise<void> {
+    return this.inner.rollbackTransaction(connection);
+  }
+  savepoint(
+    connection: DatabaseConnection,
+    savepointName: string,
+    compileQuery: QueryCompiler["compileQuery"],
+  ): Promise<void> {
+    return this.inner.savepoint?.(connection, savepointName, compileQuery) ?? Promise.resolve();
+  }
+  rollbackToSavepoint(
+    connection: DatabaseConnection,
+    savepointName: string,
+    compileQuery: QueryCompiler["compileQuery"],
+  ): Promise<void> {
+    return (
+      this.inner.rollbackToSavepoint?.(connection, savepointName, compileQuery) ?? Promise.resolve()
+    );
+  }
+  releaseSavepoint(
+    connection: DatabaseConnection,
+    savepointName: string,
+    compileQuery: QueryCompiler["compileQuery"],
+  ): Promise<void> {
+    return (
+      this.inner.releaseSavepoint?.(connection, savepointName, compileQuery) ?? Promise.resolve()
+    );
+  }
+  destroy(): Promise<void> {
+    return this.inner.destroy();
+  }
+}
+
 export function createSqliteDriver(options: SqliteDriverOptions): SqliteDriver {
   const readonly = options.readonly ?? false;
   const conn = new BetterSqlite3(options.path, { readonly });
   applyRuntimePragmas(conn, readonly);
-  const dialect = new SqliteDialect({ database: conn });
+  const dialect = new EditorZeroSqliteDialect({ database: conn });
   const base = new Kysely<SystemDatabase>({ dialect });
 
   return {
     scoped: (workspace_id) => createTenantScopedDb(base, workspace_id),
     system: () => base,
+    // `setIsolationLevel("serializable")` is the write-path-tx signal
+    // `EditorZeroSqliteDriver.beginTransaction` listens for — it
+    // promotes this tx to `BEGIN IMMEDIATE`. Without the signal, the
+    // driver delegates to the stock `SqliteDriver` which uses a
+    // DEFERRED begin (the right default for every other transaction
+    // opened through `system()` / `scoped()`).
+    withSystemTx: (fn) => base.transaction().setIsolationLevel("serializable").execute(fn),
     close: async () => {
       await base.destroy();
     },

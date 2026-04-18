@@ -177,6 +177,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@editorzero/audit':
+        specifier: workspace:*
+        version: link:../audit
       '@editorzero/ids':
         specifier: workspace:*
         version: link:../ids

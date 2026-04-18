@@ -10,6 +10,7 @@
  * prevents any `Kysely` / `sql<T>` import outside this package.
  */
 
+export { asAuditTx, createSqliteAuditWriter } from "./audit-writer";
 export type { SqliteDriver, SqliteDriverOptions } from "./drivers/sqlite";
 export { createSqliteDriver } from "./drivers/sqlite";
 export {
