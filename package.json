@@ -1,0 +1,42 @@
+{
+  "name": "editorzero",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Open-source, self-hostable, AI-native documentation and collaboration platform.",
+  "license": "AGPL-3.0-only",
+  "repository": "https://github.com/numman-ali/editorzero",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean && rm -rf packages/*/dist apps/*/dist",
+    "typecheck": "tsc -b --noEmit",
+    "typecheck:affected": "pnpm -r --filter \"...[origin/main]\" exec tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:affected": "pnpm -r --filter \"...[origin/main]\" test",
+    "test:watch": "vitest",
+    "test:prop": "vitest run --project prop",
+    "coherence": "tsx scripts/coherence.ts",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@types/node": "catalog:",
+    "lefthook": "^1.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "lefthook"
+    ]
+  }
+}

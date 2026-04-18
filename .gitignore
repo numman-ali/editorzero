@@ -8,6 +8,10 @@ out/
 *.tsbuildinfo
 .pnpm-store/
 
+# Lefthook / tooling caches
+.lefthook-local.yml
+.lefthook-cache/
+
 # Env
 .env
 .env.local

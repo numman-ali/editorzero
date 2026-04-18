@@ -1,0 +1,81 @@
+# Lefthook configuration — fast pre-commit, slow pre-push.
+# Philosophy (AGENTS.md § Verification stack): every gate is local;
+# a commit that fails any step is blocked at the hook.
+# Splitting into fast (< 20s) + slow (< 5min) lanes per §16.13.
+
+min_version: 1.11.0
+
+# ── Fast lane: runs on every commit attempt ────────────────────────────────
+# Target: < 20s on changed packages only.
+pre-commit:
+  parallel: true
+  commands:
+    types:
+      glob: "*.{ts,tsx}"
+      run: pnpm typecheck:affected
+      stage_fixed: false
+    lint:
+      glob: "*.{ts,tsx,js,mjs,json,jsonc}"
+      run: pnpm exec biome check --staged --no-errors-on-unmatched {staged_files}
+      stage_fixed: false
+    coherence:
+      # Drift-prevention guard (continuation.md § Phase 3 kickoff #2).
+      # Fails the commit on: section references missing, capability IDs
+      # out of sync across Appendix A / registry / AuditEffect, numeric
+      # constants referenced as literals instead of named imports, ADR
+      # cross-refs missing.
+      glob: "{docs/**,packages/**,AGENTS.md}"
+      run: pnpm coherence
+    unit-affected:
+      glob: "*.{ts,tsx}"
+      run: pnpm test:affected --changed
+      stage_fixed: false
+
+# ── Slow lane: runs on pre-push ────────────────────────────────────────────
+# Full verification stack per AGENTS.md § Verification stack — 1..9.
+# Target: < 5min.
+pre-push:
+  parallel: false
+  commands:
+    full-typecheck:
+      run: pnpm typecheck
+    full-lint:
+      run: pnpm lint
+    property:
+      run: pnpm test:prop
+    integration:
+      # SQLite + Postgres conformance suite (ADR 0007 / §17.1).
+      # Activates when `packages/db/test/integration/` exists.
+      run: |
+        if [ -d packages/db/test/integration ]; then
+          pnpm -C packages/db test:integration
+        else
+          echo "skip: integration suite not yet scaffolded"
+        fi
+    contract:
+      # Cross-surface parity matrix (§5.5).
+      run: |
+        if [ -d packages/contract-tests/test ]; then
+          pnpm -C packages/contract-tests test
+        else
+          echo "skip: contract tests not yet scaffolded"
+        fi
+    e2e:
+      # Playwright + axe (§17.2 step 7).
+      run: |
+        if [ -d packages/e2e/test ]; then
+          pnpm -C packages/e2e test
+        else
+          echo "skip: e2e suite not yet scaffolded"
+        fi
+
+# ── Commit message hook: DCO sign-off enforcement ──────────────────────────
+commit-msg:
+  commands:
+    dco-signoff:
+      # Reject commits missing `Signed-off-by:` per CONTRIBUTING.md.
+      run: |
+        if ! grep -qE "^Signed-off-by: " "{1}"; then
+          echo "ERROR: missing DCO sign-off. Use 'git commit -s'."
+          exit 1
+        fi

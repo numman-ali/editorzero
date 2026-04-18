@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "./packages/constants" },
+    { "path": "./packages/ids" },
+    { "path": "./packages/scopes" }
+  ]
+}
