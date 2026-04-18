@@ -18,10 +18,12 @@
  * plain strings without a cast at the boundary.
  */
 
+import type { HandlerError } from "@editorzero/audit";
 import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
 import { CapabilityId, CollectionId, DocId } from "@editorzero/ids";
 import { z } from "zod";
 
+import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_LIST_ID = CapabilityId("doc.list");
@@ -79,12 +81,7 @@ export const docList: Capability<Input, Output> = {
       required_scopes: ["doc:read"],
       reason_code: reason.kind,
     }),
-    effectOnError: (_input, _error) => ({
-      kind: "error",
-      capability: DOC_LIST_ID,
-      error_code: "internal",
-      retriable: false,
-    }),
+    effectOnError: (_input, error: HandlerError) => projectErrorAudit(DOC_LIST_ID, error),
     // Reads collapse: identical calls within the audit-read-collapse
     // window fold into one row with `collapsed_count > 1` on the
     // envelope (§9.3). `collapseKey` is a constant because `doc.list`

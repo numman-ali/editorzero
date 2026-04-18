@@ -10,9 +10,11 @@
     { "path": "../audit" },
     { "path": "../constants" },
     { "path": "../db" },
+    { "path": "../errors" },
     { "path": "../ids" },
     { "path": "../observability" },
     { "path": "../principal" },
-    { "path": "../scopes" }
+    { "path": "../scopes" },
+    { "path": "../sync" }
   ]
 }

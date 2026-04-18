@@ -25,4 +25,5 @@ export { createRegistry, RegistryLookupError, registerCapability } from "./regis
 // barrel dependency-light and lets consumers choose which capabilities
 // to include (e.g., an admin-only surface that omits public ones).
 
+export { docCreate } from "./doc/create";
 export { docList } from "./doc/list";

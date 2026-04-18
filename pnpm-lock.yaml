@@ -112,6 +112,9 @@ importers:
       '@editorzero/db':
         specifier: workspace:*
         version: link:../db
+      '@editorzero/errors':
+        specifier: workspace:*
+        version: link:../errors
       '@editorzero/ids':
         specifier: workspace:*
         version: link:../ids
@@ -124,6 +127,12 @@ importers:
       '@editorzero/scopes':
         specifier: workspace:*
         version: link:../scopes
+      '@editorzero/sync':
+        specifier: workspace:*
+        version: link:../sync
+      yjs:
+        specifier: 'catalog:'
+        version: 13.6.30
       zod:
         specifier: 'catalog:'
         version: 4.3.6

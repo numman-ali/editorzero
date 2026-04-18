@@ -239,6 +239,18 @@ describe("doc.list", () => {
     }
   });
 
+  it("preserves the HandlerError kind on non-internal failures (audit log partitioning)", () => {
+    // The shared `projectErrorAudit` helper preserves `error.kind` on
+    // the audit row and derives `retriable` per-kind — same contract
+    // as doc.create, for the same reason (Codex F102 P2 finding).
+    const effect = docList.audit.effectOnError(
+      {},
+      { kind: "upstream", service: "storage", status: 503 },
+    );
+    expect(effect.kind === "error" && effect.error_code).toBe("upstream");
+    expect(effect.kind === "error" && effect.retriable).toBe(true);
+  });
+
   it("is collapsible with a constant key (no input → always same bucket)", () => {
     const policy = docList.audit.collapsePolicy;
     expect(policy.collapsible).toBe(true);

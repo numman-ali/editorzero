@@ -21,10 +21,13 @@
     "@editorzero/audit": "workspace:*",
     "@editorzero/constants": "workspace:*",
     "@editorzero/db": "workspace:*",
+    "@editorzero/errors": "workspace:*",
     "@editorzero/ids": "workspace:*",
     "@editorzero/observability": "workspace:*",
     "@editorzero/principal": "workspace:*",
     "@editorzero/scopes": "workspace:*",
+    "@editorzero/sync": "workspace:*",
+    "yjs": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

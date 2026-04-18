@@ -1,0 +1,413 @@
+/**
+ * `doc.create` — capability-level integration test.
+ *
+ * Runs the handler against a real in-memory SQLite driver and a real
+ * `MemorySyncService` so the seed path actually touches a Y.Doc.
+ * Cross-tenant isolation and the dispatcher's audit emission are owned
+ * by their own tests; this file asserts only that `doc.create` composes
+ * with those layers correctly.
+ */
+
+import { createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
+import { ValidationError } from "@editorzero/errors";
+import { AgentId, CollectionId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
+import { noopLogger, noopTracer } from "@editorzero/observability";
+import type { AgentPrincipal, Principal, UserPrincipal } from "@editorzero/principal";
+import { MemorySyncService, readBlocks } from "@editorzero/sync";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import type { CapabilityContext } from "../kernel";
+import { docCreate } from "./create";
+
+// ── Fixtures ─────────────────────────────────────────────────────────────
+
+const WORKSPACE_A = WorkspaceId("018f0000-0000-7000-8000-000000000001");
+const ALICE = UserId("018f0000-0000-7000-8000-0000000000a1");
+const BOB = UserId("018f0000-0000-7000-8000-0000000000a2");
+const COLLECTION_C1 = CollectionId("018f0000-0000-7000-8000-0000000000c1");
+const AGENT_BOT42 = AgentId("018f0000-0000-7000-8000-0000000000f1");
+const TOKEN = TokenId("018f0000-0000-7000-8000-0000000000e1");
+
+let driver: SqliteDriver;
+let sync: MemorySyncService;
+
+beforeEach(() => {
+  driver = createSqliteDriver({ path: ":memory:" });
+  driver.exec(DOCS_DDL);
+  sync = new MemorySyncService();
+});
+
+afterEach(async () => {
+  await sync.close();
+  await driver.close();
+});
+
+function userPrincipal(): UserPrincipal {
+  return {
+    kind: "user",
+    id: ALICE,
+    workspace_id: WORKSPACE_A,
+    roles: ["member"],
+    session_id: null,
+    token_id: null,
+  };
+}
+
+function agentPrincipal(opts: {
+  owner?: UserPrincipal["id"] | null;
+  acting_as?: UserPrincipal["id"];
+}): AgentPrincipal {
+  const base: AgentPrincipal = {
+    kind: "agent",
+    id: AGENT_BOT42,
+    workspace_id: WORKSPACE_A,
+    owner_user_id: opts.owner ?? null,
+    scopes: ["doc:write"],
+    token_id: TOKEN,
+    token_kind: "api-key",
+  };
+  return opts.acting_as !== undefined ? { ...base, acting_as: opts.acting_as } : base;
+}
+
+function buildCtx(principal: Principal, now = () => 1): CapabilityContext {
+  return {
+    principal,
+    tenant: { workspace_id: principal.workspace_id },
+    db: driver.scoped(principal.workspace_id),
+    transact: (doc_id, fn) => sync.transact(doc_id, fn),
+    outbox: () => {
+      /* doc.create emits no outbox events in v1 */
+    },
+    logger: noopLogger,
+    tracer: noopTracer,
+    now,
+  };
+}
+
+// ── Happy path ───────────────────────────────────────────────────────────
+
+describe("doc.create handler", () => {
+  it("mints a UUIDv7 doc_id, writes the docs row, seeds the Y.Doc with title+paragraph", async () => {
+    const ctx = buildCtx(userPrincipal(), () => 42);
+    const out = await docCreate.handler(ctx, { title: "Hello, World!" });
+
+    // Output shape — workspace_id is the caller's scope; slug is kebab; order_key == doc_id.
+    expect(out.workspace_id).toBe(WORKSPACE_A);
+    expect(out.title).toBe("Hello, World!");
+    expect(out.slug).toBe("hello-world");
+    expect(out.visibility).toBe("workspace");
+    expect(out.collection_id).toBeNull();
+    expect(out.order_key).toBe(out.doc_id);
+    // UUIDv7 parser asserts the shape: round-trip confirms branding.
+    expect(DocId(out.doc_id)).toBe(out.doc_id);
+
+    // docs row landed in the workspace.
+    const rows = await driver.scoped(WORKSPACE_A).selectFrom("docs").selectAll().execute();
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    if (row === undefined) throw new Error("expected one row");
+    expect(row.id).toBe(out.doc_id);
+    expect(row.title).toBe("Hello, World!");
+    expect(row.slug).toBe("hello-world");
+    expect(row.visibility).toBe("workspace");
+    expect(row.visibility_version).toBe(0);
+    expect(row.created_by).toBe(ALICE);
+    expect(row.created_at).toBe(42);
+    expect(row.updated_at).toBe(42);
+    expect(row.deleted_at).toBeNull();
+
+    // Y.Doc was seeded with the canonical BlockNote shape:
+    // heading/1 carrying the title, followed by an empty paragraph.
+    const blocks = await sync.transact(out.doc_id, (ydoc) => readBlocks(ydoc));
+    expect(blocks.map((b) => b.type)).toEqual(["heading", "paragraph"]);
+    const [heading] = blocks;
+    if (heading === undefined) throw new Error("expected seeded heading block");
+    const content = heading.content as Array<{ type: string; text: string }>;
+    expect(content[0]?.text).toBe("Hello, World!");
+  });
+
+  it("lands new docs at workspace root with visibility `workspace` (v1 scope)", async () => {
+    // Both `visibility` and `collection_id` are intentionally not
+    // caller-settable in v1 — see `create.ts` file header. The
+    // handler hardcodes `visibility: "workspace"` and
+    // `collection_id: null`, so a fresh doc always presents that
+    // way regardless of what the caller tried to supply.
+    const ctx = buildCtx(userPrincipal());
+    const out = await docCreate.handler(ctx, { title: "Plain notes" });
+    expect(out.visibility).toBe("workspace");
+    expect(out.collection_id).toBeNull();
+
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("docs")
+      .selectAll()
+      .executeTakeFirstOrThrow();
+    expect(row.collection_id).toBeNull();
+    expect(row.visibility).toBe("workspace");
+  });
+
+  it("rejects caller-supplied `visibility` and `collection_id` at the input boundary (strict mode)", () => {
+    // `InputSchema.strict()` emits a zod `unrecognized_keys` issue
+    // for any field the schema doesn't know. That's how we refuse
+    // to print visibility labels the read path doesn't honour
+    // (Codex F103 P1 — `"private"` today would be false privacy,
+    // `"public"` would bypass `doc:publish`) and how we refuse to
+    // store dangling `collection_id` references (F103 P2 #2 — no
+    // `collections` table yet). When the read path / collections
+    // table ship, these fields return with honest semantics.
+    for (const bad of [
+      { title: "x", visibility: "public" },
+      { title: "x", visibility: "private" },
+      { title: "x", visibility: "workspace" },
+      { title: "x", collection_id: "018f0000-0000-7000-8000-0000000000c1" },
+    ]) {
+      const result = docCreate.input.safeParse(bad);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((i) => i.code === "unrecognized_keys")).toBe(true);
+      }
+    }
+  });
+
+  it("rejects whitespace-only titles and trims surrounding whitespace on valid ones", async () => {
+    // Codex F103 P2 #1 — `z.string().min(1)` on its own accepts
+    // `"   "` and produces a doc whose stored title / heading
+    // block render visually blank. `.trim().min(1)` closes the
+    // hole: whitespace-only trims to empty and fails the non-empty
+    // check; leading / trailing spaces on a real title strip
+    // before storage so the heading renders clean.
+    const blank = docCreate.input.safeParse({ title: "   " });
+    expect(blank.success).toBe(false);
+    if (!blank.success) {
+      expect(blank.error.issues[0]?.path).toEqual(["title"]);
+    }
+
+    const alsoBlank = docCreate.input.safeParse({ title: "" });
+    expect(alsoBlank.success).toBe(false);
+
+    // Trimming: the zod schema strips surrounding whitespace so a
+    // `"  Hello  "` request lands as `"Hello"` before the handler
+    // ever sees it. The dispatcher runs `input.safeParse` ahead of
+    // the handler, so we test the schema directly here (the unit
+    // test calls `handler` with raw input and would skip the
+    // transform otherwise).
+    const parsed = docCreate.input.parse({ title: "  Hello  " });
+    expect(parsed.title).toBe("Hello");
+
+    const ctx = buildCtx(userPrincipal());
+    const out = await docCreate.handler(ctx, parsed);
+    expect(out.title).toBe("Hello");
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("docs")
+      .selectAll()
+      .executeTakeFirstOrThrow();
+    expect(row.title).toBe("Hello");
+  });
+
+  it("slugifies emoji / non-ASCII titles into kebab-case; falls back to `untitled`", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const a = await docCreate.handler(ctx, { title: "Heading · with 🎉 mixed chars" });
+    expect(a.slug).toBe("heading-with-mixed-chars");
+
+    const b = await docCreate.handler(ctx, { title: "🎉🎊" });
+    expect(b.slug).toBe("untitled");
+  });
+
+  it("generates a unique doc_id per call (uniqueness test against UUIDv7 generator)", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const ids = new Set<string>();
+    for (let i = 0; i < 10; i++) {
+      const out = await docCreate.handler(ctx, { title: `Doc ${i}` });
+      ids.add(out.doc_id);
+    }
+    expect(ids.size).toBe(10);
+  });
+});
+
+// ── Agent attribution ────────────────────────────────────────────────────
+
+describe("doc.create — agent principal attribution", () => {
+  it("uses `acting_as` when set (agent-auth delegated token)", async () => {
+    const principal = agentPrincipal({ owner: null, acting_as: BOB });
+    const ctx = buildCtx(principal);
+    const out = await docCreate.handler(ctx, { title: "Delegated write" });
+
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("docs")
+      .selectAll()
+      .executeTakeFirstOrThrow();
+    // Delegator (BOB) is the attribution target, not the agent.
+    expect(row.created_by).toBe(BOB);
+    expect(out.title).toBe("Delegated write");
+  });
+
+  it("falls back to `owner_user_id` when `acting_as` is absent", async () => {
+    const principal = agentPrincipal({ owner: ALICE });
+    const ctx = buildCtx(principal);
+    await docCreate.handler(ctx, { title: "Owner-attributed" });
+
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("docs")
+      .selectAll()
+      .executeTakeFirstOrThrow();
+    expect(row.created_by).toBe(ALICE);
+  });
+
+  it("throws ValidationError for an agent with no owner and no delegation (400 on the surface)", async () => {
+    const principal = agentPrincipal({ owner: null });
+    const ctx = buildCtx(principal);
+    const err = await docCreate.handler(ctx, { title: "Orphan" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      // `httpStatus: 400` means adapters surface this as a client error,
+      // not a 500. The dispatcher's audit projection is
+      // `{ kind: "validation" }` (per `toHandlerError`), not `"internal"`.
+      expect(err.httpStatus).toBe(400);
+      expect(err.toHandlerError().kind).toBe("validation");
+      // Issues payload carries a machine-readable code so surfaces can
+      // render / classify the refusal without string-matching the
+      // message.
+      const issues = err.issues as Array<{ code: string }>;
+      expect(issues[0]?.code).toBe("unattributable_agent");
+    }
+  });
+
+  it("does not leave a docs row when attribution fails (seed-first ordering)", async () => {
+    // `resolveCreatedBy` throws before the seed step runs, so no seed
+    // happens and no docs row lands. The explicit assertion pins the
+    // write-order invariant: a P1-level Codex finding was that the
+    // previous order (insert→seed) could leak orphan docs rows; the
+    // fix reverses to seed→insert *and* fails-fast on attribution.
+    const principal = agentPrincipal({ owner: null });
+    const ctx = buildCtx(principal);
+    await expect(docCreate.handler(ctx, { title: "Orphan" })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+    const rows = await driver.scoped(WORKSPACE_A).selectFrom("docs").selectAll().execute();
+    expect(rows).toHaveLength(0);
+  });
+
+  it("does not leave a docs row when the seed step throws (seed-first ordering)", async () => {
+    // Wire a transact stub that throws to simulate a sync-service
+    // failure. With seed-before-insert, the docs INSERT never runs —
+    // `doc.list` is unchanged on retry. If we reversed the order, this
+    // test would fail with `rows.length === 1`: an orphan doc.
+    const principal = userPrincipal();
+    const ctx: CapabilityContext = {
+      ...buildCtx(principal),
+      transact: async () => {
+        throw new Error("simulated sync failure");
+      },
+    };
+    await expect(docCreate.handler(ctx, { title: "Boom" })).rejects.toThrow(
+      /simulated sync failure/,
+    );
+    const rows = await driver.scoped(WORKSPACE_A).selectFrom("docs").selectAll().execute();
+    expect(rows).toHaveLength(0);
+  });
+});
+
+// ── Registry metadata + audit projections ─────────────────────────────────
+
+describe("doc.create registry metadata", () => {
+  it("declares the expected id, category, scope, surfaces, agentAllowed", () => {
+    expect(docCreate.id).toBe("doc.create");
+    expect(docCreate.category).toBe("mutation");
+    expect(docCreate.requires).toEqual(["doc:write"]);
+    expect(docCreate.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(docCreate.agentAllowed).toBeDefined();
+  });
+});
+
+describe("doc.create audit projections", () => {
+  const sampleOutput = {
+    doc_id: DocId("018f0000-0000-7000-8000-0000000000d9"),
+    workspace_id: WORKSPACE_A,
+    collection_id: COLLECTION_C1,
+    title: "T",
+    slug: "t",
+    order_key: "018f0000-0000-7000-8000-0000000000d9",
+    visibility: "workspace" as const,
+  };
+
+  it("effectOnAllow projects the doc.create audit kind with every field", () => {
+    const effect = docCreate.audit.effectOnAllow({ title: "T" }, sampleOutput);
+    expect(effect.kind).toBe("doc.create");
+    if (effect.kind === "doc.create") {
+      expect(effect.doc_id).toBe(sampleOutput.doc_id);
+      expect(effect.workspace_id).toBe(WORKSPACE_A);
+      expect(effect.collection_id).toBe(COLLECTION_C1);
+      expect(effect.title).toBe("T");
+      expect(effect.slug).toBe("t");
+      expect(effect.order_key).toBe(sampleOutput.order_key);
+      expect(effect.visibility).toBe("workspace");
+    }
+  });
+
+  it("subjectFrom returns the doc subject kind (no id before the handler runs)", () => {
+    const subject = docCreate.audit.subjectFrom({ title: "T" });
+    expect(subject.kind).toBe("doc");
+  });
+
+  it("effectOnDeny carries required_scopes + reason_code from the gate", () => {
+    const effect = docCreate.audit.effectOnDeny(
+      { title: "T" },
+      { kind: "missing_scope", required: ["doc:write"], principal_scopes: ["doc:read"] },
+    );
+    expect(effect.kind).toBe("deny");
+    if (effect.kind === "deny") {
+      expect(effect.capability).toBe("doc.create");
+      expect(effect.required_scopes).toEqual(["doc:write"]);
+      expect(effect.reason_code).toBe("missing_scope");
+    }
+  });
+
+  it("effectOnError preserves the HandlerError kind — validation is not flattened to internal", () => {
+    // Before F102's `projectErrorAudit` helper, `effectOnError`
+    // hard-coded `error_code: "internal"` regardless of the thrown
+    // shape. That misclassified every `ValidationError` (400-class,
+    // client-retriable-after-input-fix) as a server error in the
+    // audit log — Codex P2 finding. This assertion pins the fix.
+    const effect = docCreate.audit.effectOnError(
+      { title: "T" },
+      { kind: "validation", issues: [] },
+    );
+    expect(effect.kind).toBe("error");
+    if (effect.kind === "error") {
+      expect(effect.capability).toBe("doc.create");
+      expect(effect.error_code).toBe("validation");
+      expect(effect.retriable).toBe(false);
+    }
+  });
+
+  it("effectOnError projects a non-retriable internal error for unknown-origin throws", () => {
+    const effect = docCreate.audit.effectOnError(
+      { title: "T" },
+      { kind: "internal", trace_id: "" },
+    );
+    expect(effect.kind).toBe("error");
+    if (effect.kind === "error") {
+      expect(effect.capability).toBe("doc.create");
+      expect(effect.error_code).toBe("internal");
+      expect(effect.retriable).toBe(false);
+    }
+  });
+
+  it("effectOnError marks conflict + upstream as retriable (CLI / client auto-retry signal)", () => {
+    const conflict = docCreate.audit.effectOnError({ title: "T" }, { kind: "conflict" });
+    expect(conflict.kind === "error" && conflict.retriable).toBe(true);
+
+    const upstream = docCreate.audit.effectOnError(
+      { title: "T" },
+      { kind: "upstream", service: "storage", status: 502 },
+    );
+    expect(upstream.kind === "error" && upstream.retriable).toBe(true);
+  });
+
+  it("is non-collapsible — mutations always emit their own audit row", () => {
+    expect(docCreate.audit.collapsePolicy.collapsible).toBe(false);
+  });
+});
