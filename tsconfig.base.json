@@ -1,5 +1,51 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
+
+  // ── Why these flags ───────────────────────────────────────────────────────
+  //
+  // Agent-native TS config — decisions below are chosen to serve the
+  // architecture's "types are canonical, derive from schema" posture
+  // (architecture.md §1.1). Each strict flag catches a class of bug; the
+  // absent ones are cases where strictness fights the ecosystem (zod,
+  // JSON columns) and costs more than it earns.
+  //
+  //   strict (+ no*, useUnknown*, verbatim*)
+  //     → standard modern strictness. Agents "trust the types" because
+  //       the types actually prove what they claim. Non-negotiable.
+  //
+  //   exactOptionalPropertyTypes
+  //     → distinguishes `prop?: T` (key may be missing) from
+  //       `prop: T | undefined` (key present, value may be undefined).
+  //       Zod's `.optional()` produces the former, so `z.infer<...>`
+  //       lines up naturally. DO NOT hand-write `readonly x?: T` if the
+  //       schema says the key can exist-and-be-undefined — the gotcha
+  //       that bit `RuntimeConfig` is: match the schema output exactly
+  //       or use `z.infer` directly (the correct answer).
+  //
+  //   module: Preserve + moduleResolution: Bundler
+  //     → relative imports stay extensionless; `tsc -b` typechecks,
+  //       bundlers (Next/Vite/bun) handle resolution at app build.
+  //
+  //   isolatedModules (ON) / isolatedDeclarations (OFF)
+  //     → isolatedModules enables per-file transpile via swc/esbuild/bun.
+  //       isolatedDeclarations is INTENTIONALLY OFF: it forbids exported
+  //       types inferred from `z.infer<typeof schema>`, which would force
+  //       hand-duplication of every zod schema as a parallel TS
+  //       interface. The architecture's "single zod schema → every
+  //       consumer" rule (§1.1) directly conflicts with that flag, so
+  //       isolatedDeclarations loses. Re-enable only if we adopt tsgo /
+  //       fast-declaration tooling that pays its way.
+  //
+  //   composite + declaration + declarationMap + sourceMap
+  //     → required for project references (incremental `tsc -b`).
+  //
+  //   verbatimModuleSyntax
+  //     → forces `import type { X }` for type-only imports. Reader sees
+  //       instantly what's erased at build vs what lands at runtime.
+  //       Critical for dep-light packages (e.g. capabilities/kernel)
+  //       that import types from heavier packages without pulling their
+  //       runtime code.
+
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2023"],
@@ -17,7 +63,6 @@
     "verbatimModuleSyntax": true,
 
     "isolatedModules": true,
-    "isolatedDeclarations": true,
 
     "composite": true,
     "declaration": true,
@@ -27,9 +72,13 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "skipLibCheck": true,
-
-    "disableSourceOfProjectReferenceRedirect": true
+    "skipLibCheck": true
   },
-  "exclude": ["node_modules", "dist", "build", ".next"]
+
+  // `**/*.test.ts` excluded from build emit so co-located unit tests
+  // don't land in `dist/`. Tests are typechecked by `pnpm test` /
+  // `vitest run` via its own TS transform; add `tsconfig.test.json`
+  // per-package if you need `tsc --noEmit` on tests in the pre-commit
+  // gate (first package that needs it documents the pattern).
+  "exclude": ["node_modules", "dist", "build", ".next", "**/*.test.ts"]
 }

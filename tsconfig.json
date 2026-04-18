@@ -8,6 +8,7 @@
     { "path": "./packages/scopes" },
     { "path": "./packages/audit" },
     { "path": "./packages/capabilities" },
+    { "path": "./packages/config" },
     { "path": "./packages/errors" },
     { "path": "./packages/principal" }
   ]
