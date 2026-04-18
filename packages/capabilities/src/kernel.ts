@@ -30,39 +30,24 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import type { CapabilityId, DocId, WorkspaceId } from "@editorzero/ids";
+import type { Logger, Tracer } from "@editorzero/observability";
 import type { Principal } from "@editorzero/principal";
 import type { CapabilityCategory, Scope, SubjectKind, Surface } from "@editorzero/scopes";
 import type { ZodType } from "zod";
 
-// ── Logger / Tracer / Db — structural interfaces only ─────────────────────
+// Re-export the structural contracts handlers consume so a capability
+// file has one import source (`@editorzero/capabilities`) for context,
+// not three.
+export type { Logger, Tracer, TracerSpan } from "@editorzero/observability";
+
+// ── Db handle — opaque brand ──────────────────────────────────────────────
 //
-// Real implementations live in `@editorzero/observability` + `@editorzero/db`.
-// The kernel declares only the surface area a handler consumes so it can
-// stay dep-light; the dispatcher constructs the concrete ctx.
+// Concrete type is `TenantScopedDb` from `@editorzero/db`, assembled
+// per-request by auth middleware. The kernel declares only the brand —
+// handlers call methods on `ctx.db` typed in the concrete package.
+// The arch-lint rule `no-raw-kysely-in-capabilities` enforces that
+// handlers never reach past `ctx.db` for the raw driver.
 
-export interface Logger {
-  debug(msg: string, meta?: Record<string, unknown>): void;
-  info(msg: string, meta?: Record<string, unknown>): void;
-  warn(msg: string, meta?: Record<string, unknown>): void;
-  error(msg: string, meta?: Record<string, unknown>): void;
-}
-
-export interface TracerSpan {
-  setAttribute(key: string, value: string | number | boolean): void;
-  end(): void;
-}
-
-export interface Tracer {
-  span<T>(name: string, fn: (span: TracerSpan) => T | Promise<T>): Promise<T>;
-}
-
-/**
- * Opaque to the kernel; concrete type is `TenantScopedDb` from
- * `@editorzero/db`, assembled per-request by auth middleware. The only
- * knowledge the kernel needs is "not `Kysely` directly" — the arch-lint
- * rule `no-raw-kysely-in-capabilities` enforces that handlers never
- * import the raw driver.
- */
 export type TenantScopedDbHandle = { readonly __brand: "TenantScopedDb" };
 
 // ── CapabilityContext (§16.4) ─────────────────────────────────────────────

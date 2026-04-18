@@ -66,6 +66,9 @@ importers:
       '@editorzero/ids':
         specifier: workspace:*
         version: link:../ids
+      '@editorzero/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@editorzero/principal':
         specifier: workspace:*
         version: link:../principal
