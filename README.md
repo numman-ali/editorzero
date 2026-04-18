@@ -30,7 +30,7 @@ One capability layer. Four surfaces: API · CLI · MCP · Web UI. Full parity, e
 |---|---|---|
 | **0** · Orient | Brief, invariants, working assumptions | ✅ Closed |
 | **1** · Research + ADRs | 20 ADRs, cross-model red-team | ✅ Closed |
-| **2** · Architecture | End-to-end design, 3 red-team passes (incl. cross-model Opus + Codex) | ✅ Closed |
+| **2** · Architecture | End-to-end design, 3 red-team passes (including cross-model) | ✅ Closed |
 | **3** · Verification harness + first slice | Types / lint / unit / property / contract / e2e — "create doc, read doc" | 🏗 In progress |
 | **4** · Feature slices | Full capability surface across all four adapters | — |
 | **5** · Hardening + launch | Security pass, load tests, runbook, threat model | — |
@@ -62,7 +62,7 @@ What's being stress-tested:
 
 - **Autonomous phase progression.** Human review at boundaries, not per-commit.
 - **Self-critique loops.** Red-team sub-agents find blockers before they ship (F1–F93 and counting across four passes).
-- **Cross-model validation at high stakes.** Opus + Codex on Phase 2 pass #3 caught 3 BLOCKERs neither found alone — one was invalid SQL a single-model review missed entirely.
+- **Independent cross-validation at high stakes.** Phase 2's final red-team pass added a second model on the same prompt and caught 3 BLOCKERs the primary review missed — one was invalid SQL that would have shipped otherwise.
 - **Code-as-spec over prose-as-spec.** Types and property tests are canonical; ADRs explain *why*, not *how*.
 - **Drift-prevention.** Coherence scripts at pre-commit, registry-derived adapters, single source of truth per concern.
 
