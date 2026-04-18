@@ -8,5 +8,7 @@
  * react` out of non-UI consumers' dep graph.
  */
 
+export { HEADING_TYPE, type HeadingAttributes, heading } from "./core/heading";
+export { PARAGRAPH_TYPE, paragraph } from "./core/paragraph";
 export type { AnyBlockTypeSpec, BlockTypeSpec, MdastBlockNode } from "./kernel";
 export { createBlockTypeSpec } from "./kernel";
