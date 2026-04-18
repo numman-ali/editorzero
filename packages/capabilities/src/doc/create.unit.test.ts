@@ -8,9 +8,18 @@
  * with those layers correctly.
  */
 
+import type { SeedBlock } from "@editorzero/audit";
 import { createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
 import { ValidationError } from "@editorzero/errors";
-import { AgentId, CollectionId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
+import {
+  AgentId,
+  BlockId,
+  CollectionId,
+  DocId,
+  TokenId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AgentPrincipal, Principal, UserPrincipal } from "@editorzero/principal";
 import { MemorySyncService, readBlocks } from "@editorzero/sync";
@@ -214,6 +223,44 @@ describe("doc.create handler", () => {
     expect(b.slug).toBe("untitled");
   });
 
+  it("pre-mints block IDs and threads them into both the Y.Doc and the output", async () => {
+    // Invariant 3a (audit log reconstructs final state): the
+    // `seed_blocks` field on the output must name the same block IDs
+    // that actually land in the Y.XmlFragment. `seedBlocks` sets the
+    // BlockNote `PartialBlock.id` field, which BlockNote's
+    // `blockToNode` conversion honours when provided — regression test
+    // in case a future BlockNote bump changes that behaviour. A replay
+    // reducer that receives `{ kind: "doc.create", seed_blocks: [...]
+    // }` and calls `seedBlocks(ydoc, seed_blocks)` then produces the
+    // same Y.Doc state the original write did.
+    const ctx = buildCtx(userPrincipal());
+    const out = await docCreate.handler(ctx, { title: "ID thread-through" });
+
+    expect(out.seed_blocks).toHaveLength(2);
+    const [headingSeed, paragraphSeed] = out.seed_blocks;
+    if (headingSeed === undefined || paragraphSeed === undefined) {
+      throw new Error("expected two seed blocks in output");
+    }
+    expect(headingSeed.type).toBe("heading");
+    expect(headingSeed.props).toEqual({ level: 1 });
+    expect(headingSeed.content).toBe("ID thread-through");
+    expect(paragraphSeed.type).toBe("paragraph");
+    // UUIDv7 round-trip asserts the brand — no freshly-minted non-v7.
+    expect(BlockId(headingSeed.id)).toBe(headingSeed.id);
+    expect(BlockId(paragraphSeed.id)).toBe(paragraphSeed.id);
+
+    // Y.Doc side: the blocks BlockNote wrote carry the same IDs the
+    // audit row records.
+    const blocks = await sync.transact(out.doc_id, (ydoc) => readBlocks(ydoc));
+    expect(blocks).toHaveLength(2);
+    const [heading, paragraph] = blocks;
+    if (heading === undefined || paragraph === undefined) {
+      throw new Error("expected two blocks in Y.Doc");
+    }
+    expect(heading.id).toBe(headingSeed.id);
+    expect(paragraph.id).toBe(paragraphSeed.id);
+  });
+
   it("generates a unique doc_id per call (uniqueness test against UUIDv7 generator)", async () => {
     const ctx = buildCtx(userPrincipal());
     const ids = new Set<string>();
@@ -323,6 +370,12 @@ describe("doc.create registry metadata", () => {
 });
 
 describe("doc.create audit projections", () => {
+  const SAMPLE_HEADING_ID = BlockId("018f0000-0000-7000-8000-0000000000b1");
+  const SAMPLE_PARAGRAPH_ID = BlockId("018f0000-0000-7000-8000-0000000000b2");
+  const sampleSeedBlocks: SeedBlock[] = [
+    { id: SAMPLE_HEADING_ID, type: "heading", props: { level: 1 }, content: "T" },
+    { id: SAMPLE_PARAGRAPH_ID, type: "paragraph", content: "" },
+  ];
   const sampleOutput = {
     doc_id: DocId("018f0000-0000-7000-8000-0000000000d9"),
     workspace_id: WORKSPACE_A,
@@ -331,6 +384,7 @@ describe("doc.create audit projections", () => {
     slug: "t",
     order_key: "018f0000-0000-7000-8000-0000000000d9",
     visibility: "workspace" as const,
+    seed_blocks: sampleSeedBlocks,
   };
 
   it("effectOnAllow projects the doc.create audit kind with every field", () => {
@@ -344,6 +398,9 @@ describe("doc.create audit projections", () => {
       expect(effect.slug).toBe("t");
       expect(effect.order_key).toBe(sampleOutput.order_key);
       expect(effect.visibility).toBe("workspace");
+      // Invariant 3a: pre-minted block IDs land in the audit envelope
+      // so a later replay can reconstruct the initial Y.Doc fragment.
+      expect(effect.seed_blocks).toEqual(sampleSeedBlocks);
     }
   });
 

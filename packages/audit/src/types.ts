@@ -50,6 +50,44 @@ export interface BlockPostState {
 }
 
 /**
+ * `SeedBlock` — the pre-minted-ID, pre-seed representation of a block
+ * captured on the `doc.create` audit effect (§16.3). Enough to replay
+ * `seedBlocks(ydoc, seed_blocks)` deterministically:
+ *
+ *   - `id` is **pre-minted** by the handler (via `generateBlockId()`)
+ *     and passed into BlockNote's `PartialBlock.id` — BlockNote respects
+ *     provided IDs, so what lands in the Y.Doc fragment matches what
+ *     the audit row records. Invariant 3a (replay reconstructs final
+ *     state) becomes true for the initial block-ID assignment.
+ *   - `type` / `props` / `content` mirror BlockNote's `PartialBlock`
+ *     (heading / paragraph / … as the block registry grows). `content`
+ *     is `unknown` because BlockNote's `PartialInlineContent[] | string`
+ *     union cannot be narrowed without pulling BlockNote's type tree
+ *     into `@editorzero/audit`; the replay path re-validates by
+ *     routing through `seedBlocks` itself (same validator both sides).
+ *
+ * Contrast with `BlockPostState` below: that shape is for post-create
+ * block mutations (insert / update / remove), which carry doc-scoped
+ * bookkeeping (`parent_block_id`, `order_key`, per-block visibility)
+ * that a top-level seed does not yet have.
+ */
+export interface SeedBlock {
+  id: BlockId;
+  type: string;
+  // Shape intentionally matches the zod inference on the `doc.create`
+  // Output's `seed_blocks` field (see `packages/capabilities/src/doc/
+  // create.ts`). Under `exactOptionalPropertyTypes: true` a zod
+  // `z.record(...).optional()` emits `Record<..> | undefined` (present,
+  // possibly undefined) — not the `prop?: X` form (possibly-absent).
+  // Declaring these fields with the explicit `| undefined` union keeps
+  // the interface assignable from the zod-inferred type without a cast
+  // at the call site. `content` is already `unknown`, which covers the
+  // same ground.
+  props?: Record<string, unknown> | undefined;
+  content?: unknown;
+}
+
+/**
  * Full preimage of a doc at purge time — feeds the 24h restore-token
  * escape hatch (§3.11, ADR 0017).
  */

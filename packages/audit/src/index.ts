@@ -26,5 +26,6 @@ export type {
   DocVisibility,
   HandlerError,
   Role,
+  SeedBlock,
 } from "./types";
 export type { AuditTx, AuditWriteInput, AuditWriter } from "./writer";

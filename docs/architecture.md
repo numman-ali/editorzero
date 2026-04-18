@@ -1898,7 +1898,7 @@ export type AuditEffect =
   | { kind: "collection.soft_delete"; collection_id: CollectionId }
   | { kind: "collection.restore";     collection_id: CollectionId }
   // Doc ---------------------------------------------------------------------
-  | { kind: "doc.create"; doc_id: DocId; workspace_id: WorkspaceId; collection_id: CollectionId | null; title: string; slug: string; order_key: string; visibility: "workspace"|"public"|"private" }
+  | { kind: "doc.create"; doc_id: DocId; workspace_id: WorkspaceId; collection_id: CollectionId | null; title: string; slug: string; order_key: string; visibility: "workspace"|"public"|"private"; seed_blocks: SeedBlock[] }  // seed_blocks = pre-minted BlockIds + shape for replay reconstruction (invariant 3a)
   | { kind: "doc.rename"; doc_id: DocId; title: string }
   | { kind: "doc.move";   doc_id: DocId; new_collection_id: CollectionId | null; new_order_key: string }
   | { kind: "doc.publish";   doc_id: DocId; published_at: number }

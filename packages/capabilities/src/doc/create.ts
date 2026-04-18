@@ -91,9 +91,18 @@ import type {
   AuditError,
   DenyReason,
   HandlerError,
+  SeedBlock,
 } from "@editorzero/audit";
 import { ValidationError } from "@editorzero/errors";
-import { CapabilityId, CollectionId, DocId, generateDocId, WorkspaceId } from "@editorzero/ids";
+import {
+  BlockId,
+  CapabilityId,
+  CollectionId,
+  DocId,
+  generateBlockId,
+  generateDocId,
+  WorkspaceId,
+} from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
 import { type LoosePartialBlock, seedBlocks } from "@editorzero/sync";
 import type * as Y from "yjs";
@@ -177,6 +186,20 @@ const NullableCollectionIdField = z
   .nullable()
   .transform((s): CollectionId | null => (s === null ? null : CollectionId(s)));
 
+// `seed_blocks` — the pre-minted block IDs + shape the handler passed
+// into `seedBlocks`. Lives on the output so `effectOnAllow` can project
+// it into the audit effect (same pattern as `workspace_id` above: the
+// audit projection has no ctx access, so handler-derived data lands on
+// output). Agent callers get an ergonomic byproduct — they can apply a
+// follow-up `doc.update` against these IDs without a refetch.
+const BlockIdField = z.string().transform((s): BlockId => BlockId(s));
+const SeedBlockSchema = z.object({
+  id: BlockIdField,
+  type: z.string(),
+  props: z.record(z.string(), z.unknown()).optional(),
+  content: z.unknown().optional(),
+});
+
 const OutputSchema = z.object({
   doc_id: DocIdField,
   workspace_id: WorkspaceIdField,
@@ -185,6 +208,7 @@ const OutputSchema = z.object({
   slug: z.string(),
   order_key: z.string(),
   visibility: VisibilitySchema,
+  seed_blocks: z.array(SeedBlockSchema),
 });
 type Output = z.infer<typeof OutputSchema>;
 
@@ -258,6 +282,7 @@ export const docCreate: Capability<Input, Output> = {
       slug: output.slug,
       order_key: output.order_key,
       visibility: output.visibility,
+      seed_blocks: output.seed_blocks,
     }),
     effectOnDeny: (_input, reason: DenyReason): AuditDeny => ({
       kind: "deny",
@@ -332,10 +357,31 @@ export const docCreate: Capability<Input, Output> = {
     // concrete per-type block configs don't match the wide-generic
     // `LoosePartialBlock` literal-for-literal, so the sync boundary
     // is by convention cast at the call site.
-    const seed = [
-      { type: "heading", props: { level: 1 }, content: title },
-      { type: "paragraph", content: "" },
-    ] as unknown as LoosePartialBlock[];
+    //
+    // **Pre-minted block IDs (closes Codex F104 P1 / gap (b)).** We mint
+    // `BlockId`s here, set them on the `PartialBlock.id` field BlockNote
+    // honours (verified: `@blocknote/core/src/api/nodeConversions/
+    // blockToNode.ts` uses the provided id when present, only calling
+    // its own `UniqueID.options.generateID()` when `id === undefined`),
+    // and thread the same list into the `doc.create` audit effect via
+    // the output's `seed_blocks` field. Invariant 3a (audit replay
+    // reconstructs final state) becomes true for the initial block
+    // layout: a replay reducer seeing `{ kind: "doc.create",
+    // seed_blocks: [...] }` can call `seedBlocks(ydoc, seed_blocks)`
+    // and land on the same Y.XmlFragment the original write produced.
+    // A later `doc.rename` / `doc.update` that references these IDs has
+    // a stable audit-recorded target, not a BlockNote-internal id the
+    // trail never saw.
+    const seed_blocks: SeedBlock[] = [
+      { id: generateBlockId(), type: "heading", props: { level: 1 }, content: title },
+      { id: generateBlockId(), type: "paragraph", content: "" },
+    ];
+    const seed = seed_blocks.map((b) => ({
+      id: b.id,
+      type: b.type,
+      props: b.props,
+      content: b.content,
+    })) as unknown as LoosePartialBlock[];
     await ctx.transact(doc_id, (editor) => {
       seedBlocks(editor as Y.Doc, seed);
     });
@@ -358,47 +404,37 @@ export const docCreate: Capability<Input, Output> = {
       })
       .execute();
 
-    // **Two known structural gaps — both close at Phase 3.6.**
+    // **One known structural gap remaining — closes at Phase 3.6
+    // (dispatcher write-path tx).**
     //
-    // (1) `doc_counters` row is NOT primed here. Architecture.md
-    // §6.4 mandates a `doc_counters(doc_id, next_seq=1)` INSERT in
-    // the same tx as the `docs` INSERT, so the seq allocator that
-    // `HocuspocusSyncService.onStoreDocument` uses finds a row on
-    // the first `doc_updates` write. F98 narrows `TenantScopedDb`
-    // to hide `doc_counters` from handlers (it lives on
-    // `SystemDatabase`), so there is no handler-surface path to
-    // prime the counter today; this slice's `MemorySyncService`
-    // never writes `doc_updates`, so the missing row is currently
-    // inert. The Phase 3.6 write-path-tx commit (ADR 0018
-    // empirical verification) lands the dispatcher-owned tx that
-    // INSERTs both rows atomically — at that point the dispatcher
-    // primes the counter when it sees a `doc.create` audit effect
-    // land, and the handler continues to stay on the narrow
-    // tenant-scoped DB. Codex F104 P2 — deferred with the fix
-    // scope named; property tests in Phase 3.6 lock the invariant
-    // after the tx lands. (Reintroducing the INSERT directly from
-    // here would reopen the F98 handler-vs-system-DB boundary for
-    // a gap that doesn't yet bite.)
-    //
-    // (2) Seeded block IDs are NOT captured in the `doc.create`
-    // audit effect. `seedBlocks` mints BlockNote-assigned IDs for
-    // the heading and paragraph; a strict read of invariant 3
-    // (audit-log alone reconstructs final state) requires those
-    // IDs in the audit row so a later `doc.rename` / `doc.update`
-    // referencing them can be replayed. Closing this needs an
-    // `AuditEffect["doc.create"]` envelope change (add
-    // `seed_blocks: Array<{ id, type, props?, content?: string }>`)
-    // + pre-minting block IDs via `generateBlockId()` and passing
-    // them into the seed payload. That change ripples through the
-    // audit writer + any reader, so it lands alongside the first
-    // content-mutation capability that references block IDs
-    // (`doc.rename` in a later slice), where the envelope cost pays
-    // for itself. Until then no audit row references the minted
-    // IDs, so invariant 3 has no observable violation. Codex F104
-    // P1 — deferred with the fix scope named; coherence rule in
-    // Phase 3.7 enumerates each content-mutating capability to
-    // force this pair to land together.
+    // `doc_counters` row is NOT primed here. Architecture.md §6.4
+    // mandates a `doc_counters(doc_id, next_seq=1)` INSERT in the same
+    // tx as the `docs` INSERT, so the seq allocator that
+    // `HocuspocusSyncService.onStoreDocument` uses finds a row on the
+    // first `doc_updates` write. F98 narrows `TenantScopedDb` to hide
+    // `doc_counters` from handlers (it lives on `SystemDatabase`), so
+    // there is no handler-surface path to prime the counter today; this
+    // slice's `MemorySyncService` never writes `doc_updates`, so the
+    // missing row is currently inert. The Phase 3.6 write-path-tx
+    // commit (ADR 0018 empirical verification) lands the dispatcher-
+    // owned tx that INSERTs both rows atomically — at that point the
+    // dispatcher primes the counter when it sees a `doc.create` audit
+    // effect land, and the handler continues to stay on the narrow
+    // tenant-scoped DB. Codex F104 P2 — deferred with the fix scope
+    // named; property tests in Phase 3.6 lock the invariant after the
+    // tx lands. (Reintroducing the INSERT directly from here would
+    // reopen the F98 handler-vs-system-DB boundary for a gap that
+    // doesn't yet bite.)
 
-    return { doc_id, workspace_id, collection_id, title, slug, order_key, visibility };
+    return {
+      doc_id,
+      workspace_id,
+      collection_id,
+      title,
+      slug,
+      order_key,
+      visibility,
+      seed_blocks,
+    };
   },
 };

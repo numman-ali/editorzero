@@ -36,6 +36,7 @@ import type {
   DocPurgePreimage,
   DocVisibility,
   Role,
+  SeedBlock,
 } from "./types";
 
 // prettier-ignore
@@ -94,6 +95,12 @@ export type AuditEffect =
   | { kind: "collection.soft_delete"; collection_id: CollectionId }
   | { kind: "collection.restore"; collection_id: CollectionId }
   // ── Doc (§3.5) ───────────────────────────────────────────────────────────
+  // `seed_blocks` carries the pre-minted block IDs the handler passed
+  // into `seedBlocks` + enough shape to replay them (type/props/content).
+  // Closing invariant 3a for the initial `docs` row: a later
+  // `doc.update` that references these blocks has stable IDs in the
+  // audit log to refer to, not IDs freshly minted inside BlockNote that
+  // the audit trail never saw.
   | {
       kind: "doc.create";
       doc_id: DocId;
@@ -103,6 +110,7 @@ export type AuditEffect =
       slug: string;
       order_key: string;
       visibility: DocVisibility;
+      seed_blocks: SeedBlock[];
     }
   | { kind: "doc.rename"; doc_id: DocId; title: string }
   | {
