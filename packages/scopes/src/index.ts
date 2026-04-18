@@ -35,6 +35,14 @@ export type Scope = (typeof SCOPES)[number];
 export const CAPABILITY_CATEGORIES = ["mutation", "read", "auth", "admin", "system"] as const;
 export type CapabilityCategory = (typeof CAPABILITY_CATEGORIES)[number];
 
+// ── Surfaces (§5) ──────────────────────────────────────────────────────────
+//
+// Every type-compatible capability is exposed on every listed surface —
+// invariant #4, enforced by the contract-matrix test.
+
+export const SURFACES = ["api", "cli", "mcp", "ui"] as const;
+export type Surface = (typeof SURFACES)[number];
+
 // ── Fidelity tier (ADR 0013) ───────────────────────────────────────────────
 
 export const FIDELITY_TIERS = ["lossless", "directive", "opaque"] as const;

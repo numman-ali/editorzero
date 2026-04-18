@@ -15,6 +15,9 @@ catalogs:
     vitest:
       specifier: ^3.0.0
       version: 3.2.4
+    zod:
+      specifier: ^4.0.0
+      version: 4.3.6
 
 importers:
 
@@ -47,6 +50,31 @@ importers:
       '@editorzero/scopes':
         specifier: workspace:*
         version: link:../scopes
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/node@22.19.17)(tsx@4.21.0)
+
+  packages/capabilities:
+    dependencies:
+      '@editorzero/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@editorzero/ids':
+        specifier: workspace:*
+        version: link:../ids
+      '@editorzero/principal':
+        specifier: workspace:*
+        version: link:../principal
+      '@editorzero/scopes':
+        specifier: workspace:*
+        version: link:../scopes
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -765,6 +793,9 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  zod@4.3.6:
+    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+
 snapshots:
 
   '@biomejs/biome@2.4.12':
@@ -1299,3 +1330,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  zod@4.3.6: {}
