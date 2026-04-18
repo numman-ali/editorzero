@@ -13,8 +13,8 @@
   "scripts": {
     "build": "tsc -b",
     "clean": "tsc -b --clean && rm -rf packages/*/dist apps/*/dist",
-    "typecheck": "tsc -b --noEmit",
-    "typecheck:affected": "pnpm -r --filter \"...[origin/main]\" exec tsc --noEmit",
+    "typecheck": "tsc -b",
+    "typecheck:affected": "pnpm -r --filter \"...[origin/main]\" exec tsc -b",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",

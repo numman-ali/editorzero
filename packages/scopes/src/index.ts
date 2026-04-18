@@ -45,6 +45,11 @@ export type FidelityTier = (typeof FIDELITY_TIERS)[number];
 export const PRINCIPAL_KINDS = ["user", "agent"] as const;
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 
+// ── Workspace role (§3.4) ──────────────────────────────────────────────────
+
+export const ROLES = ["owner", "admin", "member", "guest"] as const;
+export type Role = (typeof ROLES)[number];
+
 // ── Subject kind (§3.11 audit) ─────────────────────────────────────────────
 
 export const SUBJECT_KINDS = [

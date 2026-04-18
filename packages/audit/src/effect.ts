@@ -1,0 +1,304 @@
+/**
+ * `AuditEffect` — discriminated union of every state-mutating audit
+ * effect kind (architecture.md §16.3).
+ *
+ * The replay reducer in `packages/audit/test/replay.prop.ts` must have
+ * a branch for every `kind`; the `audit-effect-exhaustiveness` arch-lint
+ * enforces exhaustive switches at compile time.
+ *
+ * Every row in the Appendix A capability matrix whose "Audit effect kind"
+ * column names a mutation has a corresponding variant here; the coherence
+ * script's stub for `AuditEffect ↔ Appendix A` (scripts/coherence.ts) will
+ * activate once this union is referenced from Appendix A checks.
+ */
+
+import type {
+  AgentId,
+  AttachmentId,
+  BlockId,
+  CollectionId,
+  CommentId,
+  CustomDomainId,
+  DocId,
+  MirrorId,
+  TokenId,
+  UserId,
+  VersionId,
+  WebhookId,
+  WorkspaceId,
+} from "@editorzero/ids";
+import type { Scope } from "@editorzero/scopes";
+import type {
+  BlockPostState,
+  BlockVisibility,
+  DocPurgePreimage,
+  DocVisibility,
+  Role,
+} from "./types";
+
+// prettier-ignore
+export type AuditEffect =
+  // ── Workspace lifecycle (§3.2) ───────────────────────────────────────────
+  | {
+      kind: "workspace.create";
+      workspace_id: WorkspaceId;
+      slug: string;
+      name: string;
+      created_by: UserId;
+    }
+  | {
+      kind: "workspace.update";
+      workspace_id: WorkspaceId;
+      patch: Partial<{ name: string; trash_retention_days: number; settings: unknown }>;
+    }
+  | { kind: "workspace.soft_delete"; workspace_id: WorkspaceId }
+  | { kind: "workspace.restore"; workspace_id: WorkspaceId }
+  | { kind: "workspace.purge"; workspace_id: WorkspaceId; member_count_at_purge: number }
+  | { kind: "member.add"; workspace_id: WorkspaceId; user_id: UserId; role: Role }
+  | { kind: "member.remove"; workspace_id: WorkspaceId; user_id: UserId }
+  | { kind: "member.update_role"; workspace_id: WorkspaceId; user_id: UserId; role: Role }
+  // ── Collection (§3.5) ────────────────────────────────────────────────────
+  | {
+      kind: "collection.create";
+      collection_id: CollectionId;
+      workspace_id: WorkspaceId;
+      parent_id: CollectionId | null;
+      title: string;
+      slug: string;
+      order_key: string;
+    }
+  | {
+      kind: "collection.update";
+      collection_id: CollectionId;
+      patch: Partial<{ title: string; slug: string; order_key: string }>;
+    }
+  | {
+      kind: "collection.move";
+      collection_id: CollectionId;
+      new_parent_id: CollectionId | null;
+      new_order_key: string;
+    }
+  | { kind: "collection.soft_delete"; collection_id: CollectionId }
+  | { kind: "collection.restore"; collection_id: CollectionId }
+  // ── Doc (§3.5) ───────────────────────────────────────────────────────────
+  | {
+      kind: "doc.create";
+      doc_id: DocId;
+      workspace_id: WorkspaceId;
+      collection_id: CollectionId | null;
+      title: string;
+      slug: string;
+      order_key: string;
+      visibility: DocVisibility;
+    }
+  | { kind: "doc.rename"; doc_id: DocId; title: string }
+  | {
+      kind: "doc.move";
+      doc_id: DocId;
+      new_collection_id: CollectionId | null;
+      new_order_key: string;
+    }
+  | { kind: "doc.publish"; doc_id: DocId; published_at: number }
+  | { kind: "doc.unpublish"; doc_id: DocId }
+  | { kind: "doc.soft_delete"; doc_id: DocId }
+  | { kind: "doc.restore"; doc_id: DocId }
+  | { kind: "doc.purge"; preimage: DocPurgePreimage }
+  /** F66/F73 — transient; GC of expired tokens is auditable. */
+  | { kind: "doc.reconcile_base_token"; doc_id: DocId; token: string; expires_at: number }
+  // ── Block (projection state — invariant 3a) ──────────────────────────────
+  | { kind: "block.insert"; doc_id: DocId; post: BlockPostState }
+  | { kind: "block.update"; doc_id: DocId; post: BlockPostState }
+  | { kind: "block.remove"; doc_id: DocId; block_id: BlockId }
+  | { kind: "block.set_visibility"; doc_id: DocId; block_id: BlockId; visibility: BlockVisibility }
+  // ── doc.update batch (F12 + F33) — one audit row per handler invocation ──
+  | {
+      kind: "doc.update_batch";
+      doc_id: DocId;
+      ops: Array<
+        | {
+            op: "insert";
+            block: BlockPostState;
+            after_block_id: BlockId | null;
+            parent_block_id: BlockId | null;
+          }
+        | { op: "update"; block_id: BlockId; post: BlockPostState }
+        | {
+            op: "move";
+            block_id: BlockId;
+            new_parent_block_id: BlockId | null;
+            new_order_key: string;
+          }
+        | { op: "remove"; block_id: BlockId; preimage: BlockPostState }
+        | { op: "set_visibility"; block_id: BlockId; visibility: BlockVisibility }
+      >;
+    }
+  // ── Version (§3.8) ───────────────────────────────────────────────────────
+  | {
+      kind: "version.create";
+      doc_id: DocId;
+      version_id: VersionId;
+      name: string | null;
+      snapshot_seq: number;
+    }
+  | {
+      kind: "version.restore";
+      doc_id: DocId;
+      from_version_id: VersionId;
+      pre_restore_version_id: VersionId;
+      snapshot_seq_before: number;
+      snapshot_seq_after: number;
+    }
+  // ── Comment (§3.9) / Attachment (§3.10) ──────────────────────────────────
+  | {
+      kind: "comment.create";
+      comment_id: CommentId;
+      doc_id: DocId;
+      anchor: unknown;
+      thread_root_id: CommentId | null;
+      body_markdown: string;
+    }
+  | { kind: "comment.update"; comment_id: CommentId; body_markdown: string }
+  | { kind: "comment.resolve"; comment_id: CommentId; resolved_by: UserId | AgentId }
+  | { kind: "comment.soft_delete"; comment_id: CommentId }
+  /** F57/F80 — pending upload; no final blob yet. */
+  | {
+      kind: "attachment.request_upload";
+      upload_id: string;
+      workspace_id: WorkspaceId;
+      storage_key: string;
+      declared_size: number;
+      declared_content_type: string;
+      declared_sha256: string | null;
+      expires_at: number;
+    }
+  /** F57/F80 — upload confirmed; row in `attachments` with content-addressable storage_key. */
+  | {
+      kind: "attachment.confirm_upload";
+      upload_id: string;
+      attachment_id: AttachmentId;
+      storage_key: string;
+      filename: string;
+      content_type: string;
+      bytes: number;
+      sha256: string;
+    }
+  | { kind: "attachment.soft_delete"; attachment_id: AttachmentId }
+  // ── Permissions (§3.12) ──────────────────────────────────────────────────
+  | {
+      kind: "acl.grant";
+      scope: { doc_id: DocId } | { collection_id: CollectionId };
+      subject_kind: "user" | "agent" | "role";
+      subject_id: string;
+      access: "read" | "comment" | "edit" | "admin";
+    }
+  | {
+      kind: "acl.revoke";
+      scope: { doc_id: DocId } | { collection_id: CollectionId };
+      subject_kind: "user" | "agent" | "role";
+      subject_id: string;
+    }
+  // ── Principals (§3.3) ────────────────────────────────────────────────────
+  | { kind: "agent.create"; agent_id: AgentId; owner_user_id: UserId | null; name: string }
+  | { kind: "agent.rename"; agent_id: AgentId; name: string }
+  | { kind: "agent.revoke"; agent_id: AgentId }
+  | {
+      kind: "token.create";
+      token_id: TokenId;
+      bound_to: { agent_id: AgentId } | { user_id: UserId };
+      scopes: Scope[];
+      expires_at: number | null;
+    }
+  | { kind: "token.revoke"; token_id: TokenId }
+  // ── Mirror (§3.15, F50 + F58) ────────────────────────────────────────────
+  | {
+      kind: "mirror.configure";
+      patch: Partial<{
+        remote_url: string;
+        branch: string;
+        auth_kind: string;
+        path_template: string;
+        debounce_ms: number;
+        batch_window_ms: number;
+      }>;
+    }
+  | { kind: "mirror.enable" }
+  | { kind: "mirror.disable" }
+  | {
+      kind: "mirror.reset_state";
+      mirror_id: MirrorId;
+      workspace_id: WorkspaceId;
+      cleared_state: true;
+      reprojected: boolean;
+      touched_credentials: false;
+    }
+  | {
+      kind: "mirror.reset_auth";
+      mirror_id: MirrorId;
+      workspace_id: WorkspaceId;
+      revoked_secret_ref: true;
+      disabled: boolean;
+      cleared_state: false;
+    }
+  // ── Custom domain (§3.2, F50) ────────────────────────────────────────────
+  | { kind: "custom_domain.add"; domain: string }
+  | {
+      kind: "custom_domain.verify";
+      custom_domain_id: CustomDomainId;
+      verification_method: "dns" | "http";
+    }
+  | { kind: "custom_domain.remove"; domain: string }
+  // ── Webhooks (F56, §3.17) ────────────────────────────────────────────────
+  | {
+      kind: "webhook.created";
+      webhook_id: WebhookId;
+      workspace_id: WorkspaceId;
+      url: string;
+      events: string[];
+      resolved_ip: string;
+    }
+  | {
+      kind: "webhook.updated";
+      webhook_id: WebhookId;
+      patch: Partial<{
+        url: string;
+        events: string[];
+        active: boolean;
+        resolved_ip: string;
+        resolution_policy: "manual" | "auto_on_failure";
+      }>;
+    }
+  | { kind: "webhook.deleted"; webhook_id: WebhookId }
+  | {
+      kind: "webhook.rotated";
+      webhook_id: WebhookId;
+      new_secret_version: number;
+      dual_accept_until: number;
+    }
+  | {
+      kind: "webhook.circuit_broken";
+      webhook_id: WebhookId;
+      failure_count: number;
+      broken_at: number;
+    }
+  | {
+      kind: "webhook.test_delivery";
+      webhook_id: WebhookId;
+      delivery_id: string;
+      status: number | null;
+      error: string | null;
+    }
+  // ── Admin actions (F50) — replay is a no-op; enumerated for exhaustiveness
+  | {
+      kind: "admin.reembed_workspace";
+      workspace_id: WorkspaceId;
+      model_from: string;
+      model_to: string;
+    }
+  | { kind: "admin.reindex_workspace"; workspace_id: WorkspaceId; index_kind: "fts" | "hnsw" }
+  | { kind: "admin.evict_doc"; doc_id: DocId }
+  | { kind: "admin.unlock_doc"; doc_id: DocId }
+  | { kind: "admin.job_requeue"; job_id: string; queue: string }
+  | { kind: "admin.job_cancel"; job_id: string; queue: string }
+  | { kind: "admin.queue_pause"; queue: string }
+  | { kind: "admin.queue_resume"; queue: string }
+  | { kind: "admin.secret_rotate"; secret_kind: string; dual_accept_until: number };

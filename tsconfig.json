@@ -5,6 +5,8 @@
   "references": [
     { "path": "./packages/constants" },
     { "path": "./packages/ids" },
-    { "path": "./packages/scopes" }
+    { "path": "./packages/scopes" },
+    { "path": "./packages/audit" },
+    { "path": "./packages/principal" }
   ]
 }

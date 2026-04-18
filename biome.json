@@ -54,12 +54,7 @@
         "useImportType": "error",
         "useConst": "error",
         "noNonNullAssertion": "warn",
-        "useNamingConvention": {
-          "level": "warn",
-          "options": {
-            "strictCase": false
-          }
-        }
+        "useNamingConvention": "off"
       },
       "suspicious": {
         "noExplicitAny": "error",
