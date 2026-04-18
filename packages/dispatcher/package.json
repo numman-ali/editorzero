@@ -20,6 +20,7 @@
   "dependencies": {
     "@editorzero/audit": "workspace:*",
     "@editorzero/capabilities": "workspace:*",
+    "@editorzero/db": "workspace:*",
     "@editorzero/errors": "workspace:*",
     "@editorzero/ids": "workspace:*",
     "@editorzero/observability": "workspace:*",

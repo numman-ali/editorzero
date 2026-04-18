@@ -20,11 +20,12 @@ import {
   createRegistry,
   registerCapability,
 } from "@editorzero/capabilities";
+import { createSqliteDriver, type SqliteDriver } from "@editorzero/db";
 import { PermissionDeniedError, ValidationError } from "@editorzero/errors";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AccessPath, UserPrincipal } from "@editorzero/principal";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { CapabilityContextExtras } from "./index";
 import { createDispatcher, scopeOnlyGate } from "./index";
@@ -58,9 +59,19 @@ function memoryAuditWriter(): AuditWriter & { readonly rows: AuditWriteInput[] }
   };
 }
 
+let driver: SqliteDriver;
+
+beforeEach(() => {
+  driver = createSqliteDriver({ path: ":memory:" });
+});
+
+afterEach(async () => {
+  await driver.close();
+});
+
 function testExtras(): CapabilityContextExtras {
   return {
-    db: { __brand: "TenantScopedDb" },
+    db: driver.scoped(WORKSPACE_ID),
     outbox: () => {
       /* stubbed — tests don't exercise the outbox */
     },

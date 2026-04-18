@@ -8,6 +8,7 @@
   "include": ["src/**/*"],
   "references": [
     { "path": "../audit" },
+    { "path": "../db" },
     { "path": "../ids" },
     { "path": "../observability" },
     { "path": "../principal" },

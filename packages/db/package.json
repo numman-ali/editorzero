@@ -1,5 +1,5 @@
 {
-  "name": "@editorzero/capabilities",
+  "name": "@editorzero/db",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,15 +18,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@editorzero/audit": "workspace:*",
-    "@editorzero/db": "workspace:*",
     "@editorzero/ids": "workspace:*",
-    "@editorzero/observability": "workspace:*",
-    "@editorzero/principal": "workspace:*",
-    "@editorzero/scopes": "workspace:*",
-    "zod": "catalog:"
+    "kysely": "catalog:"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "catalog:",
+    "better-sqlite3": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

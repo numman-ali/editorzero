@@ -11,7 +11,6 @@ export type {
   Deprecation,
   Logger,
   RateLimit,
-  TenantScopedDbHandle,
   Tracer,
   TracerSpan,
 } from "./kernel";

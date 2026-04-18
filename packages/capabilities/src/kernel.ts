@@ -31,6 +31,7 @@ import type {
   DenyReason,
   HandlerError,
 } from "@editorzero/audit";
+import type { TenantScopedDb } from "@editorzero/db";
 import type { CapabilityId, DocId, WorkspaceId } from "@editorzero/ids";
 import type { Logger, Tracer } from "@editorzero/observability";
 import type { Principal } from "@editorzero/principal";
@@ -42,22 +43,12 @@ import type { ZodType } from "zod";
 // not three.
 export type { Logger, Tracer, TracerSpan } from "@editorzero/observability";
 
-// ── Db handle — opaque brand ──────────────────────────────────────────────
-//
-// Concrete type is `TenantScopedDb` from `@editorzero/db`, assembled
-// per-request by auth middleware. The kernel declares only the brand —
-// handlers call methods on `ctx.db` typed in the concrete package.
-// The arch-lint rule `no-raw-kysely-in-capabilities` enforces that
-// handlers never reach past `ctx.db` for the raw driver.
-
-export type TenantScopedDbHandle = { readonly __brand: "TenantScopedDb" };
-
 // ── CapabilityContext (§16.4) ─────────────────────────────────────────────
 
 export interface CapabilityContext<TEditor = unknown> {
   readonly principal: Principal;
   readonly tenant: { readonly workspace_id: WorkspaceId };
-  readonly db: TenantScopedDbHandle;
+  readonly db: TenantScopedDb;
 
   /**
    * The only path to Y.Doc mutation (invariant 7 + ADR 0018). Calls the
