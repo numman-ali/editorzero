@@ -84,13 +84,17 @@ describe("paragraph.toMarkdown", () => {
     expect(md).toBe("plain **bold** and *ital*");
   });
 
-  it("emits the empty-paragraph sentinel (U+00A0) for an empty content array", () => {
-    // CommonMark has no representation for an empty paragraph — a
-    // blank line is a block separator. U+00A0 (NBSP) is literal text,
-    // so `toMarkdown([]) → "\u00a0"` reparses as a paragraph whose
-    // `fromMarkdown` restores the empty content array.
+  it("emits the empty string for an empty content array (outside lossless tier)", () => {
+    // CommonMark has no spelling for an empty paragraph: any invented
+    // sentinel (NBSP, ZWSP, etc.) collides with legitimate content
+    // that happens to contain those code points, which is worse than
+    // the lossy empty-string behaviour. The document-level serializer
+    // handles empty-paragraph spacing by joining non-empty paragraphs
+    // with blank lines — this block-level carve-out is what lets that
+    // document-level logic own the correct behaviour. See paragraph.ts
+    // file header for the full rationale.
     const md = paragraph.toMarkdown(makeParagraph([]));
-    expect(md).toBe("\u00a0");
+    expect(md).toBe("");
   });
 
   it("escapes a leading `>` to prevent blockquote parse", () => {
@@ -126,6 +130,35 @@ describe("paragraph.toMarkdown", () => {
   it("escapes a bare `---` line (thematic break opener)", () => {
     const md = paragraph.toMarkdown(makeParagraph([textNode("---")]));
     expect(md).toBe("\\---");
+  });
+
+  it("escapes a blockquote marker preceded by 1–3 leading spaces", () => {
+    // CommonMark still recognizes `> ` as a blockquote opener after
+    // up to 3 leading spaces; the escape has to land on the `>` while
+    // preserving the indent verbatim.
+    const md = paragraph.toMarkdown(makeParagraph([textNode("   > quoted")]));
+    expect(md).toBe("   \\> quoted");
+  });
+
+  it("escapes an ordered-list marker preceded by leading spaces", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode(" 1. item")]));
+    expect(md).toBe(" 1\\. item");
+  });
+
+  it("escapes an ATX heading marker preceded by 2 leading spaces", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("  ## still a paragraph")]));
+    expect(md).toBe("  \\## still a paragraph");
+  });
+
+  it("does not add a block-level escape after 4+ leading spaces (those become indented code; out of scope)", () => {
+    // 4+ spaces is CommonMark's indented-code trigger, which this
+    // serializer does NOT handle — escaping here would collide with
+    // emphasis boundary-whitespace handling. Documented in
+    // `paragraph.ts` as an explicit carve-out; the property harness
+    // will not fuzz this shape. The `>` backslash comes from the
+    // inline escape set, not the block-opener escaper.
+    const md = paragraph.toMarkdown(makeParagraph([textNode("    > not escaped")]));
+    expect(md).toBe("    \\> not escaped");
   });
 
   it("leaves a normal paragraph start unchanged", () => {
@@ -216,20 +249,6 @@ describe("paragraph round-trip (fromMarkdown(toMarkdown) is the fixed point)", (
       children: [{ type: "text", value: md }],
     } as never) as LooseBlock;
     expect(roundtripped.content).toEqual(start.content);
-  });
-
-  it("empty content", () => {
-    // `toMarkdown` returns the NBSP sentinel; a real CommonMark
-    // parser represents that as a paragraph containing one text node
-    // with value `"\u00a0"`, which is exactly what `fromMarkdown`
-    // collapses back to `content: []`.
-    const start = makeParagraph([]);
-    const md = paragraph.toMarkdown(start);
-    const roundtripped = paragraph.fromMarkdown({
-      type: "paragraph",
-      children: [{ type: "text", value: md }],
-    } as never) as LooseBlock;
-    expect(roundtripped.content).toEqual([]);
   });
 
   it("text starting with a blockquote character", () => {
