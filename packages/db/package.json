@@ -20,6 +20,7 @@
   "dependencies": {
     "@editorzero/audit": "workspace:*",
     "@editorzero/ids": "workspace:*",
+    "@editorzero/principal": "workspace:*",
     "@editorzero/scopes": "workspace:*",
     "kysely": "catalog:"
   },

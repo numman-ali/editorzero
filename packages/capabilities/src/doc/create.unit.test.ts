@@ -322,12 +322,10 @@ describe("doc.create — agent principal attribution", () => {
     }
   });
 
-  it("does not leave a docs row when attribution fails (seed-first ordering)", async () => {
-    // `resolveCreatedBy` throws before the seed step runs, so no seed
-    // happens and no docs row lands. The explicit assertion pins the
-    // write-order invariant: a P1-level Codex finding was that the
-    // previous order (insert→seed) could leak orphan docs rows; the
-    // fix reverses to seed→insert *and* fails-fast on attribution.
+  it("does not leave a docs row when attribution fails (fail-fast before any write)", async () => {
+    // `resolveCreatedBy` throws before either the docs INSERT or the
+    // `ctx.transact` seed runs. No partial state lands regardless of
+    // ordering or whether a dispatcher tx is in scope.
     const principal = agentPrincipal({ owner: null });
     const ctx = buildCtx(principal);
     await expect(docCreate.handler(ctx, { title: "Orphan" })).rejects.toBeInstanceOf(
@@ -337,24 +335,15 @@ describe("doc.create — agent principal attribution", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("does not leave a docs row when the seed step throws (seed-first ordering)", async () => {
-    // Wire a transact stub that throws to simulate a sync-service
-    // failure. With seed-before-insert, the docs INSERT never runs —
-    // `doc.list` is unchanged on retry. If we reversed the order, this
-    // test would fail with `rows.length === 1`: an orphan doc.
-    const principal = userPrincipal();
-    const ctx: CapabilityContext = {
-      ...buildCtx(principal),
-      transact: async () => {
-        throw new Error("simulated sync failure");
-      },
-    };
-    await expect(docCreate.handler(ctx, { title: "Boom" })).rejects.toThrow(
-      /simulated sync failure/,
-    );
-    const rows = await driver.scoped(WORKSPACE_A).selectFrom("docs").selectAll().execute();
-    expect(rows).toHaveLength(0);
-  });
+  // The "orphan docs row on seed failure" invariant moved from in-
+  // handler ordering (seed-first, insert-second) to the dispatcher's
+  // write-path tx (P3.6b) once the CRDT persist started going through
+  // SQL via `DocUpdatesWriter` (P3.6c). `doc.create` now runs
+  // insert-first, seed-second; a `ctx.transact` failure rolls back the
+  // whole tx including the `docs` INSERT. That atomicity is covered by
+  // `packages/dispatcher/src/writepath.integration.test.ts`; pinning
+  // it here with a stubbed `transact` would just assert the stub, not
+  // the production invariant.
 });
 
 // ── Registry metadata + audit projections ─────────────────────────────────

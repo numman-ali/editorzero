@@ -23,5 +23,6 @@ export {
   readBlocks,
   seedBlocks,
 } from "./blocks";
+export { HocuspocusSync, type HocuspocusSyncDeps, type HocuspocusTxContext } from "./hocuspocus";
 export { MemorySyncService } from "./memory";
 export type { SyncService } from "./service";

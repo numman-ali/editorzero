@@ -27,6 +27,7 @@ import {
 import {
   asAuditTx,
   createSqliteAuditWriter,
+  createSqliteDocUpdatesWriter,
   createSqliteDriver,
   createTenantScopedDb,
   FULL_DDL,
@@ -36,7 +37,9 @@ import { PermissionDeniedError } from "@editorzero/errors";
 import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AccessPath, UserPrincipal } from "@editorzero/principal";
+import { HocuspocusSync } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type * as Y from "yjs";
 import { z } from "zod";
 import type { CapabilityContextExtras } from "./index";
 import { createDispatcher, scopeOnlyGate } from "./index";
@@ -65,13 +68,16 @@ interface DocCountOutput {
 }
 
 let driver: SqliteDriver;
+let hocuspocus: HocuspocusSync | null = null;
 
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(FULL_DDL);
+  hocuspocus = null;
 });
 
 afterEach(async () => {
+  if (hocuspocus !== null) await hocuspocus.close();
   await driver.close();
 });
 
@@ -280,6 +286,200 @@ async function fetchAuditEvents(): Promise<
     .execute();
 }
 
+async function fetchDocUpdates(
+  doc_id: DocId,
+): Promise<Array<{ seq: number; update_blob: Uint8Array }>> {
+  return driver
+    .system()
+    .selectFrom("doc_updates")
+    .select(["seq", "update_blob"])
+    .where("doc_id", "=", doc_id)
+    .orderBy("seq", "asc")
+    .execute();
+}
+
+async function fetchOutbox(): Promise<Array<{ event: string; payload: string }>> {
+  return driver.system().selectFrom("outbox").select(["event", "payload"]).execute();
+}
+
+async function seedExistingDoc(doc_id: DocId): Promise<void> {
+  // Pre-seed only the `docs` row — stand-in for `doc.create`'s handler
+  // INSERT (already exercised in the SQL-only tests above). The
+  // `DocUpdatesWriter` auto-bootstraps `doc_counters` on first write
+  // via ON CONFLICT DO NOTHING, so the content-mutation fixtures below
+  // don't need a separate priming step. The FK
+  // `doc_counters.doc_id REFERENCES docs(id)` enforces the docs-first
+  // order the real pipeline preserves (writer hits the FK if the docs
+  // row is missing — same shape we assert for raw
+  // `HocuspocusSync.transact` in the sync integration tests).
+  const now = Date.now();
+  await driver
+    .system()
+    .insertInto("docs")
+    .values({
+      id: doc_id,
+      workspace_id: WORKSPACE_ID,
+      collection_id: null,
+      title: "seed",
+      slug: "seed",
+      order_key: "a",
+      visibility: "workspace",
+      visibility_version: 0,
+      created_by: USER_ID,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+    })
+    .execute();
+}
+
+// ── Content-mutation fixture (P3.6c) ─────────────────────────────────────
+//
+// Capability that exercises the full content-mutation write path:
+// (1) UPDATEs the existing `docs` row via `ctx.db`, (2) calls
+// `ctx.transact(doc_id, fn)` to mutate the Y.Doc — the writer auto-
+// bootstraps `doc_counters` on first write. A variant
+// `bodyAfterTransact` injects allow / throw / output-violation
+// behaviours — mirroring the `buildDocInsertCapability` shape for the
+// SQL-only write-path tests above.
+
+const DOC_MUTATE_ID = CapabilityId("doc.mutate_fixture");
+
+interface DocMutateInput {
+  readonly doc_id: string;
+  readonly text: string;
+}
+interface DocMutateOutput {
+  readonly doc_id: string;
+  readonly text: string;
+}
+
+function buildDocMutateCapability(
+  bodyAfterTransact: (ctx: CapabilityContext, input: DocMutateInput) => Promise<DocMutateOutput>,
+  overrides: Partial<Pick<Capability<DocMutateInput, DocMutateOutput>, "requires">> = {},
+): Capability<DocMutateInput, DocMutateOutput> {
+  return {
+    id: DOC_MUTATE_ID,
+    category: "mutation",
+    summary: "integration fixture: open ctx.transact + write Y.Doc text",
+    input: z.object({ doc_id: z.string(), text: z.string() }),
+    output: z.object({ doc_id: z.string(), text: z.string() }),
+    requires: overrides.requires ?? ["doc:write"],
+    audit: {
+      subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
+      effectOnAllow: (input) => ({
+        kind: "doc.rename",
+        doc_id: DocId(input.doc_id),
+        title: input.text,
+      }),
+      effectOnDeny: (_input, reason) => ({
+        kind: "deny",
+        capability: DOC_MUTATE_ID,
+        required_scopes: ["doc:write"],
+        reason_code: reason.kind,
+      }),
+      effectOnError: () => ({
+        kind: "error",
+        capability: DOC_MUTATE_ID,
+        error_code: "internal",
+        retriable: false,
+      }),
+      collapsePolicy: { collapsible: false },
+    },
+    surfaces: ["api"],
+    handler: async (ctx, input) => {
+      // Metadata-side write: bump the `updated_at` on the existing
+      // `docs` row via `ctx.db`. Tenant-scoping plugin enforces
+      // `workspace_id` = principal's workspace (F86 + F87). The write
+      // is in the same tx as the `ctx.transact` call below; an update
+      // here verifies that metadata mutations and CRDT mutations
+      // commit atomically.
+      await ctx.db
+        .updateTable("docs")
+        .set({ title: input.text, updated_at: Date.now() })
+        .where("id", "=", DocId(input.doc_id))
+        .execute();
+      // CRDT content mutation through `ctx.transact`. Writes one
+      // `doc_updates` row + one `outbox(doc.updated)` row via the
+      // sync package's bound writer — inside the same SQL tx the
+      // dispatcher opened for the `docs` UPDATE above. The
+      // `doc_counters` row auto-bootstraps on this first write (ON
+      // CONFLICT DO NOTHING inside the writer); no external priming
+      // step is needed.
+      await ctx.transact(DocId(input.doc_id), (editor) => {
+        (editor as unknown as Y.Doc).getText("body").insert(0, input.text);
+      });
+      return bodyAfterTransact(ctx, input);
+    },
+  };
+}
+
+interface ContentMountResult {
+  dispatcher: ReturnType<typeof createDispatcher>;
+  runners: RunnerCounts;
+  hocuspocus: HocuspocusSync;
+}
+
+function mountContentDispatcher<I, O>(capability: Capability<I, O>): ContentMountResult {
+  const registry = createRegistry([registerCapability(capability)]);
+  const auditWriter = createSqliteAuditWriter();
+  const docUpdatesWriter = createSqliteDocUpdatesWriter();
+  const sync = new HocuspocusSync({ docUpdatesWriter });
+  hocuspocus = sync;
+  const runners: RunnerCounts = { writeTx: 0, read: 0 };
+  let tick = 0;
+  const dispatcher = createDispatcher({
+    registry,
+    gate: scopeOnlyGate(),
+    auditWriter,
+    tracer: noopTracer,
+    logger: noopLogger,
+    now: () => {
+      tick += 1;
+      return tick;
+    },
+    runInWriteTx: async (principal, fn) => {
+      runners.writeTx += 1;
+      return driver.withSystemTx(async (tx) => {
+        const auditTx = asAuditTx(tx);
+        // `hocuspocus.bind(ctx)` hands back a tx-bound `SyncService`
+        // whose `transact` closes over `auditTx` so the
+        // `DocUpdatesWriter.write` call commits inside the same SQL
+        // tx as the handler's `ctx.db` writes and the allow audit
+        // row. One `bind` per dispatcher invocation.
+        const bound = sync.bind({
+          sqlTx: auditTx,
+          principal,
+          workspace_id: principal.workspace_id,
+        });
+        const extras: CapabilityContextExtras = {
+          db: createTenantScopedDb(tx, principal.workspace_id),
+          outbox: () => {
+            /* handler-emitted outbox rows land in P3.6d */
+          },
+          transact: bound.transact.bind(bound),
+        };
+        return fn(extras, auditTx);
+      });
+    },
+    runRead: async (principal, fn) => {
+      runners.read += 1;
+      const extras: CapabilityContextExtras = {
+        db: driver.scoped(principal.workspace_id),
+        outbox: () => {
+          /* reads do not emit */
+        },
+        transact: async () => {
+          throw new Error("reads must not call ctx.transact");
+        },
+      };
+      return fn(extras);
+    },
+    withAuditTx: (fn) => driver.withSystemTx((tx) => fn(asAuditTx(tx))),
+  });
+  return { dispatcher, runners, hocuspocus: sync };
+}
+
 // ── Scenarios ─────────────────────────────────────────────────────────────
 
 describe("write-path tx primitive (F31)", () => {
@@ -477,5 +677,171 @@ describe("write-path tx primitive (F31)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.outcome).toBe("allow");
     expect(rows[0]?.capability_id).toBe(DOC_COUNT_ID);
+  });
+});
+
+// ── P3.6c: content-mutation atomicity (invariant 7 end-to-end) ────────────
+//
+// Closes the atomicity window ADR 0018 F31 opened. A capability that
+// calls `ctx.transact` must commit its CRDT write (`doc_updates` +
+// `outbox(doc.updated)`) in the SAME SQL tx as its metadata writes
+// (`docs` INSERT) and the dispatcher's `allow` audit row. Handler
+// throw after `ctx.transact` → entire tuple rolls back.
+
+describe("write-path tx + content mutation (P3.6c)", () => {
+  it("allow: docs UPDATE + doc_updates + outbox + audit row commit atomically", async () => {
+    const { dispatcher } = mountContentDispatcher(
+      buildDocMutateCapability(async (_ctx, input) => ({
+        doc_id: input.doc_id,
+        text: input.text,
+      })),
+    );
+    await seedExistingDoc(DocId(DOC_ID_A));
+
+    await dispatcher.dispatch({
+      capability_id: DOC_MUTATE_ID,
+      input: { doc_id: DOC_ID_A, text: "hello" },
+      principal: testUser(),
+      access: testAccess(),
+      trace_id: null,
+    });
+
+    // Docs row updated (pre-seeded `title = "seed"`, now "hello").
+    const docRow = await driver
+      .system()
+      .selectFrom("docs")
+      .select("title")
+      .where("id", "=", DocId(DOC_ID_A))
+      .executeTakeFirstOrThrow();
+    expect(docRow.title).toBe("hello");
+    const updates = await fetchDocUpdates(DocId(DOC_ID_A));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.seq).toBe(1);
+    expect(updates[0]?.update_blob.length).toBeGreaterThan(0);
+
+    const outbox = await fetchOutbox();
+    // One `doc.updated` row from the sync writer. `audit.appended`
+    // landing in the same tx is P3.6d's dispatcher-side addition;
+    // until then the outbox has exactly one row.
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.event).toBe("doc.updated");
+
+    const audit = await fetchAuditEvents();
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.outcome).toBe("allow");
+    expect(audit[0]?.capability_id).toBe(DOC_MUTATE_ID);
+  });
+
+  it("handler throws after ctx.transact: docs UPDATE + doc_updates + outbox all roll back; error audit persists", async () => {
+    const { dispatcher } = mountContentDispatcher(
+      buildDocMutateCapability(async () => {
+        // Thrown AFTER `ctx.transact` succeeded — the stored update
+        // blob must not leak into `doc_updates` outside the
+        // committed window.
+        throw new Error("handler boom after transact");
+      }),
+    );
+    await seedExistingDoc(DocId(DOC_ID_A));
+
+    await expect(
+      dispatcher.dispatch({
+        capability_id: DOC_MUTATE_ID,
+        input: { doc_id: DOC_ID_A, text: "hello" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      }),
+    ).rejects.toThrow(/boom after transact/);
+
+    // Docs pre-seeded title was "seed"; the handler's UPDATE inside
+    // the tx should have been rolled back. `countDocs` still 1 (doc
+    // itself wasn't deleted — the UPDATE was; rollback reverts the
+    // title change).
+    const docRow = await driver
+      .system()
+      .selectFrom("docs")
+      .select("title")
+      .where("id", "=", DocId(DOC_ID_A))
+      .executeTakeFirstOrThrow();
+    expect(docRow.title).toBe("seed");
+    expect(await fetchDocUpdates(DocId(DOC_ID_A))).toHaveLength(0);
+    expect(await fetchOutbox()).toHaveLength(0);
+    // Error audit still lands — `withAuditTx` opens its own
+    // short-lived tx after the write-path tx rolls back.
+    const audit = await fetchAuditEvents();
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.outcome).toBe("error");
+  });
+
+  it("output shape violation after ctx.transact: entire tuple rolls back", async () => {
+    const { dispatcher } = mountContentDispatcher(
+      buildDocMutateCapability(
+        // Handler returns a value zod will reject (missing `text`).
+        // biome-ignore lint/suspicious/noExplicitAny: handler invariant test.
+        (async (): Promise<any> => ({ doc_id: "abc" })) as never,
+      ),
+    );
+    await seedExistingDoc(DocId(DOC_ID_A));
+
+    await expect(
+      dispatcher.dispatch({
+        capability_id: DOC_MUTATE_ID,
+        input: { doc_id: DOC_ID_A, text: "hello" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      }),
+    ).rejects.toThrow();
+
+    const docRow = await driver
+      .system()
+      .selectFrom("docs")
+      .select("title")
+      .where("id", "=", DocId(DOC_ID_A))
+      .executeTakeFirstOrThrow();
+    expect(docRow.title).toBe("seed");
+    expect(await fetchDocUpdates(DocId(DOC_ID_A))).toHaveLength(0);
+    expect(await fetchOutbox()).toHaveLength(0);
+    const audit = await fetchAuditEvents();
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.outcome).toBe("error");
+  });
+
+  it("post-parse deny after ctx.transact: entire tuple rolls back; deny audit persists", async () => {
+    const { dispatcher } = mountContentDispatcher(
+      buildDocMutateCapability(async () => {
+        // Handler-owned deny decision (F88) — dispatcher recognises
+        // the rethrow and rolls back the write-path tx. Deny audit
+        // lands in a separate short-lived tx.
+        throw new PermissionDeniedError({
+          reason: { kind: "acl_deny", scope: { doc_id: DocId(DOC_ID_A) } },
+        });
+      }),
+    );
+    await seedExistingDoc(DocId(DOC_ID_A));
+
+    await expect(
+      dispatcher.dispatch({
+        capability_id: DOC_MUTATE_ID,
+        input: { doc_id: DOC_ID_A, text: "hello" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      }),
+    ).rejects.toBeInstanceOf(PermissionDeniedError);
+
+    const docRow = await driver
+      .system()
+      .selectFrom("docs")
+      .select("title")
+      .where("id", "=", DocId(DOC_ID_A))
+      .executeTakeFirstOrThrow();
+    expect(docRow.title).toBe("seed");
+    expect(await fetchDocUpdates(DocId(DOC_ID_A))).toHaveLength(0);
+    expect(await fetchOutbox()).toHaveLength(0);
+    const audit = await fetchAuditEvents();
+    expect(audit).toHaveLength(1);
+    expect(audit[0]?.outcome).toBe("deny");
+    expect(audit[0]?.deny_reason).toBe("acl_deny");
   });
 });

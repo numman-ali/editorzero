@@ -11,6 +11,12 @@
  */
 
 export { asAuditTx, createSqliteAuditWriter } from "./audit-writer";
+export {
+  createSqliteDocUpdatesWriter,
+  type DocUpdatesWriter,
+  type DocUpdateWriteInput,
+  type DocUpdateWriteResult,
+} from "./doc-updates-writer";
 export type { SqliteDriver, SqliteDriverOptions } from "./drivers/sqlite";
 export { createSqliteDriver } from "./drivers/sqlite";
 export {

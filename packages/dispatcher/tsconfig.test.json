@@ -4,5 +4,16 @@
     "noEmit": true,
     "tsBuildInfoFile": "./.tsbuildinfo.test"
   },
+  "references": [
+    { "path": "../audit" },
+    { "path": "../capabilities" },
+    { "path": "../db" },
+    { "path": "../errors" },
+    { "path": "../ids" },
+    { "path": "../observability" },
+    { "path": "../principal" },
+    { "path": "../scopes" },
+    { "path": "../sync" }
+  ],
   "exclude": ["node_modules", "dist"]
 }

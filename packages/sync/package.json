@@ -19,10 +19,19 @@
   },
   "dependencies": {
     "@blocknote/core": "^0.48.0",
+    "@editorzero/audit": "workspace:*",
+    "@editorzero/constants": "workspace:*",
+    "@editorzero/db": "workspace:*",
     "@editorzero/ids": "workspace:*",
+    "@editorzero/principal": "workspace:*",
+    "@hocuspocus/server": "3.4.4",
     "yjs": "catalog:"
   },
   "devDependencies": {
+    "@editorzero/errors": "workspace:*",
+    "@editorzero/scopes": "workspace:*",
+    "@types/better-sqlite3": "catalog:",
+    "better-sqlite3": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

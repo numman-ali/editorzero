@@ -29,7 +29,9 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@editorzero/sync": "workspace:*",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "yjs": "catalog:"
   }
 }

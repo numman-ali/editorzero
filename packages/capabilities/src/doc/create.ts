@@ -320,31 +320,28 @@ export const docCreate: Capability<Input, Output> = {
     const now = ctx.now();
     const created_by = resolveCreatedBy(ctx.principal);
 
-    // Order-of-writes: seed the CRDT FIRST, then INSERT the docs row.
+    // Order-of-writes: INSERT the docs row FIRST, then seed the CRDT.
     //
-    // The slice does not yet have the ADR 0018 unified write-path tx
-    // that atomically couples `ctx.db` mutations to `ctx.transact`; the
-    // dispatcher runs the handler outside any shared tx (Phase 3.6
-    // resolves this with the empirical-verification gate). Given that:
+    // This ordering is what the unified write-path tx (P3.6b) plus the
+    // Hocuspocus-backed sync service (P3.6c) require. The
+    // `DocUpdatesWriter` that `ctx.transact` calls through persists
+    // `doc_updates` + `outbox(doc.updated)` + an auto-bootstrapped
+    // `doc_counters` row — all of which carry foreign keys back to
+    // `docs(id)`. With the docs row absent at `ctx.transact` time, the
+    // FK on `doc_counters.doc_id` (auto-bootstrap INSERT) or on
+    // `doc_updates(doc_id, workspace_id)` (the update row itself) would
+    // fail before any partial state can land.
     //
-    //   • Seed-first, insert-second: if the seed throws, no docs row
-    //     ever lands — doc.list is unchanged, retry is clean. If the
-    //     docs INSERT fails after seed, the Y.Doc is orphaned in
-    //     `MemorySyncService`'s Map and GC's on `close()`. A future
-    //     `HocuspocusSyncService` would produce an orphan whose
-    //     `doc_updates` INSERT would fail the composite FK
-    //     `(doc_id, workspace_id) REFERENCES docs(id, workspace_id)`
-    //     on the next `onStoreDocument` flush — the orphan can't leak
-    //     into durable storage.
-    //
-    //   • Insert-first, seed-second (the alternative): a failed seed
-    //     would leave a `docs` row that `doc.list` returns but has no
-    //     CRDT state — a visible ghost doc. Worse user-facing failure
-    //     mode than the orphan above.
-    //
-    // When the unified write-path tx lands (Phase 3.6), both steps
-    // collapse into one atomic region and the ordering becomes
-    // irrelevant; until then, seed-first is the safe side to fail on.
+    // Closes Codex P3.6c adversarial P3: the previous "seed-first,
+    // insert-second" ordering — safe when `MemorySyncService` was the
+    // only backend and `ctx.transact` never touched SQL — becomes
+    // incompatible with the Hocuspocus-backed writer. Flipping the
+    // order is safe under the P3.6b write-path tx because both writes
+    // now live in the same `BEGIN IMMEDIATE` region: any failure
+    // between them rolls back both rows. No visible-ghost-doc risk,
+    // no orphan Y.Doc risk (rollback abandons the in-memory mutation;
+    // P3.6e wires `onLoadDocument` so a subsequent read rehydrates
+    // cleanly from `doc_updates`).
     //
     // Kernel `TEditor` is `unknown` today (kernel.ts header); the
     // runtime ctx.transact hands us the Y.Doc that `@editorzero/sync`
@@ -372,20 +369,6 @@ export const docCreate: Capability<Input, Output> = {
     // A later `doc.rename` / `doc.update` that references these IDs has
     // a stable audit-recorded target, not a BlockNote-internal id the
     // trail never saw.
-    const seed_blocks: SeedBlock[] = [
-      { id: generateBlockId(), type: "heading", props: { level: 1 }, content: title },
-      { id: generateBlockId(), type: "paragraph", content: "" },
-    ];
-    const seed = seed_blocks.map((b) => ({
-      id: b.id,
-      type: b.type,
-      props: b.props,
-      content: b.content,
-    })) as unknown as LoosePartialBlock[];
-    await ctx.transact(doc_id, (editor) => {
-      seedBlocks(editor as Y.Doc, seed);
-    });
-
     await ctx.db
       .insertInto("docs")
       .values({
@@ -404,27 +387,25 @@ export const docCreate: Capability<Input, Output> = {
       })
       .execute();
 
-    // **One known structural gap remaining — closes at Phase 3.6
-    // (dispatcher write-path tx).**
-    //
-    // `doc_counters` row is NOT primed here. Architecture.md §6.4
-    // mandates a `doc_counters(doc_id, next_seq=1)` INSERT in the same
-    // tx as the `docs` INSERT, so the seq allocator that
-    // `HocuspocusSyncService.onStoreDocument` uses finds a row on the
-    // first `doc_updates` write. F98 narrows `TenantScopedDb` to hide
-    // `doc_counters` from handlers (it lives on `SystemDatabase`), so
-    // there is no handler-surface path to prime the counter today; this
-    // slice's `MemorySyncService` never writes `doc_updates`, so the
-    // missing row is currently inert. The Phase 3.6 write-path-tx
-    // commit (ADR 0018 empirical verification) lands the dispatcher-
-    // owned tx that INSERTs both rows atomically — at that point the
-    // dispatcher primes the counter when it sees a `doc.create` audit
-    // effect land, and the handler continues to stay on the narrow
-    // tenant-scoped DB. Codex F104 P2 — deferred with the fix scope
-    // named; property tests in Phase 3.6 lock the invariant after the
-    // tx lands. (Reintroducing the INSERT directly from here would
-    // reopen the F98 handler-vs-system-DB boundary for a gap that
-    // doesn't yet bite.)
+    const seed_blocks: SeedBlock[] = [
+      { id: generateBlockId(), type: "heading", props: { level: 1 }, content: title },
+      { id: generateBlockId(), type: "paragraph", content: "" },
+    ];
+    const seed = seed_blocks.map((b) => ({
+      id: b.id,
+      type: b.type,
+      props: b.props,
+      content: b.content,
+    })) as unknown as LoosePartialBlock[];
+    await ctx.transact(doc_id, (editor) => {
+      seedBlocks(editor as Y.Doc, seed);
+    });
+    // The `DocUpdatesWriter` auto-bootstraps `doc_counters(doc_id,
+    // next_seq=1)` inside the write-path tx on the first write (closes
+    // F104 P2 / Codex P3.6c adversarial P3): no dispatcher-side priming
+    // step needed, no handler-surface exposure of the system-only
+    // `doc_counters` table (F98), and the bootstrap is tx-local so a
+    // rolled-back `doc.create` leaves no orphan counter.
 
     return {
       doc_id,
