@@ -299,6 +299,9 @@ importers:
 
   packages/sync:
     dependencies:
+      '@blocknote/core':
+        specifier: ^0.48.0
+        version: 0.48.1(@types/hast@3.0.4)
       '@editorzero/ids':
         specifier: workspace:*
         version: link:../ids

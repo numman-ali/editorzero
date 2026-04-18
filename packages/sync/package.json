@@ -18,6 +18,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@blocknote/core": "^0.48.0",
     "@editorzero/ids": "workspace:*",
     "yjs": "catalog:"
   },
