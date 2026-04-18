@@ -8,17 +8,21 @@
 
 **Phase 2 (architecture) CLOSED 2026-04-18.** Three red-team passes (F1–F30 / F31–F53 / F54–F84, cross-model Opus + Codex on pass-3) all applied. Architecture stabilized at ~2616 lines; ADRs 0004, 0006, 0007, 0014, 0016, 0018 updated to match; AGENTS.md invariants refined; disposition docs under `docs/adr/red-team-phase-{1,2,3}.md`. Phase 3 (verification harness) open.
 
-## Immediate focus — Phase 3 kickoff
+## Immediate focus — red-team pass #4 dispositions
 
-**Harness before features.** Order matters here — every Phase 3 item is a drift-prevention primitive before it's a feature-enabling primitive.
+**Pausing the "create doc, read doc" slice to close three BLOCKERs Codex surfaced in the first pass against landed code** (`docs/adr/red-team-phase-4.md`). All three are "claim true in prose, not yet true in code" — typecheck hole claim was false, cross-tenant leak via independent `DispatchInvocation` inputs, and the WorkspaceScopingPlugin is neither alias-aware nor join-aware. Plus 4 HIGH / 1 MEDIUM / 1 LOW behind them.
 
-1. **Monorepo scaffold + pre-commit hooks.** `packages/{config,capabilities,dispatcher,auth,auth-service,scopes,constants,webhooks,…}` per architecture.md §16.1. Biome + tsc pre-commit; fast path (types + lint + affected unit) + slow path (property + integration + contract + e2e + smoke) on pre-push.
-2. **Coherence script at pre-commit** (the drift-prevention investment I flagged to @numman, 2026-04-17). ~100 lines of TS that greps: section references exist, capability IDs in Appendix A ↔ registry ↔ `AuditEffect` union match 1:1, numeric constants referenced by name (no duplicated literals across docs), ADR cross-refs exist. Fails the commit on divergence. Not a framework — a script.
-3. **`packages/constants/`** — single source of truth for numeric floors (72h tombstone, 100MB attachment cap, 500 updates/sec, …). Docs cite named constants, not literals.
-4. **Typed invariant enumerations** — `METADATA_ONLY_CAPABILITIES = [...] as const`. AGENTS.md + §6.5 + §17.1 reference the const name. Contract test asserts list matches `capability.category`.
-5. **"Create doc, read doc" end-to-end slice** across all four surfaces with the verification stack green (types → lint → unit → property → integration-both-drivers → contract → e2e → smoke → OTel).
-6. **Open verification from ADR 0018** — prototype `BlockNoteEditor.create({ collaboration }) inside openDirectConnection.transact()` under concurrent human+agent edits; close the open-question in the ADR with empirical evidence or revise.
-7. **Appendix C entry checklist** (architecture.md) — work down the list; each item is green before Phase 3 exits.
+The disposition doc is the durable work-plan. Each finding lands as one commit; disposition table's "Applied" column gets updated per commit with `YYYY-MM-DD <sha>`. Task IDs #42, #44–#51 track the individual fixes.
+
+Once F85–F93 close, the original Phase 3 focus resumes:
+
+1. **Monorepo scaffold + pre-commit hooks.** Foundational packages + hooks mostly landed; remaining infra (sync, auth-service, api-server, contract-tests, e2e) pulled in lazily as P3.5 sub-slices demand.
+2. **Coherence script at pre-commit** — active but with stub checks; F89 closes the stub/claim gap.
+3. **`packages/constants/`** — active; F93 brings `doc.list` into compliance.
+4. **Typed invariant enumerations** — active (`METADATA_ONLY_CAPABILITIES`, `SCOPES`, `FIDELITY_TIERS`, …).
+5. **"Create doc, read doc" end-to-end slice** — resumes post-disposition with sync, blocks-impl, auth-service, doc.create, doc.read, surfaces, contract tests.
+6. **Open verification from ADR 0018** — empirical Y.Doc write-path verification (Phase 3 exit gate).
+7. **Appendix C entry checklist** (architecture.md) — each item green before Phase 3 exits.
 
 ## Drift-prevention posture (new, Phase 3 onward)
 

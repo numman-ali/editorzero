@@ -58,4 +58,7 @@ All ADRs are **Accepted (v2, post-refresh)** as of 2026-04-17 unless noted. The 
 ## Review trails
 
 - [`red-team-phase-1.md`](red-team-phase-1.md) — Phase 1 v1 red-team: 25 findings, 22 accepted, 3 partially accepted or rebutted with reasoning.
+- [`red-team-phase-2.md`](red-team-phase-2.md) — Phase 2 pass-2: F31–F53 (all applied).
+- [`red-team-phase-3.md`](red-team-phase-3.md) — Phase 2 pass-3 (cross-model Opus + Codex): F54–F84 (all applied).
+- [`red-team-phase-4.md`](red-team-phase-4.md) — Phase 3 first pass against landed code (Codex): F85–F97 (3 BLOCKER, 4 HIGH, 1 MEDIUM, 1 LOW, 4 UNUSUAL-GOOD). **In progress.**
 - [`refresh-research-phase-1.md`](refresh-research-phase-1.md) — Phase 1 v2 refresh: 8 Opus sub-agent memos; substantive changes to ADRs 0002/0004/0005/0006/0007/0008/0009/0010/0012/0013/0016/0018; new ADR 0020.
