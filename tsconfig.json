@@ -14,6 +14,7 @@
     { "path": "./packages/dispatcher" },
     { "path": "./packages/errors" },
     { "path": "./packages/observability" },
-    { "path": "./packages/principal" }
+    { "path": "./packages/principal" },
+    { "path": "./packages/sync" }
   ]
 }

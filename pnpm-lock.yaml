@@ -27,6 +27,9 @@ catalogs:
     vitest:
       specifier: ^3.0.0
       version: 3.2.4
+    yjs:
+      specifier: ^13.6.20
+      version: 13.6.30
     zod:
       specifier: ^4.0.0
       version: 4.3.6
@@ -286,6 +289,22 @@ importers:
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(tsx@4.21.0)
 
   packages/scopes:
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(tsx@4.21.0)
+
+  packages/sync:
+    dependencies:
+      '@editorzero/ids':
+        specifier: workspace:*
+        version: link:../ids
+      yjs:
+        specifier: 'catalog:'
+        version: 13.6.30
     devDependencies:
       typescript:
         specifier: 'catalog:'
