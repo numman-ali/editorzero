@@ -720,11 +720,16 @@ describe("write-path tx + content mutation (P3.6c)", () => {
     expect(updates[0]?.update_blob.length).toBeGreaterThan(0);
 
     const outbox = await fetchOutbox();
-    // One `doc.updated` row from the sync writer. `audit.appended`
-    // landing in the same tx is P3.6d's dispatcher-side addition;
-    // until then the outbox has exactly one row.
-    expect(outbox).toHaveLength(1);
-    expect(outbox[0]?.event).toBe("doc.updated");
+    // Two outbox rows committed in the write-path tx: `doc.updated`
+    // from the sync writer and `audit.appended` from the audit writer
+    // (P3.6d). Both share the same tx as the `docs` UPDATE + the
+    // `doc_updates` INSERT + the `audit_events` allow row — all five
+    // rows commit or none of them do. Order is writer call order
+    // (doc-updates first, audit last) but callers should not depend
+    // on it; match by event name.
+    expect(outbox).toHaveLength(2);
+    const events = outbox.map((r) => r.event).sort();
+    expect(events).toEqual(["audit.appended", "doc.updated"]);
 
     const audit = await fetchAuditEvents();
     expect(audit).toHaveLength(1);
@@ -765,9 +770,13 @@ describe("write-path tx + content mutation (P3.6c)", () => {
       .executeTakeFirstOrThrow();
     expect(docRow.title).toBe("seed");
     expect(await fetchDocUpdates(DocId(DOC_ID_A))).toHaveLength(0);
-    expect(await fetchOutbox()).toHaveLength(0);
-    // Error audit still lands — `withAuditTx` opens its own
-    // short-lived tx after the write-path tx rolls back.
+    // Write-path tx rolled back → no `doc.updated` outbox row. The
+    // error audit lands in its own `withAuditTx` (separate tx) and
+    // pairs with one `outbox(audit.appended)` row (P3.6d). Webhook
+    // subscribers still see the failure.
+    const outboxAfter = await fetchOutbox();
+    expect(outboxAfter).toHaveLength(1);
+    expect(outboxAfter[0]?.event).toBe("audit.appended");
     const audit = await fetchAuditEvents();
     expect(audit).toHaveLength(1);
     expect(audit[0]?.outcome).toBe("error");
@@ -801,7 +810,11 @@ describe("write-path tx + content mutation (P3.6c)", () => {
       .executeTakeFirstOrThrow();
     expect(docRow.title).toBe("seed");
     expect(await fetchDocUpdates(DocId(DOC_ID_A))).toHaveLength(0);
-    expect(await fetchOutbox()).toHaveLength(0);
+    // Write-path tx rolled back → no `doc.updated` row. Error audit
+    // via `withAuditTx` still emits its own `audit.appended`.
+    const outboxAfter = await fetchOutbox();
+    expect(outboxAfter).toHaveLength(1);
+    expect(outboxAfter[0]?.event).toBe("audit.appended");
     const audit = await fetchAuditEvents();
     expect(audit).toHaveLength(1);
     expect(audit[0]?.outcome).toBe("error");
@@ -838,7 +851,12 @@ describe("write-path tx + content mutation (P3.6c)", () => {
       .executeTakeFirstOrThrow();
     expect(docRow.title).toBe("seed");
     expect(await fetchDocUpdates(DocId(DOC_ID_A))).toHaveLength(0);
-    expect(await fetchOutbox()).toHaveLength(0);
+    // Write-path tx rolled back → no `doc.updated` row. Deny audit
+    // via `withAuditTx` still emits its own `audit.appended` so
+    // security/webhook subscribers can observe the denial.
+    const outboxAfter = await fetchOutbox();
+    expect(outboxAfter).toHaveLength(1);
+    expect(outboxAfter[0]?.event).toBe("audit.appended");
     const audit = await fetchAuditEvents();
     expect(audit).toHaveLength(1);
     expect(audit[0]?.outcome).toBe("deny");

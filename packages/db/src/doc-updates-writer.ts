@@ -46,9 +46,10 @@
  * `docs` INSERT before the first `ctx.transact`.
  *
  * **`outbox(audit.appended)`** is NOT emitted here — that row belongs
- * to the audit write path (architecture.md §6.2), and the dispatcher
- * owns it (P3.6d bundled). This writer's scope is only the two-row
- * mutation-side fan-out: `doc_updates` + `outbox(doc.updated)`.
+ * to the audit write path (architecture.md §6.2) and is emitted by
+ * `createSqliteAuditWriter` inside the same write-path tx (P3.6d).
+ * This writer's scope is only the two-row mutation-side fan-out:
+ * `doc_updates` + `outbox(doc.updated)`.
  */
 
 import type { AuditTx } from "@editorzero/audit";

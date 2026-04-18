@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { asAuditTx, createSqliteAuditWriter } from "./audit-writer";
 import { createSqliteDriver, type SqliteDriver } from "./drivers/sqlite";
-import { AUDIT_EVENTS_DDL } from "./drivers/sqlite-ddl";
+import { AUDIT_EVENTS_DDL, OUTBOX_DDL } from "./drivers/sqlite-ddl";
 
 const WORKSPACE_ID = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const USER_ID = UserId("018f0000-0000-7000-8000-000000000002");
@@ -27,6 +27,7 @@ let driver: SqliteDriver;
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(AUDIT_EVENTS_DDL);
+  driver.exec(OUTBOX_DDL);
 });
 
 afterEach(async () => {
@@ -172,6 +173,86 @@ describe("createSqliteAuditWriter", () => {
     expect(rows[0]?.id).toMatch(v7Re);
     expect(rows[1]?.id).toMatch(v7Re);
     expect(rows[0]?.id).not.toBe(rows[1]?.id);
+  });
+
+  it("emits outbox(audit.appended) in the same tx with audit_id + capability + outcome + category", async () => {
+    // Architecture.md §6.2/§6.3 contract: every `audit_events` INSERT
+    // pairs with a transactional-outbox row so the webhook/projection
+    // pollers can fan out at-least-once. Missing this emission would
+    // break invariant 3 (audit trail reconstruction) for any downstream
+    // consumer that reads the log via outbox.
+    const writer = createSqliteAuditWriter(() => 123_456);
+    await driver.withSystemTx((tx) => writer.write(asAuditTx(tx), allowInput()));
+
+    const auditRows = await driver.system().selectFrom("audit_events").selectAll().execute();
+    expect(auditRows).toHaveLength(1);
+    const auditId = auditRows[0]?.id;
+    if (auditId === undefined) throw new Error("expected audit row id");
+
+    const outbox = await driver.system().selectFrom("outbox").selectAll().execute();
+    expect(outbox).toHaveLength(1);
+    const row = outbox[0];
+    if (row === undefined) throw new Error("expected outbox row");
+    expect(row.event).toBe("audit.appended");
+    expect(row.workspace_id).toBe(WORKSPACE_ID);
+    expect(row.created_at).toBe(123_456);
+    expect(row.forwarded_at).toBeNull();
+    expect(row.forwarded_to).toBeNull();
+    // Payload is canonical JSON keyed on audit_id so downstream
+    // consumers can re-fetch the full row; capability + outcome +
+    // category give the poller enough to compose webhook event keys
+    // without the extra round-trip.
+    expect(JSON.parse(row.payload)).toEqual({
+      audit_id: auditId,
+      capability_id: DOC_CREATE,
+      outcome: "allow",
+      category: "mutation",
+    });
+  });
+
+  it("outbox(audit.appended) rolls back when the enclosing tx rejects", async () => {
+    const writer = createSqliteAuditWriter();
+    await expect(
+      driver.withSystemTx(async (tx) => {
+        await writer.write(asAuditTx(tx), allowInput());
+        throw new Error("force rollback");
+      }),
+    ).rejects.toThrow("force rollback");
+
+    // Both rows live in the same tx; the outbox fan-out must not
+    // survive a rollback of the audit row it describes.
+    expect(await driver.system().selectFrom("audit_events").selectAll().execute()).toHaveLength(0);
+    expect(await driver.system().selectFrom("outbox").selectAll().execute()).toHaveLength(0);
+  });
+
+  it("outbox(audit.appended) payload reflects the outcome for deny rows", async () => {
+    // Webhook subscribers route on the outcome (e.g. `audit.appended.doc.*`
+    // filtered to `outcome=deny` for security alerting). The payload must
+    // stay truthful about what actually happened.
+    const writer = createSqliteAuditWriter();
+    await driver.withSystemTx((tx) =>
+      writer.write(asAuditTx(tx), {
+        ...allowInput(),
+        record: {
+          outcome: "deny",
+          reason: { kind: "missing_scope", required: ["admin"], principal_scopes: [] },
+          effect: {
+            kind: "deny",
+            capability: DOC_CREATE,
+            required_scopes: ["workspace:admin"],
+            reason_code: "missing_scope",
+          },
+        },
+      }),
+    );
+
+    const outbox = await driver.system().selectFrom("outbox").selectAll().execute();
+    expect(outbox).toHaveLength(1);
+    expect(JSON.parse(outbox[0]?.payload ?? "")).toMatchObject({
+      capability_id: DOC_CREATE,
+      outcome: "deny",
+      category: "mutation",
+    });
   });
 
   it("deny_reason tracks effect.reason_code, not the internal reason.kind", async () => {

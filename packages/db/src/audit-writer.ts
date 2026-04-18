@@ -83,10 +83,12 @@ export function createSqliteAuditWriter(now: () => number = Date.now): AuditWrit
       // downstream analytic queries.
       const deny_reason = record.outcome === "deny" ? record.effect.reason_code : null;
       const effect = JSON.stringify(record.effect);
+      const audit_id = nextAuditId();
+      const ts = now();
       await kysely
         .insertInto("audit_events")
         .values({
-          id: nextAuditId(),
+          id: audit_id,
           workspace_id: input.workspace_id,
           capability_id: input.capability_id,
           category: input.category,
@@ -114,8 +116,36 @@ export function createSqliteAuditWriter(now: () => number = Date.now): AuditWrit
           effect,
           duration_ms: input.duration_ms,
           trace_id: input.trace_id,
-          created_at: now(),
+          created_at: ts,
           collapsed_count: input.collapsed_count,
+        })
+        .execute();
+
+      // `outbox(audit.appended)` fan-out (architecture.md §6.2/§6.3).
+      // Every `audit_events` INSERT pairs with a transactional-outbox
+      // row so downstream webhook, notification, and projection jobs
+      // can observe the audit trail at-least-once. Same tx as the
+      // audit INSERT: a crash between the two would lose the fan-out
+      // and break webhook delivery guarantees. Payload is tight —
+      // `audit_id` is the join key; `capability_id` + `outcome` +
+      // `category` give the poller enough to compose webhook event
+      // keys (`audit.appended.<capability>.<outcome>`, §15.4) without
+      // a round-trip re-read of the audit row.
+      await kysely
+        .insertInto("outbox")
+        .values({
+          id: uuidV7(),
+          workspace_id: input.workspace_id,
+          event: "audit.appended",
+          payload: JSON.stringify({
+            audit_id,
+            capability_id: input.capability_id,
+            outcome: record.outcome,
+            category: input.category,
+          }),
+          created_at: ts,
+          forwarded_at: null,
+          forwarded_to: null,
         })
         .execute();
     },
