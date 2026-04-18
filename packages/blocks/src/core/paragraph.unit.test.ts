@@ -84,9 +84,53 @@ describe("paragraph.toMarkdown", () => {
     expect(md).toBe("plain **bold** and *ital*");
   });
 
-  it("returns an empty string for an empty content array", () => {
+  it("emits the empty-paragraph sentinel (U+00A0) for an empty content array", () => {
+    // CommonMark has no representation for an empty paragraph — a
+    // blank line is a block separator. U+00A0 (NBSP) is literal text,
+    // so `toMarkdown([]) → "\u00a0"` reparses as a paragraph whose
+    // `fromMarkdown` restores the empty content array.
     const md = paragraph.toMarkdown(makeParagraph([]));
-    expect(md).toBe("");
+    expect(md).toBe("\u00a0");
+  });
+
+  it("escapes a leading `>` to prevent blockquote parse", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("> quoted")]));
+    expect(md).toBe("\\> quoted");
+  });
+
+  it("escapes a leading `#` (ATX heading opener)", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("# not heading")]));
+    expect(md).toBe("\\# not heading");
+  });
+
+  it("escapes a leading `-` followed by space (unordered list marker)", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("- bullet")]));
+    expect(md).toBe("\\- bullet");
+  });
+
+  it("escapes a leading `+` followed by space (unordered list marker)", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("+ bullet")]));
+    expect(md).toBe("\\+ bullet");
+  });
+
+  it("escapes the `.` after a leading digit run (ordered list marker)", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("1. install")]));
+    expect(md).toBe("1\\. install");
+  });
+
+  it("escapes the `)` after a leading digit run (ordered list marker)", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("42) answer")]));
+    expect(md).toBe("42\\) answer");
+  });
+
+  it("escapes a bare `---` line (thematic break opener)", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("---")]));
+    expect(md).toBe("\\---");
+  });
+
+  it("leaves a normal paragraph start unchanged", () => {
+    const md = paragraph.toMarkdown(makeParagraph([textNode("hello world")]));
+    expect(md).toBe("hello world");
   });
 
   it("throws when an inline item is not a StyledText node (out-of-scope shape)", () => {
@@ -170,6 +214,42 @@ describe("paragraph round-trip (fromMarkdown(toMarkdown) is the fixed point)", (
     const roundtripped = paragraph.fromMarkdown({
       type: "paragraph",
       children: [{ type: "text", value: md }],
+    } as never) as LooseBlock;
+    expect(roundtripped.content).toEqual(start.content);
+  });
+
+  it("empty content", () => {
+    // `toMarkdown` returns the NBSP sentinel; a real CommonMark
+    // parser represents that as a paragraph containing one text node
+    // with value `"\u00a0"`, which is exactly what `fromMarkdown`
+    // collapses back to `content: []`.
+    const start = makeParagraph([]);
+    const md = paragraph.toMarkdown(start);
+    const roundtripped = paragraph.fromMarkdown({
+      type: "paragraph",
+      children: [{ type: "text", value: md }],
+    } as never) as LooseBlock;
+    expect(roundtripped.content).toEqual([]);
+  });
+
+  it("text starting with a blockquote character", () => {
+    // `toMarkdown` escapes the leading `>`. CommonMark consumes the
+    // backslash and yields a text node with the raw `> quoted`.
+    const start = makeParagraph([textNode("> quoted")]);
+    paragraph.toMarkdown(start);
+    const roundtripped = paragraph.fromMarkdown({
+      type: "paragraph",
+      children: [{ type: "text", value: "> quoted" }],
+    } as never) as LooseBlock;
+    expect(roundtripped.content).toEqual(start.content);
+  });
+
+  it("text starting with an ordered-list marker", () => {
+    const start = makeParagraph([textNode("1. install")]);
+    paragraph.toMarkdown(start);
+    const roundtripped = paragraph.fromMarkdown({
+      type: "paragraph",
+      children: [{ type: "text", value: "1. install" }],
     } as never) as LooseBlock;
     expect(roundtripped.content).toEqual(start.content);
   });

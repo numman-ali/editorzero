@@ -82,6 +82,11 @@ If a hook is slow enough to cause friction, split it — a fast pre-commit (type
 6. **Stop at phase boundaries.** At the end of each phase, update `docs/continuation.md`, commit, push, and post a summary to @numman for review before proceeding.
 7. **Opus sub-agents only** (per @numman, 2026-04-17).
 8. **Verify library/tool docs at point of use.** Before writing code against any pinned dependency (Hocuspocus, BlockNote, Better Auth, Yjs, Kysely, Atlas, MCP SDK, Next.js, Hono, etc.), fetch the current docs for the pinned version and confirm the API shape. Pinned versions drift; the gotchas list is populated by doing exactly this. If docs contradict an ADR, flag it in `docs/continuation.md` before coding around it.
+9. **Codex for peer review + rescue.** Three distinct uses of the `/codex:` skill surface; size of diff is NOT a factor in choosing between them — the *nature of the change* is.
+   - **`/codex:review`** — straightforward code review. Run on every commit by default (small or large, 1 file or 50). Like a collaborator reading a diff and leaving comments. Apply findings directly; no disposition doc.
+   - **`/codex:adversarial-review`** — design-level challenge review. Reserved for commits that make non-trivial design choices, introduce architectural primitives, or lock in tradeoffs (new ADR, write-path primitive, schema change, permission rule, capability shape). Like a senior engineer asking "is this the right approach?" — not "is this code correct?". Still apply findings directly; still no disposition doc. This is distinct from rule 5's phase-boundary red-team, which produces `docs/adr/red-team-*.md` for BLOCKER-class ADR questions.
+   - **`/codex:rescue`** — delegate a substantial coding task when stuck, when a second implementation pass is the faster path, or when iteration is taking long enough that a principal-level peer is the better use of wall-clock. Codex handles large coherent chunks well.
+   Default `--background` on anything that will take codex > 30s. Timing and mode are your judgement.
 
 ## Defend these
 
