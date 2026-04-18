@@ -46,7 +46,10 @@ pre-push:
     full-typecheck:
       run: pnpm typecheck
     full-lint:
-      run: pnpm lint
+      # Strict gate at push time — `pnpm lint` auto-writes fixes, but
+      # writes landed here wouldn't be in the pushed commit, so we
+      # invoke biome directly in check-only mode.
+      run: pnpm exec biome check .
     property:
       # Vitest `--project prop` activates when a project config declares it;
       # until any package ships a property test suite there is nothing to run.
