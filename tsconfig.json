@@ -10,6 +10,8 @@
     { "path": "./packages/blocks" },
     { "path": "./packages/capabilities" },
     { "path": "./packages/config" },
+    { "path": "./packages/db" },
+    { "path": "./packages/dispatcher" },
     { "path": "./packages/errors" },
     { "path": "./packages/observability" },
     { "path": "./packages/principal" }

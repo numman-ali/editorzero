@@ -80,9 +80,14 @@
   // tests carries a sibling `tsconfig.test.json` that extends its
   // `tsconfig.json` and overrides this exclude to re-include tests
   // with `noEmit: true`. The package's `typecheck` script runs both
-  // configs in sequence; drift (e.g. a wrong `AuditEffect.kind` in a
-  // test) is caught at pre-commit, not only at runtime. Pattern first
-  // established by `packages/dispatcher` (after an audit.access_log
-  // drift slipped past vitest's type-stripping transform).
+  // configs in sequence; the root `typecheck:affected` script (wired
+  // into the pre-commit `types` hook) uses `pnpm -r run typecheck`
+  // so those per-package scripts are what actually runs — NOT
+  // `tsc -b`, which skips tsconfig.test.json entirely. Drift (e.g.
+  // a wrong `AuditEffect.kind` in a test) is caught at pre-commit,
+  // not only at runtime. Pattern first established by
+  // `packages/dispatcher` (after an audit.access_log drift slipped
+  // past vitest's type-stripping transform), hardened after
+  // red-team F85 caught the hook-path gap.
   "exclude": ["node_modules", "dist", "build", ".next", "**/*.test.ts"]
 }
