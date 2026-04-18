@@ -10,6 +10,7 @@
     { "path": "./packages/capabilities" },
     { "path": "./packages/config" },
     { "path": "./packages/errors" },
+    { "path": "./packages/observability" },
     { "path": "./packages/principal" }
   ]
 }
