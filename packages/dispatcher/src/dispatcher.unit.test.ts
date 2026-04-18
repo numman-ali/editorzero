@@ -21,8 +21,9 @@ import {
   registerCapability,
 } from "@editorzero/capabilities";
 import { createSqliteDriver, type SqliteDriver } from "@editorzero/db";
+import type { DenyReason } from "@editorzero/errors";
 import { PermissionDeniedError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
+import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AccessPath, UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -263,6 +264,38 @@ describe("dispatcher", () => {
     expect(row.record.outcome).toBe("error");
     if (row.record.outcome === "error") {
       expect(row.record.error.kind).toBe("internal");
+    }
+  });
+
+  it("F88 post-parse deny: handler-thrown PermissionDeniedError writes a deny audit and rethrows", async () => {
+    const reason: DenyReason = {
+      kind: "acl_deny",
+      scope: { doc_id: DocId("018f0000-0000-7000-8000-0000000000d1") },
+    };
+    const { dispatcher, auditWriter } = mountDispatcher(
+      buildDocReadCapability(async () => {
+        throw new PermissionDeniedError({ reason });
+      }),
+    );
+
+    await expect(
+      dispatcher.dispatch({
+        capability_id: DOC_READ_ID,
+        input: { doc_id: "abc" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      }),
+    ).rejects.toBeInstanceOf(PermissionDeniedError);
+
+    // Before F88 this failed — handler-thrown denies leaked out with
+    // zero audit rows because the catch block rethrew without writing.
+    expect(auditWriter.rows).toHaveLength(1);
+    const row = auditWriter.rows[0];
+    if (row === undefined) throw new Error("expected one row");
+    expect(row.record.outcome).toBe("deny");
+    if (row.record.outcome === "deny") {
+      expect(row.record.reason.kind).toBe("acl_deny");
     }
   });
 

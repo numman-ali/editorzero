@@ -10,6 +10,12 @@
  *     `PermissionDeniedError`.
  *  3. Handler invocation — supplies the capability its
  *     `CapabilityContext` via the injected `makeContextExtras` factory.
+ *     Handlers may throw `PermissionDeniedError` for deny decisions
+ *     the gate could not have made (sub-block ACL, ctx-aware
+ *     quotas). The dispatcher recognises this as a first-class deny
+ *     channel: it writes the `effectOnDeny` audit row with the
+ *     handler's `DenyReason` and rethrows (F88). Handlers never
+ *     touch the audit writer directly.
  *  4. Output parsing (zod) — rejects with `InternalError` (handler
  *     contract violation).
  *  5. Audit — writes the `effectOnAllow` / `effectOnError` row; the
@@ -342,10 +348,35 @@ export function createDispatcher<TEditor = unknown>(
       try {
         rawOutput = await capability.invoke(ctx, parsedInput.data);
       } catch (err) {
-        // PermissionDeniedError from inside a handler is rare but
-        // legitimate (e.g., sub-block ACL). Propagate as-is; the handler
-        // emits its own deny audit. Unknown throws go to error audit.
-        if (err instanceof PermissionDeniedError) throw err;
+        // F88 post-parse deny channel. Handlers throw
+        // `PermissionDeniedError` for deny decisions that cannot be
+        // made before the handler runs — sub-block ACL, quota state
+        // tied to tenant reads, etc. The handler has no audit writer
+        // (intentional: one dispatcher-owned shape), so the dispatcher
+        // writes the deny row using `capability.audit.effectOnDeny`
+        // against the parsed input + the error's `DenyReason`. The
+        // error is then rethrown unchanged so adapters see the same
+        // exception type they see for gate denies.
+        if (err instanceof PermissionDeniedError) {
+          const duration_ms = deps.now() - startedAt;
+          await writeAudit(
+            deps,
+            capability,
+            principal,
+            tenant,
+            {
+              outcome: "deny",
+              reason: err.reason,
+              effect: capability.audit.effectOnDeny(parsedInput.data, err.reason),
+            },
+            parsedInput.data,
+            trace_id,
+            duration_ms,
+          );
+          span.setAttribute("outcome", "deny");
+          span.setAttribute("deny.reason", err.reason.kind);
+          throw err;
+        }
         await writeAuditError(
           deps,
           capability,
