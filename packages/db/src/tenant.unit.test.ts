@@ -616,3 +616,98 @@ describe("TenantScopedDb narrows away internal tables (F98)", () => {
     expect(true).toBe(true);
   });
 });
+
+// ── Composite FK: doc_id/workspace_id consistency (F99) ──────────────────
+//
+// The scoping plugin enforces `workspace_id = <scope>` on every query
+// but does not verify that `doc_id` belongs to that workspace — a
+// bug (or the unscoped system handle) could otherwise pair a valid
+// `doc_id` with a wrong `workspace_id` and silently corrupt the
+// replay path. The DDL adds a composite FK `(doc_id, workspace_id)
+// REFERENCES docs(id, workspace_id)` on `doc_snapshots` and
+// `doc_updates`; these tests prove the FK fires even through the
+// unscoped system handle.
+
+describe("Composite (doc_id, workspace_id) FK (F99)", () => {
+  it("doc_snapshots rejects a mismatched workspace_id even through driver.system()", async () => {
+    const sys = driver.system();
+    const a = driver.scoped(WORKSPACE_A);
+
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+
+    const snapshot = new Uint8Array([0x01]);
+    await expect(() =>
+      sys
+        .insertInto("doc_snapshots")
+        .values({
+          id: "snap-bad",
+          doc_id: DOC_A1,
+          // Doc A1 belongs to workspace A; claiming workspace B here
+          // must fail at the composite FK.
+          workspace_id: WORKSPACE_B,
+          seq: 1,
+          state: snapshot,
+          created_at: 1,
+        })
+        .execute(),
+    ).rejects.toThrow(/FOREIGN KEY constraint failed/i);
+  });
+
+  it("doc_updates rejects a mismatched workspace_id even through driver.system()", async () => {
+    const sys = driver.system();
+    const a = driver.scoped(WORKSPACE_A);
+
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+
+    const blob = new Uint8Array([0xff]);
+    await expect(() =>
+      sys
+        .insertInto("doc_updates")
+        .values({
+          id: "upd-bad",
+          doc_id: DOC_A1,
+          workspace_id: WORKSPACE_B,
+          seq: 1,
+          update_blob: blob,
+          principal_kind: "user",
+          principal_id: ALICE,
+          session_id: null,
+          created_at: 1,
+          delete_after: null,
+        })
+        .execute(),
+    ).rejects.toThrow(/FOREIGN KEY constraint failed/i);
+  });
+
+  it("doc_snapshots accepts a matching workspace_id (sanity: the FK passes the happy path)", async () => {
+    const sys = driver.system();
+    const a = driver.scoped(WORKSPACE_A);
+
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+
+    const snapshot = new Uint8Array([0x01]);
+    await sys
+      .insertInto("doc_snapshots")
+      .values({
+        id: "snap-ok",
+        doc_id: DOC_A1,
+        workspace_id: WORKSPACE_A,
+        seq: 1,
+        state: snapshot,
+        created_at: 1,
+      })
+      .execute();
+
+    const seen = await sys.selectFrom("doc_snapshots").select("id").execute();
+    expect(seen).toEqual([{ id: "snap-ok" }]);
+  });
+});

@@ -22,7 +22,17 @@
  * mapping but today it is a pairwise read between the two files.
  */
 
-/** `docs` — canonical metadata row per document (architecture.md §3.5). */
+/**
+ * `docs` — canonical metadata row per document (architecture.md §3.5).
+ *
+ * `UNIQUE (id, workspace_id)` is the target for the composite FK from
+ * `doc_snapshots` and `doc_updates` (F99). SQLite's FK machinery needs
+ * a UNIQUE or PRIMARY KEY index covering exactly the referenced
+ * column list; adding `workspace_id` to the unique tuple gives that
+ * index without changing the effective row identity (`id` is already
+ * the PK). The practical effect: a child row can only pair `doc_id =
+ * X` with the one `workspace_id` that row X actually belongs to.
+ */
 export const DOCS_DDL = `
   CREATE TABLE docs (
     id                 TEXT PRIMARY KEY,
@@ -36,28 +46,47 @@ export const DOCS_DDL = `
     created_by         TEXT NOT NULL,
     created_at         INTEGER NOT NULL,
     updated_at         INTEGER NOT NULL,
-    deleted_at         INTEGER
+    deleted_at         INTEGER,
+    UNIQUE (id, workspace_id)
   );
 ` as const;
 
-/** `doc_snapshots` — compacted Y.Doc state per `seq` (architecture.md §3.7). */
+/**
+ * `doc_snapshots` — compacted Y.Doc state per `seq` (architecture.md §3.7).
+ *
+ * F99: composite FK `(doc_id, workspace_id) REFERENCES docs(id,
+ * workspace_id)` is the DB-level guard against `workspace_id` on a
+ * child row drifting away from the owning `docs` row. The scoping
+ * plugin enforces `workspace_id = <scope>` on every query, but it
+ * does not verify that `doc_id` actually belongs to that workspace —
+ * without this FK, a bug (or the unscoped system handle) could pair
+ * a valid `doc_id` with a wrong `workspace_id` and corrupt the
+ * replay path silently. `PRAGMA foreign_keys = ON` is set at
+ * connection open (ADR 0007); the FK fires at write time.
+ */
 export const DOC_SNAPSHOTS_DDL = `
   CREATE TABLE doc_snapshots (
     id           TEXT PRIMARY KEY,
-    doc_id       TEXT NOT NULL REFERENCES docs(id),
+    doc_id       TEXT NOT NULL,
     workspace_id TEXT NOT NULL,
     seq          INTEGER NOT NULL,
     state        BLOB NOT NULL,
     created_at   INTEGER NOT NULL,
-    UNIQUE (doc_id, seq)
+    UNIQUE (doc_id, seq),
+    FOREIGN KEY (doc_id, workspace_id) REFERENCES docs(id, workspace_id)
   );
 ` as const;
 
-/** `doc_updates` — append-only journal of Yjs updates (architecture.md §3.7). */
+/**
+ * `doc_updates` — append-only journal of Yjs updates (architecture.md §3.7).
+ *
+ * F99: see `DOC_SNAPSHOTS_DDL` for the composite FK rationale —
+ * same guard, same rationale.
+ */
 export const DOC_UPDATES_DDL = `
   CREATE TABLE doc_updates (
     id             TEXT PRIMARY KEY,
-    doc_id         TEXT NOT NULL REFERENCES docs(id),
+    doc_id         TEXT NOT NULL,
     workspace_id   TEXT NOT NULL,
     seq            INTEGER NOT NULL,
     update_blob    BLOB NOT NULL,
@@ -66,7 +95,8 @@ export const DOC_UPDATES_DDL = `
     session_id     TEXT,
     created_at     INTEGER NOT NULL,
     delete_after   INTEGER,
-    UNIQUE (doc_id, seq)
+    UNIQUE (doc_id, seq),
+    FOREIGN KEY (doc_id, workspace_id) REFERENCES docs(id, workspace_id)
   );
 ` as const;
 
