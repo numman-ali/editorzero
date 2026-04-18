@@ -83,6 +83,16 @@ If a hook is slow enough to cause friction, split it — a fast pre-commit (type
 7. **Opus sub-agents only** (per @numman, 2026-04-17).
 8. **Verify library/tool docs at point of use.** Before writing code against any pinned dependency (Hocuspocus, BlockNote, Better Auth, Yjs, Kysely, Atlas, MCP SDK, Next.js, Hono, etc.), fetch the current docs for the pinned version and confirm the API shape. Pinned versions drift; the gotchas list is populated by doing exactly this. If docs contradict an ADR, flag it in `docs/continuation.md` before coding around it.
 
+## Defend these
+
+Patterns red-team review (`docs/adr/red-team-*.md`) flagged as load-bearing design decisions, not accidents of convenience. A refactor that undoes one is not a "cleanup" — it must argue past the rationale below in writing before landing.
+
+- **Closure-based `RegisteredCapability` erasure** (F94). `registerCapability<I, O>()` closes over the concrete `I` / `O` inside `invoke` and the audit projection, then returns a `RegisteredCapability` typed as `<unknown, unknown>` at the registry boundary. This is how heterogeneous capabilities collect in one `Map` without an `any` escape or a cast at the adapter. **Do not** reintroduce a cast-based `AnyCapability = Capability<any, any>` alias — the closure pays for type discipline once per capability, for the life of the project.
+- **Errors own their audit projection** (F95). Every `EditorZeroError` subclass implements `abstract toHandlerError()` — there is no central `switch (err.code)` that silently defaults to `internal`. Adding a new subclass forces a compile-time decision about how it audits. **Do not** centralize this into a big switch statement; the scalable-correctness property comes from locality.
+- **Registry-first, adapters-derived, parity-by-contract** (F96). The capability registry is the single source of truth; API / CLI / MCP / UI adapters are generated or derived from it, and `contract-tests` enforce the matrix (invariant 4). **Do not** hand-write a second source of truth in an adapter ("just this one endpoint") — the matrix test will fail, and even if it didn't, the parity invariant starts decaying from the first exception.
+- **Honest single-backend envelope** (F97, ADR 0007). Default to SQLite; Postgres is declared separately with an explicit conformance suite that re-runs the analyzers Atlas Pro ships. **Do not** paper over the gap with "works on both" prose when the code has not run against both — the conformance suite is what earns that claim.
+- **Runtime `ctx.transact` at-most-once backstop** (F92). The dispatcher wraps caller-provided `extras.transact` in a one-shot guard; a second call throws `TransactCalledTwiceError`. This backstops invariant 7 until `@editorzero/arch-lint` ships the dev-time rule. **Do not** remove the runtime guard when the lint rule lands — defence-in-depth is the point.
+
 ## Gotchas
 
 Maintained as we discover them.
