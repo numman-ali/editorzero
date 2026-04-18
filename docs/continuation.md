@@ -1,6 +1,6 @@
 # Continuation — rolling work state
 
-*Rolling work-state journal. `AGENTS.md` (= `CLAUDE.md`) is already in your context — it is auto-loaded on every session. This file is what an agent updates as work progresses; commit with each phase-boundary update.*
+*Rolling work-state journal. `AGENTS.md` is already in your context — `CLAUDE.md` is a 1-line `@AGENTS.md` import that Claude Code expands at session start. This file is what an agent updates as work progresses; commit with each phase-boundary update.*
 
 ---
 
@@ -24,12 +24,13 @@ Root-cause observations from the three red-team passes: prose-as-spec hides bugs
 - **Code-as-spec over prose-as-spec.** Types + property tests are canonical. ADRs explain *why*, not *how*.
 - **Single source of truth, derived elsewhere.** Registry → OpenAPI / MCP / contract matrix / Appendix A. Constants → `packages/constants/`. Enumerations → `as const` arrays.
 - **Coherence script at pre-commit** (item 2 above) is the load-bearing enforcement.
+- **Coherence checks protect *derived* artifacts** (architecture.md, Appendix A) against canonical code. AGENTS.md is agent-loading context, not a derived artifact — it holds rules + pointers, not enumerations. Do not add coherence checks against AGENTS.md prose.
 - **Cross-model red-team reserved for ADR-level decisions + phase boundaries.** Not routine — it earns its keep on BLOCKER-class questions (pass-3 caught invalid SQL that way). Per-PR is ceremony.
 - **Small diffs per commit during implementation.** Big sub-agent fix-batches regressed things in Phase 2 (pass-3's F74 was introduced by pass-2's F40 fix). Small focused edits + CI gate are the Phase 3 discipline.
 
 ## Resume protocol (for a fresh-context agent)
 
-1. **`AGENTS.md` is already loaded** via the CLAUDE.md symlink — canonical rules + invariants + gotchas are in your context.
+1. **`AGENTS.md` is already loaded** — `CLAUDE.md` is a 1-line `@AGENTS.md` import expanded by Claude Code; canonical rules + invariants + gotchas are in your context.
 2. **This file is your next read** — current phase, immediate focus, open questions (below).
 3. Read `docs/brief.md` — Phase 0 framing.
 4. Read `docs/adr/README.md` — ADR index.

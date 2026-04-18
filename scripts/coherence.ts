@@ -13,9 +13,11 @@
  *       are referenced from anywhere must exist.
  *   [2] Architecture section reference integrity — `§N.M` / `§N.Ma`
  *       citations resolve to real headings in `docs/architecture.md`.
- *   [3] METADATA_ONLY_CAPABILITIES triple-consistency —
- *       `packages/scopes` ↔ `docs/architecture.md` §6.5 ↔ `AGENTS.md`
- *       invariant 7 list agree on the exact membership.
+ *   [3] METADATA_ONLY_CAPABILITIES consistency —
+ *       `packages/scopes` ↔ `docs/architecture.md` §6.5 agree on the
+ *       exact membership. (AGENTS.md invariant 7 references the scopes
+ *       export by name rather than enumerating — AGENTS.md is
+ *       agent-loading context, not a derived artifact.)
  *   [4] `no-raw-kysely-outside-db` (F89) — no production or test file
  *       outside `packages/db/**` imports from `kysely`. Enforces the
  *       single-chokepoint claim architecture.md §8.1a / §17 rests on.
@@ -291,24 +293,6 @@ async function checkMetadataOnlyCapabilities(report: Report): Promise<void> {
       diffLists(report, "architecture.md §6.5", docList, "packages/scopes", codeList);
     }
   }
-
-  // AGENTS.md invariant 7 lists metadata capabilities inline. It uses
-  // `collection.*` as shorthand — we expand that to all five variants
-  // before diffing.
-  const agentsPath = join(ROOT, "AGENTS.md");
-  const agentsSrc = await readIfExists(agentsPath);
-  if (agentsSrc) {
-    const agentsList = parseMetadataOnlyFromAgents(agentsSrc);
-    if (agentsList === null) {
-      report.add({
-        severity: "error",
-        file: agentsPath,
-        message: "AGENTS.md invariant 7 metadata-only enumeration not parseable",
-      });
-    } else {
-      diffLists(report, "AGENTS.md invariant 7", agentsList, "packages/scopes", codeList);
-    }
-  }
 }
 
 function parseMetadataOnlyFromScopes(src: string): string[] | null {
@@ -329,37 +313,6 @@ function parseMetadataOnlyFromArchitecture(src: string): string[] | null {
     .map((s) => s.trim())
     .filter((s) => /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(s));
   return ids;
-}
-
-function parseMetadataOnlyFromAgents(src: string): string[] | null {
-  // Invariant 7 text includes:
-  //   "**Metadata mutations** (`block.set_visibility`, `doc.publish`,
-  //    `doc.unpublish`, `doc.move`, `collection.*`)"
-  const re = /Metadata mutations[^(]*\(([^)]+)\)/;
-  const m = re.exec(src);
-  if (!m?.[1]) return null;
-  const raw = m[1]
-    .split(",")
-    .map((s) => s.trim().replace(/^`|`$/g, ""))
-    .filter((s) => s.length > 0);
-
-  // Expand `collection.*` to the five concrete members.
-  const CollectionVariants = [
-    "collection.create",
-    "collection.update",
-    "collection.move",
-    "collection.delete",
-    "collection.restore",
-  ];
-  const out: string[] = [];
-  for (const id of raw) {
-    if (id === "collection.*") {
-      out.push(...CollectionVariants);
-    } else if (/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(id)) {
-      out.push(id);
-    }
-  }
-  return out;
 }
 
 function extractStringItems(block: string): string[] {
