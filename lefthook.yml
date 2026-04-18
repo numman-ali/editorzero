@@ -51,8 +51,9 @@ pre-push:
       # invoke biome directly in check-only mode.
       run: pnpm exec biome check .
     property:
-      # Vitest `--project prop` activates when a project config declares it;
-      # until any package ships a property test suite there is nothing to run.
+      # `pnpm test:prop` runs the slow-lane vitest config
+      # (`vitest.prop.config.ts`, scoped to `packages/*/prop/**/*.test.ts`).
+      # Until any package ships a property suite there is nothing to run.
       run: |
         if find packages -type d -name prop 2>/dev/null | grep -q .; then
           pnpm test:prop

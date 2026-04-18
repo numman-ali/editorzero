@@ -29,6 +29,7 @@ export {
   FULL_DDL,
   OUTBOX_DDL,
 } from "./drivers/sqlite-ddl";
+export { createQueryFaultPlugin, describeQueryNode, type QueryTag } from "./query-fault";
 export type {
   AuditEventsTable,
   Database,

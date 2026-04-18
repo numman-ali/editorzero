@@ -20,7 +20,7 @@
     "test": "vitest run",
     "test:affected": "pnpm -r --filter \"...[origin/main]\" test",
     "test:watch": "vitest",
-    "test:prop": "vitest run --project prop",
+    "test:prop": "vitest run --config vitest.prop.config.ts",
     "coherence": "tsx scripts/coherence.ts",
     "prepare": "lefthook install"
   },
