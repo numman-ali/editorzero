@@ -15,3 +15,5 @@ export type {
   Tracer,
   TracerSpan,
 } from "./kernel";
+export type { CapabilityMap, Registry, RegistryLookupError } from "./registry";
+export { createRegistry } from "./registry";
