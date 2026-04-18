@@ -22,11 +22,7 @@ function stubCapability(id: string) {
     requires: [],
     audit: {
       subjectFrom: () => ({ kind: "workspace" }),
-      effectOnAllow: () => ({
-        kind: "audit.access_log",
-        principal_kind: "user",
-        capability_id: CapabilityId(id),
-      }),
+      effectOnAllow: () => ({ kind: "audit.access_log" }),
       effectOnDeny: (_input, reason) => ({
         kind: "deny",
         capability: CapabilityId(id),

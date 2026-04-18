@@ -115,11 +115,7 @@ function buildDocReadCapability(
     requires: overrides.requires ?? ["doc:read"],
     audit: {
       subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
-      effectOnAllow: () => ({
-        kind: "audit.access_log",
-        principal_kind: "user",
-        capability_id: DOC_READ_ID,
-      }),
+      effectOnAllow: () => ({ kind: "audit.access_log" }),
       effectOnDeny: () => ({
         kind: "deny",
         capability: DOC_READ_ID,

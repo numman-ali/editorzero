@@ -16,7 +16,6 @@ import type {
   AgentId,
   AttachmentId,
   BlockId,
-  CapabilityId,
   CollectionId,
   CommentId,
   CustomDomainId,
@@ -41,20 +40,15 @@ import type {
 export type AuditEffect =
   // ── Reads (architecture.md §9.3) ─────────────────────────────────────────
   //
-  // Read capabilities (`category: "read"`) project to this generic
-  // access-log variant. Reads are not state-mutating, so the replay
-  // reducer's branch for this kind is a no-op — but the row still lands
-  // in `audit_events` so forensic reconstruction of *who read what* is
-  // possible. Collapse applies: identical (capability_id, principal,
-  // input) reads within a 1s window fold into a single row with
-  // `AuditWriteInput.collapsed_count > 1`. That counter lives on the
-  // write-input envelope, not on the effect itself, so rebuilding the
-  // effect after collapse doesn't require walking collapsed siblings.
-  | {
-      kind: "audit.access_log";
-      principal_kind: "user" | "agent";
-      capability_id: CapabilityId;
-    }
+  // Read capabilities (`category: "read"`) project to this empty-bodied
+  // variant. Reads are not state-mutating, so the replay reducer's branch
+  // for this kind is a no-op — but the row still lands in `audit_events`
+  // so forensic reconstruction of *who read what* is possible. The useful
+  // identifying fields (`capability_id`, `principal_kind`, `principal_id`,
+  // `subject_*`, `input_hash`) already live on the `AuditWriteInput`
+  // envelope; duplicating them in the effect body would create a
+  // must-stay-in-sync hazard for no gain.
+  | { kind: "audit.access_log" }
   // ── Workspace lifecycle (§3.2) ───────────────────────────────────────────
   | {
       kind: "workspace.create";
