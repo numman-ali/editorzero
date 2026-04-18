@@ -59,7 +59,7 @@ Server-side Yjs sync with auth hooks, durable persistence, awareness/presence, f
 Redis-backed fan-out using the **worker-nodes + single-manager topology** (per Hocuspocus 3.x Redis scaling docs) — not symmetrical. Single-node SQLite-mode does not need Redis; Postgres-mode HA deploys do.
 
 ### Unified write path (see ADR 0018)
-API, CLI, MCP, and Web UI mutations all flow through `ctx.transact(doc_id, fn)`, which opens a Hocuspocus direct connection, binds a `BlockNoteEditor<BlockSpecSchema>` to the live `Y.XmlFragment`, and runs `editor.transact(...)` → one Yjs update → the same Hocuspocus pipeline browser clients use. `@blocknote/server-util`'s `ServerBlockNoteEditor` is a conversion surface only — **explicitly wrong to treat as a write primitive** — its `blocksToYDoc` is not a rehydration path (loses history) and it does not expose `transact/insertBlocks/updateBlock/removeBlocks`. See ADR 0018 for the full write path and AGENTS.md gotchas.
+API, CLI, MCP, and Web UI mutations all flow through `ctx.transact(doc_id, fn)`, which opens a Hocuspocus direct connection, binds a `BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>` to the live `Y.XmlFragment`, and runs `editor.transact(...)` → one Yjs update → the same Hocuspocus pipeline browser clients use. `@blocknote/server-util`'s `ServerBlockNoteEditor` is a conversion surface only — **explicitly wrong to treat as a write primitive** — its `blocksToYDoc` is not a rehydration path (loses history) and it does not expose `transact/insertBlocks/updateBlock/removeBlocks`. See ADR 0018 for the full write path and AGENTS.md gotchas.
 
 ## Consequences
 - One process to run, monitor, observe.

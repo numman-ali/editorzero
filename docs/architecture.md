@@ -1434,7 +1434,7 @@ Property test (`doc-residency.prop.ts`): `ctx.transact` on a non-resident doc hy
 
 ### 10.6 Sync for non-browser clients
 
-API/CLI/MCP handlers are clients of the same Hocuspocus path. `ctx.transact(doc_id, fn)` opens a direct connection to the live `Y.Doc` and binds a `BlockNoteEditor<BlockSpecSchema>` to its `Y.XmlFragment`; the handler calls `editor.insertBlocks/updateBlock/removeBlocks` inside `editor.transact(...)`. `@blocknote/server-util`'s `ServerBlockNoteEditor` is a conversion surface only (blocks ↔ HTML/Markdown/Y.Doc) and is not used to mutate — ADR 0018. No parallel write path. See §6.
+API/CLI/MCP handlers are clients of the same Hocuspocus path. `ctx.transact(doc_id, fn)` opens a direct connection to the live `Y.Doc` and binds a `BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>` to its `Y.XmlFragment`; the handler calls `editor.insertBlocks/updateBlock/removeBlocks` inside `editor.transact(...)`. `@blocknote/server-util`'s `ServerBlockNoteEditor` is a conversion surface only (blocks ↔ HTML/Markdown/Y.Doc) and is not used to mutate — ADR 0018. No parallel write path. See §6.
 
 ## 11. Search
 
@@ -1709,7 +1709,7 @@ editorzero/
 │   ├── sync/                      # Hocuspocus integration + ctx.transact impl
 │   ├── blocks/                    # Block specs (ADR 0013) — one file per block type
 │   │   ├── src/
-│   │   │   ├── kernel.ts          #   BlockSpec<Attrs> type + tier union
+│   │   │   ├── kernel.ts          #   BlockTypeSpec<Attrs, …> type + tier union
 │   │   │   ├── core/
 │   │   │   │   ├── heading.ts     #   editorzero:core/heading
 │   │   │   │   ├── heading.prop.test.ts
@@ -2033,7 +2033,7 @@ export interface CapabilityContext {
   readonly db: TenantScopedDb;                   // scoped; un-scoped query is a compile error
   readonly transact: <T>(
     doc_id: DocId,
-    fn: (editor: BlockNoteEditor<BlockSpecSchema>) => T | Promise<T>
+    fn: (editor: BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>) => T | Promise<T>
   ) => Promise<T>;                               // the only path to Y.Doc mutation; see §6
                                                  // F55: editor is BlockNoteEditor (exposes
                                                  // insertBlocks/updateBlock/removeBlocks);
@@ -2066,21 +2066,41 @@ No `req`, no `res`, no `userId` positional arg, no `db` positional arg. The hand
 
 `ctx.transact` may be called **at most once per handler invocation**. This is asserted at runtime by the dispatcher and lint-enforced by `@editorzero/arch-lint`'s `transact-called-at-most-once` rule. Handlers that mutate across multiple docs must do so at the service layer across multiple capability invocations (typically via a job) — cross-doc atomicity is not a CRDT primitive.
 
-### 16.5 `BlockSpec` — the primitive every block type declares (ADR 0013)
+### 16.5 `BlockTypeSpec` — the primitive every block type declares (ADR 0013)
+
+`BlockTypeSpec` is the fidelity-tier descriptor editorzero carries per block type. **Do not confuse with BlockNote's own `BlockSpec` type (`{ config, implementation, extensions }` from `@blocknote/core`)** — different concern, colliding name; we renamed ours to avoid the collision at import sites.
 
 ```ts
-export interface BlockSpec<Attrs extends Record<string, unknown>> {
+import type {
+  Block, BlockSchema, DefaultBlockSchema,
+  DefaultInlineContentSchema, DefaultStyleSchema,
+  InlineContentSchema, StyleSchema,
+} from "@blocknote/core";
+import type { RootContent } from "mdast";
+
+export type MdastBlockNode = RootContent;
+
+export interface BlockTypeSpec<
+  Attrs extends Record<string, unknown>,
+  BSchema extends BlockSchema = DefaultBlockSchema,
+  ISchema extends InlineContentSchema = DefaultInlineContentSchema,
+  SSchema extends StyleSchema = DefaultStyleSchema,
+> {
   readonly type: string;                          // "editorzero:core/heading"
   readonly tier: FidelityTier;                    // lossless | directive | opaque
   readonly attributes: z.ZodType<Attrs>;
-  readonly toMarkdown: (block: Block<Attrs>) => string;
-  readonly fromMarkdown: (md: MdastNode) => Block<Attrs> | null;
-  readonly equivalence?: (a: Block<Attrs>, b: Block<Attrs>) => boolean;
-  readonly reactView?: React.ComponentType<BlockViewProps<Attrs>>;  // client-only
+  readonly toMarkdown: (block: Block<BSchema, ISchema, SSchema>) => string;
+  readonly fromMarkdown: (md: MdastBlockNode) => Block<BSchema, ISchema, SSchema> | null;
+  readonly equivalence?: (
+    a: Block<BSchema, ISchema, SSchema>,
+    b: Block<BSchema, ISchema, SSchema>,
+  ) => boolean;
+  // reactView lives in `@editorzero/blocks/react` (requires @blocknote/react);
+  // kept out of the kernel so the main export stays dep-light.
 }
 ```
 
-The property-test harness fuzzes every `BlockSpec` against its declared tier contract. Registering a new block type auto-creates the fidelity test row.
+The property-test harness fuzzes every `BlockTypeSpec` against its declared tier contract. Registering a new block type auto-creates the fidelity test row.
 
 ### 16.6 Semantic naming
 

@@ -16,7 +16,9 @@
  *
  * `TEditor` is left as a generic parameter with default `unknown` so this
  * package stays dependency-light. `@editorzero/blocks` sharpens it to
- * `BlockNoteEditor<BlockSpecSchema>` when handler code is written; the
+ * `BlockNoteEditor<BSchema, ISchema, SSchema>` when handler code is
+ * written (BlockNote's real tri-generic; the project schema is the
+ * instance returned by `BlockNoteSchema.create({ blockSpecs })`). The
  * arch-lint rule `transact-called-at-most-once` backstops the invariant
  * that handlers invoke `ctx.transact` at most once per call (§16.8).
  */
