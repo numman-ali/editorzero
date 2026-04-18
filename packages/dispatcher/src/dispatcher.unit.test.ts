@@ -201,6 +201,16 @@ describe("dispatcher", () => {
     expect(row.subject_id).toBe("abc");
     expect(row.principal_kind).toBe("user");
     expect(row.principal_id).toBe(USER_ID);
+    // F90: `category` is carried on every row so analytic queries can
+    // partition `audit_events` by mutation/read/auth/admin/system
+    // without round-tripping via `capability_id`.
+    expect(row.category).toBe("read");
+    // F90: `collapsed_count` is always 1 at write time; the collapse
+    // path (ADR 0009) mutates the prior row.
+    expect(row.collapsed_count).toBe(1);
+    // F90: `input_hash` is sha256-hex (64 chars, lowercase), not the
+    // prior 8-char FNV-1a fingerprint.
+    expect(row.input_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("deny path: missing scope throws PermissionDeniedError + writes deny audit", async () => {
@@ -254,6 +264,13 @@ describe("dispatcher", () => {
     if (row.record.outcome === "error") {
       expect(row.record.error.kind).toBe("validation");
     }
+    // F90: even on the dispatcher-owned validation path we carry the
+    // capability's category, so analytics can partition validation
+    // errors by read vs mutation vs admin without re-resolving the
+    // capability.
+    expect(row.category).toBe("read");
+    expect(row.collapsed_count).toBe(1);
+    expect(row.input_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it(

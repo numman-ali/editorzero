@@ -44,6 +44,8 @@
  * of pattern-matching on string codes.
  */
 
+import { createHash } from "node:crypto";
+
 import type { AuditEffect, AuditRecord, AuditWriteInput, AuditWriter } from "@editorzero/audit";
 import type { AnyCapability, CapabilityContext, Registry } from "@editorzero/capabilities";
 import type { HandlerError } from "@editorzero/errors";
@@ -62,6 +64,7 @@ import {
   type Principal,
   type TenantContext,
 } from "@editorzero/principal";
+import type { CapabilityCategory } from "@editorzero/scopes";
 
 import type { PermissionGate } from "./gate";
 
@@ -207,20 +210,18 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * FNV-1a 32-bit hex over the canonicalised JSON. Not a cryptographic
- * hash — just a short, stable fingerprint for the `input_hash` column
- * (de-dup within the collapse window, redaction-joins across services).
- * A real `@editorzero/audit` canonicaliser can replace this later.
+ * SHA-256 hex over the canonicalised JSON (architecture.md §3.11 —
+ * `input_hash TEXT NOT NULL  -- sha256 of normalized input`). Used for
+ * de-dup inside the read-collapse window (ADR 0009) and for cross-service
+ * joins after PII redaction. SHA-256 is cryptographic-grade not because
+ * the audit log is a security trust anchor on its own, but because a
+ * short non-crypto hash (the prior FNV-1a 32-bit form) collided often
+ * enough at audit-volume that collapse-window queries were unsafe to
+ * treat as identity.
  */
 function stableHash(input: unknown): string {
-  const json = JSON.stringify(canonicalize(input));
-  const source = json ?? "";
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < source.length; i++) {
-    hash ^= source.charCodeAt(i);
-    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
+  const json = JSON.stringify(canonicalize(input)) ?? "";
+  return createHash("sha256").update(json).digest("hex");
 }
 
 function writeAudit<TEditor>(
@@ -237,12 +238,18 @@ function writeAudit<TEditor>(
   const writeInput: AuditWriteInput = {
     workspace_id: tenant.workspace_id,
     capability_id: capability.id,
+    category: capability.category,
     ...principalFieldsFor(principal),
     subject_kind: subject.kind,
     subject_id: subject.id ?? null,
     input_hash: stableHash(input),
     duration_ms,
     trace_id,
+    // Always 1 at write-time; read-collapse increments the *prior* row
+    // inside the writer's tx (ADR 0009 / §9.3) when the collapse window
+    // matches. Mutation capabilities can never collapse — that invariant
+    // is enforced by the `collapse-only-for-reads` contract test.
+    collapsed_count: 1,
     record,
   };
   return deps.auditWriter.write(deps.openAuditTx(), writeInput);
@@ -292,6 +299,7 @@ export function createDispatcher<TEditor = unknown>(
         await writeInputValidationAudit(
           deps,
           capability.id,
+          capability.category,
           principal,
           tenant,
           input,
@@ -489,6 +497,7 @@ function writeAuditError<TEditor>(
 function writeInputValidationAudit<TEditor>(
   deps: DispatcherDeps<TEditor>,
   capability_id: CapabilityId,
+  category: CapabilityCategory,
   principal: Principal,
   tenant: TenantContext,
   rawInput: unknown,
@@ -500,12 +509,14 @@ function writeInputValidationAudit<TEditor>(
   const writeInput: AuditWriteInput = {
     workspace_id: tenant.workspace_id,
     capability_id,
+    category,
     ...principalFieldsFor(principal),
     subject_kind: "system",
     subject_id: null,
     input_hash: stableHash(rawInput),
     duration_ms,
     trace_id,
+    collapsed_count: 1,
     record: {
       outcome: "error",
       error: err.toHandlerError(),

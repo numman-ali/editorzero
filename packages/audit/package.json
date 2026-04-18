@@ -15,7 +15,7 @@
     "build": "tsc -b",
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@editorzero/errors": "workspace:*",

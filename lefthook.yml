@@ -27,8 +27,14 @@ pre-commit:
       glob: "{docs/**,packages/**,AGENTS.md}"
       run: pnpm coherence
     unit-affected:
+      # Scope is narrowed at the workspace-filter level (pnpm -r --filter
+      # "...[origin/main]") — run each affected package's full suite so
+      # per-package coverage thresholds see every test. Passing vitest's
+      # own `--changed` would mask coverage (unchanged files' tests
+      # wouldn't execute even though `coverage.all: true` still counts
+      # those files against the threshold).
       glob: "*.{ts,tsx}"
-      run: pnpm test:affected --changed
+      run: pnpm test:affected
       stage_fixed: false
 
 # ── Slow lane: runs on pre-push ────────────────────────────────────────────
