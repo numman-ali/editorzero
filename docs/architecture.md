@@ -1954,7 +1954,8 @@ export type AuditEffect =
   | { kind: "admin.job_cancel";    job_id: string; queue: string }
   | { kind: "admin.queue_pause";   queue: string }
   | { kind: "admin.queue_resume";  queue: string }
-  | { kind: "admin.secret_rotate"; secret_kind: string; dual_accept_until: number };
+  | { kind: "admin.secret_rotate"; secret_kind: string; dual_accept_until: number }
+  | { kind: "admin.diagnose";      workspace_id: WorkspaceId; bundle_id: string; with_content: boolean };   // §9.7 bundle export
 ```
 
 **Audit record envelope (F32).** Every persisted `audit_events` row is one of three variants:

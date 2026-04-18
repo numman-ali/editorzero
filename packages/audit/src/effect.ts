@@ -301,4 +301,17 @@ export type AuditEffect =
   | { kind: "admin.job_cancel"; job_id: string; queue: string }
   | { kind: "admin.queue_pause"; queue: string }
   | { kind: "admin.queue_resume"; queue: string }
-  | { kind: "admin.secret_rotate"; secret_kind: string; dual_accept_until: number };
+  | { kind: "admin.secret_rotate"; secret_kind: string; dual_accept_until: number }
+  /**
+   * Support-bundle export. `bundle_id` ties the audit row to the exported
+   * artifact for later retrieval. `with_content` distinguishes default
+   * redacted export from the operator-cosigned raw-content variant
+   * (§9.7). Appendix A row references this kind; §16.3 omitted it — drift
+   * fix.
+   */
+  | {
+      kind: "admin.diagnose";
+      workspace_id: WorkspaceId;
+      bundle_id: string;
+      with_content: boolean;
+    };
