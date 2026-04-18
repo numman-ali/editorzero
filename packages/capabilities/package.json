@@ -27,6 +27,8 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "catalog:",
+    "better-sqlite3": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
