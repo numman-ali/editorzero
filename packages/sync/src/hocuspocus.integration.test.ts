@@ -24,6 +24,7 @@
 import {
   asAuditTx,
   createSqliteAuditWriter,
+  createSqliteDocUpdatesReader,
   createSqliteDocUpdatesWriter,
   createSqliteDriver,
   FULL_DDL,
@@ -47,7 +48,10 @@ let sync: HocuspocusSync;
 beforeEach(async () => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(FULL_DDL);
-  sync = new HocuspocusSync({ docUpdatesWriter: createSqliteDocUpdatesWriter() });
+  sync = new HocuspocusSync({
+    docUpdatesWriter: createSqliteDocUpdatesWriter(),
+    docUpdatesReader: createSqliteDocUpdatesReader(),
+  });
 });
 
 afterEach(async () => {
@@ -462,6 +466,110 @@ describe("HocuspocusSync.bind().transact", () => {
     for (const row of rows) Y.applyUpdate(replay, row.update_blob);
     // No interleaving — each `[X … X]` block stays contiguous.
     expect(replay.getText("body").toString()).toMatch(/^(\[(A|B|C)\2\]){3}$/);
+  });
+
+  it("per-doc retention is bounded across invocations (Codex P3.6e adversarial)", async () => {
+    // Regression guard on the open-replace pattern inside
+    // `#runTransactLocked`. Before P3.6e, each `ctx.transact` left its
+    // `DirectConnection` alive and registered in a per-doc
+    // `Set<DirectConnection>` until `HocuspocusSync.close()` — memory
+    // grew O(invocations) per doc. The fix opens a replacement
+    // connection per call, stores it in the singleton map, and
+    // disconnects the predecessor in `finally` AFTER the new one is
+    // registered (so `directConnectionsCount` never drops to 0 during
+    // the swap and the Y.Doc stays resident). Test pins the invariant
+    // by driving 10 same-doc transacts and asserting the server's
+    // `directConnectionsCount` stays at 1, not 10.
+    await seedDocMetadata(DOC_ID_A);
+    const iterations = 10;
+    for (let i = 0; i < iterations; i++) {
+      await driver.withSystemTx(async (tx) => {
+        const ctx: HocuspocusTxContext = {
+          sqlTx: asAuditTx(tx),
+          principal: testPrincipal(),
+          workspace_id: WORKSPACE_ID,
+        };
+        const bound = sync.bind(ctx);
+        await bound.transact(DOC_ID_A, (ydoc) => {
+          ydoc.getText("body").insert(0, `${i}`);
+        });
+      });
+    }
+
+    const server = sync._server_testOnly();
+    const document = server.documents.get(DOC_ID_A);
+    if (document === undefined) throw new Error("expected document resident");
+    // `directConnectionsCount` == 1 proves the predecessor was
+    // disconnected on each swap, not accumulated. 10 invocations, 1
+    // live connection.
+    expect(document.directConnectionsCount).toBe(1);
+    // All `iterations` `doc_updates` rows landed — functional path
+    // unbroken by the open-replace refactor.
+    expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(iterations);
+  });
+
+  it("rollback leaves the doc resident when a concurrent connection holds it (WS-client limit regression guard)", async () => {
+    // P3.6e class docstring "In-memory rollback scope" claim:
+    // `bound.rollback()` disconnects our per-doc singleton, but
+    // Hocuspocus's `shouldUnloadDocument` gates unload on
+    // `getConnectionsCount() === 0` — including WebSocket client
+    // connections. In production with live browser editors attached,
+    // rolling back a server-side `ctx.transact` cannot evict the
+    // Document, so the rolled-back delta stays resident and a
+    // subsequent `ctx.transact` reads the polluted state. This test
+    // pins that as a *known* limit, not accidental: if someone "fixes"
+    // this by force-closing WebSocket connections on rollback, this
+    // test fails and forces them to justify the UX tradeoff (dropping
+    // live editor sessions mid-edit). The real closure is Phase 4's
+    // broadcast-suppression work.
+    await seedDocMetadata(DOC_ID_A);
+
+    // Simulate a WebSocket client by opening a second direct
+    // connection from outside our bind. This holds the Document
+    // resident independently of our bind's singleton.
+    const squatter = await sync._server_testOnly().openDirectConnection(DOC_ID_A, {});
+    try {
+      await expect(
+        driver.withSystemTx(async (tx) => {
+          const ctx: HocuspocusTxContext = {
+            sqlTx: asAuditTx(tx),
+            principal: testPrincipal(),
+            workspace_id: WORKSPACE_ID,
+          };
+          const bound = sync.bind(ctx);
+          try {
+            await bound.transact(DOC_ID_A, (ydoc) => {
+              ydoc.getText("body").insert(0, "rolled-back");
+            });
+            throw new Error("post-transact throw");
+          } catch (err) {
+            await bound.rollback();
+            throw err;
+          }
+        }),
+      ).rejects.toThrow("post-transact throw");
+
+      // Durable state clean (SQL tx rolled back).
+      expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(0);
+
+      // BUT the Y.Doc is still resident (squatter keeps the count
+      // above 0). A subsequent ctx.transact sees the polluted state.
+      let observed = "";
+      await driver.withSystemTx(async (tx) => {
+        const ctx: HocuspocusTxContext = {
+          sqlTx: asAuditTx(tx),
+          principal: testPrincipal(),
+          workspace_id: WORKSPACE_ID,
+        };
+        const bound = sync.bind(ctx);
+        await bound.transact(DOC_ID_A, (ydoc) => {
+          observed = ydoc.getText("body").toString();
+        });
+      });
+      expect(observed).toBe("rolled-back");
+    } finally {
+      await squatter.disconnect();
+    }
   });
 
   it("isolates writes across doc_ids", async () => {

@@ -41,3 +41,43 @@ export interface SyncService {
   /** Release resources (destroy Y.Docs, clear internal state). */
   close(): Promise<void>;
 }
+
+/**
+ * A write-path-bound `SyncService` (ADR 0018 §6.4 / F31). Returned by
+ * backend-specific `bind()` methods — `HocuspocusSync.bind(context)`
+ * is the primary producer. The handle tracks which `doc_id`s the
+ * handler mutated via `transact` so the dispatcher's `runInWriteTx`
+ * can drop their in-memory Y.Doc state when the enclosing SQL tx
+ * rolls back.
+ *
+ * **Why `rollback()` and not `finalize("commit"|"rollback")`.** The
+ * commit path is a no-op — the in-memory Y.Doc is the source of
+ * truth post-commit until the next server restart re-hydrates it
+ * from `doc_updates`. A two-branch finalize would add a required
+ * call on the happy path for symmetry only; the dispatcher forgetting
+ * to fire it would silently leak nothing. `rollback()` keeps the
+ * failure-only coupling explicit.
+ *
+ * **Lifecycle.** One `BoundSyncService` per `runInWriteTx` invocation.
+ * Handlers receive `bound.transact` via `ctx.transact`; the
+ * dispatcher calls `bound.rollback()` in its catch path. The bound
+ * service is discarded at the end of the invocation.
+ */
+export interface BoundSyncService extends SyncService {
+  /**
+   * Drop the in-memory Y.Doc state for every `doc_id` mutated via
+   * this binding's `transact`. Called by `runInWriteTx` when its
+   * closure threw — the SQL tx rolls back, and so the Y.Doc in
+   * memory must re-hydrate from `doc_updates` next time it is
+   * opened. Idempotent; safe to call on a binding whose handler
+   * never issued `ctx.transact`.
+   *
+   * **Scope.** The Hocuspocus-backed impl can only evict the Document
+   * when no WebSocket client connections are attached — Hocuspocus's
+   * `shouldUnloadDocument` gates on total `getConnectionsCount() === 0`.
+   * For docs with live editor sessions, the aborted delta stays in
+   * memory and in client-local Y.Docs; full atomicity there requires
+   * buffering broadcasts until SQL commit (Phase 4 scope).
+   */
+  rollback(): Promise<void>;
+}

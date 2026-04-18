@@ -27,6 +27,7 @@ import {
 import {
   asAuditTx,
   createSqliteAuditWriter,
+  createSqliteDocUpdatesReader,
   createSqliteDocUpdatesWriter,
   createSqliteDriver,
   createTenantScopedDb,
@@ -424,7 +425,8 @@ function mountContentDispatcher<I, O>(capability: Capability<I, O>): ContentMoun
   const registry = createRegistry([registerCapability(capability)]);
   const auditWriter = createSqliteAuditWriter();
   const docUpdatesWriter = createSqliteDocUpdatesWriter();
-  const sync = new HocuspocusSync({ docUpdatesWriter });
+  const docUpdatesReader = createSqliteDocUpdatesReader();
+  const sync = new HocuspocusSync({ docUpdatesWriter, docUpdatesReader });
   hocuspocus = sync;
   const runners: RunnerCounts = { writeTx: 0, read: 0 };
   let tick = 0;
@@ -442,11 +444,11 @@ function mountContentDispatcher<I, O>(capability: Capability<I, O>): ContentMoun
       runners.writeTx += 1;
       return driver.withSystemTx(async (tx) => {
         const auditTx = asAuditTx(tx);
-        // `hocuspocus.bind(ctx)` hands back a tx-bound `SyncService`
-        // whose `transact` closes over `auditTx` so the
-        // `DocUpdatesWriter.write` call commits inside the same SQL
-        // tx as the handler's `ctx.db` writes and the allow audit
-        // row. One `bind` per dispatcher invocation.
+        // `hocuspocus.bind(ctx)` hands back a tx-bound
+        // `BoundSyncService` whose `transact` closes over `auditTx`
+        // so the `DocUpdatesWriter.write` call commits inside the
+        // same SQL tx as the handler's `ctx.db` writes and the allow
+        // audit row. One `bind` per dispatcher invocation.
         const bound = sync.bind({
           sqlTx: auditTx,
           principal,
@@ -459,7 +461,19 @@ function mountContentDispatcher<I, O>(capability: Capability<I, O>): ContentMoun
           },
           transact: bound.transact.bind(bound),
         };
-        return fn(extras, auditTx);
+        try {
+          return await fn(extras, auditTx);
+        } catch (err) {
+          // The SQL tx is about to roll back. Drop the in-memory
+          // Y.Doc state for every `doc_id` the handler mutated via
+          // `ctx.transact` so the next open re-hydrates from
+          // committed `doc_updates`. Without this step the live
+          // Hocuspocus `Document` would retain the rolled-back
+          // mutation — Codex P3.6c adversarial P2 (the "durable
+          // state is correct but the hot CRDT drifts" bug).
+          await bound.rollback();
+          throw err;
+        }
       });
     },
     runRead: async (principal, fn) => {
@@ -861,5 +875,123 @@ describe("write-path tx + content mutation (P3.6c)", () => {
     expect(audit).toHaveLength(1);
     expect(audit[0]?.outcome).toBe("deny");
     expect(audit[0]?.deny_reason).toBe("acl_deny");
+  });
+
+  it("rollback drops in-memory Y.Doc drift: post-rollback read returns pre-transact state (P3.6e)", async () => {
+    // The atomicity invariant (§7) is defined over durable state —
+    // the SQL tuple — but the in-memory Y.Doc a handler mutated via
+    // `ctx.transact` must not leak past a tx rollback either. If it
+    // did, a read issued on the same sync instance before a server
+    // restart would observe content with no matching `doc_updates`
+    // row, and the next durable write would fork.
+    //
+    // This test pins the rollback-drops-memory contract:
+    //   1. Invocation A commits a mutation. `doc_updates` has seq 1
+    //      with blob "first"; the in-memory Y.Doc holds "first".
+    //   2. Invocation B mutates the same doc, then throws — tx rolls
+    //      back, `bound.rollback()` fires, the in-memory Y.Doc is
+    //      dropped.
+    //   3. Invocation C reads the Y.Doc via a no-op `ctx.transact`.
+    //      `openDirectConnection` re-fires `onLoadDocument`, which
+    //      replays `doc_updates` from SQLite — only seq 1 exists, so
+    //      the observed text is "first", NOT "firstrolled-back".
+    //
+    // Without the `bound.rollback()` call in `runInWriteTx`, step 3
+    // would see "firstrolled-back" (the aborted in-memory state) —
+    // durable state and observable state drift apart, invariant 7
+    // breaks. The test would fail here.
+    const observed: string[] = [];
+    const { dispatcher } = mountContentDispatcher({
+      id: DOC_MUTATE_ID,
+      category: "mutation",
+      summary: "rollback-drift integration fixture",
+      input: z.object({ doc_id: z.string(), text: z.string(), mode: z.string() }),
+      output: z.object({ doc_id: z.string(), text: z.string() }),
+      requires: ["doc:write"],
+      audit: {
+        subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
+        effectOnAllow: (input) => ({
+          kind: "doc.rename",
+          doc_id: DocId(input.doc_id),
+          title: input.text,
+        }),
+        effectOnDeny: (_input, reason) => ({
+          kind: "deny",
+          capability: DOC_MUTATE_ID,
+          required_scopes: ["doc:write"],
+          reason_code: reason.kind,
+        }),
+        effectOnError: () => ({
+          kind: "error",
+          capability: DOC_MUTATE_ID,
+          error_code: "internal",
+          retriable: false,
+        }),
+        collapsePolicy: { collapsible: false },
+      },
+      surfaces: ["api"],
+      handler: async (ctx, input) => {
+        if (input.mode === "write") {
+          await ctx.transact(DocId(input.doc_id), (editor) => {
+            (editor as unknown as Y.Doc).getText("body").insert(0, input.text);
+          });
+          return { doc_id: input.doc_id, text: input.text };
+        }
+        if (input.mode === "write-then-throw") {
+          await ctx.transact(DocId(input.doc_id), (editor) => {
+            (editor as unknown as Y.Doc).getText("body").insert(0, input.text);
+          });
+          throw new Error("post-transact handler throw");
+        }
+        // mode === "read": snapshot current body text via a no-op
+        // `ctx.transact`. The transact itself produces no update
+        // deltas (we only read), so no `doc_updates` row is written
+        // — the read is purely observational.
+        await ctx.transact(DocId(input.doc_id), (editor) => {
+          observed.push((editor as unknown as Y.Doc).getText("body").toString());
+        });
+        return { doc_id: input.doc_id, text: "" };
+      },
+    });
+    await seedExistingDoc(DocId(DOC_ID_A));
+
+    // Invocation A — commit "first".
+    await dispatcher.dispatch({
+      capability_id: DOC_MUTATE_ID,
+      input: { doc_id: DOC_ID_A, text: "first", mode: "write" },
+      principal: testUser(),
+      access: testAccess(),
+      trace_id: null,
+    });
+
+    // Invocation B — mutate then throw; tx rolls back, bound.rollback()
+    // drops the in-memory Y.Doc.
+    await expect(
+      dispatcher.dispatch({
+        capability_id: DOC_MUTATE_ID,
+        input: { doc_id: DOC_ID_A, text: "rolled-back", mode: "write-then-throw" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      }),
+    ).rejects.toThrow(/post-transact handler throw/);
+
+    // Sanity: `doc_updates` has only seq 1 from invocation A.
+    const updates = await fetchDocUpdates(DocId(DOC_ID_A));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.seq).toBe(1);
+
+    // Invocation C — read. onLoadDocument replays the one
+    // committed row, so the observed text is invocation A's "first",
+    // NOT invocation B's "rolled-backfirst" (insert-at-0 would have
+    // prepended the aborted text had the in-memory Y.Doc survived).
+    await dispatcher.dispatch({
+      capability_id: DOC_MUTATE_ID,
+      input: { doc_id: DOC_ID_A, text: "", mode: "read" },
+      principal: testUser(),
+      access: testAccess(),
+      trace_id: null,
+    });
+    expect(observed).toEqual(["first"]);
   });
 });

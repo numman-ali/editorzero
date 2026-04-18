@@ -25,4 +25,4 @@ export {
 } from "./blocks";
 export { HocuspocusSync, type HocuspocusSyncDeps, type HocuspocusTxContext } from "./hocuspocus";
 export { MemorySyncService } from "./memory";
-export type { SyncService } from "./service";
+export type { BoundSyncService, SyncService } from "./service";

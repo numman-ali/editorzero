@@ -11,6 +11,7 @@
  */
 
 export { asAuditTx, createSqliteAuditWriter } from "./audit-writer";
+export { createSqliteDocUpdatesReader, type DocUpdatesReader } from "./doc-updates-reader";
 export {
   createSqliteDocUpdatesWriter,
   type DocUpdatesWriter,
