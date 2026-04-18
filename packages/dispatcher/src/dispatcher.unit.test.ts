@@ -22,7 +22,11 @@ import {
 } from "@editorzero/capabilities";
 import { createSqliteDriver, type SqliteDriver } from "@editorzero/db";
 import type { DenyReason } from "@editorzero/errors";
-import { PermissionDeniedError, ValidationError } from "@editorzero/errors";
+import {
+  PermissionDeniedError,
+  TransactCalledTwiceError,
+  ValidationError,
+} from "@editorzero/errors";
 import { AgentId, CapabilityId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AccessPath, AgentPrincipal, UserPrincipal } from "@editorzero/principal";
@@ -420,6 +424,87 @@ describe("dispatcher", () => {
       expect(row.record.reason.kind).toBe("acl_deny");
     }
   });
+
+  it(
+    "F92 backstop: handler calling ctx.transact twice throws " +
+      "TransactCalledTwiceError on the second call and writes one error audit row",
+    async () => {
+      // Custom extras with a `transact` stub that completes normally,
+      // so the FIRST call succeeds and the SECOND call hits the
+      // at-most-once wrapper. The default `testExtras()` throws on
+      // any call, which wouldn't distinguish "first call threw" from
+      // "second call was blocked".
+      const transactStub = async <T>(
+        _doc_id: DocId,
+        fn: (editor: unknown) => T | Promise<T>,
+      ): Promise<T> => fn({});
+      const DOC_ONE = DocId("018f0000-0000-7000-8000-0000000000a1");
+      const DOC_TWO = DocId("018f0000-0000-7000-8000-0000000000a2");
+
+      const registry = createRegistry([
+        registerCapability(
+          buildDocReadCapability(async (ctx: CapabilityContext, input) => {
+            await ctx.transact(DOC_ONE, () => undefined);
+            // Second call — dispatcher wrapper throws the backstop error.
+            await ctx.transact(DOC_TWO, () => undefined);
+            return { doc_id: input.doc_id, title: "unreachable" };
+          }),
+        ),
+      ]);
+      const auditWriter = memoryAuditWriter();
+      const openAuditTx = (): AuditTx => ({ __brand: "AuditTx" });
+      let tick = 0;
+      const dispatcher = createDispatcher({
+        registry,
+        gate: scopeOnlyGate(),
+        auditWriter,
+        tracer: noopTracer,
+        logger: noopLogger,
+        now: () => {
+          tick += 1;
+          return tick;
+        },
+        makeContextExtras: () => ({
+          db: driver.scoped(WORKSPACE_ID),
+          outbox: () => {
+            /* unused */
+          },
+          transact: transactStub,
+        }),
+        openAuditTx,
+      });
+
+      const rejection = dispatcher.dispatch({
+        capability_id: DOC_READ_ID,
+        input: { doc_id: "abc" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      });
+      await expect(rejection).rejects.toBeInstanceOf(TransactCalledTwiceError);
+      await rejection.catch((err: unknown) => {
+        if (err instanceof TransactCalledTwiceError) {
+          // The error identifies the SECOND doc_id — the call the
+          // wrapper blocked — so operator triage can tell which
+          // handler path branched into a duplicate transact.
+          expect(err.doc_id).toBe(DOC_TWO);
+          expect(err.capability_id).toBe(DOC_READ_ID);
+        }
+      });
+
+      expect(auditWriter.rows).toHaveLength(1);
+      const row = auditWriter.rows[0];
+      if (row === undefined) throw new Error("expected one row");
+      expect(row.record.outcome).toBe("error");
+      if (row.record.outcome === "error") {
+        // Handler-contract violation projects to `internal` (§16.10);
+        // operators reading the audit stream see an internal error
+        // correlated with a `transact_called_twice` code in logs via
+        // the same `trace_id`.
+        expect(row.record.error.kind).toBe("internal");
+      }
+    },
+  );
 
   it(
     "F86 invariant: access.workspace_id disagreeing with principal.workspace_id " +

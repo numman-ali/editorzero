@@ -53,9 +53,10 @@ import {
   EditorZeroError,
   InternalError,
   PermissionDeniedError,
+  TransactCalledTwiceError,
   ValidationError,
 } from "@editorzero/errors";
-import type { CapabilityId } from "@editorzero/ids";
+import type { CapabilityId, DocId } from "@editorzero/ids";
 import type { Logger, Tracer } from "@editorzero/observability";
 import {
   type AccessPath,
@@ -337,12 +338,32 @@ export function createDispatcher<TEditor = unknown>(
 
       // 3. Build context + invoke handler
       const extras = deps.makeContextExtras(principal);
+      // F92 runtime backstop: handlers must call `ctx.transact` at most
+      // once per invocation (§16.4 + ADR 0018). The single-write-path-tx
+      // contract (F31) depends on it — a second call would split one
+      // logical mutation into two `doc_updates` rows and two
+      // `outbox(doc.updated)` events, breaking atomicity across CRDT,
+      // audit, and outbox. A dev-time `@editorzero/arch-lint` rule will
+      // eventually catch this syntactically; until then this wrapper
+      // throws on the second call so the violation surfaces as a normal
+      // error audit row instead of silently corrupting the write-path.
+      let transactCalled = false;
+      const transactOnce = async <T>(
+        doc_id: DocId,
+        fn: (editor: TEditor) => T | Promise<T>,
+      ): Promise<T> => {
+        if (transactCalled) {
+          throw new TransactCalledTwiceError({ capability_id, doc_id });
+        }
+        transactCalled = true;
+        return extras.transact(doc_id, fn);
+      };
       const ctx: CapabilityContext<TEditor> = {
         principal,
         tenant: { workspace_id: tenant.workspace_id },
         db: extras.db,
         outbox: extras.outbox,
-        transact: extras.transact,
+        transact: transactOnce,
         logger: deps.logger.child({
           event: "dispatcher.invoke",
           capability_id,

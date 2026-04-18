@@ -14,6 +14,7 @@
  * surfaces key on; `httpStatus` is the canonical HTTP mapping.
  */
 
+import type { CapabilityId, DocId } from "@editorzero/ids";
 import type { SubjectKind } from "@editorzero/scopes";
 
 import type { DenyReason, HandlerError } from "./handler-error";
@@ -191,6 +192,41 @@ export class UpstreamError extends EditorZeroError {
 
   toHandlerError(): HandlerError {
     return { kind: "upstream", service: this.service, status: this.status };
+  }
+}
+
+/**
+ * Capability handler violated the at-most-once `ctx.transact` contract
+ * (§16.4 + ADR 0018, F92). The single-write-path-tx invariant (F31)
+ * assumes exactly one CRDT transact per invocation — a second call
+ * would split one logical mutation into two `doc_updates` + two
+ * `outbox(doc.updated)` rows, so the dispatcher refuses the second
+ * call before the Hocuspocus direct-connection tx opens.
+ *
+ * This is a handler-contract bug, not a domain error — it maps to
+ * `internal` in the audit projection. The planned
+ * `@editorzero/arch-lint` rule `transact-called-at-most-once` catches
+ * this at dev time; until it ships, this runtime backstop is what
+ * enforces the invariant.
+ */
+export class TransactCalledTwiceError extends EditorZeroError {
+  readonly code = "transact_called_twice";
+  readonly httpStatus = 500;
+  readonly capability_id: CapabilityId;
+  readonly doc_id: DocId;
+
+  constructor(params: { message?: string; capability_id: CapabilityId; doc_id: DocId }) {
+    super(
+      params.message ??
+        `ctx.transact may be called at most once per invocation; capability ` +
+          `${params.capability_id} called it twice on doc ${params.doc_id}`,
+    );
+    this.capability_id = params.capability_id;
+    this.doc_id = params.doc_id;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "internal", trace_id: "" };
   }
 }
 
