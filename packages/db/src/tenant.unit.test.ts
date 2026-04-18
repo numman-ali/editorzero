@@ -18,6 +18,7 @@ import { sql } from "kysely";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createSqliteDriver, type SqliteDriver } from "./drivers/sqlite";
+import { FULL_DDL } from "./drivers/sqlite-ddl";
 import { TenantScopeViolationError } from "./tenant";
 
 const WORKSPACE_A = WorkspaceId("018f0000-0000-7000-8000-000000000001");
@@ -30,29 +31,10 @@ const DOC_A2 = DocId("018f0000-0000-7000-8000-0000000000d2");
 const DOC_B1 = DocId("018f0000-0000-7000-8000-0000000000d3");
 
 // ── Fixture harness ──────────────────────────────────────────────────────
-
-/**
- * `docs` DDL mirrors architecture.md §3.5 for the columns this slice
- * exercises. It is hand-written until Atlas + kysely-codegen land
- * (see `./schema.ts`); when they do, the migration will come from
- * `packages/db/src/schema/*.sql`.
- */
-const DOCS_DDL = `
-  CREATE TABLE docs (
-    id                 TEXT PRIMARY KEY,
-    workspace_id       TEXT NOT NULL,
-    collection_id      TEXT,
-    title              TEXT NOT NULL,
-    slug               TEXT NOT NULL,
-    order_key          TEXT NOT NULL,
-    visibility         TEXT NOT NULL DEFAULT 'workspace',
-    visibility_version INTEGER NOT NULL DEFAULT 0,
-    created_by         TEXT NOT NULL,
-    created_at         INTEGER NOT NULL,
-    updated_at         INTEGER NOT NULL,
-    deleted_at         INTEGER
-  );
-`;
+//
+// DDL comes from `./drivers/sqlite-ddl` so the test fixture and the
+// runtime bootstrap agree on one source of truth (migrates to Atlas
+// when that pipeline lands — see `./schema.ts`).
 
 function seedRow(id: DocId, workspace_id: WorkspaceId, title: string, created_by: UserId) {
   return {
@@ -75,7 +57,7 @@ let driver: SqliteDriver;
 
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
-  driver.exec(DOCS_DDL);
+  driver.exec(FULL_DDL);
 });
 
 afterEach(async () => {
@@ -418,5 +400,184 @@ describe("WorkspaceScopingPlugin — join awareness (F87)", () => {
     expect(compiled.sql).toContain('"target"."workspace_id" = ?');
     expect(compiled.sql).toContain('"source"."workspace_id" = ?');
     expect(compiled.parameters).toContain(WORKSPACE_A);
+  });
+});
+
+// ── New tenant-scoped tables (F31 write-path schema) ─────────────────────
+//
+// `doc_snapshots`, `doc_updates`, `audit_events` joined `docs` in
+// `TENANT_SCOPED_TABLES` as part of the P3.5 schema expansion. The
+// plugin enforcement is table-blind — it keys off membership in that
+// list — so these tests prove the list extension took effect, not
+// that per-table behaviour is novel. One assertion per table: SELECT
+// from workspace A returns zero workspace-B rows.
+
+describe("WorkspaceScopingPlugin — new tenant-scoped tables", () => {
+  it("doc_snapshots SELECT is scoped to the caller's workspace", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+
+    // `docs` seed first — FK from `doc_snapshots.doc_id`.
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+    await b
+      .insertInto("docs")
+      .values(seedRow(DOC_B1, WORKSPACE_B, "B1", BOB))
+      .execute();
+
+    const snapshot = new Uint8Array([0x01, 0x02, 0x03]);
+    await a
+      .insertInto("doc_snapshots")
+      .values({
+        id: "snap-a1",
+        doc_id: DOC_A1,
+        workspace_id: WORKSPACE_A,
+        seq: 1,
+        state: snapshot,
+        created_at: 1,
+      })
+      .execute();
+    await b
+      .insertInto("doc_snapshots")
+      .values({
+        id: "snap-b1",
+        doc_id: DOC_B1,
+        workspace_id: WORKSPACE_B,
+        seq: 1,
+        state: snapshot,
+        created_at: 1,
+      })
+      .execute();
+
+    const seenFromA = await a.selectFrom("doc_snapshots").selectAll().execute();
+    expect(seenFromA.map((r) => r.id)).toEqual(["snap-a1"]);
+  });
+
+  it("doc_updates SELECT is scoped to the caller's workspace", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+
+    await a
+      .insertInto("docs")
+      .values(seedRow(DOC_A1, WORKSPACE_A, "A1", ALICE))
+      .execute();
+    await b
+      .insertInto("docs")
+      .values(seedRow(DOC_B1, WORKSPACE_B, "B1", BOB))
+      .execute();
+
+    const blob = new Uint8Array([0xff]);
+    await a
+      .insertInto("doc_updates")
+      .values({
+        id: "upd-a1",
+        doc_id: DOC_A1,
+        workspace_id: WORKSPACE_A,
+        seq: 1,
+        update_blob: blob,
+        principal_kind: "user",
+        principal_id: ALICE,
+        session_id: null,
+        created_at: 1,
+        delete_after: null,
+      })
+      .execute();
+    await b
+      .insertInto("doc_updates")
+      .values({
+        id: "upd-b1",
+        doc_id: DOC_B1,
+        workspace_id: WORKSPACE_B,
+        seq: 1,
+        update_blob: blob,
+        principal_kind: "user",
+        principal_id: BOB,
+        session_id: null,
+        created_at: 1,
+        delete_after: null,
+      })
+      .execute();
+
+    const seenFromA = await a.selectFrom("doc_updates").selectAll().execute();
+    expect(seenFromA.map((r) => r.id)).toEqual(["upd-a1"]);
+  });
+
+  it("audit_events SELECT is scoped to the caller's workspace", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+
+    const baseRow = {
+      capability_id: "doc.list",
+      category: "read" as const,
+      principal_kind: "user" as const,
+      acting_as_user_id: null,
+      session_id: null,
+      token_id: null,
+      subject_kind: "workspace" as const,
+      subject_id: null,
+      outcome: "allow" as const,
+      deny_reason: null,
+      input_hash: "0".repeat(64),
+      effect: '{"kind":"audit.access_log"}',
+      duration_ms: 1,
+      trace_id: null,
+      created_at: 1,
+      collapsed_count: 1,
+    };
+    await a
+      .insertInto("audit_events")
+      .values({ id: "aud-a1", workspace_id: WORKSPACE_A, principal_id: ALICE, ...baseRow })
+      .execute();
+    await b
+      .insertInto("audit_events")
+      .values({ id: "aud-b1", workspace_id: WORKSPACE_B, principal_id: BOB, ...baseRow })
+      .execute();
+
+    const seenFromA = await a.selectFrom("audit_events").selectAll().execute();
+    expect(seenFromA.map((r) => r.id)).toEqual(["aud-a1"]);
+  });
+});
+
+// ── `outbox` is NOT tenant-scoped — system-level poller reads across ─────
+
+describe("WorkspaceScopingPlugin — outbox is not tenant-scoped", () => {
+  it("handler-emitted outbox rows carry workspace_id but SELECT returns both", async () => {
+    // The poller drains outbox rows across workspaces. The scoped
+    // handle does NOT hide them — this test proves the plugin
+    // deliberately leaves `outbox` alone. Handler writers must still
+    // set `workspace_id` manually (the dispatcher's write-path tx
+    // populates it from the principal); the plugin isn't their
+    // backstop here because the invariant isn't workspace isolation
+    // but cross-workspace observability for the poller.
+    const a = driver.scoped(WORKSPACE_A);
+
+    await a
+      .insertInto("outbox")
+      .values([
+        {
+          id: "out-a",
+          workspace_id: WORKSPACE_A,
+          event: "doc.updated",
+          payload: "{}",
+          created_at: 1,
+          forwarded_at: null,
+          forwarded_to: null,
+        },
+        {
+          id: "out-b",
+          workspace_id: WORKSPACE_B,
+          event: "doc.updated",
+          payload: "{}",
+          created_at: 1,
+          forwarded_at: null,
+          forwarded_to: null,
+        },
+      ])
+      .execute();
+
+    const seen = await a.selectFrom("outbox").selectAll().execute();
+    expect(seen.map((r) => r.id).sort()).toEqual(["out-a", "out-b"]);
   });
 });

@@ -1,0 +1,148 @@
+/**
+ * SQLite DDL for the tables this slice of `@editorzero/db` declares.
+ *
+ * The long-term source of truth is Atlas + `kysely-codegen`
+ * (architecture.md §16.9). Until that pipeline lands, this file is
+ * the hand-written migration body. Two consumers import from here:
+ *
+ *  - Unit + integration tests that construct an in-memory SQLite
+ *    driver and need real tables behind it.
+ *  - The `@editorzero/runtime` composition package (P3.5 commit 4)
+ *    that bootstraps a workspace-local SQLite file at first run.
+ *
+ * Not importing DDL into production handlers is deliberate — no
+ * capability handler should ever execute raw DDL. The
+ * `no-raw-kysely-outside-db` coherence check keeps raw Kysely pinned
+ * to `packages/db/**` already; the same reasoning applies to the DDL
+ * strings here.
+ *
+ * Schema shapes mirror `./../schema.ts` (the Kysely `Database`
+ * interface) and architecture.md §3.5 – §3.11. Keep them in sync at
+ * the same commit; the coherence script will eventually enforce the
+ * mapping but today it is a pairwise read between the two files.
+ */
+
+/** `docs` — canonical metadata row per document (architecture.md §3.5). */
+export const DOCS_DDL = `
+  CREATE TABLE docs (
+    id                 TEXT PRIMARY KEY,
+    workspace_id       TEXT NOT NULL,
+    collection_id      TEXT,
+    title              TEXT NOT NULL,
+    slug               TEXT NOT NULL,
+    order_key          TEXT NOT NULL,
+    visibility         TEXT NOT NULL DEFAULT 'workspace',
+    visibility_version INTEGER NOT NULL DEFAULT 0,
+    created_by         TEXT NOT NULL,
+    created_at         INTEGER NOT NULL,
+    updated_at         INTEGER NOT NULL,
+    deleted_at         INTEGER
+  );
+` as const;
+
+/** `doc_snapshots` — compacted Y.Doc state per `seq` (architecture.md §3.7). */
+export const DOC_SNAPSHOTS_DDL = `
+  CREATE TABLE doc_snapshots (
+    id           TEXT PRIMARY KEY,
+    doc_id       TEXT NOT NULL REFERENCES docs(id),
+    workspace_id TEXT NOT NULL,
+    seq          INTEGER NOT NULL,
+    state        BLOB NOT NULL,
+    created_at   INTEGER NOT NULL,
+    UNIQUE (doc_id, seq)
+  );
+` as const;
+
+/** `doc_updates` — append-only journal of Yjs updates (architecture.md §3.7). */
+export const DOC_UPDATES_DDL = `
+  CREATE TABLE doc_updates (
+    id             TEXT PRIMARY KEY,
+    doc_id         TEXT NOT NULL REFERENCES docs(id),
+    workspace_id   TEXT NOT NULL,
+    seq            INTEGER NOT NULL,
+    update_blob    BLOB NOT NULL,
+    principal_kind TEXT NOT NULL,
+    principal_id   TEXT NOT NULL,
+    session_id     TEXT,
+    created_at     INTEGER NOT NULL,
+    delete_after   INTEGER,
+    UNIQUE (doc_id, seq)
+  );
+` as const;
+
+/**
+ * `doc_counters` — per-doc `next_seq` row-lock target (architecture.md §6.4).
+ * `ON DELETE CASCADE` keeps the counter row lifetime tied to the doc's
+ * hard-delete (separate from soft-delete / `docs.deleted_at`, which
+ * leaves the counter intact because restore reuses the seq space).
+ */
+export const DOC_COUNTERS_DDL = `
+  CREATE TABLE doc_counters (
+    doc_id     TEXT PRIMARY KEY REFERENCES docs(id) ON DELETE CASCADE,
+    next_seq   INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL
+  );
+` as const;
+
+/**
+ * `audit_events` — every outcome of every capability invocation
+ * (architecture.md §3.11). Two indexes per the architecture document.
+ */
+export const AUDIT_EVENTS_DDL = `
+  CREATE TABLE audit_events (
+    id                TEXT PRIMARY KEY,
+    workspace_id      TEXT NOT NULL,
+    capability_id     TEXT NOT NULL,
+    category          TEXT NOT NULL,
+    principal_kind    TEXT NOT NULL,
+    principal_id      TEXT NOT NULL,
+    acting_as_user_id TEXT,
+    session_id        TEXT,
+    token_id          TEXT,
+    subject_kind      TEXT NOT NULL,
+    subject_id        TEXT,
+    outcome           TEXT NOT NULL,
+    deny_reason       TEXT,
+    input_hash        TEXT NOT NULL,
+    effect            TEXT NOT NULL,
+    duration_ms       INTEGER NOT NULL,
+    trace_id          TEXT,
+    created_at        INTEGER NOT NULL,
+    collapsed_count   INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE INDEX audit_by_workspace_time ON audit_events(workspace_id, created_at);
+  CREATE INDEX audit_by_subject ON audit_events(subject_kind, subject_id, created_at);
+` as const;
+
+/**
+ * `outbox` — transactional-outbox rows emitted in the write-path tx
+ * (architecture.md §6.3). Nullable `workspace_id` supports system-level
+ * events; see `schema.ts` comment for why this table is not
+ * tenant-scoped.
+ */
+export const OUTBOX_DDL = `
+  CREATE TABLE outbox (
+    id            TEXT PRIMARY KEY,
+    workspace_id  TEXT,
+    event         TEXT NOT NULL,
+    payload       TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    forwarded_at  INTEGER,
+    forwarded_to  TEXT
+  );
+` as const;
+
+/**
+ * The full DDL applied at driver bootstrap. Concatenation order
+ * matters only for FK references — `docs` must come before
+ * `doc_snapshots` / `doc_updates` / `doc_counters`. Other orderings
+ * are free.
+ */
+export const FULL_DDL = [
+  DOCS_DDL,
+  DOC_SNAPSHOTS_DDL,
+  DOC_UPDATES_DDL,
+  DOC_COUNTERS_DDL,
+  AUDIT_EVENTS_DDL,
+  OUTBOX_DDL,
+].join("\n");

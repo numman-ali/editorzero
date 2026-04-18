@@ -13,7 +13,7 @@
  */
 
 import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
-import { createSqliteDriver, type SqliteDriver } from "@editorzero/db";
+import { createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
 import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
@@ -33,23 +33,6 @@ const DOC_A1 = DocId("018f0000-0000-7000-8000-0000000000d1");
 const DOC_A2 = DocId("018f0000-0000-7000-8000-0000000000d2");
 const DOC_A3_DELETED = DocId("018f0000-0000-7000-8000-0000000000d3");
 const DOC_B1 = DocId("018f0000-0000-7000-8000-0000000000d4");
-
-const DOCS_DDL = `
-  CREATE TABLE docs (
-    id                 TEXT PRIMARY KEY,
-    workspace_id       TEXT NOT NULL,
-    collection_id      TEXT,
-    title              TEXT NOT NULL,
-    slug               TEXT NOT NULL,
-    order_key          TEXT NOT NULL,
-    visibility         TEXT NOT NULL DEFAULT 'workspace',
-    visibility_version INTEGER NOT NULL DEFAULT 0,
-    created_by         TEXT NOT NULL,
-    created_at         INTEGER NOT NULL,
-    updated_at         INTEGER NOT NULL,
-    deleted_at         INTEGER
-  );
-`;
 
 let driver: SqliteDriver;
 

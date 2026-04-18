@@ -168,6 +168,9 @@ importers:
       '@editorzero/ids':
         specifier: workspace:*
         version: link:../ids
+      '@editorzero/scopes':
+        specifier: workspace:*
+        version: link:../scopes
       kysely:
         specifier: 'catalog:'
         version: 0.28.16

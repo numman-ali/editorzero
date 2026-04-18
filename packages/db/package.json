@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@editorzero/ids": "workspace:*",
+    "@editorzero/scopes": "workspace:*",
     "kysely": "catalog:"
   },
   "devDependencies": {
