@@ -15,7 +15,8 @@ Refresh material updates:
 
 ### SDK and transports
 - **SDK:** **pin to `@modelcontextprotocol/sdk` latest 1.x stable** (v2 remains alpha). Re-pin to v2 on GA (tracked as a revisit trigger).
-- **Transports:** stdio (local AI clients) + Streamable HTTP (remote). HTTP+SSE as deprecated fallback only.
+- **Hono integration:** **`@hono/mcp`'s `StreamableHTTPTransport`** mounted at `app.all('/mcp', ...)` in the same Hono app that serves `/api/v1/*`. See [ADR 0021](0021-surface-transport-topology.md) for alternatives evaluated (`xmcp`, `FastMCP TS`) and the rejection rationale.
+- **Transports (refined by [ADR 0021](0021-surface-transport-topology.md), 2026-04-18):** **Streamable HTTP only.** Stdio transport is **dropped** — local-subprocess MCP agents point at the same Streamable HTTP endpoint (same auth story, no stdio shim to maintain). HTTP+SSE remains the deprecated fallback per MCP spec.
 
 ### Capability registry as single source of truth
 `packages/capabilities/src/*.ts` registry is authoritative. Each capability:

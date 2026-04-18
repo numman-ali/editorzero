@@ -1,8 +1,10 @@
 # ADR 0012 — Deploy artifact: docker-compose primary + Bun-compiled CLI binary
 
-**Status:** Accepted (post-refresh)
+**Status:** Accepted (post-refresh; CLI framework + agent-output contract refined by [ADR 0021](0021-surface-transport-topology.md), 2026-04-18)
 **Date:** 2026-04-17 (v2)
 **Deciders:** @numman
+
+> **See [ADR 0021](0021-surface-transport-topology.md) before editing the CLI section.** It names the CLI framework (`citty`), commits the CLI to being an HTTP client of the Hono trunk via `hc<AppType>`, adopts [AXI](https://github.com/kunchenguid/axi) as the agent-output contract (stdout format — TOON vs JSON vs alternatives — deferred to eval), and binds the session-hook self-install behaviour for Claude Code + Codex.
 
 ## Context
 v1 honestly declared "docker-compose, full stop" because the Bun `--compile` single-binary route was 2026-young with native-dep pitfalls. The refresh confirmed Bun's server runtime is still not boring (ADR 0002) but revealed that **`bun build --compile` is production-grade for CLI distribution** — cross-compilation to Linux/macOS/Windows amd64/arm64, fast cold starts, embedded assets and SQLite, auto-loaded env. That's a real single-binary win for the `editorzero` CLI surface.

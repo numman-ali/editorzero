@@ -26,4 +26,5 @@ export { createRegistry, RegistryLookupError, registerCapability } from "./regis
 // to include (e.g., an admin-only surface that omits public ones).
 
 export { docCreate } from "./doc/create";
+export { docGet } from "./doc/get";
 export { docList } from "./doc/list";

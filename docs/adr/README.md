@@ -54,6 +54,8 @@ All ADRs are **Accepted (v2, post-refresh)** as of 2026-04-17 unless noted. The 
 | [0018](0018-unified-write-path.md) | Unified write path via ServerBlockNoteEditor | Accepted (v2) |
 | [0019](0019-observability.md) | Observability: OpenTelemetry + Prometheus + admin dashboard | Accepted |
 | [0020](0020-git-mirror-export.md) | **Git-mirror export (opt-in) + S3-versioning archive** | **Accepted (new)** |
+| [0021](0021-surface-transport-topology.md) | **Surface transport topology: Hono app as trunk, typed RPC for all surfaces** | **Accepted (new, 2026-04-18)** |
+| [0022](0022-agent-editing-constraints.md) | **Agent-editing constraints on block capabilities** (precondition hash, reserved selectors, deferred ergonomic wrappers) | **Accepted (new, 2026-04-18)** |
 
 ## Review trails
 

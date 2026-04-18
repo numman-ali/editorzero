@@ -1,8 +1,10 @@
 # ADR 0013 — Block model: CRDT-as-source-of-truth with per-block-type Markdown fidelity
 
-**Status:** Accepted (post-refresh, supersedes v1 "Markdown AST as source of truth")
+**Status:** Accepted (post-refresh, supersedes v1 "Markdown AST as source of truth"; markdown block-ID anchor syntax deferred per [ADR 0022](0022-agent-editing-constraints.md))
 **Date:** 2026-04-17 (v2)
 **Deciders:** @numman
+
+> **[ADR 0022](0022-agent-editing-constraints.md)** formalizes that the markdown block-ID anchor *syntax* (HTML comments vs `remark-directive {#id}` vs none) remains an *open question* pending agent traffic. The `preserveBlockIds` flag stays as the implementation knob; formal syntax choice is deferred to the agent-ergonomic wrapper ADR.
 
 ## Context
 v1 decided "Markdown AST is the source of truth; CRDT reflects it." That was a direct translation of a naive user pointer (versioned-S3-of-Markdown). The pointer was retracted and the right shape is **CRDT (Yjs) is the source of truth; Markdown is a faithful-where-possible projection with per-block-type fidelity contracts.**

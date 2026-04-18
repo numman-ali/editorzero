@@ -805,6 +805,8 @@ MVP is `v1`. Breaking changes ship a new capability id alongside (`doc.update_v2
 
 Every capability is generated into every surface it's type-compatible with (invariant #4 in AGENTS.md). Hand-written adapter glue is **forbidden**.
 
+> **Read [ADR 0021](adr/0021-surface-transport-topology.md) before implementing any §5.x slice.** It names the Hono app as the single trunk, commits every surface (Server Actions / RSC / CLI / MCP) to consuming it via typed RPC (`hc<AppType>` — in-process via `app.request` for server-side callers, HTTP for clients), drops MCP stdio in favour of Streamable HTTP, names `citty` as the CLI framework, and pins `@hono/mcp` as the MCP integration. The subsections below describe the resulting surfaces; the ADR is the why.
+
 ### 5.1 HTTP API (Hono)
 
 - Mounted under `/api/v1/*` and `/mcp` (via `@better-auth/mcp`'s `mcpAuthHono`).
@@ -814,28 +816,36 @@ Every capability is generated into every surface it's type-compatible with (inva
 
 ### 5.2 CLI (Bun-compiled binary)
 
-- One subcommand per capability: `editorzero doc create --workspace ws1 --title "..."`.
-- Argument parser generated from zod schema (zod → CLI flags via a derived mapper — similar approach to `zod-to-json-schema` → CLI).
-- Auth: reads `~/.editorzero/credentials` (API key) or prompts for device-authorization flow (Better Auth OAuth provider). Same `Principal` shape; same dispatcher.
-- Output: defaults to table/YAML pretty-print; `--json` for machine consumption.
-- Distribution: `bun build --compile` per target tuple (linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windows-amd64).
+- **Framework: `citty`** (Unjs, near-zero deps, compile-clean under `bun build --compile`). commander / oclif / clipanion evaluated and rejected — see [ADR 0021](adr/0021-surface-transport-topology.md).
+- **Transport: HTTP client of the API trunk** via `hc<AppType>(baseUrl)` from `hono/client`. The CLI never holds the dispatcher directly; it is a first-class HTTP consumer of `/api/v1/*` identical to any other external client.
+- One subcommand per capability generated from the registry: `editorzero doc create --workspace ws1 --title "..."`.
+- Argument parser built from the capability's zod input (registry source) via a citty `defineCommand` loop.
+- Auth: reads `~/.editorzero/credentials` (API key) or runs a device-authorization flow (Better Auth OAuth provider). Credential → bearer header on every `hc` call.
+- **Output governed by [AXI](https://github.com/kunchenguid/axi) in agent mode; [clig.dev](https://clig.dev/) in TTY mode.** See ADR 0021 for the full commitments. Summary:
+  - Agent mode (non-TTY or `--agent`): minimal default schemas, pre-computed aggregates, structured errors **on stdout** with typed `code`, idempotent mutations exit 0 on no-op, no prompts, content-first home view.
+  - TTY mode: table / YAML, colour (respecting `NO_COLOR`), clig.dev error conventions, human prose.
+  - **Stdout format for agent mode is pending eval** — TOON, JSON, JSONL, YAML-compact evaluated on token cost AND agent task-completion success. JSON is the interim default until the eval runs (ADR 0021 Decision §6).
+- **Session-hook self-install** for Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`) on first invocation. `SessionStart` hook emits a compact TOON workspace dashboard as ambient context; absolute-path hook command, self-heals on relocation.
+- Distribution: `bun build --compile --bytecode` per target tuple (linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windows-amd64). Binary ~60MB.
 
 ### 5.3 MCP (`@modelcontextprotocol/sdk` 1.x stable)
 
-Per ADR 0009, capabilities map to MCP concepts:
+Per ADR 0009 + [ADR 0021](adr/0021-surface-transport-topology.md), capabilities map to MCP concepts:
 
-- **Tools**: every `mutation` + `read` capability becomes a tool. Input schema = capability.input. Output schema surfaced via the SDK's `outputSchema`.
+- **Integration**: `@hono/mcp`'s `StreamableHTTPTransport` mounted at `app.all('/mcp', ...)` inside the same Hono app that serves `/api/v1/*`. `xmcp` and `FastMCP TS` evaluated and rejected in ADR 0021 (xmcp has no Hono adapter and its file-system routing fights the capability registry; FastMCP wraps Hono backwards and duplicates Better Auth).
+- **Tools**: every `mutation` + `read` capability becomes a tool, registered programmatically via `server.tool()` in a registry loop. Input schema = capability.input. Output schema surfaced via the SDK's `outputSchema`.
 - **Resources**: pinnable context — `editorzero://workspace/{id}/doc/{id}` (rendered Markdown per ADR 0013 fidelity), `editorzero://workspace/{id}/doc-tree`, `editorzero://workspace/{id}/schema`. Each resource is a thin wrapper around a read capability.
 - **Prompts**: authoring templates; populated from a registry extension (not part of MVP capability set).
 - **Toolsets**: grouped via `X-MCP-Tools` header; `--read-only` mode filters to category=`read`.
-- **Transports**: stdio (local) + Streamable HTTP (remote). HTTP+SSE as deprecated fallback.
-- **Auth**: `withMcpAuth` / `mcpAuthHono` (`@better-auth/mcp`). OAuth 2.1 DCR + PKCE S256 + RFC 8707 audience; `resolveTenantAudience(host)` binds custom-domain tenants.
+- **Transport**: **Streamable HTTP only**. Stdio transport is **dropped** (ADR 0021) — local-subprocess MCP agents point at `http://<host>/mcp` (same auth story as remote). HTTP+SSE remains a deprecated fallback per MCP spec.
+- **Auth**: `withMcpAuth` / `mcpAuthHono` (`@better-auth/mcp`) in front of the transport on the same Hono route. OAuth 2.1 DCR + PKCE S256 + RFC 8707 audience; `resolveTenantAudience(host)` binds custom-domain tenants.
 - **Reconnect**: keepalive 15 s, `Mcp-Session-Id` + `Last-Event-Id` resume, `tool_call_id` persisted 24 h for interrupted calls.
 
 ### 5.4 Web UI (Next 16 App Router)
 
-- **Server Actions** are thin wrappers around capability dispatch. Action takes `(input)`, resolves session via Better Auth (outside any `"use cache"` scope — gotcha), calls dispatcher, returns output.
-- **RSC reads** call capability handlers directly with the request's `Principal` / `TenantContext`; pagination + filters are capability inputs.
+- **Server Actions + RSC consume the Hono trunk via in-process typed RPC** ([ADR 0021](adr/0021-surface-transport-topology.md)). `@editorzero/api-client` exports `createServerClient()` which returns `hc<AppType>` bound to `app.request.bind(app)` — full Hono middleware chain runs (Better Auth → `Principal` resolution → tenant scope → rate limit → dispatcher), zero TCP hop. Server-side callers never invoke the dispatcher outside this chain.
+- **Header forwarding.** Next middleware runs on the Next request; Hono middleware runs on the synthesized `Request`. `createServerClient` forwards a capped allowlist (`cookie`, `authorization`) from `next/headers` into the synthesized request — never a `...req.headers` dump, to avoid accepting spoofed tenant hints.
+- **Better Auth + `"use cache"` gotcha** remains: session resolution cannot run inside a `"use cache"` scope. Cached functions receive already-resolved `Principal` / `TenantContext` as arguments (architecture.md §Gotchas).
 - `(app)/` routes use the editor (BlockNote + `y-prosemirror` over Hocuspocus WebSocket).
 - `(public)/[domain]/[slug]` uses `"use cache"` + `cacheLife` for published-doc render. **Cache key includes `visibility_version`** (red-team F5 fix):
   - Key: `(workspace_id, doc_id, latest_snapshot_seq, visibility_version)`.
@@ -869,6 +879,8 @@ Without bounds, the matrix is `capability × surface × principal_profile × out
 - **Meta-test.** `packages/contract-tests/test/meta.test.ts` asserts: **every possible cell either runs or matches a suppression rule with a cited reason.** "Just didn't add this one" is a meta-test failure, not a silent gap.
 
 ## 6. Unified write path (ADR 0018)
+
+> **Read [ADR 0022](adr/0022-agent-editing-constraints.md) before implementing `doc.update`.** It adds an OPTIONAL per-op `expect_prior_content_hash` field (SHA-256 of canonicalized prior block JSON) on `update`/`move`/`remove`/`set_visibility` ops, plus a reserved `precondition_policy?: "strict"` discriminator. The precondition check lives inside the handler's `ctx.transact` closure and throws `StalePreconditionError` on mismatch before any op applies. The field is optional so the human UI (BlockNote via Hocuspocus) omits it; agents always send it. Reserves `AccessPath.markdown_anchor` (null-only in v1). Defers the full agent-ergonomic wrapper ADR (`doc.read` / `doc.grep` / `block.edit` etc.) to post-traffic evidence.
 
 ### 6.1 Pipeline
 
@@ -2517,7 +2529,7 @@ This matrix incorporates red-team fixes F12, F13, F15, F19, F22.
 | `doc.create` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 300 | `doc.create` |
 | `doc.get` | doc:read | H | A | ✓ | ✓ | ✓ (resource) | ✓ | 600 | read |
 | `doc.list` | doc:read | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |
-| `doc.update` (F12: **canonical batch mutation**; replaces separate `block.insert/update/remove`) | doc:write, block:write | H | A | ✓ | ✓ | ✓ | ✓ | 600 (bucket `doc.write`) | `doc.update_batch` |
+| `doc.update` (F12: **canonical batch mutation**; replaces separate `block.insert/update/remove`. [ADR 0022](adr/0022-agent-editing-constraints.md): per-op `expect_prior_content_hash?` on `update`/`move`/`remove`/`set_visibility` ops; `precondition_policy?: "strict"` reserved.) | doc:write, block:write | H | A | ✓ | ✓ | ✓ | ✓ | 600 (bucket `doc.write`) | `doc.update_batch` |
 | `doc.update_from_markdown` (F66/F73: takes opaque `reconcile_base_token` from `doc.get`/`doc.get_markdown`) | doc:write, block:write | H | A | ✓ | ✓ | ✓ | — | 300 (bucket `doc.write`) | `doc.update_batch` (post-reconcile) |
 | `doc.rename` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `doc.rename` |
 | `doc.move` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `doc.move` |

@@ -1,8 +1,10 @@
 # ADR 0015 — Permission enforcement: capability-layer + Postgres RLS
 
-**Status:** Accepted (post-red-team)
+**Status:** Accepted (post-red-team; `AccessPath.markdown_anchor` reserved per [ADR 0022](0022-agent-editing-constraints.md))
 **Date:** 2026-04-17
 **Deciders:** @numman
+
+> **[ADR 0022](0022-agent-editing-constraints.md), 2026-04-18:** reserves `AccessPath.markdown_anchor` as a sibling to the already-reserved `AccessPath.selector`. Both remain `null` in v1; they exist to keep the door open for content-addressed selection shapes (e.g. Notion's `selection_with_ellipsis`) and sub-block ID selectors respectively.
 
 ## Context
 Red-team (#9, #13) flagged that "permission checks centralized in the capability layer" is underspecified. Middleware-level checks are bypassable by any internal caller (background job, MCP tool, webhook handler) that forgets to invoke the middleware. For a platform where AI agents are peer principals and workspace/tenant isolation is first-order, the check must be at the point of data access — not at an HTTP route boundary that internal code can sidestep.

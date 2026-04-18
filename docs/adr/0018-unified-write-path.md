@@ -1,10 +1,12 @@
 # ADR 0018 — Unified write path: all mutations flow through the CRDT via Hocuspocus direct connection + BlockNote editor
 
-**Status:** Accepted (post-refresh, API prose corrected 2026-04-17 after BlockNote research pass; updated 2026-04-17 to reflect pass-3 disposition)
+**Status:** Accepted (post-refresh, API prose corrected 2026-04-17 after BlockNote research pass; updated 2026-04-17 to reflect pass-3 disposition; per-op preconditions added 2026-04-18 per [ADR 0022](0022-agent-editing-constraints.md))
 **Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
 > **Updated 2026-04-17 to reflect pass-3 disposition (F76).** Write-path ownership sharpened to match architecture.md §6.1–6.3 exactly: the **dispatcher** owns the single write-path DB tx; **Hocuspocus** provides the per-doc serializer and the DB-tx hook (not audit ownership). The tx commits `doc_updates + outbox(doc.updated) + audit_events + outbox(audit.appended)` together (F31). `onChange` is no longer described as independently writing audit; audit is a dispatcher responsibility inside the same tx.
+>
+> **[ADR 0022](0022-agent-editing-constraints.md), 2026-04-18:** adds an optional per-op `expect_prior_content_hash` check that runs inside the `ctx.transact` closure before op application; `StalePreconditionError` fails closed on mismatch. Does not change the write-path shape; the check is a pre-condition inside the same transact.
 
 ## Context
 v1 decided every mutation from every surface goes through the CRDT via Hocuspocus. The April-2026 BlockNote research pass resolved the implementation primitive: Hocuspocus's `openDirectConnection(docId).transact(ydoc => …)` loads the live `Y.Doc`, and inside that callback `BlockNoteEditor.create({ collaboration: { fragment } })` binds a headless block editor to the doc's `Y.XmlFragment`. Typed block ops then produce ProseMirror transactions → Yjs updates through the same pipeline browser clients use.
