@@ -22,13 +22,25 @@
  *       This is the load-bearing rule the future `@editorzero/arch-lint`
  *       package will eventually own; until that package lands, the
  *       coherence script enforces it.
+ *   [5] Implemented capability ↔ Appendix A matrix. Every
+ *       `CapabilityId("x.y")` literal under `packages/capabilities/src/**`
+ *       (non-test) must appear as a row in architecture.md § Appendix A.
+ *       Asymmetric: Appendix A may list forward-looking capabilities not
+ *       yet implemented — that's expected until Phase 4 backfill — but
+ *       an implemented capability absent from the matrix is drift.
+ *   [6] Implemented capability's Appendix A effect kind ↔ AuditEffect
+ *       variant. For every row in [5], the Appendix A "Audit effect
+ *       kind" column value (the rightmost cell of that row) must either
+ *       be the category literal `read` (collapsible or otherwise) or
+ *       name a `kind: "…"` variant declared in
+ *       `packages/audit/src/effect.ts`. Catches the class of drift where
+ *       a capability ships, Appendix A names a fresh effect kind, but
+ *       the discriminated union never gains the variant — which would
+ *       silently make the audit writer fall through to `{ kind:
+ *       "internal" }` (F95) without a compile-time error.
  *
  * Deferred checks (no-ops today; activate when the real comparison is
  * implemented, not when a source file merely exists):
- *   [D1] Capability registry ↔ Appendix A matrix 1:1. The registry
- *        package exists; the appendix parser and diff do not.
- *   [D2] AuditEffect union ↔ Appendix A effect-kind column. The effect
- *        module exists; the appendix parser and diff do not.
  *   [D3] Numeric literal leak — any literal outside `packages/constants`
  *        matching a constant value should reference the named export.
  *
@@ -406,7 +418,7 @@ async function checkNoRawKyselyOutsideDb(report: Report): Promise<void> {
   if (!(await pathExists(packagesDir))) return;
 
   const allTs = await listTypeScriptFiles(packagesDir);
-  const allowed = join(ROOT, "packages", "db") + "/";
+  const allowed = `${join(ROOT, "packages", "db")}/`;
   const importRe = /^\s*import\b[^;]*?\bfrom\s+["']kysely(?:\/[^"']+)?["']/gm;
 
   for (const file of allTs) {
@@ -445,23 +457,225 @@ async function listTypeScriptFiles(dir: string): Promise<string[]> {
   return out;
 }
 
-// ── Deferred stubs — no enforcement today ──────────────────────────────────
+// ── Check 5 + 6 — Appendix A ↔ registry + AuditEffect ──────────────────────
 //
-// Both of the below print nothing and are not wired into `main()`. They
-// stay in the file as named no-ops so the Appendix-A / registry-diff
-// work lands as a rewrite of a known entry point rather than a new
-// function search. When the parser + diff lands, wire the result into
-// the `Promise.all` below and the top-file docstring in the same commit
-// so the overclaim Codex flagged at F89 cannot recur.
+// Single parsing pass that powers both checks: scan architecture.md's
+// `## Appendix A — Capability matrix` table, extract each row's
+// capability id (first column) and audit effect cell (last column),
+// then diff against the two code sources of truth:
+//
+//   [5] `CapabilityId("x.y")` literals under packages/capabilities/src/**
+//       (non-test). The implemented set.
+//   [6] `kind: "…"` variants in packages/audit/src/effect.ts. The
+//       permitted audit-effect-kind set.
+//
+// Asymmetry by design:
+//   - Appendix A is forward-looking; it may list capabilities not yet
+//     implemented. So (5) fails only when an IMPLEMENTED capability is
+//     absent from Appendix A — the other direction (matrix-extra) is
+//     silent until Phase 4 backfills capabilities.
+//   - Appendix A's effect column may say `read` (category marker, not a
+//     kind); reads audit as `audit.access_log` (§9.3). We accept `read`
+//     and variants thereof (e.g. `read (collapsible)`, `read (enqueues
+//     job)`) as "the access_log path"; only non-`read` values are
+//     checked against the `AuditEffect` union. (6) fails when an
+//     Appendix A row names an effect kind that isn't in the union,
+//     because that is exactly the drift shape that would make the audit
+//     writer fall through to `{ kind: "internal" }` (F95) at runtime
+//     without a compile-time signal.
 
-async function _checkCapabilityRegistry(_report: Report): Promise<void> {
-  // Deferred (D1). `packages/capabilities/src/registry.ts` exists; the
-  // Appendix A parser does not. Do not print info; silence is honest.
+interface AppendixRow {
+  capability_id: string;
+  audit_effect_raw: string; // full last-cell text (may carry annotations)
+  line: number;
 }
 
-async function _checkAuditEffectUnion(_report: Report): Promise<void> {
-  // Deferred (D2). `packages/audit/src/effect.ts` exists; the Appendix
-  // A effect-kind parser does not.
+async function checkAppendixACoherence(report: Report): Promise<void> {
+  const archPath = join(ROOT, "docs", "architecture.md");
+  const archSrc = await readIfExists(archPath);
+  if (!archSrc) {
+    report.add({
+      severity: "warn",
+      message: "docs/architecture.md not found — skipping Appendix A coherence checks",
+    });
+    return;
+  }
+
+  const rows = parseAppendixARows(archSrc);
+  if (rows === null) {
+    report.add({
+      severity: "error",
+      file: archPath,
+      message: "Appendix A table not locatable — expected '## Appendix A — Capability matrix'",
+    });
+    return;
+  }
+
+  // ── Check 5: implemented capabilities must appear in Appendix A ────────
+  const capsDir = join(ROOT, "packages", "capabilities", "src");
+  const implemented = await collectImplementedCapabilityIds(capsDir);
+  const appendixIds = new Set(rows.map((r) => r.capability_id));
+  for (const impl of implemented) {
+    if (!appendixIds.has(impl.id)) {
+      report.add({
+        severity: "error",
+        file: impl.file,
+        line: impl.line,
+        message:
+          `Appendix A drift: \`${impl.id}\` is implemented (CapabilityId literal) but has no row in ` +
+          `docs/architecture.md § Appendix A. Add a matrix row with scopes/surfaces/rate/effect, ` +
+          `or rename the implementation to match an existing row.`,
+      });
+    }
+  }
+
+  // ── Check 6: Appendix A effect kinds must exist in AuditEffect ─────────
+  const effectPath = join(ROOT, "packages", "audit", "src", "effect.ts");
+  const effectSrc = await readIfExists(effectPath);
+  if (!effectSrc) {
+    report.add({
+      severity: "warn",
+      message:
+        "packages/audit/src/effect.ts not found — skipping AuditEffect-union coherence check",
+    });
+    return;
+  }
+  const unionKinds = parseAuditEffectKinds(effectSrc);
+  if (unionKinds.size === 0) {
+    report.add({
+      severity: "error",
+      file: effectPath,
+      message:
+        'AuditEffect union: no `kind: "…"` variants parseable — check the file is structured as a discriminated union',
+    });
+    return;
+  }
+
+  for (const row of rows) {
+    const extracted = extractEffectKindFromCell(row.audit_effect_raw);
+    if (extracted === null) continue; // `read` family — category marker, not a kind
+    if (!unionKinds.has(extracted)) {
+      report.add({
+        severity: "error",
+        file: archPath,
+        line: row.line,
+        message:
+          `Appendix A drift: row \`${row.capability_id}\` audits as \`${extracted}\` but that kind ` +
+          `is not a variant of \`AuditEffect\` in packages/audit/src/effect.ts. Either add the ` +
+          `variant to the union (with replay-reducer branch) or fix the matrix to name an ` +
+          `existing kind.`,
+      });
+    }
+  }
+}
+
+/**
+ * Locate the Appendix A table and extract each row's capability id +
+ * last-cell (audit effect) text. Returns `null` if the heading is
+ * missing — the heading presence is the signal the appendix still
+ * lives in this doc under the expected anchor.
+ */
+function parseAppendixARows(src: string): AppendixRow[] | null {
+  const headingRe = /^##\s+Appendix A\b.*$/m;
+  const headingMatch = headingRe.exec(src);
+  if (!headingMatch) return null;
+
+  // The appendix ends at the next top-level `##` heading or end-of-doc.
+  const after = src.slice(headingMatch.index + headingMatch[0].length);
+  const nextTopRe = /^##\s+(?!Appendix A)/m;
+  const nextTopMatch = nextTopRe.exec(after);
+  const appendixBody = nextTopMatch ? after.slice(0, nextTopMatch.index) : after;
+
+  const rowRe = /^\|\s+`([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*)`/gm;
+  const out: AppendixRow[] = [];
+  let m: RegExpExecArray | null = rowRe.exec(appendixBody);
+  while (m !== null) {
+    const rowStart = m.index;
+    const lineEnd = appendixBody.indexOf("\n", rowStart);
+    const rowText = appendixBody.slice(rowStart, lineEnd === -1 ? undefined : lineEnd);
+    // Last `|` separates the Audit-effect-kind cell from the trailing `|`.
+    const cells = rowText.split("|").map((c) => c.trim());
+    // Trailing empty cell from the final `|`; audit cell is cells[cells.length - 2].
+    const last = cells[cells.length - 2] ?? "";
+    const line = src
+      .slice(0, headingMatch.index + headingMatch[0].length + rowStart)
+      .split("\n").length;
+    // biome-ignore lint/style/noNonNullAssertion: regex capture group 1 is required by the pattern
+    out.push({ capability_id: m[1]!, audit_effect_raw: last, line });
+    m = rowRe.exec(appendixBody);
+  }
+  return out;
+}
+
+/**
+ * Pull every `CapabilityId("x.y")` literal out of
+ * packages/capabilities/src/**, skipping test files. Each literal
+ * is treated as "an implemented capability surface exists for id
+ * x.y"; duplicates across files are collapsed in the returned set.
+ */
+interface ImplementedId {
+  id: string;
+  file: string;
+  line: number;
+}
+
+async function collectImplementedCapabilityIds(dir: string): Promise<ImplementedId[]> {
+  if (!(await pathExists(dir))) return [];
+  const files = await listTypeScriptFiles(dir);
+  const literalRe = /CapabilityId\(\s*"([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*)"\s*\)/g;
+  const out: ImplementedId[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    // Skip test files — CapabilityId literals inside fixtures aren't
+    // claims about shipped capabilities.
+    if (/\.(unit|integration|prop|contract|e2e)\.test\.(ts|tsx|mts|cts)$/.test(file)) continue;
+    const src = await readFile(file, "utf8");
+    for (const { match, line } of findMatches(src, literalRe)) {
+      const id = match[1];
+      if (id === undefined) continue;
+      const key = `${id}::${file}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id, file, line });
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse the `kind: "…"` literal set from `packages/audit/src/effect.ts`.
+ * The file is a `export type AuditEffect = | { kind: "…"; … } | …` union,
+ * and **only** the top-level `kind:` discriminator field contributes.
+ * A negative-lookbehind rejects matches like `subject_kind: "user"` or
+ * `index_kind: "fts"` on nested-property fields — without it, Appendix A
+ * could silently type an effect as `user` / `fts` / `role` and this
+ * check would accept the drift (Codex F106 P3).
+ */
+function parseAuditEffectKinds(src: string): Set<string> {
+  const re = /(?<![A-Za-z_])kind\s*:\s*"([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)"/g;
+  const out = new Set<string>();
+  for (const { match } of findMatches(src, re)) {
+    if (match[1]) out.add(match[1]);
+  }
+  return out;
+}
+
+/**
+ * Pull the canonical effect-kind id out of an Appendix A "Audit effect
+ * kind" cell. Returns `null` for the `read` family (category marker,
+ * not a variant in `AuditEffect`). Otherwise returns the first
+ * backticked `x.y` token, stripping parenthesized annotations such as
+ * `(full preimage)`, `(collapsible)`, `(post-reconcile)`.
+ */
+function extractEffectKindFromCell(cell: string): string | null {
+  const stripped = cell.replace(/\([^)]*\)/g, "").trim();
+  // `read`, `read (collapsible)`, `read (enqueues job)` all reduce to
+  // just `read` after annotation stripping.
+  if (/^read\b/i.test(stripped)) return null;
+  const backtickRe = /`([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*)`/;
+  const m = backtickRe.exec(stripped);
+  if (!m?.[1]) return null;
+  return m[1];
 }
 
 // ── Entrypoint ─────────────────────────────────────────────────────────────
@@ -473,6 +687,7 @@ async function main(): Promise<void> {
     checkArchitectureSectionRefs(report),
     checkMetadataOnlyCapabilities(report),
     checkNoRawKyselyOutsideDb(report),
+    checkAppendixACoherence(report),
   ]);
   report.print();
   if (report.errorCount > 0) {
