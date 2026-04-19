@@ -4,7 +4,7 @@
 
 editorzero — open-source, self-hostable, AI-native docs + collaboration platform. Humans and AI agents are peer co-editors. API · CLI · MCP · Web UI at full parity.
 
-**You** are the implementing agent. Primary model: Claude Opus 4.7. Review model: Codex via `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`. Human author + reviewer: @numman, at phase boundaries.
+**You** are the implementing agent. Primary model: Claude Opus 4.7. Review model: Codex via `/codex:adversarial-review` (default reviewer) and `/codex:rescue` (Codex-as-subagent for delegated work). Human author + reviewer: @numman, at phase boundaries.
 
 Public repo: https://github.com/numman-ali/editorzero · License: AGPL-3.0-only, DCO on every commit.
 
@@ -30,18 +30,19 @@ The rhythm of every session. Follow them explicitly — Opus 4.7 rewards literal
 
 *A bad commit on `main` is expensive to unwind — direct push, no PRs at this phase. This loop is non-optional.*
 
-1. **Stage by path.** `git add <specific-files>`. Never `-A` / `.` — bulk stages pick up secrets, artifacts, parallel-agent work.
-2. **`/codex:review` on the working tree.** Codex sees the whole diff; treat findings like inline PR comments from a senior collaborator.
-3. **Remediate every finding.** Edit directly, or delegate mechanical fixes to `/codex:rescue`. Disagreement is fine; silent skipping is not.
+1. **Stage by path.** `git add <specific-files>`. Never `-A` / `.` for staging. Never `git commit -a` / `-am` / `--all` — those bypass the explicit stage by pulling in every tracked modification, including parallel-agent work and unreviewed edits. The commit step uses the staged snapshot; nothing else.
+2. **`/codex:adversarial-review` on the working tree with focus text.** Always pass focus text tied to this slice — name the invariant the change is meant to preserve, the regression mode you'd miss most, and the surface you consider risky. Focus **prioritizes**, it does not filter: Codex still reports material issues outside the focus area (the prompt template explicitly says "weight focus heavily, but still report any other material issue"). Empty focus = generic attack-surface pass, which is noisier and less useful. Run `--background` if the diff is likely > 30s of review time.
+
+   **Skip-review allowlist — strict.** Skip review **only** when the *entire* staged diff is under: `CHANGELOG.md`, `CONTRIBUTING.md`, `README.md`, or files under `docs/**` **excluding** `docs/continuation.md`. Never skip for: `AGENTS.md`, `CLAUDE.md`, `docs/continuation.md`, or any new instruction-bearing file an agent loads at startup or that governs other commits — those always get review because a change there can silently weaken the review policy itself. Every other file class — `package.json`, lockfiles, `lefthook.yml`, `tsconfig*.json`, `biome.json`, Atlas migrations, scripts, CI workflows, test-infra configs — counts as reviewable. Any mix of categories = review.
+3. **Remediate every finding.** Edit directly, or delegate mechanical fixes to `/codex:rescue`. Disagreement is fine; silent skipping is not. Judge each finding on Codex's own evidence — it's strong at what it does, but "high" severity on an academic gap isn't the same as a shipping blocker. Capture any rebuttal in the commit body so the reasoning is auditable later.
 4. **Re-stage by path.** Step 1's snapshot is stale after step 3.
-5. **Re-run `/codex:review` until clean** — or until every remaining item has a rebuttal captured in the commit body.
-6. **`/codex:adversarial-review` if the commit makes a non-trivial design choice.** Triggers: new ADR, schema change, permission rule, write-path primitive, capability shape, audit-envelope field, error-taxonomy extension. Same remediate → re-stage → re-review cycle. Pure bug fixes and mechanical rounds do not trigger this.
-7. **Local gates green.** `pnpm -w run typecheck`, affected tests, `pnpm run coherence`. Biome runs at the pre-commit hook against *staged* Biome-typed files (see `lefthook.yml` — scoped to `*.{ts,tsx,js,mjs,json,jsonc}` with `--no-errors-on-unmatched`, so a docs/ADR-only commit is fine). **Do not run `pnpm lint`** — it expands to `biome check --write .` and rewrites the whole tree, including parallel-agent work. To pre-check, mirror the hook: `pnpm exec biome check --staged --no-errors-on-unmatched <Biome-typed staged paths>`. If a gate produces file changes, loop back to step 4.
-8. **Commit.** `git commit -s` (DCO), imperative subject, body explains the *why*. If AI-assisted, end with a `Co-Authored-By:` trailer crediting the assistant that did the work (Codex-authored change credits Codex, not Claude; human-only commits carry no trailer). For a Claude-authored change this session:
+5. **Re-run `/codex:adversarial-review` until clean** — or until every remaining finding has a captured rebuttal in the commit body.
+6. **Local gates green.** `pnpm -w run typecheck`, affected tests, `pnpm run coherence`. Biome runs at the pre-commit hook against *staged* Biome-typed files (see `lefthook.yml` — scoped to `*.{ts,tsx,js,mjs,json,jsonc}` with `--no-errors-on-unmatched`, so a docs/ADR-only commit is fine). **Do not run `pnpm lint`** — it expands to `biome check --write .` and rewrites the whole tree, including parallel-agent work. To pre-check, mirror the hook: `pnpm exec biome check --staged --no-errors-on-unmatched <Biome-typed staged paths>`. If a gate produces file changes, loop back to step 4.
+7. **Commit.** Before committing, run `git status --short` and confirm the staged snapshot matches what you last reviewed in step 5. Two drift modes to catch: **filename drift** (new entries) — loop to step 1; **content drift** on a reviewed file (an `MM` or `AM` row means the index was reviewed but the worktree has since diverged) — loop to step 4 to re-stage and step 5 to re-review. A clean snapshot is all `M ` / `A ` / `D ` (index-only, worktree clean) on exactly the files step 5 cleared. Then: `git commit -s` (DCO), imperative subject, body explains the *why*. If AI-assisted, end with a `Co-Authored-By:` trailer crediting the assistant that did the work (Codex-authored change credits Codex, not Claude; human-only commits carry no trailer). For a Claude-authored change this session:
    ```
    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
    ```
-9. **Never `git push --force` on `main`. Never rewrite `main`.** Fix forward with new commits.
+8. **Never `git push --force` on `main`. Never rewrite `main`.** Fix forward with new commits.
 
 **Codex background mode.** Default `--background` on any codex invocation likely to take > 30s. Timing is judgement; the gate is not.
 
@@ -78,7 +79,7 @@ Enumerated in [`docs/brief.md`](docs/brief.md) § Hard invariants. Property test
 3. **Determinism is a feature.** Doc-model changes preserve CRDT convergence and per-block Markdown fidelity (ADR 0013). Property tests enforce from Phase 3 onward; pre-harness, reason about it explicitly in the ADR.
 4. **Contract tests enforce surface parity.** Capabilities register once; adapters are generated or derived from the registry.
 5. **Opus sub-agents only** (per @numman, 2026-04-17). Spawn when fan-out beats sequential — 4.7 spawns fewer by default, state the rationale.
-6. **Parallel agents share the working tree; do not isolate.** Let other agents' unstaged work coexist. Stage your own files by path; `/codex:review --scope working-tree` sees everything in the tree, findings scope to the diff regardless. A parallel agent may adjust your in-flight files; review the result after.
+6. **Parallel agents share the working tree; do not isolate.** Let other agents' unstaged work coexist. Stage your own files by path; `/codex:adversarial-review --scope working-tree` sees everything in the tree, findings scope to the diff regardless. A parallel agent may adjust your in-flight files; review the result after.
 7. **Verify library docs at point of use.** Before writing code against any pinned dependency (Hocuspocus, BlockNote, Better Auth, Yjs, Kysely, Atlas, MCP SDK, Next.js, Hono), fetch current docs for the pinned version. If docs contradict an ADR, flag in `docs/continuation.md` before coding around it.
 8. **Solo-author + agent flow → direct push to `main`, no PRs.** Switch to PRs when multiple humans contribute. **DCO sign-off on every commit** (`git commit -s`). Imperative subject; body explains the *why*.
 
@@ -131,9 +132,8 @@ Red-team review (`docs/adr/red-team-*.md`) flagged these as load-bearing design 
 ## Skills
 
 - **`dev-browser:dev-browser`** — browser automation with persistent page state. Use for UI verification, pixel-perfect checks against design, form fills, screenshots, scraping, testing the web app.
-- **`/codex:review`** — straightforward code review on the working tree. Every commit.
-- **`/codex:adversarial-review`** — design-level challenge review. Only for the triggers in commit-loop step 6.
-- **`/codex:rescue`** — delegate a substantial coding task when stuck, or apply remediations so the primary agent stays on architecture.
+- **`/codex:adversarial-review`** — Codex's adversarial reviewer, default on every commit (see commit-loop step 2 for the skip-rule). Always pass focus text tied to the slice's invariants / regression modes / risky surfaces — without focus, Codex runs a generic pass. Structured JSON output (verdict + findings), so rebuttals live in the commit body, not the transcript. `/codex:review` (native) also exists but is unused in this project — adversarial with focus earns its keep everywhere native would.
+- **`/codex:rescue`** — **Codex as a subagent.** Write-capable (`--write` default on), persistent thread (`--resume` to chain across turns), sees the repo directly rather than a pre-bundled diff. Delegate when: (a) the work is mechanical and main-Claude's context should stay clean (biome passes, config stubs, typed fixture ports); (b) main-Claude is stuck and benefits from an independent implementation attempt; (c) follow-up work needs to chain — each `--resume` picks up prior thread state. Default shape: `--background --write "<task>"`. Returns Codex's stdout verbatim.
 
 ## When in doubt
 
