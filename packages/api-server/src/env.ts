@@ -14,21 +14,49 @@
  * fine; removing one is a breaking change for every handler that
  * reads it.
  *
- * Currently empty because no middleware is mounted yet. Lands in
- * subsequent slices:
+ * ### Variables
  *
- *   - `principal: Principal` — Better Auth middleware (ADR 0009 /
- *     0016).
- *   - `tenant: TenantContext` — tenant-scope middleware that pulls
- *     `workspace_id` from the `Principal` and sets the
- *     `WorkspaceScopingPlugin`-bound DB handle on the context.
- *   - `dispatcher: Dispatcher` — lazy per-request dispatcher or a
- *     process-wide one; decided at the dispatcher composition-root
- *     slice.
+ * - `principal: Principal` — resolved once per request by the auth
+ *   middleware (`src/middleware/principal.ts`). Either a `UserPrincipal`
+ *   (browser session or human PAT) or an `AgentPrincipal` (API key or
+ *   delegated agent-auth token). Capability routes read this directly
+ *   off `c.var`; the dispatcher requires it on every `DispatchInvocation`.
+ *   **Non-optional.** A route that mounts without the principal
+ *   middleware cannot legally run a capability; its absence is a
+ *   composition-time bug, not a runtime condition. Public routes (like
+ *   `/infra/health`) run outside the chain that sets this variable —
+ *   they type against a subset of `ApiEnv` that doesn't read it, or
+ *   they run on a sub-tree that doesn't include the principal mw.
+ *
+ * - `dispatcher: Dispatcher` — a process-scoped `Dispatcher` returned
+ *   by `createApiDispatcher({...})` (`src/composition/
+ *   createApiDispatcher.ts`). The dispatcher owns the single
+ *   orchestration path (architecture.md §6.1); capability routes
+ *   exclusively invoke capabilities through it. Holding it on
+ *   `c.var` rather than importing it at module scope makes the route
+ *   handler independent of the composition root — tests can swap a
+ *   fixture dispatcher in via `createDispatcherMiddleware({
+ *   dispatcher: testDispatcher })` without rewiring imports.
+ *
+ * Future variables (deferred until their slice lands):
+ *
+ *   - `tenant: TenantContext` — tenant-scope middleware that reads
+ *     `workspace_id` from `principal` and threads it through
+ *     `AsyncLocalStorage`. Today the dispatcher's `runInWriteTx` /
+ *     `runRead` derive tenant from `principal.workspace_id`
+ *     directly, so this var is not needed until a handler needs
+ *     tenant access outside a dispatch call.
+ *   - `rateLimit: RateLimitBudget` — remaining-budget info for the
+ *     current request; lands when `@editorzero/ratelimit` ships.
  */
 
-// biome-ignore lint/suspicious/noEmptyInterface: starter shape; variables land in subsequent middleware slices. Keeping the declaration here rather than `type ApiEnv = {}` so the first middleware merge is a one-line `Variables: { principal: Principal }` edit, not a shape refactor.
-export interface ApiEnvVariables {}
+import type { Dispatcher } from "@editorzero/dispatcher";
+import type { Principal } from "@editorzero/principal";
+
+export interface ApiEnvVariables {
+  readonly principal: Principal;
+  readonly dispatcher: Dispatcher;
+}
 
 export interface ApiEnv {
   readonly Variables: ApiEnvVariables;

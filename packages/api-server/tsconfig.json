@@ -6,5 +6,16 @@
     "tsBuildInfoFile": "./.tsbuildinfo"
   },
   "include": ["src/**/*"],
-  "references": []
+  "references": [
+    { "path": "../audit" },
+    { "path": "../auth" },
+    { "path": "../capabilities" },
+    { "path": "../db" },
+    { "path": "../dispatcher" },
+    { "path": "../errors" },
+    { "path": "../ids" },
+    { "path": "../observability" },
+    { "path": "../principal" },
+    { "path": "../scopes" }
+  ]
 }

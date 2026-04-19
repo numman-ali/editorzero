@@ -1,6 +1,18 @@
 /**
  * Hono trunk — every editorzero surface (HTTP, CLI, MCP, Web UI in-
- * process callers) consumes this `app` via `hc<AppType>` (ADR 0021).
+ * process callers) consumes this trunk via `hc<AppType>` (ADR 0021).
+ *
+ * **Two shapes.** `createApiApp({ auth?, dispatcher? })` is the
+ * composition-root factory — the production trunk calls it once at
+ * boot with a concrete Better Auth instance + dispatcher and caches
+ * the returned app. `app` is a zero-arg default instance used by the
+ * trunk-composition smoke, the api-client smoke, and any consumer
+ * that needs an `AppType` binding without a running auth stack.
+ * Because Better Auth's handler is mounted via `app.on(["POST",
+ * "GET"], "/auth/*", ...)` — a Hono base method that does not add
+ * to `OpenAPIHono`'s Schema — `AppType` (typed from the default
+ * `app`) is stable across both shapes. `hc<AppType>` bindings do not
+ * need to know whether auth is wired.
  *
  * **Composition primitive.** Routes live one-per-folder under
  * `src/routes/<domain>/<capability>/index.ts` as `defineOpenAPIRoute(
@@ -35,6 +47,25 @@
  * `hc<AppType>` extracts Schema, not `Env` — so the `Env` contract is
  * purely server-internal.
  *
+ * **Better Auth mount.** `app.on(["POST","GET"], "/auth/*", c =>
+ * auth.handler(c.req.raw))` is the Better Auth 1.6.5 Hono-integration
+ * shape. `basePath: "/auth"` on `createAuth(...)` keeps the paths in
+ * lockstep — Better Auth's client-side routes (`/sign-in/email`,
+ * `/sign-up/email`, `/get-session`, ...) compose under `/auth/*`. The
+ * mount is on the non-typed `.on()` method rather than `openapiRoutes
+ * ([...] as const)` because Better Auth owns its own request/response
+ * contract (not our zod-validated capability shape); exposing it
+ * through OpenAPI would conflate the two contract systems. Auth
+ * endpoints are documented separately via `auth.api.getOpenAPISchema(
+ * )` if needed.
+ *
+ * **Dispatcher + principal middleware slot.** The factory accepts an
+ * optional `dispatcher` that (today) is unused — it lands on
+ * capability routes via per-route `route.middleware` arrays when the
+ * first capability route ships. Accepting it now keeps the factory
+ * signature stable across slices so the content-mutation slice does
+ * not churn the composition-root signature.
+ *
  * **Future state.** Domain tuples become codegen-emitted from the
  * capability registry; the trunk spread pattern is unchanged. This is
  * why the "Modular Organization" tuple-spread pattern was chosen over
@@ -42,11 +73,47 @@
  * apps. See ADR 0021 for the full rationale.
  */
 
+import type { Auth } from "@editorzero/auth";
+import type { Dispatcher } from "@editorzero/dispatcher";
 import { OpenAPIHono } from "@hono/zod-openapi";
 
 import type { ApiEnv } from "./env";
 import { infraRoutes } from "./routes/infra";
 
-export const app = new OpenAPIHono<ApiEnv>().openapiRoutes([...infraRoutes] as const);
+export interface CreateApiAppOptions {
+  /**
+   * Better Auth instance. When provided, `auth.handler` is mounted
+   * on `/auth/*` (POST + GET) so Better Auth's sign-up / sign-in /
+   * session endpoints compose under the trunk. Omit for tests or
+   * smoke-level composition checks that don't need the auth stack.
+   */
+  readonly auth?: Auth;
+  /**
+   * Dispatcher composition-root instance. Reserved for the capability-
+   * route slice — per-route middleware reads `c.var.dispatcher` to
+   * invoke capabilities. Not referenced here yet; accepting it now
+   * keeps the factory signature stable across the upcoming content-
+   * mutation slice.
+   */
+  readonly dispatcher?: Dispatcher;
+}
+
+export function createApiApp(options: CreateApiAppOptions = {}) {
+  const { auth } = options;
+  const trunk = new OpenAPIHono<ApiEnv>();
+  if (auth !== undefined) {
+    trunk.on(["POST", "GET"], "/auth/*", (c) => auth.handler(c.req.raw));
+  }
+  return trunk.openapiRoutes([...infraRoutes] as const);
+}
+
+/**
+ * Default trunk instance — zero-arg composition. Exists so
+ * `packages/api-client` smoke tests and the trunk-composition smoke
+ * can bind `hc<AppType>` without spinning up a full auth stack.
+ * Production composition roots construct their own via
+ * `createApiApp({ auth, dispatcher })`.
+ */
+export const app = createApiApp();
 
 export type AppType = typeof app;

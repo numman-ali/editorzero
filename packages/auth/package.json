@@ -1,5 +1,5 @@
 {
-  "name": "@editorzero/api-server",
+  "name": "@editorzero/auth",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,19 +18,10 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@editorzero/audit": "workspace:*",
-    "@editorzero/auth": "workspace:*",
-    "@editorzero/capabilities": "workspace:*",
     "@editorzero/db": "workspace:*",
-    "@editorzero/dispatcher": "workspace:*",
-    "@editorzero/errors": "workspace:*",
     "@editorzero/ids": "workspace:*",
-    "@editorzero/observability": "workspace:*",
     "@editorzero/principal": "workspace:*",
-    "@editorzero/scopes": "workspace:*",
-    "@hono/zod-openapi": "1.3.0",
-    "hono": "4.12.14",
-    "zod": "catalog:"
+    "better-auth": "^1.6.5"
   },
   "devDependencies": {
     "typescript": "catalog:",

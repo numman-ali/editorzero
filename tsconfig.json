@@ -9,6 +9,7 @@
     { "path": "./packages/api-client" },
     { "path": "./packages/api-server" },
     { "path": "./packages/audit" },
+    { "path": "./packages/auth" },
     { "path": "./packages/blocks" },
     { "path": "./packages/capabilities" },
     { "path": "./packages/config" },
