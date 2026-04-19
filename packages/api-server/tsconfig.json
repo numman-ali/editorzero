@@ -16,6 +16,7 @@
     { "path": "../ids" },
     { "path": "../observability" },
     { "path": "../principal" },
-    { "path": "../scopes" }
+    { "path": "../scopes" },
+    { "path": "../sync" }
   ]
 }

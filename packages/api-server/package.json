@@ -28,6 +28,7 @@
     "@editorzero/observability": "workspace:*",
     "@editorzero/principal": "workspace:*",
     "@editorzero/scopes": "workspace:*",
+    "@editorzero/sync": "workspace:*",
     "@hono/zod-openapi": "1.3.0",
     "hono": "4.12.14",
     "zod": "catalog:"

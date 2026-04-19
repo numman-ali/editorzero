@@ -24,6 +24,7 @@
  * run before its handler.
  */
 
+import { create } from "./create";
 import { list } from "./list";
 
-export const docsRoutes = [list] as const;
+export const docsRoutes = [list, create] as const;

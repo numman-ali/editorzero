@@ -23,10 +23,17 @@ import {
   createRegistry,
   registerCapability,
 } from "@editorzero/capabilities";
-import { createSqliteDriver, SQLITE_FULL_DDL, type SqliteDriver } from "@editorzero/db";
+import {
+  createDocUpdatesReader,
+  createDocUpdatesWriter,
+  createSqliteDriver,
+  SQLITE_FULL_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
 import { PermissionDeniedError } from "@editorzero/errors";
 import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { AccessPath, UserPrincipal } from "@editorzero/principal";
+import { HocuspocusSync } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -308,12 +315,13 @@ describe("createApiDispatcher", () => {
     expect(audits[0]?.outcome).toBe("allow");
   });
 
-  it("write path: ctx.transact is stubbed to throw (content-mutation slice deferred)", async () => {
-    // The composition root deliberately throws from `ctx.transact` until
-    // the Hocuspocus `BoundSyncService` wiring slice lands. A content-
-    // mutation capability that calls `ctx.transact(...)` sees a real
-    // error it can surface; this test pins that contract so a future
-    // slice can't silently swap in a no-op.
+  it("write path: ctx.transact throws when `sync` is not passed (content-mutation fails loud)", async () => {
+    // Metadata-only capabilities don't touch `ctx.transact`, so the
+    // factory stays usable without a `HocuspocusSync` dep. A content-
+    // mutation capability that calls `ctx.transact(...)` in such a
+    // composition sees a real error projected to a typed audit row;
+    // this test pins that contract so a future slice can't silently
+    // swap in a no-op.
     const mutationFixture = buildFixture(async (ctx, input) => {
       await ctx.transact(DocId(input.doc_id), () => {
         // Unreachable — the stub throws before this runs.
@@ -331,12 +339,146 @@ describe("createApiDispatcher", () => {
         access: testAccess(),
         trace_id: null,
       }),
-    ).rejects.toThrow(/ctx\.transact is not wired yet/u);
+    ).rejects.toThrow(/ctx\.transact is not wired/u);
 
     // Error audit row still lands through `withAuditTx`.
     const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
     expect(audits).toHaveLength(1);
     expect(audits[0]?.outcome).toBe("error");
+  });
+
+  it("write path: with `sync` passed, ctx.transact persists doc_updates inside the same tx", async () => {
+    // When `sync: HocuspocusSync` is passed, the composition root binds
+    // per-invocation and wires `ctx.transact` through the bound service.
+    // Same pattern proven in `packages/dispatcher/src/writepath.
+    // integration.test.ts`; this test asserts the wiring survives the
+    // factory boundary. Allow-path invariants:
+    //   1. Handler insert + `doc_updates` row commit together.
+    //   2. Audit `allow` row lands referencing the handler output.
+    //   3. `doc_counters` row auto-bootstraps (writer side-effect).
+    const sync = new HocuspocusSync({
+      docUpdatesWriter: createDocUpdatesWriter(),
+      docUpdatesReader: createDocUpdatesReader(),
+    });
+    try {
+      const fixture: Capability<FixtureInput, FixtureOutput> = {
+        ...buildFixture(async (ctx, input) => {
+          await ctx.db
+            .insertInto("docs")
+            .values({
+              id: DocId(input.doc_id),
+              workspace_id: WORKSPACE_ID,
+              collection_id: null,
+              title: input.title,
+              slug: "seed",
+              order_key: "a",
+              visibility: "workspace",
+              visibility_version: 0,
+              created_by: USER_ID,
+              created_at: 1,
+              updated_at: 1,
+              deleted_at: null,
+            })
+            .execute();
+          // Mutation through the real bound sync. The callback receives
+          // a Y.Doc; here we insert one character into a shared text.
+          // `@editorzero/sync`'s `seedBlocks` exists for the richer
+          // case; this fixture only needs to prove a `doc_updates` row
+          // lands in the same tx.
+          await ctx.transact(DocId(input.doc_id), (editor) => {
+            // biome-ignore lint/suspicious/noExplicitAny: Kernel `TEditor` is `unknown`; real type is Y.Doc.
+            (editor as any).getText("body").insert(0, "x");
+          });
+          return { doc_id: input.doc_id, title: input.title };
+        }),
+      };
+      const registry = createRegistry([registerCapability(fixture)]);
+      const dispatcher = createApiDispatcher({ driver, registry, sync, now: () => 1 });
+
+      await dispatcher.dispatch({
+        capability_id: FIXTURE_ID,
+        input: { doc_id: DOC_ID, title: "Hello" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      });
+
+      const docs = await driver.system().selectFrom("docs").select("id").execute();
+      expect(docs).toHaveLength(1);
+      const updates = await driver
+        .system()
+        .selectFrom("doc_updates")
+        .select(["seq", "doc_id"])
+        .execute();
+      expect(updates).toHaveLength(1);
+      expect(updates[0]?.doc_id).toBe(DOC_ID);
+      const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+      expect(audits).toHaveLength(1);
+      expect(audits[0]?.outcome).toBe("allow");
+    } finally {
+      await sync.close();
+    }
+  });
+
+  it("write path: with `sync` passed, handler throw rolls back `doc_updates` and evicts the Y.Doc", async () => {
+    // Handler-throw after a `ctx.transact` call must leave no durable
+    // trace: the SQL tx rolls back, and `bound.rollback()` in the
+    // composition root drops the in-memory Y.Doc so a subsequent
+    // `ctx.transact` re-hydrates from committed state (P3.6e). The
+    // zero `doc_updates` rows + `outcome = error` audit row proves
+    // both halves hold across the composition boundary.
+    const sync = new HocuspocusSync({
+      docUpdatesWriter: createDocUpdatesWriter(),
+      docUpdatesReader: createDocUpdatesReader(),
+    });
+    try {
+      const fixture = buildFixture(async (ctx, input) => {
+        await ctx.db
+          .insertInto("docs")
+          .values({
+            id: DocId(input.doc_id),
+            workspace_id: WORKSPACE_ID,
+            collection_id: null,
+            title: input.title,
+            slug: "seed",
+            order_key: "a",
+            visibility: "workspace",
+            visibility_version: 0,
+            created_by: USER_ID,
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: null,
+          })
+          .execute();
+        await ctx.transact(DocId(input.doc_id), (editor) => {
+          // biome-ignore lint/suspicious/noExplicitAny: see previous test.
+          (editor as any).getText("body").insert(0, "x");
+        });
+        throw new Error("boom");
+      });
+      const registry = createRegistry([registerCapability(fixture)]);
+      const dispatcher = createApiDispatcher({ driver, registry, sync, now: () => 1 });
+
+      await expect(
+        dispatcher.dispatch({
+          capability_id: FIXTURE_ID,
+          input: { doc_id: DOC_ID, title: "Hello" },
+          principal: testUser(),
+          access: testAccess(),
+          trace_id: null,
+        }),
+      ).rejects.toThrow();
+
+      const docs = await driver.system().selectFrom("docs").select("id").execute();
+      const updates = await driver.system().selectFrom("doc_updates").select("seq").execute();
+      const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+      expect(docs).toHaveLength(0);
+      expect(updates).toHaveLength(0);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]?.outcome).toBe("error");
+    } finally {
+      await sync.close();
+    }
   });
 
   it("default now: () => Date.now() is used when `now` is not overridden", async () => {

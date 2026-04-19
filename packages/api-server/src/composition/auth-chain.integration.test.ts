@@ -31,9 +31,16 @@
  */
 
 import { createAuth, createBetterAuthResolver, runAuthMigrations } from "@editorzero/auth";
-import { createRegistry, docList, registerCapability } from "@editorzero/capabilities";
-import { createSqliteDriver, SQLITE_FULL_DDL, type SqliteDriver } from "@editorzero/db";
+import { createRegistry, docCreate, docList, registerCapability } from "@editorzero/capabilities";
+import {
+  createDocUpdatesReader,
+  createDocUpdatesWriter,
+  createSqliteDriver,
+  SQLITE_FULL_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
 import { DocId, UserId } from "@editorzero/ids";
+import { HocuspocusSync } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createApiApp } from "../app";
@@ -42,6 +49,7 @@ import { createPrincipalMiddleware } from "../middleware/principal";
 import { createApiDispatcher } from "./createApiDispatcher";
 
 let driver: SqliteDriver;
+const openSyncs: HocuspocusSync[] = [];
 
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
@@ -49,6 +57,10 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  while (openSyncs.length > 0) {
+    const sync = openSyncs.pop();
+    if (sync !== undefined) await sync.close();
+  }
   await driver.close();
 });
 
@@ -61,7 +73,9 @@ function sessionCookieFrom(response: Response): string {
     .join("; ");
 }
 
-async function buildStack(options: { registerDocList?: boolean } = {}) {
+async function buildStack(
+  options: { registerDocList?: boolean; registerDocCreate?: boolean; withSync?: boolean } = {},
+) {
   const auth = createAuth({
     driver,
     baseURL: "http://localhost:3000",
@@ -70,12 +84,29 @@ async function buildStack(options: { registerDocList?: boolean } = {}) {
   });
   await runAuthMigrations(auth);
   // Registry is empty by default (the probe route exercises middleware-
-  // only scenarios). The `/docs/list` end-to-end test registers
-  // `docList` so its dispatcher routes the request to the real
-  // capability handler.
-  const capabilities = options.registerDocList ? [registerCapability(docList)] : [];
+  // only scenarios). Each end-to-end test opts in to the capabilities
+  // it exercises so the dispatcher only routes registered ones.
+  const capabilities = [
+    ...(options.registerDocList ? [registerCapability(docList)] : []),
+    ...(options.registerDocCreate ? [registerCapability(docCreate)] : []),
+  ];
   const registry = createRegistry(capabilities);
-  const dispatcher = createApiDispatcher({ driver, registry });
+  // Content-mutation capabilities (doc.create) need a real
+  // HocuspocusSync bound into the dispatcher so `ctx.transact`
+  // persists the seed-blocks update to `doc_updates` inside the
+  // write-path tx. Tests that exercise read-only capabilities skip
+  // sync for a smaller blast radius.
+  const sync =
+    options.withSync === true
+      ? new HocuspocusSync({
+          docUpdatesWriter: createDocUpdatesWriter(),
+          docUpdatesReader: createDocUpdatesReader(),
+        })
+      : undefined;
+  if (sync !== undefined) openSyncs.push(sync);
+  const dispatcher = createApiDispatcher(
+    sync === undefined ? { driver, registry } : { driver, registry, sync },
+  );
   const trunk = createApiApp({ auth, dispatcher });
   return { auth, dispatcher, trunk };
 }
@@ -216,11 +247,10 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     if (principal === null) throw new Error("unexpected null principal after sign-in");
     const workspace_id = principal.workspace_id;
 
-    // Seed a docs row directly via the driver — content-mutation
-    // capabilities (doc.create) aren't wired yet (the sync-service
-    // slice is deferred), so we plant a row by hand to prove the
-    // read-path round-trip. Once doc.create lands, this test swaps
-    // the direct insert for a real POST /docs/create.
+    // Seed a docs row directly via the driver for the list round-trip —
+    // this test owns the *read-path* composition (no sync wired). A
+    // separate test below exercises `POST /docs/create` → `GET /docs/list`
+    // with `withSync: true` so the list read sees the written row.
     await driver.withSystemTx(async (tx) => {
       await tx
         .insertInto("docs")
@@ -329,5 +359,113 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     };
     expect(danaBody.docs).toHaveLength(1);
     expect(danaBody.docs[0]?.title).toBe("Dana's doc");
+  });
+
+  it("POST /docs/create mints a doc; GET /docs/list returns it (full write-path round-trip)", async () => {
+    // End-to-end write-path test: Better Auth → principal middleware →
+    // dispatcher middleware → createApiDispatcher (with HocuspocusSync
+    // wired) → doc.create handler → seedBlocks through ctx.transact →
+    // doc_updates + audit rows commit in one tx. Then GET /docs/list
+    // reads back the freshly-created doc from the tenant-scoped
+    // `docs` view.
+    const { trunk } = await buildStack({
+      registerDocList: true,
+      registerDocCreate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "frank@example.com");
+    const signInRes = await signIn(trunk, "frank@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Frank's first doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      doc_id: string;
+      workspace_id: string;
+      title: string;
+      slug: string;
+      seed_blocks: ReadonlyArray<{ id: string; type: string }>;
+    };
+    expect(createBody.title).toBe("Frank's first doc");
+    expect(createBody.slug).toBe("frank-s-first-doc");
+    expect(createBody.seed_blocks).toHaveLength(2);
+    expect(createBody.seed_blocks[0]?.type).toBe("heading");
+    expect(createBody.seed_blocks[1]?.type).toBe("paragraph");
+    expect(createBody.doc_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
+
+    // Durable state: one `doc_updates` row landed inside the write-
+    // path tx (proves ctx.transact is wired through HocuspocusSync).
+    const updates = await driver
+      .system()
+      .selectFrom("doc_updates")
+      .select(["seq", "doc_id"])
+      .execute();
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.doc_id).toBe(createBody.doc_id);
+
+    // Read-path round-trip: the new doc shows up in /docs/list.
+    const listRes = await trunk.request("/docs/list", { headers: { cookie } });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      docs: ReadonlyArray<{ id: string; title: string }>;
+    };
+    expect(listBody.docs).toHaveLength(1);
+    expect(listBody.docs[0]?.id).toBe(createBody.doc_id);
+    expect(listBody.docs[0]?.title).toBe("Frank's first doc");
+
+    // Audit trail: one allow row per call (create + list). The read
+    // collapses on identical inputs, but this test only hits list
+    // once — no collapsing is expected.
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits).toHaveLength(2);
+    expect(audits[0]?.capability_id).toBe("doc.create");
+    expect(audits[0]?.outcome).toBe("allow");
+    expect(audits[1]?.capability_id).toBe("doc.list");
+    expect(audits[1]?.outcome).toBe("allow");
+  });
+
+  it("POST /docs/create 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      withSync: true,
+    });
+    const res = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Hello" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /docs/create with empty title returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "grace@example.com");
+    const signInRes = await signIn(trunk, "grace@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "   " }),
+    });
+    expect(res.status).toBe(400);
+
+    // No audit row — the zod validator rejected the body before the
+    // dispatcher was invoked (route-level `.strict()` is stricter than
+    // the capability's own input schema would reach).
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
   });
 });
