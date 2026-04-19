@@ -26,9 +26,9 @@ import {
 } from "@editorzero/capabilities";
 import {
   asAuditTx,
-  createSqliteAuditWriter,
-  createSqliteDocUpdatesReader,
-  createSqliteDocUpdatesWriter,
+  createAuditWriter,
+  createDocUpdatesReader,
+  createDocUpdatesWriter,
   createSqliteDriver,
   createTenantScopedDb,
   SQLITE_FULL_DDL,
@@ -218,7 +218,7 @@ interface RunnerCounts {
 
 function mountDispatcher<I, O>(capability: Capability<I, O>) {
   const registry = createRegistry([registerCapability(capability)]);
-  const auditWriter = createSqliteAuditWriter();
+  const auditWriter = createAuditWriter();
   const runners: RunnerCounts = { writeTx: 0, read: 0 };
   let tick = 0;
   const dispatcher = createDispatcher({
@@ -423,9 +423,9 @@ interface ContentMountResult {
 
 function mountContentDispatcher<I, O>(capability: Capability<I, O>): ContentMountResult {
   const registry = createRegistry([registerCapability(capability)]);
-  const auditWriter = createSqliteAuditWriter();
-  const docUpdatesWriter = createSqliteDocUpdatesWriter();
-  const docUpdatesReader = createSqliteDocUpdatesReader();
+  const auditWriter = createAuditWriter();
+  const docUpdatesWriter = createDocUpdatesWriter();
+  const docUpdatesReader = createDocUpdatesReader();
   const sync = new HocuspocusSync({ docUpdatesWriter, docUpdatesReader });
   hocuspocus = sync;
   const runners: RunnerCounts = { writeTx: 0, read: 0 };

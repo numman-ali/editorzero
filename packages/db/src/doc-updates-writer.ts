@@ -1,16 +1,20 @@
 /**
- * SQLite-backed `DocUpdatesWriter` (architecture.md §6.1 / ADR 0018 F31).
+ * `DocUpdatesWriter` over the shared Kysely surface (architecture.md §6.1 /
+ * ADR 0018 F31). Dialect-agnostic — same factory runs against
+ * `createSqliteDriver` and `createPostgresDriver`; empirically verified by
+ * `packages/db/test/integration/writers.integration.test.ts`.
  *
  * Writes one Y.Doc update — plus its `outbox(doc.updated)` fan-out row —
  * through the dispatcher's write-path tx. The seq is allocated via the
- * `doc_counters` row: INSERT OR IGNORE to bootstrap on first write,
- * SELECT current `next_seq`, UPDATE to `+1`, INSERT `doc_updates` with
- * the allocated value (architecture.md §6.4). All four writes live
- * inside the caller-provided `AuditTx`, so they commit atomically with
- * the rest of the write path — the `docs` INSERT a handler may have
- * just made, the `audit_events` allow row the dispatcher will write
- * after the handler returns, and any other system-level writes in the
- * same tx.
+ * `doc_counters` row: `ON CONFLICT DO NOTHING` to bootstrap on first
+ * write (Kysely's `onConflict` builder; compiles to `INSERT ... ON
+ * CONFLICT DO NOTHING` on both SQLite and Postgres), SELECT current
+ * `next_seq`, UPDATE to `+1`, INSERT `doc_updates` with the allocated
+ * value (architecture.md §6.4). All four writes live inside the
+ * caller-provided `AuditTx`, so they commit atomically with the rest
+ * of the write path — the `docs` INSERT a handler may have just made,
+ * the `audit_events` allow row the dispatcher will write after the
+ * handler returns, and any other system-level writes in the same tx.
  *
  * Why this lives here and not in `@editorzero/sync`. The
  * `no-raw-kysely-outside-db` coherence check (§8.1a + §17) pins every
@@ -47,8 +51,8 @@
  *
  * **`outbox(audit.appended)`** is NOT emitted here — that row belongs
  * to the audit write path (architecture.md §6.2) and is emitted by
- * `createSqliteAuditWriter` inside the same write-path tx (P3.6d).
- * This writer's scope is only the two-row mutation-side fan-out:
+ * `createAuditWriter` inside the same write-path tx (P3.6d). This
+ * writer's scope is only the two-row mutation-side fan-out:
  * `doc_updates` + `outbox(doc.updated)`.
  */
 
@@ -75,7 +79,7 @@ export interface DocUpdatesWriter {
   write(tx: AuditTx, input: DocUpdateWriteInput): Promise<DocUpdateWriteResult>;
 }
 
-export function createSqliteDocUpdatesWriter(now: () => number = Date.now): DocUpdatesWriter {
+export function createDocUpdatesWriter(now: () => number = Date.now): DocUpdatesWriter {
   return {
     write: async (auditTx, input) => {
       const tx = auditTx as unknown as Transaction<SystemDatabase>;

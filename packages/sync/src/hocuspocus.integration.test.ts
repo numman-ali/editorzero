@@ -23,9 +23,9 @@
 
 import {
   asAuditTx,
-  createSqliteAuditWriter,
-  createSqliteDocUpdatesReader,
-  createSqliteDocUpdatesWriter,
+  createAuditWriter,
+  createDocUpdatesReader,
+  createDocUpdatesWriter,
   createSqliteDriver,
   SQLITE_FULL_DDL,
   type SqliteDriver,
@@ -49,8 +49,8 @@ beforeEach(async () => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(SQLITE_FULL_DDL);
   sync = new HocuspocusSync({
-    docUpdatesWriter: createSqliteDocUpdatesWriter(),
-    docUpdatesReader: createSqliteDocUpdatesReader(),
+    docUpdatesWriter: createDocUpdatesWriter(),
+    docUpdatesReader: createDocUpdatesReader(),
   });
 });
 
@@ -323,11 +323,11 @@ describe("HocuspocusSync.bind().transact", () => {
   it("skips the doc_updates write when the handler issues no Y.Doc mutations", async () => {
     await seedDocMetadata(DOC_ID_A);
 
-    // `createSqliteAuditWriter()` imported so this file's test-setup
+    // `createAuditWriter()` imported so this file's test-setup
     // mirrors the full write-path even though the assertion only
     // touches doc_updates here. Prevents a future "this file forgot
     // to import the audit writer" drift signal.
-    void createSqliteAuditWriter;
+    void createAuditWriter;
 
     await driver.withSystemTx(async (tx) => {
       const ctx: HocuspocusTxContext = {

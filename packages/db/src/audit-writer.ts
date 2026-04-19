@@ -1,9 +1,12 @@
 /**
- * SQLite-backed `AuditWriter` (architecture.md §6.2, §9.3 / ADR 0018 F31).
+ * `AuditWriter` over the shared Kysely surface (architecture.md §6.2, §9.3 /
+ * ADR 0018 F31). Dialect-agnostic — same factory runs against
+ * `createSqliteDriver` and `createPostgresDriver`; empirically verified by
+ * `packages/db/test/integration/writers.integration.test.ts`.
  *
  * The opaque `AuditTx` brand produced here is a `Transaction<SystemDatabase>`
  * under the hood. `asAuditTx` casts the live Kysely tx handle to the
- * brand at the producer boundary; `createSqliteAuditWriter` casts it
+ * brand at the producer boundary; `createAuditWriter` casts it
  * back at the consumer boundary. Both casts live inside
  * `@editorzero/db`, so the opaque contract is respected end-to-end —
  * no caller outside this package can produce an `AuditTx` that is not
@@ -71,7 +74,7 @@ function nextAuditId(): string {
  * fix lands before the runtime composition package wires a live
  * SQLite audit writer behind the public API.
  */
-export function createSqliteAuditWriter(now: () => number = Date.now): AuditWriter {
+export function createAuditWriter(now: () => number = Date.now): AuditWriter {
   return {
     write: async (tx, input) => {
       const kysely = tx as unknown as Transaction<SystemDatabase>;

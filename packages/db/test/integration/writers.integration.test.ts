@@ -2,13 +2,13 @@
  * Writers conformance across SQLite + Postgres (ADR 0023 §4 /
  * architecture.md §6.1 + §6.2).
  *
- * `createSqliteAuditWriter` and `createSqliteDocUpdatesWriter` are
- * named `Sqlite*` but implemented entirely on top of Kysely — no raw
- * SQL, no dialect-specific calls. The question this test answers is
- * empirical: does the writer actually run end-to-end against a real
- * Postgres, including the ON CONFLICT DO NOTHING bootstrap on
- * `doc_counters`, the composite-FK-covered `doc_updates` INSERT, and
- * the twin `outbox` fan-outs (`audit.appended` + `doc.updated`)?
+ * `createAuditWriter` and `createDocUpdatesWriter` are implemented
+ * entirely on top of Kysely — no raw SQL, no dialect-specific calls.
+ * The question this test answers is empirical: does the writer
+ * actually run end-to-end against a real Postgres, including the
+ * ON CONFLICT DO NOTHING bootstrap on `doc_counters`, the composite-
+ * FK-covered `doc_updates` INSERT, and the twin `outbox` fan-outs
+ * (`audit.appended` + `doc.updated`)?
  *
  * If any future change accidentally leaks a dialect-specific
  * construct into one of these writers (e.g. SQLite's `INSERT OR
@@ -30,9 +30,9 @@ import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { asAuditTx, createSqliteAuditWriter } from "../../src/audit-writer";
-import { createSqliteDocUpdatesReader } from "../../src/doc-updates-reader";
-import { createSqliteDocUpdatesWriter } from "../../src/doc-updates-writer";
+import { asAuditTx, createAuditWriter } from "../../src/audit-writer";
+import { createDocUpdatesReader } from "../../src/doc-updates-reader";
+import { createDocUpdatesWriter } from "../../src/doc-updates-writer";
 import {
   type Backend,
   createPostgresBackend,
@@ -100,8 +100,8 @@ describe.each(backends)("writers conformance — $name", ({ setup }) => {
     await backend.resetSchema();
   });
 
-  it("createSqliteAuditWriter inserts audit_events + outbox(audit.appended) atomically", async () => {
-    const writer = createSqliteAuditWriter(() => 1_700_000_000_000);
+  it("createAuditWriter inserts audit_events + outbox(audit.appended) atomically", async () => {
+    const writer = createAuditWriter(() => 1_700_000_000_000);
 
     await backend.driver.withSystemTx(async (tx) => {
       await writer.write(asAuditTx(tx), {
@@ -141,7 +141,7 @@ describe.each(backends)("writers conformance — $name", ({ setup }) => {
     expect(outboxRows[0]?.event).toBe("audit.appended");
   });
 
-  it("createSqliteDocUpdatesWriter bootstraps doc_counters, allocates seq, writes doc_updates + outbox(doc.updated)", async () => {
+  it("createDocUpdatesWriter bootstraps doc_counters, allocates seq, writes doc_updates + outbox(doc.updated)", async () => {
     // `doc_counters` FK requires a parent `docs` row. Seed via unscoped
     // `system()` to sidestep the scoping plugin.
     await backend.driver
@@ -150,7 +150,7 @@ describe.each(backends)("writers conformance — $name", ({ setup }) => {
       .values(seedDoc(DOC, WORKSPACE, ALICE))
       .execute();
 
-    const writer = createSqliteDocUpdatesWriter(() => 1_700_000_000_000);
+    const writer = createDocUpdatesWriter(() => 1_700_000_000_000);
     const blob = new Uint8Array([0x01, 0x02, 0xff]);
 
     const first = await backend.driver.withSystemTx(async (tx) => {
@@ -196,15 +196,15 @@ describe.each(backends)("writers conformance — $name", ({ setup }) => {
     expect(outboxRows.map((r) => r.event)).toEqual(["doc.updated", "doc.updated"]);
   });
 
-  it("createSqliteDocUpdatesReader returns the writes in seq order", async () => {
+  it("createDocUpdatesReader returns the writes in seq order", async () => {
     await backend.driver
       .system()
       .insertInto("docs")
       .values(seedDoc(DOC, WORKSPACE, ALICE))
       .execute();
 
-    const writer = createSqliteDocUpdatesWriter(() => 1_700_000_000_000);
-    const reader = createSqliteDocUpdatesReader();
+    const writer = createDocUpdatesWriter(() => 1_700_000_000_000);
+    const reader = createDocUpdatesReader();
     const blobs = [new Uint8Array([0x01]), new Uint8Array([0x02]), new Uint8Array([0x03])];
     for (const update_blob of blobs) {
       await backend.driver.withSystemTx(async (tx) => {

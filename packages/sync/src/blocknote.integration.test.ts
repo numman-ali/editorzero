@@ -31,8 +31,8 @@ import {
 } from "@blocknote/core";
 import {
   asAuditTx,
-  createSqliteDocUpdatesReader,
-  createSqliteDocUpdatesWriter,
+  createDocUpdatesReader,
+  createDocUpdatesWriter,
   createSqliteDriver,
   SQLITE_FULL_DDL,
   type SqliteDriver,
@@ -61,8 +61,8 @@ beforeEach(async () => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(SQLITE_FULL_DDL);
   sync = new HocuspocusSync({
-    docUpdatesWriter: createSqliteDocUpdatesWriter(),
-    docUpdatesReader: createSqliteDocUpdatesReader(),
+    docUpdatesWriter: createDocUpdatesWriter(),
+    docUpdatesReader: createDocUpdatesReader(),
   });
 });
 

@@ -1,5 +1,5 @@
 /**
- * `SqliteDocUpdatesWriter` — per-method unit tests against real SQLite.
+ * `DocUpdatesWriter` — per-method unit tests against real SQLite.
  *
  * Locks the writer contract that `@editorzero/sync` depends on:
  *   1. Seq is allocated via SELECT + UPDATE on `doc_counters`; the
@@ -25,7 +25,7 @@ import type { AgentPrincipal, Principal, UserPrincipal } from "@editorzero/princ
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { asAuditTx } from "./audit-writer";
-import { createSqliteDocUpdatesWriter, type DocUpdatesWriter } from "./doc-updates-writer";
+import { createDocUpdatesWriter, type DocUpdatesWriter } from "./doc-updates-writer";
 import { createSqliteDriver, type SqliteDriver } from "./drivers/sqlite";
 import { FULL_DDL } from "./drivers/sqlite-ddl";
 
@@ -41,7 +41,7 @@ let writer: DocUpdatesWriter;
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(FULL_DDL);
-  writer = createSqliteDocUpdatesWriter(() => 1_700_000_000_000);
+  writer = createDocUpdatesWriter(() => 1_700_000_000_000);
 });
 
 afterEach(async () => {
@@ -111,7 +111,7 @@ async function writeUpdate(principal: Principal, blob: Uint8Array): Promise<{ se
   });
 }
 
-describe("createSqliteDocUpdatesWriter.write", () => {
+describe("createDocUpdatesWriter.write", () => {
   it("inserts doc_updates with the allocated seq + increments doc_counters", async () => {
     await seedDoc();
     const blob = new Uint8Array([1, 2, 3, 4]);
@@ -269,7 +269,7 @@ describe("createSqliteDocUpdatesWriter.write", () => {
 
   it("uses Date.now() when no custom clock is supplied", async () => {
     await seedDoc();
-    const defaultWriter = createSqliteDocUpdatesWriter();
+    const defaultWriter = createDocUpdatesWriter();
     const before = Date.now();
     await driver.withSystemTx(async (tx) => {
       await defaultWriter.write(asAuditTx(tx), {

@@ -1,5 +1,5 @@
 /**
- * `createSqliteDocUpdatesReader` unit tests.
+ * `createDocUpdatesReader` unit tests.
  *
  * Locks the reader contract that `@editorzero/sync`'s `onLoadDocument`
  * hook depends on: one `Uint8Array` per `doc_updates` row for the
@@ -14,7 +14,7 @@ import { DocId, UserId, uuidV7, WorkspaceId } from "@editorzero/ids";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { asAuditTx } from "./audit-writer";
-import { createSqliteDocUpdatesReader, type DocUpdatesReader } from "./doc-updates-reader";
+import { createDocUpdatesReader, type DocUpdatesReader } from "./doc-updates-reader";
 import { createSqliteDriver, type SqliteDriver } from "./drivers/sqlite";
 import { FULL_DDL } from "./drivers/sqlite-ddl";
 
@@ -29,7 +29,7 @@ let reader: DocUpdatesReader;
 beforeEach(async () => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(FULL_DDL);
-  reader = createSqliteDocUpdatesReader();
+  reader = createDocUpdatesReader();
   const now = 1_700_000_000_000;
   await driver
     .system()
@@ -94,7 +94,7 @@ async function readByDoc(doc_id: DocId): Promise<Uint8Array[]> {
   return driver.withSystemTx(async (tx) => reader.readByDoc(asAuditTx(tx), doc_id));
 }
 
-describe("createSqliteDocUpdatesReader.readByDoc", () => {
+describe("createDocUpdatesReader.readByDoc", () => {
   it("returns an empty array when the doc has no updates", async () => {
     const blobs = await readByDoc(DOC_A);
     expect(blobs).toEqual([]);

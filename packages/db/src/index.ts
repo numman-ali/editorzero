@@ -10,10 +10,10 @@
  * prevents any `Kysely` / `sql<T>` import outside this package.
  */
 
-export { asAuditTx, createSqliteAuditWriter } from "./audit-writer";
-export { createSqliteDocUpdatesReader, type DocUpdatesReader } from "./doc-updates-reader";
+export { asAuditTx, createAuditWriter } from "./audit-writer";
+export { createDocUpdatesReader, type DocUpdatesReader } from "./doc-updates-reader";
 export {
-  createSqliteDocUpdatesWriter,
+  createDocUpdatesWriter,
   type DocUpdatesWriter,
   type DocUpdateWriteInput,
   type DocUpdateWriteResult,

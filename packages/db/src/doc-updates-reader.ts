@@ -1,5 +1,8 @@
 /**
- * SQLite-backed `DocUpdatesReader` (architecture.md §6.4 / ADR 0018 F31).
+ * `DocUpdatesReader` over the shared Kysely surface (architecture.md §6.4 /
+ * ADR 0018 F31). Dialect-agnostic — same factory runs against
+ * `createSqliteDriver` and `createPostgresDriver`; empirically verified by
+ * `packages/db/test/integration/writers.integration.test.ts`.
  *
  * Reads `doc_updates.update_blob` for a doc in seq order. Consumed by
  * the Hocuspocus `onLoadDocument` hook — each blob is applied to the
@@ -14,7 +17,8 @@
  * connection would block on `acquireConnection` until the tx commits —
  * and `onLoadDocument` fires *inside* that tx. Routing the read
  * through the tx's own Kysely handle shares the connection, avoiding
- * the deadlock.
+ * the deadlock. Postgres's pool model tolerates a second connection,
+ * but the shared-handle contract keeps the call site dialect-agnostic.
  *
  * **Read-your-own-writes is not a concern here.** Hydration runs in
  * `onLoadDocument`, which fires during `openDirectConnection` at the
@@ -49,7 +53,7 @@ export interface DocUpdatesReader {
   readByDoc(tx: AuditTx, doc_id: DocId): Promise<Uint8Array[]>;
 }
 
-export function createSqliteDocUpdatesReader(): DocUpdatesReader {
+export function createDocUpdatesReader(): DocUpdatesReader {
   return {
     readByDoc: async (auditTx, doc_id) => {
       const tx = auditTx as unknown as Transaction<SystemDatabase>;

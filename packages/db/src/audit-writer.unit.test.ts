@@ -1,5 +1,5 @@
 /**
- * `createSqliteAuditWriter` unit tests.
+ * `createAuditWriter` unit tests.
  *
  * Covers the field-for-field projection from `AuditWriteInput` to
  * `audit_events` (F90), the deny-reason denormalisation, and the
@@ -11,7 +11,7 @@ import type { AuditWriteInput } from "@editorzero/audit";
 import { AgentId, CapabilityId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { asAuditTx, createSqliteAuditWriter } from "./audit-writer";
+import { asAuditTx, createAuditWriter } from "./audit-writer";
 import { createSqliteDriver, type SqliteDriver } from "./drivers/sqlite";
 import { AUDIT_EVENTS_DDL, OUTBOX_DDL } from "./drivers/sqlite-ddl";
 
@@ -57,9 +57,9 @@ function allowInput(): AuditWriteInput {
   };
 }
 
-describe("createSqliteAuditWriter", () => {
+describe("createAuditWriter", () => {
   it("inserts a row with every AuditWriteInput field projected to the right column", async () => {
-    const writer = createSqliteAuditWriter(() => 123_456);
+    const writer = createAuditWriter(() => 123_456);
     await driver.withSystemTx((tx) => writer.write(asAuditTx(tx), allowInput()));
 
     const rows = await driver.system().selectFrom("audit_events").selectAll().execute();
@@ -87,7 +87,7 @@ describe("createSqliteAuditWriter", () => {
   });
 
   it("deny rows denormalise deny_reason from record.effect.reason_code", async () => {
-    const writer = createSqliteAuditWriter();
+    const writer = createAuditWriter();
     await driver.withSystemTx((tx) =>
       writer.write(asAuditTx(tx), {
         ...allowInput(),
@@ -114,7 +114,7 @@ describe("createSqliteAuditWriter", () => {
   });
 
   it("agent principal projects token_id + acting_as_user_id on the row", async () => {
-    const writer = createSqliteAuditWriter();
+    const writer = createAuditWriter();
     await driver.withSystemTx((tx) =>
       writer.write(asAuditTx(tx), {
         ...allowInput(),
@@ -135,7 +135,7 @@ describe("createSqliteAuditWriter", () => {
   });
 
   it("rolls back the audit row when the enclosing withSystemTx rejects", async () => {
-    const writer = createSqliteAuditWriter();
+    const writer = createAuditWriter();
     await expect(
       driver.withSystemTx(async (tx) => {
         await writer.write(asAuditTx(tx), allowInput());
@@ -149,7 +149,7 @@ describe("createSqliteAuditWriter", () => {
 
   it("defaults created_at to Date.now when no clock is injected", async () => {
     const before = Date.now();
-    const writer = createSqliteAuditWriter();
+    const writer = createAuditWriter();
     await driver.withSystemTx((tx) => writer.write(asAuditTx(tx), allowInput()));
     const after = Date.now();
 
@@ -164,7 +164,7 @@ describe("createSqliteAuditWriter", () => {
     // pagination over `audit_events` is only deterministic when the id
     // shares the time-prefix ordering with `created_at`. v4 would
     // randomise rows that land in the same millisecond.
-    const writer = createSqliteAuditWriter();
+    const writer = createAuditWriter();
     await driver.withSystemTx((tx) => writer.write(asAuditTx(tx), allowInput()));
     await driver.withSystemTx((tx) => writer.write(asAuditTx(tx), allowInput()));
     const rows = await driver.system().selectFrom("audit_events").selectAll().execute();
@@ -181,7 +181,7 @@ describe("createSqliteAuditWriter", () => {
     // pollers can fan out at-least-once. Missing this emission would
     // break invariant 3 (audit trail reconstruction) for any downstream
     // consumer that reads the log via outbox.
-    const writer = createSqliteAuditWriter(() => 123_456);
+    const writer = createAuditWriter(() => 123_456);
     await driver.withSystemTx((tx) => writer.write(asAuditTx(tx), allowInput()));
 
     const auditRows = await driver.system().selectFrom("audit_events").selectAll().execute();
@@ -211,7 +211,7 @@ describe("createSqliteAuditWriter", () => {
   });
 
   it("outbox(audit.appended) rolls back when the enclosing tx rejects", async () => {
-    const writer = createSqliteAuditWriter();
+    const writer = createAuditWriter();
     await expect(
       driver.withSystemTx(async (tx) => {
         await writer.write(asAuditTx(tx), allowInput());
@@ -229,7 +229,7 @@ describe("createSqliteAuditWriter", () => {
     // Webhook subscribers route on the outcome (e.g. `audit.appended.doc.*`
     // filtered to `outcome=deny` for security alerting). The payload must
     // stay truthful about what actually happened.
-    const writer = createSqliteAuditWriter();
+    const writer = createAuditWriter();
     await driver.withSystemTx((tx) =>
       writer.write(asAuditTx(tx), {
         ...allowInput(),
@@ -262,7 +262,7 @@ describe("createSqliteAuditWriter", () => {
     // `"missing_scope"`). The indexed `deny_reason` column has to mirror
     // the public effect, or analytic queries and the JSON payload will
     // silently disagree.
-    const writer = createSqliteAuditWriter();
+    const writer = createAuditWriter();
     await driver.withSystemTx((tx) =>
       writer.write(asAuditTx(tx), {
         ...allowInput(),

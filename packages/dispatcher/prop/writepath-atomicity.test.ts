@@ -10,7 +10,7 @@
  *      package's `DocUpdatesWriter` inside the dispatcher's write-path tx.
  *   3. `outbox(doc.updated)` — paired with (2), same writer.
  *   4. `audit_events(outcome='allow')` row — dispatcher's allow audit,
- *      written through `createSqliteAuditWriter` on the same tx.
+ *      written through `createAuditWriter` on the same tx.
  *   5. `outbox(audit.appended)` — paired with (4), same writer.
  *
  * If a fault is injected at ANY query inside the write-path tx, every
@@ -89,7 +89,7 @@
  *      becomes worth adding (P4 hardening).
  *   2. Single synthetic capability fixture (`doc.mutate_prop_fixture`).
  *      The property verifies the write-path tx *primitive* — `runInWriteTx`
- *      composed with `createSqliteDocUpdatesWriter`, `createSqliteAuditWriter`,
+ *      composed with `createDocUpdatesWriter`, `createAuditWriter`,
  *      and `HocuspocusSync` — which is capability-shape-agnostic: every
  *      mutation capability (`doc.create`, `doc.update`, `doc.rename`,
  *      future block caps) is wrapped by the same primitive. Per-capability
@@ -104,10 +104,10 @@
 import { type Capability, createRegistry, registerCapability } from "@editorzero/capabilities";
 import {
   asAuditTx,
+  createAuditWriter,
+  createDocUpdatesReader,
+  createDocUpdatesWriter,
   createQueryFaultPlugin,
-  createSqliteAuditWriter,
-  createSqliteDocUpdatesReader,
-  createSqliteDocUpdatesWriter,
   createSqliteDriver,
   createTenantScopedDb,
   type QueryTag,
@@ -363,8 +363,8 @@ async function runTrial(opts: TrialOpts): Promise<TrialResult> {
   const { faultOrdinal, prime = false } = opts;
   const driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(SQLITE_FULL_DDL);
-  const docUpdatesWriter = createSqliteDocUpdatesWriter();
-  const docUpdatesReader = createSqliteDocUpdatesReader();
+  const docUpdatesWriter = createDocUpdatesWriter();
+  const docUpdatesReader = createDocUpdatesReader();
   const sync = new HocuspocusSync({ docUpdatesWriter, docUpdatesReader });
   const fault = new FaultController();
   // Kysely plugin routed through `@editorzero/db` to honour
@@ -381,7 +381,7 @@ async function runTrial(opts: TrialOpts): Promise<TrialResult> {
 
     const capability = docMutateCapability();
     const registry = createRegistry([registerCapability(capability)]);
-    const auditWriter = createSqliteAuditWriter();
+    const auditWriter = createAuditWriter();
     let tick = 0;
     // `activeFaultOrdinal` drives the fault controller each dispatch.
     // During a priming dispatch (warm path), it points outside the
