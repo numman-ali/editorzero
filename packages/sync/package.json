@@ -32,6 +32,7 @@
     "@editorzero/scopes": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "better-sqlite3": "catalog:",
+    "happy-dom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
