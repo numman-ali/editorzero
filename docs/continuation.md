@@ -15,7 +15,7 @@ Three capabilities land end-to-end at the kernel layer: `doc.create`, `doc.get`,
 **Phase 3 unblock — autonomous:**
 
 - **BlockNoteEditor adapter-boundary smoke** — **no-WS half closed 2026-04-19** (`packages/sync/src/blocknote.integration.test.ts`; Appendix C item 11 → PARTIAL). WS-client concurrent-edit half remains Phase 4 (broadcast-buffering-until-commit; ADR 0018 § Out of scope).
-- **SQLite conformance harness** — `packages/db/test/integration/` with a parametrized "same assertions, both backends" runner covering the ADR 0007 analyzer gaps (closes Appendix C item 4 partially; un-skips the `integration` pre-push lane).
+- **Dual-backend conformance harness** — **closed 2026-04-19** (`packages/db/test/integration/`; Appendix C item 4 → CLOSED). Parametrised SQLite + Postgres conformance runs 14 tests (tenant-scoping + `withSystemTx` atomicity) and activates lefthook's pre-push `integration` lane. ADR 0023 codifies the Postgres substrate picks.
 - **Metadata-only mutation atomicity** — the planned `metadata-only-set.integration.ts` closure artifact; prerequisite is a real runtime composition site for the dispatcher with `ctx.outbox(...)` un-stubbed (every current `createDispatcher(...)` call is a test fixture).
 
 **Phase 3 surface adapters (ADR 0021 topology):**
@@ -35,6 +35,7 @@ Three capabilities land end-to-end at the kernel layer: `doc.create`, `doc.get`,
 
 ## Recent history
 
+- **2026-04-19** — ADR 0023 (Postgres driver substrate) + dual-backend conformance harness landed across 3 commits: ADR writeup (`fb7fe27`), Postgres driver + 9-test testcontainers unit harness (`8c52ee3`, `packages/db/src/drivers/postgres.ts` / `postgres-ddl.ts`), and the parametrised SQLite+Postgres conformance suite (`87e233b`, `packages/db/test/integration/` — 14 tests). Activates lefthook's pre-push `integration` lane. Codex adversarial review pre-coding drove three reversals (selective BIGINT/INTEGER split, per-pool `types` override, retry-semantic framing). Closes Appendix C item 4.
 - **2026-04-19** — BlockNote adapter-boundary smoke landed (`packages/sync/src/blocknote.integration.test.ts`): closes the no-WS half of Appendix C item 11 (3 tests: smoke / projection / rollback). Empirical finding — server-side `BlockNoteEditor` mutation needs a DOM shim (`happy-dom` + `editor.mount`); without it the y-prosemirror plugin's writes never reach the fragment. AGENTS.md gotcha + ADR 0018 § Empirical verification updated.
 - **2026-04-19** — Refactor pass: AGENTS.md (132 lines) + `docs/continuation.md` rewritten; `docs/cluster-check.md` deleted; per-commit Codex ceremony replaced with self-critique-at-meaningful-moments. CLAUDE.md added with private cmux notes for the Codex peer channel.
 - **2026-04-19** — P3.7: Appendix C status sweep matrix published (diagnostic, not gate; surfaced Open Question 3 above).

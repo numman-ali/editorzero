@@ -107,12 +107,14 @@ Fast lane at pre-commit; slow lane at pre-push. Concrete wiring in `lefthook.yml
 - **Next.js 16 `"use cache"`** — cached functions cannot call `cookies()` / `headers()` / `searchParams`. Pass request context as arguments.
 - **Better Auth `getServerSession`** — cannot be called inside a `"use cache"` scope.
 - **Secrets** — never read credentials via `process.env` directly. All secret loads go through `packages/config/secrets.ts`.
+- **Postgres tests need Docker** — the db-package Postgres unit + dual-backend conformance suites spin a real `postgres:17.4-bookworm` via `@testcontainers/postgresql`. Docker Desktop (or equivalent) must be running. Set `EDITORZERO_SKIP_POSTGRES_TESTS=1` to bypass when working Docker-less; SQLite-side assertions still run. Per-pool `types` override parses `int8`/BIGINT to Number with a safe-integer guard (ADR 0023 §5) — do not `pg.types.setTypeParser` globally.
 
 ### Pinned versions (do not bump blind)
 
 - **Atlas `migrate lint`** — moved to Pro in v0.38 (Oct 2025). Pin Atlas CE; cover missing analyzers in the conformance suite.
 - **sqlite-vec** — ANN is alpha as of v0.1.9. SQLite vector search uses brute force (safe < 1M vectors); ANN behind an experimental flag.
 - **pgvector** — pin ≥ 0.8.2 (CVE-2026-3172).
+- **pg** — pin `^8.20.0`; `@testcontainers/postgresql` `^11.14.0` (ADR 0023). Postgres image pinned `17.4-bookworm` in `packages/db/src/drivers/postgres.unit.test.ts` + `test/integration/backends.ts`; update both together.
 - **MCP SDK** — pin latest 1.x stable (v2.0.0-alpha.2 is alpha).
 - **Node 22 LTS** — EOL April 30 2027. Plan Node 24 migration Q3 2026.
 
