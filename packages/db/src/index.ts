@@ -18,6 +18,9 @@ export {
   type DocUpdateWriteInput,
   type DocUpdateWriteResult,
 } from "./doc-updates-writer";
+export type { PostgresDriver, PostgresDriverOptions } from "./drivers/postgres";
+export { createPostgresDriver } from "./drivers/postgres";
+export { FULL_DDL as POSTGRES_FULL_DDL } from "./drivers/postgres-ddl";
 export type { SqliteDriver, SqliteDriverOptions } from "./drivers/sqlite";
 export { createSqliteDriver } from "./drivers/sqlite";
 export {
@@ -26,7 +29,7 @@ export {
   DOC_SNAPSHOTS_DDL,
   DOC_UPDATES_DDL,
   DOCS_DDL,
-  FULL_DDL,
+  FULL_DDL as SQLITE_FULL_DDL,
   OUTBOX_DDL,
 } from "./drivers/sqlite-ddl";
 export { createQueryFaultPlugin, describeQueryNode, type QueryTag } from "./query-fault";

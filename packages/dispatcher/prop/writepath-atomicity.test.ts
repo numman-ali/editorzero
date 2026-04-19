@@ -110,8 +110,8 @@ import {
   createSqliteDocUpdatesWriter,
   createSqliteDriver,
   createTenantScopedDb,
-  FULL_DDL,
   type QueryTag,
+  SQLITE_FULL_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
 import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
@@ -362,7 +362,7 @@ interface TrialOpts {
 async function runTrial(opts: TrialOpts): Promise<TrialResult> {
   const { faultOrdinal, prime = false } = opts;
   const driver = createSqliteDriver({ path: ":memory:" });
-  driver.exec(FULL_DDL);
+  driver.exec(SQLITE_FULL_DDL);
   const docUpdatesWriter = createSqliteDocUpdatesWriter();
   const docUpdatesReader = createSqliteDocUpdatesReader();
   const sync = new HocuspocusSync({ docUpdatesWriter, docUpdatesReader });

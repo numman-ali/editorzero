@@ -22,11 +22,15 @@
     "@editorzero/ids": "workspace:*",
     "@editorzero/principal": "workspace:*",
     "@editorzero/scopes": "workspace:*",
-    "kysely": "catalog:"
+    "kysely": "catalog:",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^11.14.0",
     "@types/better-sqlite3": "catalog:",
+    "@types/pg": "^8.11.10",
     "better-sqlite3": "catalog:",
+    "testcontainers": "^11.14.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

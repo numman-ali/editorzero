@@ -31,7 +31,7 @@ import {
   createSqliteDocUpdatesWriter,
   createSqliteDriver,
   createTenantScopedDb,
-  FULL_DDL,
+  SQLITE_FULL_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
 import { PermissionDeniedError } from "@editorzero/errors";
@@ -73,7 +73,7 @@ let hocuspocus: HocuspocusSync | null = null;
 
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
-  driver.exec(FULL_DDL);
+  driver.exec(SQLITE_FULL_DDL);
   hocuspocus = null;
 });
 

@@ -34,7 +34,7 @@ import {
   createSqliteDocUpdatesReader,
   createSqliteDocUpdatesWriter,
   createSqliteDriver,
-  FULL_DDL,
+  SQLITE_FULL_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
 import { DocId, UserId, WorkspaceId } from "@editorzero/ids";
@@ -59,7 +59,7 @@ let sync: HocuspocusSync;
 
 beforeEach(async () => {
   driver = createSqliteDriver({ path: ":memory:" });
-  driver.exec(FULL_DDL);
+  driver.exec(SQLITE_FULL_DDL);
   sync = new HocuspocusSync({
     docUpdatesWriter: createSqliteDocUpdatesWriter(),
     docUpdatesReader: createSqliteDocUpdatesReader(),
