@@ -222,6 +222,76 @@ describe.skipIf(SKIP)(
   },
 );
 
+describe.skipIf(SKIP)("createPostgresDriver — searchPath onConnect hook (ADR 0023 §2)", () => {
+  it("pins the search_path on every pooled connection", async () => {
+    // Dedicated schema so the onConnect hook has a non-default target.
+    // CREATE SCHEMA runs through the shared driver, then we spin a
+    // `searchPath`-bound driver and assert unqualified names resolve
+    // into the bound schema.
+    const d = requireDriver();
+    await d.exec("DROP SCHEMA IF EXISTS sp_probe CASCADE");
+    await d.exec("CREATE SCHEMA sp_probe");
+
+    const c = container;
+    if (c === undefined) throw new Error("container missing");
+    const scoped = createPostgresDriver({
+      connectionString: c.getConnectionUri(),
+      searchPath: "sp_probe",
+    });
+    try {
+      // `current_schema()` returns the first schema on search_path.
+      // If the onConnect hook didn't fire, the result would be `public`.
+      const r = await sql<{
+        current_schema: string;
+      }>`SELECT current_schema() AS current_schema`.execute(scoped.system());
+      expect(r.rows[0]?.current_schema).toBe("sp_probe");
+
+      // Functional evidence: an unqualified CREATE TABLE lands in
+      // `sp_probe.t`, not `public.t`. Confirms the GUC is actually
+      // being consulted by DDL resolution, not just `current_schema()`.
+      await scoped.exec("CREATE TABLE t (v INTEGER NOT NULL)");
+      const inSpProbe = await sql<{
+        c: string;
+      }>`SELECT COUNT(*)::text AS c FROM information_schema.tables WHERE table_schema = 'sp_probe' AND table_name = 't'`.execute(
+        scoped.system(),
+      );
+      expect(inSpProbe.rows[0]?.c).toBe("1");
+    } finally {
+      await scoped.close();
+      await d.exec("DROP SCHEMA IF EXISTS sp_probe CASCADE");
+    }
+  });
+
+  it("escapes identifiers with embedded double-quotes (defence-in-depth)", async () => {
+    // `pgIdent` doubles `"` inside the schema name. The test harness is
+    // the only source of `searchPath` today, but the escape is in place
+    // so an operational misuse doesn't turn into SQL injection. Use a
+    // literal `"` in the schema name to prove the escape survives a
+    // round-trip through the SET statement.
+    const d = requireDriver();
+    const raw = 'sp"probe';
+    const quoted = raw.replace(/"/g, '""');
+    await d.exec(`DROP SCHEMA IF EXISTS "${quoted}" CASCADE`);
+    await d.exec(`CREATE SCHEMA "${quoted}"`);
+
+    const c = container;
+    if (c === undefined) throw new Error("container missing");
+    const scoped = createPostgresDriver({
+      connectionString: c.getConnectionUri(),
+      searchPath: raw,
+    });
+    try {
+      const r = await sql<{
+        current_schema: string;
+      }>`SELECT current_schema() AS current_schema`.execute(scoped.system());
+      expect(r.rows[0]?.current_schema).toBe(raw);
+    } finally {
+      await scoped.close();
+      await d.exec(`DROP SCHEMA IF EXISTS "${quoted}" CASCADE`);
+    }
+  });
+});
+
 describe.skipIf(SKIP)("createPostgresDriver — pool lifecycle", () => {
   it("close() drains the pool and resolves", async () => {
     // Separate driver spun from the shared container so we don't tear
