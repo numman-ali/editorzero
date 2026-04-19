@@ -40,6 +40,12 @@
  *       the discriminated union never gains the variant — which would
  *       silently make the audit writer fall through to `{ kind:
  *       "internal" }` (F95) without a compile-time error.
+ *   [7] Dialect-parallel DDL parity — `sqlite-ddl.ts` and `postgres-ddl.ts`
+ *       must declare the same tables, columns, NOT NULL nullability,
+ *       table-level constraints, and indexes. Types diverge by design
+ *       (INTEGER↔BIGINT, BLOB↔BYTEA) and are deliberately not compared.
+ *       ADR 0023 §4 flagged this as a follow-up; the check closes it
+ *       until Atlas + kysely-codegen collapse the two files into one.
  *
  * Deferred checks (no-ops today; activate when the real comparison is
  * implemented, not when a source file merely exists):
@@ -631,6 +637,274 @@ function extractEffectKindFromCell(cell: string): string | null {
   return m[1];
 }
 
+// ── Check 7 — Dialect-parallel DDL column parity ──────────────────────────
+//
+// ADR 0023 §4: `packages/db/src/drivers/sqlite-ddl.ts` and
+// `postgres-ddl.ts` carry hand-written dialect-parallel DDL until Atlas +
+// kysely-codegen take over. Type mappings diverge by design
+// (INTEGER→BIGINT, BLOB→BYTEA), so this check ignores types. What it does
+// catch is the drift class that bit the write path for free: a column
+// added to one file and forgotten in the other. The integration harness
+// would surface that only if a test happened to insert the column;
+// here we surface it at commit time even without test coverage.
+//
+// Parity checked per table:
+//   - Same set of column names
+//   - Same NOT NULL status per column
+//   - Same table-level constraints (UNIQUE / FOREIGN KEY / PRIMARY KEY)
+//
+// Indexes declared next to a CREATE TABLE (`CREATE INDEX … ON table(…)`)
+// are also diffed: index names + column lists must match between files.
+
+interface DdlTable {
+  readonly name: string;
+  readonly columns: Map<string, { notNull: boolean }>;
+  readonly constraints: string[];
+  readonly indexes: Map<string, string>;
+}
+
+async function checkDdlParity(report: Report): Promise<void> {
+  const sqlitePath = join(ROOT, "packages", "db", "src", "drivers", "sqlite-ddl.ts");
+  const pgPath = join(ROOT, "packages", "db", "src", "drivers", "postgres-ddl.ts");
+
+  const sqliteSrc = await readIfExists(sqlitePath);
+  const pgSrc = await readIfExists(pgPath);
+  if (sqliteSrc === null || pgSrc === null) {
+    report.add({
+      severity: "warn",
+      message: "sqlite-ddl.ts or postgres-ddl.ts missing — skipping DDL parity check",
+    });
+    return;
+  }
+
+  const sqlite = parseDdl(sqliteSrc);
+  const pg = parseDdl(pgSrc);
+
+  const sqliteTableNames = new Set(sqlite.keys());
+  const pgTableNames = new Set(pg.keys());
+
+  for (const name of sqliteTableNames) {
+    if (!pgTableNames.has(name)) {
+      report.add({
+        severity: "error",
+        file: pgPath,
+        message: `DDL parity: table \`${name}\` in sqlite-ddl.ts but missing from postgres-ddl.ts`,
+      });
+    }
+  }
+  for (const name of pgTableNames) {
+    if (!sqliteTableNames.has(name)) {
+      report.add({
+        severity: "error",
+        file: sqlitePath,
+        message: `DDL parity: table \`${name}\` in postgres-ddl.ts but missing from sqlite-ddl.ts`,
+      });
+    }
+  }
+
+  for (const name of sqliteTableNames) {
+    if (!pgTableNames.has(name)) continue;
+    const s = sqlite.get(name);
+    const p = pg.get(name);
+    if (!s || !p) continue;
+
+    const sCols = new Set(s.columns.keys());
+    const pCols = new Set(p.columns.keys());
+
+    for (const c of sCols) {
+      if (!pCols.has(c)) {
+        report.add({
+          severity: "error",
+          file: pgPath,
+          message: `DDL parity: \`${name}.${c}\` in sqlite-ddl.ts but missing from postgres-ddl.ts`,
+        });
+      }
+    }
+    for (const c of pCols) {
+      if (!sCols.has(c)) {
+        report.add({
+          severity: "error",
+          file: sqlitePath,
+          message: `DDL parity: \`${name}.${c}\` in postgres-ddl.ts but missing from sqlite-ddl.ts`,
+        });
+      }
+    }
+
+    for (const c of sCols) {
+      if (!pCols.has(c)) continue;
+      const sNotNull = s.columns.get(c)?.notNull ?? false;
+      const pNotNull = p.columns.get(c)?.notNull ?? false;
+      if (sNotNull !== pNotNull) {
+        report.add({
+          severity: "error",
+          file: pgPath,
+          message:
+            `DDL parity: \`${name}.${c}\` NOT NULL differs — ` +
+            `sqlite=${sNotNull ? "NOT NULL" : "nullable"}, ` +
+            `postgres=${pNotNull ? "NOT NULL" : "nullable"}`,
+        });
+      }
+    }
+
+    const sConstraints = new Set(s.constraints);
+    const pConstraints = new Set(p.constraints);
+    for (const k of sConstraints) {
+      if (!pConstraints.has(k)) {
+        report.add({
+          severity: "error",
+          file: pgPath,
+          message: `DDL parity: \`${name}\` constraint \`${k}\` present in sqlite-ddl.ts but not postgres-ddl.ts`,
+        });
+      }
+    }
+    for (const k of pConstraints) {
+      if (!sConstraints.has(k)) {
+        report.add({
+          severity: "error",
+          file: sqlitePath,
+          message: `DDL parity: \`${name}\` constraint \`${k}\` present in postgres-ddl.ts but not sqlite-ddl.ts`,
+        });
+      }
+    }
+
+    for (const [idxName, cols] of s.indexes) {
+      const pCols2 = p.indexes.get(idxName);
+      if (pCols2 === undefined) {
+        report.add({
+          severity: "error",
+          file: pgPath,
+          message: `DDL parity: index \`${idxName}\` on \`${name}\` in sqlite-ddl.ts but missing from postgres-ddl.ts`,
+        });
+      } else if (pCols2 !== cols) {
+        report.add({
+          severity: "error",
+          file: pgPath,
+          message: `DDL parity: index \`${idxName}\` column list differs — sqlite=\`${cols}\`, postgres=\`${pCols2}\``,
+        });
+      }
+    }
+    for (const idxName of p.indexes.keys()) {
+      if (!s.indexes.has(idxName)) {
+        report.add({
+          severity: "error",
+          file: sqlitePath,
+          message: `DDL parity: index \`${idxName}\` on \`${name}\` in postgres-ddl.ts but missing from sqlite-ddl.ts`,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Parse a `*-ddl.ts` source into `{ tableName → DdlTable }`.
+ *
+ * Extracts every `CREATE TABLE <name> ( … );` body and every
+ * `CREATE INDEX <idx> ON <table>(<cols>);` declaration, then walks the
+ * body to split constraint rows (UNIQUE / FOREIGN KEY / PRIMARY KEY) from
+ * column rows. Types are deliberately not captured — dialect-type
+ * divergence is the point of having two files, and types would make this
+ * check noisy for every schema touch.
+ */
+function parseDdl(src: string): Map<string, DdlTable> {
+  const out = new Map<string, DdlTable>();
+
+  const tableRe = /CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]*?)\)\s*;/g;
+  let tMatch: RegExpExecArray | null = tableRe.exec(src);
+  while (tMatch !== null) {
+    const name = tMatch[1];
+    const body = tMatch[2];
+    if (name === undefined || body === undefined) {
+      tMatch = tableRe.exec(src);
+      continue;
+    }
+    const { columns, constraints } = parseTableBody(body);
+    out.set(name, { name, columns, constraints, indexes: new Map() });
+    tMatch = tableRe.exec(src);
+  }
+
+  const indexRe = /CREATE\s+INDEX\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)\s*;/g;
+  let iMatch: RegExpExecArray | null = indexRe.exec(src);
+  while (iMatch !== null) {
+    const idxName = iMatch[1];
+    const tableName = iMatch[2];
+    const cols = iMatch[3];
+    if (idxName === undefined || tableName === undefined || cols === undefined) {
+      iMatch = indexRe.exec(src);
+      continue;
+    }
+    const table = out.get(tableName);
+    if (table) {
+      table.indexes.set(idxName, cols.replace(/\s+/g, " ").trim());
+    }
+    iMatch = indexRe.exec(src);
+  }
+
+  return out;
+}
+
+function parseTableBody(body: string): {
+  columns: Map<string, { notNull: boolean }>;
+  constraints: string[];
+} {
+  const columns = new Map<string, { notNull: boolean }>();
+  const constraints: string[] = [];
+
+  const lines = splitDdlLines(body);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.length === 0) continue;
+    if (/^(UNIQUE|FOREIGN\s+KEY|PRIMARY\s+KEY|CHECK)\b/i.test(line)) {
+      constraints.push(normaliseConstraint(line));
+      continue;
+    }
+    const colMatch = /^(\w+)\s+/.exec(line);
+    if (colMatch?.[1]) {
+      const colName = colMatch[1];
+      const notNull = /\bNOT\s+NULL\b/i.test(line) || /\bPRIMARY\s+KEY\b/i.test(line);
+      columns.set(colName, { notNull });
+    }
+  }
+
+  return { columns, constraints };
+}
+
+/**
+ * Split a CREATE TABLE body on top-level commas. A naive `.split(",")`
+ * would chop inside `FOREIGN KEY (a, b) REFERENCES t(a, b)` lists.
+ */
+function splitDdlLines(body: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let buf = "";
+  for (const ch of body) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(buf);
+      buf = "";
+    } else {
+      buf += ch;
+    }
+  }
+  if (buf.trim().length > 0) out.push(buf);
+  return out;
+}
+
+/**
+ * Collapse whitespace + uppercase keywords so semantically equal
+ * constraints that differ only in formatting compare equal.
+ */
+function normaliseConstraint(line: string): string {
+  return line
+    .replace(/\s+/g, " ")
+    .replace(/\bprimary\s+key\b/gi, "PRIMARY KEY")
+    .replace(/\bforeign\s+key\b/gi, "FOREIGN KEY")
+    .replace(/\bunique\b/gi, "UNIQUE")
+    .replace(/\breferences\b/gi, "REFERENCES")
+    .replace(/\bon\s+delete\s+cascade\b/gi, "ON DELETE CASCADE")
+    .trim();
+}
+
 // ── Entrypoint ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -641,6 +915,7 @@ async function main(): Promise<void> {
     checkMetadataOnlyCapabilities(report),
     checkNoRawKyselyOutsideDb(report),
     checkAppendixACoherence(report),
+    checkDdlParity(report),
   ]);
   report.print();
   if (report.errorCount > 0) {
