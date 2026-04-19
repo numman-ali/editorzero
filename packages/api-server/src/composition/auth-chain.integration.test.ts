@@ -31,8 +31,9 @@
  */
 
 import { createAuth, createBetterAuthResolver, runAuthMigrations } from "@editorzero/auth";
-import { createRegistry } from "@editorzero/capabilities";
+import { createRegistry, docList, registerCapability } from "@editorzero/capabilities";
 import { createSqliteDriver, SQLITE_FULL_DDL, type SqliteDriver } from "@editorzero/db";
+import { DocId, UserId } from "@editorzero/ids";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createApiApp } from "../app";
@@ -60,7 +61,7 @@ function sessionCookieFrom(response: Response): string {
     .join("; ");
 }
 
-async function buildStack() {
+async function buildStack(options: { registerDocList?: boolean } = {}) {
   const auth = createAuth({
     driver,
     baseURL: "http://localhost:3000",
@@ -68,11 +69,12 @@ async function buildStack() {
     trustedOrigins: ["http://localhost:3000"],
   });
   await runAuthMigrations(auth);
-  // Empty registry — the probe route in these tests does not call
-  // `dispatcher.dispatch`, it only asserts the middleware materialised
-  // a dispatcher onto `c.var`. The dispatcher's own dispatch-path
-  // integration is covered in `createApiDispatcher.integration.test.ts`.
-  const registry = createRegistry([]);
+  // Registry is empty by default (the probe route exercises middleware-
+  // only scenarios). The `/docs/list` end-to-end test registers
+  // `docList` so its dispatcher routes the request to the real
+  // capability handler.
+  const capabilities = options.registerDocList ? [registerCapability(docList)] : [];
+  const registry = createRegistry(capabilities);
   const dispatcher = createApiDispatcher({ driver, registry });
   const trunk = createApiApp({ auth, dispatcher });
   return { auth, dispatcher, trunk };
@@ -193,5 +195,139 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("unauthenticated");
+  });
+
+  it("GET /docs/list round-trips through the full stack (auth → principal mw → dispatcher → doc.list capability)", async () => {
+    const { trunk } = await buildStack({ registerDocList: true });
+    await signUp(trunk, "dana@example.com");
+    const signInRes = await signIn(trunk, "dana@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    // Resolve the principal once to discover the minted workspace_id
+    // so we can seed a docs row inside that tenant.
+    const principal = await createBetterAuthResolver(
+      createAuth({
+        driver,
+        baseURL: "http://localhost:3000",
+        secret: "test-secret-do-not-use-in-production-at-all",
+        trustedOrigins: ["http://localhost:3000"],
+      }),
+    )(new Headers({ cookie }));
+    if (principal === null) throw new Error("unexpected null principal after sign-in");
+    const workspace_id = principal.workspace_id;
+
+    // Seed a docs row directly via the driver — content-mutation
+    // capabilities (doc.create) aren't wired yet (the sync-service
+    // slice is deferred), so we plant a row by hand to prove the
+    // read-path round-trip. Once doc.create lands, this test swaps
+    // the direct insert for a real POST /docs/create.
+    await driver.withSystemTx(async (tx) => {
+      await tx
+        .insertInto("docs")
+        .values({
+          id: DocId("018f0000-0000-7000-8000-0000000000d1"),
+          workspace_id,
+          collection_id: null,
+          title: "My first doc",
+          slug: "my-first-doc",
+          order_key: "a",
+          visibility: "workspace",
+          visibility_version: 0,
+          created_by: UserId(principal.id),
+          created_at: 1_700_000_000_000,
+          updated_at: 1_700_000_000_000,
+          deleted_at: null,
+        })
+        .execute();
+    });
+
+    const res = await trunk.request("/docs/list", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      docs: ReadonlyArray<{ id: string; title: string; visibility: string }>;
+    };
+    expect(body.docs).toHaveLength(1);
+    expect(body.docs[0]?.title).toBe("My first doc");
+    expect(body.docs[0]?.visibility).toBe("workspace");
+  });
+
+  it("GET /docs/list 401s when no session cookie is present", async () => {
+    const { trunk } = await buildStack({ registerDocList: true });
+    const res = await trunk.request("/docs/list");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /docs/list of a different workspace returns an empty list (tenant isolation)", async () => {
+    // Two tenants, one doc per tenant. Dana hits /docs/list; she
+    // should see ONLY her own workspace's doc, not Eve's. This
+    // proves the `WorkspaceScopingPlugin` + principal-workspace_id
+    // chain correctly isolates reads (invariant 5 + ADR 0023 §3.2).
+    const { trunk } = await buildStack({ registerDocList: true });
+    await signUp(trunk, "dana@example.com");
+    await signUp(trunk, "eve@example.com");
+    const danaSignIn = await signIn(trunk, "dana@example.com");
+    const danaCookie = sessionCookieFrom(danaSignIn);
+    const eveSignIn = await signIn(trunk, "eve@example.com");
+    const eveCookie = sessionCookieFrom(eveSignIn);
+
+    const resolver = createBetterAuthResolver(
+      createAuth({
+        driver,
+        baseURL: "http://localhost:3000",
+        secret: "test-secret-do-not-use-in-production-at-all",
+        trustedOrigins: ["http://localhost:3000"],
+      }),
+    );
+    const danaPrincipal = await resolver(new Headers({ cookie: danaCookie }));
+    const evePrincipal = await resolver(new Headers({ cookie: eveCookie }));
+    if (danaPrincipal === null || evePrincipal === null) {
+      throw new Error("unexpected null principal");
+    }
+    expect(danaPrincipal.workspace_id).not.toBe(evePrincipal.workspace_id);
+
+    // Seed docs in each workspace.
+    await driver.withSystemTx(async (tx) => {
+      await tx
+        .insertInto("docs")
+        .values([
+          {
+            id: DocId("018f0000-0000-7000-8000-0000000000d1"),
+            workspace_id: danaPrincipal.workspace_id,
+            collection_id: null,
+            title: "Dana's doc",
+            slug: "dana-doc",
+            order_key: "a",
+            visibility: "workspace",
+            visibility_version: 0,
+            created_by: UserId(danaPrincipal.id),
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: null,
+          },
+          {
+            id: DocId("018f0000-0000-7000-8000-0000000000d2"),
+            workspace_id: evePrincipal.workspace_id,
+            collection_id: null,
+            title: "Eve's doc",
+            slug: "eve-doc",
+            order_key: "a",
+            visibility: "workspace",
+            visibility_version: 0,
+            created_by: UserId(evePrincipal.id),
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: null,
+          },
+        ])
+        .execute();
+    });
+
+    const danaRes = await trunk.request("/docs/list", { headers: { cookie: danaCookie } });
+    expect(danaRes.status).toBe(200);
+    const danaBody = (await danaRes.json()) as {
+      docs: ReadonlyArray<{ title: string }>;
+    };
+    expect(danaBody.docs).toHaveLength(1);
+    expect(danaBody.docs[0]?.title).toBe("Dana's doc");
   });
 });

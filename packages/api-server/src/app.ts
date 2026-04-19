@@ -8,11 +8,11 @@
  * the returned app. `app` is a zero-arg default instance used by the
  * trunk-composition smoke, the api-client smoke, and any consumer
  * that needs an `AppType` binding without a running auth stack.
- * Because Better Auth's handler is mounted via `app.on(["POST",
- * "GET"], "/auth/*", ...)` — a Hono base method that does not add
- * to `OpenAPIHono`'s Schema — `AppType` (typed from the default
- * `app`) is stable across both shapes. `hc<AppType>` bindings do not
- * need to know whether auth is wired.
+ * `AppType` (typed from the default `app`) is stable across both
+ * shapes because the routes registered via `openapiRoutes([...] as
+ * const)` are the same in both — only the middleware attached to
+ * `/docs/*` differs. `hc<AppType>` bindings do not need to know
+ * whether auth is wired.
  *
  * **Composition primitive.** Routes live one-per-folder under
  * `src/routes/<domain>/<capability>/index.ts` as `defineOpenAPIRoute(
@@ -59,12 +59,19 @@
  * endpoints are documented separately via `auth.api.getOpenAPISchema(
  * )` if needed.
  *
- * **Dispatcher + principal middleware slot.** The factory accepts an
- * optional `dispatcher` that (today) is unused — it lands on
- * capability routes via per-route `route.middleware` arrays when the
- * first capability route ships. Accepting it now keeps the factory
- * signature stable across slices so the content-mutation slice does
- * not churn the composition-root signature.
+ * **Capability-route middleware.** `/docs/*` (and every future
+ * capability-domain prefix) is mounted behind `createPrincipalMiddleware`
+ * + `createDispatcherMiddleware`. Principal runs first, short-circuits
+ * 401 on missing/invalid session; dispatcher runs second, attaches the
+ * process-scoped `Dispatcher` to `c.var` for capability handlers to
+ * invoke. Public routes (`/infra/*`, `/auth/*`) do not mount this
+ * chain — those paths live outside the capability domain.
+ *
+ * **Middleware order is load-bearing.** Principal must run before
+ * dispatcher (dispatcher's work is capability-invocation, which needs
+ * a principal) and both must run before the route handler reads
+ * `c.var.principal` / `c.var.dispatcher`. Hono preserves `app.use(...)`
+ * registration order within a path prefix.
  *
  * **Future state.** Domain tuples become codegen-emitted from the
  * capability registry; the trunk spread pattern is unchanged. This is
@@ -74,37 +81,60 @@
  */
 
 import type { Auth } from "@editorzero/auth";
+import { createBetterAuthResolver } from "@editorzero/auth";
 import type { Dispatcher } from "@editorzero/dispatcher";
 import { OpenAPIHono } from "@hono/zod-openapi";
 
 import type { ApiEnv } from "./env";
+import { createDispatcherMiddleware } from "./middleware/dispatcher";
+import { createPrincipalMiddleware } from "./middleware/principal";
+import { docsRoutes } from "./routes/docs";
 import { infraRoutes } from "./routes/infra";
 
 export interface CreateApiAppOptions {
   /**
    * Better Auth instance. When provided, `auth.handler` is mounted
    * on `/auth/*` (POST + GET) so Better Auth's sign-up / sign-in /
-   * session endpoints compose under the trunk. Omit for tests or
-   * smoke-level composition checks that don't need the auth stack.
+   * session endpoints compose under the trunk, and
+   * `createBetterAuthResolver(auth)` powers the `/docs/*` principal
+   * middleware. Omit for tests or smoke-level composition checks
+   * that don't need the auth stack — capability routes still mount
+   * but `/docs/*` 401s on every request (no resolver → no principal).
    */
   readonly auth?: Auth;
   /**
-   * Dispatcher composition-root instance. Reserved for the capability-
-   * route slice — per-route middleware reads `c.var.dispatcher` to
-   * invoke capabilities. Not referenced here yet; accepting it now
-   * keeps the factory signature stable across the upcoming content-
-   * mutation slice.
+   * Dispatcher composition-root instance. Required in production for
+   * `/docs/*` routes to actually execute capabilities; without it,
+   * the dispatcher middleware is omitted and a capability route that
+   * reached its handler would crash reading `c.var.dispatcher`. In
+   * practice the principal middleware 401s first when auth is also
+   * absent, so the default zero-arg `app` stays safe for the health-
+   * probe tests it's used in.
    */
   readonly dispatcher?: Dispatcher;
 }
 
 export function createApiApp(options: CreateApiAppOptions = {}) {
-  const { auth } = options;
+  const { auth, dispatcher } = options;
   const trunk = new OpenAPIHono<ApiEnv>();
+
   if (auth !== undefined) {
     trunk.on(["POST", "GET"], "/auth/*", (c) => auth.handler(c.req.raw));
+    // Principal middleware for every capability-domain prefix. Today
+    // just `/docs/*`; future prefixes (`/blocks/*`, `/workspaces/*`)
+    // repeat this line.
+    trunk.use(
+      "/docs/*",
+      createPrincipalMiddleware({
+        resolve: (c) => createBetterAuthResolver(auth)(c.req.raw.headers),
+      }),
+    );
   }
-  return trunk.openapiRoutes([...infraRoutes] as const);
+  if (dispatcher !== undefined) {
+    trunk.use("/docs/*", createDispatcherMiddleware({ dispatcher }));
+  }
+
+  return trunk.openapiRoutes([...infraRoutes, ...docsRoutes] as const);
 }
 
 /**
@@ -113,6 +143,12 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
  * can bind `hc<AppType>` without spinning up a full auth stack.
  * Production composition roots construct their own via
  * `createApiApp({ auth, dispatcher })`.
+ *
+ * **Capability routes mounted on this default app will 401** because
+ * the principal middleware isn't wired (no `auth` passed). The RPC
+ * surface is still typed (`hc<AppType>.docs.list.$get`); tests that
+ * need to exercise the handler use `createApiApp({ auth, dispatcher })`
+ * directly.
  */
 export const app = createApiApp();
 
