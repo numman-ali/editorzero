@@ -137,3 +137,86 @@ A codegen step emits `packages/sdk/` from the capability registry with two drive
 - Bun `--compile`: https://bun.com/docs/bundler/executables
 - NO_COLOR: https://no-color.org/
 - XDG base directories: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+
+## Amendment — 2026-04-19: api-server composition primitive and folder layout
+
+Scaffolding `packages/api-server` surfaced specifics the original decision deferred. Codified here so future slices (capability routes, registry-driven codegen, parity matrix) plug into a settled shape rather than rediscovering it.
+
+### Composition primitive: `openapiRoutes([...] as const)`
+
+`@hono/zod-openapi@1.3.0` introduced `defineOpenAPIRoute({ route, handler, hook?, addRoute? })` + `OpenAPIHono.openapiRoutes(<const Inputs extends readonly {...}[]>)`. This is the trunk composition primitive — **not** `.route(prefix, subApp)` chaining and **not** `createFactory().createApp()`.
+
+- Routes are values: each route folder exports one `defineOpenAPIRoute(...)` product. No imperative `.route()` calls.
+- The trunk composes them in a single call: `new OpenAPIHono<ApiEnv>().openapiRoutes([...infraRoutes, ...docsRoutes, ...] as const)`. The tuple **must** be literal at the call site; `SchemaFromRoutes<Inputs, BasePath>` recurses `[infer Head, ...infer Tail]` and only fires against tuple-typed input. Any intermediate `const routes = [...]` without a trailing `as const` widens to `Array<...>` and collapses the merge — `hc<AppType>` silently degrades to `unknown`.
+- `createFactory<Env>()` is narrowed to "middleware helper manufacture," not route containers. Route containers are `defineOpenAPIRoute` products, period.
+- `addRoute: true` is set on every `defineOpenAPIRoute` under `exactOptionalPropertyTypes: true`. The default behaviour is "register" but an inferred `addRoute?: undefined` is not assignable to `openapiRoutes`'s expected `addRoute?: boolean` without the explicit value.
+
+Verified against `node_modules/.pnpm/@hono+zod-openapi@1.3.0_hono@4.12.14_zod@4.3.6/node_modules/@hono/zod-openapi/dist/index.d.ts` — `defineOpenAPIRoute` (line 180), `openapiRoutes` (line 242), `SchemaFromRoutes` tuple recursion (line 167). Codex traced the type flow; confirmed this pattern is exactly what the published 1.3.0 "Modular Organization" example documents.
+
+**Why not `hono-openapi`** (evaluated as a pivot). Research + Codex both returned the same answer: bus-factor-1 maintainer; open issue #216 blocks `.route()` composition + spec generation; response types are not coupled to Hono RPC by default (callers must wire up an extra layer); README self-describes as "still in development" at its current release. `@hono/zod-openapi@1.3.0` had the opposite trajectory (new composition primitive shipped explicitly for registry-driven generation). Stay on `@hono/zod-openapi`; revisit if #216 resolves + the response-type coupling story lands.
+
+**Why not the `.route(prefix, subApp)` chain variant** (the shape `d0d99cf` originally scaffolded). Works for a handful of routes; at the 30+ capabilities implied by ADR 0021 the "must be one chained expression, no `let` rebinding" constraint makes registry-driven codegen awkward and `.reduce(...)` over the registry erases types. `openapiRoutes([...] as const)` is the primitive the 1.3.0 type system was designed around.
+
+### Folder-per-route layout; path mirrors folder path
+
+```
+packages/api-server/src/
+├── app.ts                                ← trunk; openapiRoutes spread of domain tuples
+├── app.unit.test.ts                      ← trunk-composition smoke only
+├── env.ts                                ← shared ApiEnv interface
+├── index.ts                              ← barrel
+└── routes/
+    ├── infra/
+    │   ├── health/
+    │   │   ├── index.ts                  ← exports `health` = defineOpenAPIRoute(...)
+    │   │   └── index.unit.test.ts        ← per-route test (minimal-app pattern)
+    │   └── index.ts                      ← exports `infraRoutes = [health] as const`
+    └── docs/                             ← future capability slices
+        ├── create/
+        │   ├── index.ts
+        │   └── index.unit.test.ts
+        ├── get/
+        │   ├── index.ts
+        │   └── index.unit.test.ts
+        └── index.ts                      ← exports `docsRoutes = [...] as const`
+```
+
+- **Each route is a folder**, not a file. When a route grows beyond a single file (schema + handler + middleware wiring + types), decomposition happens in-place without a filesystem refactor.
+- **Folder path == URL path.** `routes/infra/health/` exposes `/infra/health`; `routes/docs/create/` exposes `/docs/create`. The `createRoute({ path: "..." })` value mirrors the folder path. This makes the filesystem a self-documenting routing table — an agent finding the handler for a URL navigates the folder tree. No registry lookup needed.
+- **Path segments must be identifier-friendly.** `hc<AppType>` surfaces path segments as dot-access properties — `client.infra.health.$get()`, `client.docs.create.$post()`. No hyphens; deliberate singular/plural casing; no punctuation that breaks JS identifiers. Non-capability endpoints live under `infra/` so they're visibly not capability endpoints.
+- **Domain index exports one `as const` tuple.** `routes/<domain>/index.ts` imports every sibling route folder's `index.ts` and exports `export const <domain>Routes = [...] as const`. Adding a route is a domain-local change; the trunk only knows about the domain tuple.
+- **Trunk spread is inline at the `openapiRoutes` call site.** `new OpenAPIHono<ApiEnv>().openapiRoutes([...infraRoutes, ...docsRoutes] as const)`. The `as const` on the spread literal preserves tuple element types across the spread; Codex verified this is the intended 1.3.0 pattern, not a loophole.
+
+### Per-route test posture: minimal-app isolation
+
+Each `routes/<domain>/<capability>/index.unit.test.ts` mounts **only its own route** on a fresh `OpenAPIHono<ApiEnv>` via `openapiRoutes([thatRoute] as const)` and exercises it through `testClient`. Not the full trunk.
+
+| Alternative | Why rejected |
+|---|---|
+| Call handler directly with a mocked `Context` | Skips zod validators + route-level middleware; low value |
+| `testClient(trunk)` in every route test | Couples every route test to trunk state; a trunk regression cascades into every route test; slow at scale |
+| **Minimal-app** (`openapiRoutes([thisRoute] as const)`) | Isolation seam; fast; shape stays identical at 1 route or 100; exercises the route's full input-validation + handler path |
+
+**Trunk smoke** (`src/app.unit.test.ts`) owns composition-layer invariants only: typed-RPC surface survives the multi-route merge, `hc<AppType>` bound to `app.request` dispatches server-side, and **mounted path matches the generated OpenAPI doc path** (cheapest guard against silent divergence if a future prefix-mount or `basePath` introduction forgets to update `createRoute({ path })`).
+
+**Real integration tests** (cross-capability, dispatcher + DB + auth chain end-to-end) live under `test/integration/` once the dispatcher composition-root slice lands.
+
+### `packages/api-client`: two typed-RPC builders
+
+- `createServerClient({ app, forwardHeaders?, additionalHeaders? })` — binds `hc<AppType>` to `app.request` for in-process Server Actions / RSC callers. Default `forwardHeaders` allowlist is `["cookie", "authorization"]`; `additionalHeaders` extends it. **Capped allowlist, not a `...req.headers` dump** — tenanting + audit integrity depends on not accepting spoofed headers from upstream Next middleware.
+- `createHttpClient({ baseUrl, auth?, fetch? })` — binds `hc<AppType>` to real `fetch` for CLI / remote MCP / external consumers. `auth` is a sync or async resolver returning a headers object; called on every request so token rotation is a no-op for callers.
+
+Both are thin wrappers over `hc` — they exist to own the auth / header-forwarding / fetch-binding patterns in one place rather than re-implementing them per surface.
+
+### Additions to Revisit triggers
+
+- **`@hono/zod-openapi` regresses the `openapiRoutes` tuple-merge semantics** (e.g., a 2.x that re-introduces array widening or drops `const Inputs`) → hold on the current 1.3.0 line until stability returns, or fall back to the `.route()` chain variant with an explicit type-merge helper.
+- **`hono-openapi` bus factor improves + issue #216 resolves + response-type coupling lands by default** → reconsider for a capability-slice experiment (not a blanket migration).
+- **`@asteasolutions/zod-to-openapi` (`@hono/zod-openapi`'s internal Zod-to-OpenAPI converter) regresses under Zod 4** → pin a working commit or swap the converter; the route/handler authoring surface should not need to change.
+- **TypeScript changes `const` type-parameter inference semantics** (unlikely but load-bearing) → audit every `openapiRoutes([...] as const)` call site; the footgun-avoidance story is entirely built on this behaviour.
+
+### Sources added 2026-04-19
+
+- `@hono/zod-openapi` v1.3.0 "Modular Organization" pattern (verified against installed `dist/index.d.ts`): https://github.com/honojs/middleware/tree/main/packages/zod-openapi
+- Issue #216 on `hono-openapi` (composition + spec generation): https://github.com/rhinobase/hono-openapi/issues/216
+- TypeScript `const` type parameter: https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-0.html#const-type-parameters

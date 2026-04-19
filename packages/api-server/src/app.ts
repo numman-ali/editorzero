@@ -2,35 +2,51 @@
  * Hono trunk — every editorzero surface (HTTP, CLI, MCP, Web UI in-
  * process callers) consumes this `app` via `hc<AppType>` (ADR 0021).
  *
- * **Load-bearing composition rule.** Routes are defined per-file in
- * `./routes/*.ts` as standalone `OpenAPIHono` sub-apps, then mounted
- * here via a *single chained expression* — `new OpenAPIHono().route(...)
- * .route(...)`. TypeScript's RPC type inference only flows when the
- * chain is captured in one `const` (see `hc` / `testClient` docs).
- * Rebinding `app = app.route(...)` across statements collapses the
- * types to the base `OpenAPIHono`, breaking `hc<AppType>` consumers.
- * The test in `app.unit.test.ts` guards this empirically — if the
- * chain pattern regresses, the typed client call fails to compile.
+ * **Composition primitive.** Routes live one-per-folder under
+ * `src/routes/<domain>/<capability>/index.ts` as `defineOpenAPIRoute(
+ * { route, handler })` exports. Each domain aggregates its routes into
+ * a readonly tuple in `src/routes/<domain>/index.ts`. The trunk
+ * spreads every domain tuple into a single literal at the
+ * `openapiRoutes(...)` call site. This is the
+ * `@hono/zod-openapi@1.3.0` "Modular Organization" pattern.
  *
- * **Why `OpenAPIHono` instead of `createFactory<Env>().createApp()`.**
- * `@hono/zod-openapi` preserves OpenAPI route metadata only when
- * mounted onto an `OpenAPIHono` instance; plain Hono sub-apps are
- * OpenAPI-invisible. The factory helper from `hono/factory` is useful
- * for middleware/dependency bundles, but the trunk itself must be
- * `OpenAPIHono` so registry-generated routes carry their schemas
- * through to the OpenAPI spec + the typed-RPC shape.
+ * **Why the spread must be at the call site, not assigned to a
+ * variable first.** `openapiRoutes` types the tuple via a `const
+ * Inputs extends readonly {...}[]` generic; `SchemaFromRoutes` then
+ * recurses `[infer Head, ...infer Tail]`. The `const` modifier
+ * preserves literal tuple types on inference *from the argument
+ * expression*. Assigning the spread to `const routes = [...a, ...b]`
+ * without a trailing `as const` widens to `Array<...>`, and the
+ * subsequent `openapiRoutes(routes)` loses the per-element Schema
+ * merge — which means `hc<AppType>` RPC typing silently collapses to
+ * `unknown`. Keep the spread inline.
  *
- * **Future slices.** Middleware (Better Auth → `Principal`, tenant
- * scope into `AsyncLocalStorage`, rate limit, OTel span, capability
- * dispatcher) mounts on *this* app before the route composition. The
- * first real capability (`doc.create`) lands in a subsequent commit
- * once the dispatcher composition root wires a non-test runtime.
+ * **Path == folder path.** `routes/infra/health/` exposes
+ * `/infra/health`. Every route's path mirrors its folder path so the
+ * filesystem is self-documenting: finding the handler for a URL is a
+ * matter of reading the path off the URL and navigating the tree.
+ * Non-capability endpoints (health, readiness, version) live under
+ * `infra/` precisely so they're visibly not capability endpoints.
+ *
+ * **Env discipline.** One `ApiEnv` lives on the trunk; route modules
+ * type against it (or a subset assignable to it). `OpenAPIHono.route(
+ * )` does not merge sub-app `Env` into the parent return type, so
+ * per-module envs fragment the `c.var` surface at composition time.
+ * `hc<AppType>` extracts Schema, not `Env` — so the `Env` contract is
+ * purely server-internal.
+ *
+ * **Future state.** Domain tuples become codegen-emitted from the
+ * capability registry; the trunk spread pattern is unchanged. This is
+ * why the "Modular Organization" tuple-spread pattern was chosen over
+ * `.route(prefix, subApp)` chaining or `createFactory()`-based sub-
+ * apps. See ADR 0021 for the full rationale.
  */
 
 import { OpenAPIHono } from "@hono/zod-openapi";
 
-import { healthApp } from "./routes/health";
+import type { ApiEnv } from "./env";
+import { infraRoutes } from "./routes/infra";
 
-export const app = new OpenAPIHono().route("/", healthApp);
+export const app = new OpenAPIHono<ApiEnv>().openapiRoutes([...infraRoutes] as const);
 
 export type AppType = typeof app;
