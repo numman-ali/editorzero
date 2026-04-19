@@ -1,21 +1,23 @@
-# ADR 0018 — Unified write path: all mutations flow through the CRDT via Hocuspocus direct connection + BlockNote editor
+# ADR 0018 — Unified write path for content mutations: through the CRDT via Hocuspocus direct connection + BlockNote editor
 
-**Status:** Accepted (post-refresh, API prose corrected 2026-04-17 after BlockNote research pass; updated 2026-04-17 to reflect pass-3 disposition; per-op preconditions added 2026-04-18 per [ADR 0022](0022-agent-editing-constraints.md))
+**Status:** Accepted (post-refresh, API prose corrected 2026-04-17 after BlockNote research pass; updated 2026-04-17 to reflect pass-3 disposition; per-op preconditions added 2026-04-18 per [ADR 0022](0022-agent-editing-constraints.md); **empirical verification for content mutations landed 2026-04-19, P3.6 closed for that scope**)
 **Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
+> **Scope clarified 2026-04-19 (P3.6f).** "Content mutation" = any `category = "mutation"` capability that is *not* in `METADATA_ONLY_CAPABILITIES` (architecture.md §6.5; canonical list in `packages/scopes`). The CRDT-via-Hocuspocus pipeline below is the contract for **content mutations**. Metadata-only mutations — `block.set_visibility`, `doc.publish`, `doc.unpublish`, `doc.move`, `collection.*` — never call `ctx.transact`, never open a Hocuspocus direct connection, never write `doc_updates`; their **landed tuple today** is the capability's own relational metadata write(s) (e.g. `block.set_visibility` updates `blocks.visibility` + `docs.visibility_version`) **plus** `audit_events(allow)` **plus** `outbox(audit.appended)` inside the dispatcher's `withSystemTx`. The fuller tuple that also includes capability-specific handler-emitted `ctx.outbox(...)` rows (e.g. `doc.publish` enqueues `projection_blocks` per architecture.md §13.1 / §16.4) is still **planned**: production dispatcher wiring currently stubs `ctx.outbox(...)` as a no-op, so those rows are neither co-committed nor empirically verified yet. The planned `metadata-only-set.integration.ts` (architecture.md §17.1 row 7b — Phase 4) will assert the all-or-none commit of that fuller tuple after the wiring lands. The "Decision" and "Empirical verification" sections below apply to the content-mutation pipeline only.
+>
 > **Updated 2026-04-17 to reflect pass-3 disposition (F76).** Write-path ownership sharpened to match architecture.md §6.1–6.3 exactly: the **dispatcher** owns the single write-path DB tx; **Hocuspocus** provides the per-doc serializer and the DB-tx hook (not audit ownership). The tx commits `doc_updates + outbox(doc.updated) + audit_events + outbox(audit.appended)` together (F31). `onChange` is no longer described as independently writing audit; audit is a dispatcher responsibility inside the same tx.
 >
 > **[ADR 0022](0022-agent-editing-constraints.md), 2026-04-18:** adds an optional per-op `expect_prior_content_hash` check that runs inside the `ctx.transact` closure before op application; `StalePreconditionError` fails closed on mismatch. Does not change the write-path shape; the check is a pre-condition inside the same transact.
 
 ## Context
-v1 decided every mutation from every surface goes through the CRDT via Hocuspocus. The April-2026 BlockNote research pass resolved the implementation primitive: Hocuspocus's `openDirectConnection(docId).transact(ydoc => …)` loads the live `Y.Doc`, and inside that callback `BlockNoteEditor.create({ collaboration: { fragment } })` binds a headless block editor to the doc's `Y.XmlFragment`. Typed block ops then produce ProseMirror transactions → Yjs updates through the same pipeline browser clients use.
+The v1 architecture decision is that every **content mutation** from every eventual surface adapter goes through the CRDT via Hocuspocus; metadata-only capabilities are the explicit carve-out in the scope note above. The April-2026 BlockNote research pass resolved the implementation primitive: Hocuspocus's `openDirectConnection(docId).transact(ydoc => …)` loads the live `Y.Doc`, and inside that callback `BlockNoteEditor.create({ collaboration: { fragment } })` binds a headless block editor to the doc's `Y.XmlFragment`. Typed block ops then produce ProseMirror transactions → Yjs updates through the same pipeline browser clients use.
 
 Note: `@blocknote/server-util`'s `ServerBlockNoteEditor` is a **conversion surface** (blocks ↔ HTML / Markdown / Y.Doc) — it does not expose `transact/insertBlocks/updateBlock/removeBlocks`. Those methods live on `BlockNoteEditor` (accessible via `ServerBlockNoteEditor.editor` or constructed directly). The write path uses `BlockNoteEditor` directly.
 
 ## Decision
 
-**Every mutation — API, CLI, MCP, Web UI — flows through the CRDT as a headless `BlockNoteEditor` bound to the live `Y.Doc` via Hocuspocus `openDirectConnection`.**
+**Design contract:** every content mutation — once API / CLI / MCP / Web UI surface adapters exist — flows through the CRDT as a headless `BlockNoteEditor` bound to the live `Y.Doc` via Hocuspocus `openDirectConnection`. (As of P3.6, the landed/runtime evidence is the shared dispatcher + sync primitive, not the surface adapters themselves. Metadata-only mutations are excluded from this decision — see the scope callout above.)
 
 ### The write path
 
@@ -43,6 +45,17 @@ Note: `@blocknote/server-util`'s `ServerBlockNoteEditor` is a **conversion surfa
      4. Dispatcher captures post-state from the editor and computes
         capability.audit.effectOnAllow(input, postState).
      ▼
+  TODAY (P3.6-landed broadcast timing):
+     • During the `direct.transact` callback, as the Yjs update `u`
+       emits, Hocuspocus broadcasts it to subscribers immediately —
+       before the dispatcher-owned SQL tx commits.
+     • On dispatcher-tx rollback, durable SQL state rolls back; the resident
+       Y.Doc is evicted via `BoundSyncService.rollback()` only when no other
+       connection holds the doc resident. With a live WebSocket peer, the
+       rolled-back delta persists in the resident Y.Doc and on that peer's
+       local replica until reload (`packages/sync/src/hocuspocus.ts:45-63`;
+       `packages/sync/src/hocuspocus.integration.test.ts:511-570`).
+     ▼
   Dispatcher-owned write-path DB tx (runs inside Hocuspocus's DB-tx hook;
   single commit boundary — F31):
      BEGIN DB tx:
@@ -53,7 +66,10 @@ Note: `@blocknote/server-util`'s `ServerBlockNoteEditor` is a **conversion surfa
        INSERT outbox("audit.appended", audit_id, …)
      COMMIT
      ▼
-  Hocuspocus broadcasts u to subscribers after the dispatcher tx commits.
+  PLANNED (Phase 4):
+     • Buffer the broadcast until SQL commit (broadcast-on-commit /
+       rollback-safe client buffering). Once that lands, live WS peers
+       observe the post-commit form instead of today's pre-commit broadcast.
   onStoreDocument (debounced, non-concurrent per doc):
      • consolidated snapshot written to doc_snapshots (ADR 0007 §compaction)
      • does NOT write audit; does NOT own the write-path tx
@@ -66,9 +82,9 @@ Note: `@blocknote/server-util`'s `ServerBlockNoteEditor` is a **conversion surfa
 
 - Hocuspocus `openDirectConnection(docId).transact(ydoc => …)` is the canonical server-side write into a live Y.Doc. MIT, part of `@hocuspocus/server`. It serializes against other direct writers and resident browser sessions, and routes through the same `onChange` pipeline — the invariant "one write path" holds because there **is** only one path.
 - `BlockNoteEditor.create({ collaboration: { fragment, user } })` inside that callback gives the capability handler a **headless block editor** against the live `Y.XmlFragment`. It exposes `insertBlocks(blocks, referenceBlock, placement)`, `updateBlock(blockOrId, update)`, `removeBlocks(blocks)`, `replaceBlocks(remove, insert)` — a 1:1 match to agent intent expressed via MCP `doc.update`.
-- `editor.transact(fn)` collapses multi-op work into one ProseMirror transaction → one Yjs update → one `onChange` event → one durable `doc_updates` row. The dispatcher commits `doc_updates + outbox(doc.updated) + audit_events + outbox(audit.appended)` in a single DB transaction inside Hocuspocus's DB-tx hook (F31 / architecture.md §6.1–6.3). Atomicity is a property of the composition, not of any single layer.
+- `editor.transact(fn)` collapses multi-op work into one ProseMirror transaction → one Yjs update → one `onChange` event → one durable `doc_updates` row. The dispatcher commits `doc_updates + outbox(doc.updated) + audit_events + outbox(audit.appended)` in a single DB transaction inside Hocuspocus's DB-tx hook (F31 / architecture.md §6.1–6.3). Atomicity is a property of the landed composition for the durable SQL tuple, not of any single layer; live-WS post-rollback cleanup still depends on the planned broadcast-on-commit path above.
 - Block IDs are native (ADR 0004). No directive-attribute ID bookkeeping.
-- `@blocknote/server-util`'s `ServerBlockNoteEditor` is used for **conversions** (blocks ↔ HTML/Markdown/Y.Doc for initial import, projections, agent readbacks) — not for writes. Its `blocksToYDoc` is explicitly "not a rehydration path" per BlockNote docs; the correct pattern is **always** "direct-connection to live Y.Doc → apply transaction → dispatcher writes audit → pipeline broadcasts." Documented in AGENTS.md so future contributors don't regress.
+- `@blocknote/server-util`'s `ServerBlockNoteEditor` is used for **conversions** (blocks ↔ HTML/Markdown/Y.Doc for initial import, projections, agent readbacks) — not for writes. Its `blocksToYDoc` is explicitly "not a rehydration path" per BlockNote docs; the correct pattern is **always** "direct-connection to live Y.Doc → apply transaction → dispatcher writes audit → pipeline broadcasts immediately today, and post-commit once Phase 4's buffered-broadcast path lands." Documented in AGENTS.md so future contributors don't regress.
 
 ### Mutation from Markdown input (agent authoring)
 
@@ -92,15 +108,40 @@ Reads project from the Y.Doc to stable representations: block array, rendered Ma
 Two humans, a human + an agent, two agents — any mix, any surface — editing the same doc converge via Yjs. No semantic-layer reconciliation is imposed; if the merged state is semantically broken, a follow-up edit fixes it. Property tests (ADR 0013) verify convergence on fuzzed concurrent edit sequences.
 
 ## Consequences
-- Four-surface parity for mutations **holds by construction**. Every surface produces Yjs updates against the same Y.Doc via the same editor primitive.
-- Conflict resolution is Yjs's problem — no custom merge logic.
-- Capability handlers are idempotent-by-construction: the return value is read from the post-apply Y.Doc, not inferred from the input. Safe under retry.
-- Performance: capability dispatcher is in the hot path. Hot docs' Y.Docs stay resident via Hocuspocus's in-memory map. Benchmark in Phase 3 at 20 concurrent editors × 500 ops/sec.
-- Complexity cost: capability handlers construct block ops / Markdown, not raw SQL. Accepted for the invariant.
 
-## Open verification (before ADR 0018 locks in Phase 3)
-- **Smoke integration test:** `BlockNoteEditor.create({ collaboration: { fragment } })` inside `openDirectConnection.transact()` under concurrent human + agent edits; assert no cursor-awareness leakage, no orphan writes, correct broadcast to browser sessions.
-- **Bulk-import baseline:** construct-editor-per-op vs construct-editor-once-per-transact overhead at 50k blocks; numbers inform whether bulk import needs an alternative batching strategy.
+For **content mutations** (the scope of this ADR — see callout above):
+
+- **Planned invariant — four-surface parity for content mutations.** Once the surface adapters land (`packages/api-server`, `packages/cli`, `packages/mcp-server`, plus the `apps/` web UI) and the contract-test matrix (`packages/contract-tests`) is wired, those adapters will all produce Yjs updates against the same Y.Doc via the same editor primitive (`BlockNoteEditor.create({ collaboration: { fragment } }).transact` inside `openDirectConnection.transact`), and parity will be enforced by the matrix per architecture invariant 4. **Today's evidence covers the shared dispatcher + sync primitive only** (see § Empirical verification below — synthetic fixture capabilities through `runInWriteTx` + `HocuspocusSync.bind`); no surface adapter, parity harness, or `apps/` tree exists yet, so this is design intent, not runtime status. Phase 4 work.
+- Conflict resolution is Yjs's problem — no custom merge logic.
+- Capability handler **outputs** are post-state-derived: the return value is read from the post-apply Y.Doc, not inferred from the input, so a successful retry observes the same response as the first call. **Mutation idempotency itself is capability-specific, not pipeline-guaranteed.** Imperative editor ops (`insertBlocks` / `removeBlocks` / `replaceBlocks`) re-apply on retry unless the caller supplies a precondition or idempotency key. ADR 0022 introduces `expect_prior_content_hash` for `update`/`move`/`remove`/`set_visibility` ops as the precondition primitive — it is *required* on every agent-issued op and *omitted* by the human BlockNote UI (which has the live CRDT). Before treating any mutation as safe to retry, callers must use that precondition or a capability-declared idempotency contract; at-least-once delivery (architecture.md §6.3) leans on this and inherits the same caveat.
+- Performance: capability dispatcher is in the hot path. Hot docs' Y.Docs stay resident via Hocuspocus's in-memory map. Benchmark in Phase 3 at 20 concurrent editors × 500 ops/sec.
+- Complexity cost: content-mutation capability handlers construct block ops / Markdown, not raw SQL. Accepted for the invariant.
+
+For **metadata-only mutations** (excluded from this ADR's pipeline — see scope callout):
+
+- **Planned invariant — four-surface parity for metadata-only mutations** is intended to ride the dispatcher's per-surface adapter generation, not the CRDT pipeline; the metadata-only set never produces Yjs updates. As with the content-mutation bullet above, this is contingent on the adapter packages and contract-test matrix landing; today's evidence covers the dispatcher tx primitive only (and even there, the capability-specific `ctx.outbox(...)` portion is unwired — see next bullet).
+- Atomicity rests on the dispatcher's `withSystemTx` alone, but only part of the metadata-only tuple is landed today: the capability's relational metadata write(s) plus `audit_events(allow)` plus `outbox(audit.appended)` commit together; there is no `doc_updates` pair to coordinate with. **Implementation debt + verification debt:** `ctx.outbox(...)` is plumbed at the type level but the dispatcher's production wiring stubs it as a no-op, so capability-specific handler-emitted `outbox(...)` rows are not just unverified, they are unwired (see `packages/dispatcher/src/writepath.integration.test.ts:459` annotating "handler-emitted outbox rows land in a later slice"). The planned `metadata-only-set.integration.ts` (architecture.md §17.1 row 7b — Phase 4) will assert the all-or-none commit of the fuller capability-specific tuple *after* the wiring lands. Until both, that fuller tuple is design intent only.
+- Conflict semantics do not apply (no CRDT update, no concurrent-write surface).
+
+## Empirical verification (Phase 3.6, closed 2026-04-19)
+
+ADR 0018's atomicity claim — that the five-row commit (handler `docs` write + `doc_updates` + `outbox(doc.updated)` + `audit_events` + `outbox(audit.appended)`) is all-or-none — was prose through P3.6c/d. Phase 3.6 made it executable end-to-end:
+
+- **`packages/dispatcher/prop/writepath-atomicity.test.ts` (P3.6e commit 2, `a9ca821`)** — load-bearing artifact for the atomicity claim. A Kysely plugin's `transformQuery` arms a fault at ordinal N; the dispatcher's `runInWriteTx` runs a content-mutation capability; the suite asserts every one of the five rows is absent (reject arm) or all present (no-op arm beyond the last in-tx query). Two suites cover both production code paths: **cold** (9 in-tx queries — first write exercises `onLoadDocument` hydration + `doc_counters` bootstrap) and **warm** (8 queries — resident Y.Doc, no hydration SELECT). 32 tests. Five blind spots that a weaker guard would have left open are closed together: exact `callsIssued` count, per-table INSERT tag stream (`audit_events` / `doc_updates` / `doc_counters` / event-discriminated `outbox`), `doc_counters.next_seq` snapshot, `FaultInjectedError`-with-matching-ordinal assertion, and `docResidentAfterTrial` (in-memory Y.Doc residency probe — without it, a late-ordinal fault that polluted the resident Y.Doc but rolled back SQL would still pass). The test does **not** assert any per-seq audit↔update linkage (the schema does not carry that linkage and never did) — what it proves is the all-or-none commit of the five-row tuple under fault sweep. Closes Appendix C item 12.
+
+- **`packages/sync/src/hocuspocus.integration.test.ts` (P3.6c, `5583e42`; extended P3.6e commit 1, `2d199b2`)** — proves the **`HocuspocusSync` write-tx-participation contract in isolation** (no dispatcher, no WebSocket): real `@hocuspocus/server` instance, `bind(ctx).transact(doc, fn)` against the live Y.Doc, with the per-doc concurrency mutex (Promise-chain serializer prevents `update`-listener cross-contamination across same-doc transacts), post-`await` listener-lifetime (mutations after a Promise yield still get captured), gapless seq advancement, first-write `doc_counters` bootstrap, and the open-replace `DirectConnection` singleton bound at O(1) per doc. **Boundary not exercised here:** the `fn` body is raw Y.Doc manipulation, not `BlockNoteEditor.create({ collaboration: { fragment } })` — Appendix C item 11's adapter-boundary smoke remains open (see "Out of scope" below). The WS-client rollback case is pinned here as an explicit scope limit (`rollback leaves the doc resident when a concurrent connection holds it`).
+
+- **`packages/dispatcher/src/writepath.integration.test.ts` (P3.6b/c/d cumulative; P3.6e commit 1 added the rollback-rehydration case)** — exercises the same five-row commit with **dispatcher-side fixture capabilities** (`doc.insert_fixture`, `doc.count_fixture`, `doc.mutate_fixture` — defined inline in the test) under the four failure modes the property test deliberately abstracts over (allow / handler-throw / output-shape-violation / post-parse-deny), plus the **rollback-drops-in-memory-Y.Doc-drift** case (`rollback drops in-memory Y.Doc drift: post-rollback read returns pre-transact state`, lines 880–987): commit A → mutate-then-throw B → no-op-read C; C must see A's content, not B's aborted state. This is where `BoundSyncService.rollback()` + `onLoadDocument` re-hydration from `doc_updates` are proven end-to-end through the dispatcher — the `HocuspocusSync` integration suite proves the primitive's contract, but the rollback round-trip needs the dispatcher's `runInWriteTx` catch path to drive it. **Coverage shape:** the fixture capabilities exercise the dispatcher + sync + writers composition that any content-mutation handler would ride; **no real content-mutation capability is exercised through the production dispatcher + Hocuspocus path in any P3.6 test.** `packages/capabilities/src/doc/create.unit.test.ts` invokes `docCreate.handler` directly with `MemorySyncService`, which proves handler-local seed-block behaviour but not the production write path. End-to-end real-capability coverage through dispatcher + Hocuspocus is open work — likely Phase 4 alongside the API/CLI/MCP surface adapters.
+
+The atomicity primitive (`runInWriteTx` composed with `createSqliteDocUpdatesWriter`, `createSqliteAuditWriter`, `HocuspocusSync.bind`) is capability-shape-agnostic **within the content-mutation set** — every capability that calls `ctx.transact` rides the same wrapper. The composition itself is integration-tested at the dispatcher layer with **synthetic fixture capabilities** (`doc.insert_fixture` / `doc.count_fixture` / `doc.mutate_fixture`) rather than re-fuzzed at the property layer. **Real-capability dispatcher coverage — i.e., a registered production capability such as `doc.create` riding the production dispatcher + `HocuspocusSync` + SQLite path through one test — remains open work for Phase 4** (alongside the surface adapters); Phase 3.6 deliberately validated the shared write-path composition without requiring every capability to land first. Metadata-only capabilities do not compose with `HocuspocusSync.bind` and are covered separately (see "Out of scope" below).
+
+### Out of scope for Phase 3.6 (deferred)
+
+- **`BlockNoteEditor.create({ collaboration })` adapter-boundary smoke** (Appendix C item 11). The lower-level Y.Doc / Hocuspocus seam is verified, but no Phase-3.6 test instantiates the headless `BlockNoteEditor` against the live Y.Doc. Closing item 11 needs (a) a no-WS smoke that constructs `BlockNoteEditor.create({ collaboration: { fragment } })` inside `openDirectConnection.transact()` and exercises an `editor.transact(insertBlocks/...)` call (can ride on the existing Hocuspocus-server fixture), and (b) the original concurrent-human-WS-plus-agent-direct-connection case, which depends on the WS-client broadcast-buffering fix below.
+- **Bulk-import baseline.** Construct-editor-per-op vs construct-editor-once-per-transact overhead at 50k blocks. Phase 4 / Phase 5 hardening — informs whether bulk import (e.g., 50k-block Notion export) needs an alternative batching strategy. Until then, capabilities batch via a single `editor.transact` per `ctx.transact` call.
+- **WebSocket-client rollback path.** When WS clients hold the doc resident across a faulted dispatch, `bound.rollback()` cannot evict it (`getConnectionsCount() > 0` keeps Hocuspocus from unloading). The fundamentally-correct fix is buffering the broadcast until SQL commit (broadcast-first-rollback-later is wrong: clients re-send the aborted delta on reconnect). Documented as a class-docstring scope limit on `HocuspocusSync` and pinned by a regression test (`rollback leaves the doc resident when a concurrent connection holds it`). Phase 4 scope.
+- **Commit-time SQLite failures** (disk-full at COMMIT, WAL corruption). Handled by SQLite's auto-rollback per its atomicity spec and are upstream-tested. The application-layer property suite injects faults pre-execute (`transformQuery` short-circuits before the driver sees the query); the tx manager treats that identically to any in-tx rejection — same `withSystemTx` catch, same `ROLLBACK` SQL — so the rollback code path is exercised on every ordinal. If a future capability introduces retry logic that a commit failure could strand, a driver-layer harness becomes worth adding.
+- **Metadata-only mutation atomicity** (`block.set_visibility`, `doc.publish`, `doc.unpublish`, `doc.move`, `collection.*`). The F31 crash-fuzz exercises content mutations only — those are the ones that traverse `ctx.transact` and pair `doc_updates` with `audit_events`. Metadata-only mutations land only the relational metadata write(s) + `audit_events(allow)` + `outbox(audit.appended)` in the dispatcher's tx today; handler-emitted `ctx.outbox(...)` rows remain a no-op until later wiring. Their fuller capability-specific atomicity therefore remains both implementation debt and verification debt (architecture.md §17.1 row 7b — planned `metadata-only-set.integration.ts`). Reaches for Phase 4 alongside the metadata-only capability set.
 
 ## Revisit triggers
 - Synthetic-client overhead on bulk-import workloads (e.g., importing a 50k-block Notion export) is unacceptable and a batched direct-CRDT insert path is demonstrably safe.

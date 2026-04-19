@@ -17,6 +17,8 @@ Turn the 20 accepted ADRs into a system design that is:
 
 Anything still open after this doc is listed in [§19 Open questions](#19-open-questions-carried).
 
+This file mixes **target-state architecture** with **landed-status callouts**. Unless a paragraph explicitly says something is "currently landed", "open", "planned", or cites a concrete test/file as present evidence, read package inventories, surface adapters, and verification paths below as the intended architecture rather than a claim that the current tree already contains every listed package or harness. Phase-closure truth lives in `docs/continuation.md`, and the sections touched by P3.6 call out their current status inline.
+
 ## 1.1 Design posture — engineering for coding agents
 
 This repo is built to be **worked on by coding agents** (and disciplined humans) without regression, hallucination, or drift. The product is agent-native too — humans and AI agents are peer end-users of the platform — but that's a separate concern covered by the Principal model (§3.3, §8), `agentAllowed` capability metadata (§4), and the agent-first invariants in AGENTS.md.
@@ -34,7 +36,7 @@ Operationalized throughout this doc:
 - **Registry as the source of truth.** Surface adapters, contract-test matrix, OpenAPI, MCP tool list, permission matrix, rate-limit config, audit shape — all derived from `packages/capabilities`. Hand-written glue that could be generated is the anti-pattern.
 - **Typed primitives over stringly-typed anything.** Branded IDs (`WorkspaceId`, `DocId`, `BlockId`, `CapabilityId`, `SessionId`, `TokenId`, `AgentId`, `UserId`), string-literal unions (`Scope`, `CapabilityCategory`, `FidelityTier`, `QueueName`), discriminated unions (`Principal`, `AuditEffect`, `JobPayload`, `Block`). A misused identifier is a compile error, not a test failure.
 - **Type-level guarantees over runtime guards.** `TenantScopedDb` makes an un-tenanted query a build-time error. `ctx.transact` is the only way to reach a Y.Doc — no raw Hocuspocus in handlers. A capability handler that skips audit can't compile (the context requires one).
-- **Semantic naming mirrors capability IDs.** `capabilities/doc/update.ts` implements `doc.update`. `capabilities/doc/update.unit.test.ts` sits next to it. Contract and integration tests across all four surfaces are generated from the same name. An agent searching for "where do I edit doc update logic" finds one place.
+- **Semantic naming mirrors capability IDs.** `capabilities/doc/update.ts` implements `doc.update`. `capabilities/doc/update.unit.test.ts` sits next to it. When the surface adapters and contract matrix land, cross-surface contract/integration coverage derives from that same name. An agent searching for "where do I edit doc update logic" finds one place.
 - **Declarative over imperative.** Capabilities, block specs, fidelity tiers, job definitions, mirror configs, permission grants — all declarative data. The framework executes; product code declares.
 - **Codegen at build, property tests at commit.** Derived artifacts (OpenAPI spec, Kysely types from Atlas DDL, CLI parsers, MCP tool registrations) are generated + committed + diff-reviewable. Invariants that must always hold (Markdown round-trip, CRDT convergence, audit replay, permission three-layer, inverse-restore) are property-tested every commit.
 - **Tests sized to the guarantee they prove.** Unit for pure logic, integration against real SQLite + Postgres, property for invariants, contract for surface parity, E2E for user paths + a11y. Each layer has its own test harness; a regression fails at the smallest scope that can catch it.
@@ -799,13 +801,13 @@ See [Appendix A](#appendix-a--capability-matrix) for the exhaustive matrix. Grou
 
 ### 4.4 Versioning
 
-MVP is `v1`. Breaking changes ship a new capability id alongside (`doc.update_v2`) with the old kept for a deprecation window. The registry exposes a `deprecated: { since, sunset, replacement }` field consumed by all four surfaces; OpenAPI marks deprecated operations, MCP tool descriptions link the replacement, CLI prints a warning on invocation.
+MVP is `v1`. Breaking changes ship a new capability id alongside (`doc.update_v2`) with the old kept for a deprecation window. The registry exposes a `deprecated: { since, sunset, replacement }` field intended to be consumed by the four surface adapters once they land; OpenAPI will mark deprecated operations, MCP tool descriptions will link the replacement, and CLI/UI surfaces will surface the warning.
 
 ## 5. Four-surface adapters
 
-Every capability is generated into every surface it's type-compatible with (invariant #4 in AGENTS.md). Hand-written adapter glue is **forbidden**.
+Invariant #4 is the **target parity contract**, not current-tree status: as of P3.6 the shared registry/dispatcher/sync primitive is landed, but `apps/`, `packages/api-server`, `packages/cli`, `packages/mcp-server`, and `packages/contract-tests` are not in the repo yet. The subsections below describe the intended adapters and matrix; when those surfaces land, hand-written adapter glue is **forbidden**.
 
-> **Read [ADR 0021](adr/0021-surface-transport-topology.md) before implementing any §5.x slice.** It names the Hono app as the single trunk, commits every surface (Server Actions / RSC / CLI / MCP) to consuming it via typed RPC (`hc<AppType>` — in-process via `app.request` for server-side callers, HTTP for clients), drops MCP stdio in favour of Streamable HTTP, names `citty` as the CLI framework, and pins `@hono/mcp` as the MCP integration. The subsections below describe the resulting surfaces; the ADR is the why.
+> **Read [ADR 0021](adr/0021-surface-transport-topology.md) before implementing any §5.x slice.** It names the Hono app as the single trunk, commits each eventual surface adapter (Server Actions / RSC / CLI / MCP) to consuming it via typed RPC (`hc<AppType>` — in-process via `app.request` for server-side callers, HTTP for clients), drops MCP stdio in favour of Streamable HTTP, names `citty` as the CLI framework, and pins `@hono/mcp` as the MCP integration. The subsections below describe the resulting surfaces; the ADR is the why.
 
 ### 5.1 HTTP API (Hono)
 
@@ -856,13 +858,13 @@ Per ADR 0009 + [ADR 0021](adr/0021-surface-transport-topology.md), capabilities 
 
 ### 5.5 Contract enforcement
 
-Contract tests (Phase 3 deliverable):
+Planned contract-test matrix (target shape once the surface adapters + `packages/contract-tests` land; not present in the tree today):
 
 1. **Existence matrix** — for every `(capability, surface)` pair where the capability is type-compatible, a generated surface must exist and reach the same handler.
 2. **Shared-fixture matrix** — the same capability invoked on each surface with the same input produces the same output + the same audit row (modulo surface-specific metadata).
 3. **Error-parity** — permission denial and validation errors produce the same error code + shape across surfaces.
 
-The matrix is generated from the registry, so "a new capability didn't add its MCP tool" fails contract tests without a hand-maintained checklist.
+The matrix is generated from the registry, so once it lands "a new capability didn't add its MCP tool" fails contract tests without a hand-maintained checklist.
 
 #### 5.5.2 Matrix dimensions and suppression (F42)
 
@@ -875,8 +877,8 @@ Without bounds, the matrix is `capability × surface × principal_profile × out
   - **(c) Authorization-impossible outcome** — skip. `anonymous` × an admin capability has `allow` as impossible; only the `deny` cell runs.
   - **(d) Capability post-sunset (F72)** — `current date > capability.deprecated.sunset` → cell suppressed; matrix-snapshot diff flags removal for reviewer. Pre-sunset deprecated capabilities continue to exercise all cells.
 - **Surface-specific metadata excluded from cross-surface equality:** the fixed list `["x-session-id", "x-request-id", "x-trace-id", "x-ratelimit-*"]`. Everything else must match byte-for-byte across surfaces.
-- **Matrix snapshot.** The resolved matrix is emitted as `contract-matrix.snapshot.json`, committed, and diff-reviewed. Adding a capability → snapshot updates in the same commit; reviewers see the delta.
-- **Meta-test.** `packages/contract-tests/test/meta.test.ts` asserts: **every possible cell either runs or matches a suppression rule with a cited reason.** "Just didn't add this one" is a meta-test failure, not a silent gap.
+- **Matrix snapshot.** The resolved matrix will be emitted as `contract-matrix.snapshot.json`, committed, and diff-reviewed. Adding a capability will update the snapshot in the same commit so reviewers see the delta.
+- **Meta-test.** Planned `packages/contract-tests/test/meta.test.ts` will assert: **every possible cell either runs or matches a suppression rule with a cited reason.** "Just didn't add this one" is a meta-test failure, not a silent gap.
 
 ## 6. Unified write path (ADR 0018)
 
@@ -884,7 +886,7 @@ Without bounds, the matrix is `capability × surface × principal_profile × out
 
 ### 6.1 Pipeline
 
-Every mutation, on every surface, flows through this pipeline. Red-team F3 + F9 + F10 + F31 tightened ownership, atomicity, and crash-recovery guarantees. **Single-tx semantics (F31):** `doc_updates`, `audit_events`, and both `outbox` rows commit in one DB transaction; there is no window in which a CRDT update exists without its audit row or vice versa.
+Every **content mutation** (any `category = "mutation"` capability that is *not* in `METADATA_ONLY_CAPABILITIES` — see §6.5 / `packages/scopes`), once a surface adapter invokes it, flows through this pipeline. Metadata-only mutations (`block.set_visibility`, `doc.publish`, `doc.unpublish`, `doc.move`, `collection.*`) take the dispatcher-tx-only path described in §6.5 / ADR 0018 — they never call `ctx.transact`, never open a Hocuspocus direct connection, never write `doc_updates`. Their **landed tuple today** is: the capability's relational metadata write(s) + `audit_events(allow)` + `outbox(audit.appended)`. The fuller tuple that also includes capability-specific handler-emitted `ctx.outbox(...)` rows is still **planned**: production dispatcher wiring currently stubs `ctx.outbox(...)` as a no-op (`packages/dispatcher/src/writepath.integration.test.ts:459`, `packages/dispatcher/prop/writepath-atomicity.test.ts:422`), so those rows are not yet co-committed with the metadata write. Red-team F3 + F9 + F10 + F31 tightened ownership, atomicity, and crash-recovery guarantees for the content-mutation pipeline below. **Single-tx semantics (F31):** `doc_updates`, `audit_events`, and both dispatcher-emitted `outbox` rows commit in one DB transaction; there is no window in which a CRDT update exists without its audit row or vice versa.
 
 ```
 Request → surface adapter → dispatcher:
@@ -901,7 +903,15 @@ Request → surface adapter → dispatcher:
          d. capture post-state from the editor (readable inside the transact closure);
             dispatcher computes effect via
               capability.audit.effectOnAllow(input, postState) → AuditEffect
-         e. Hocuspocus's per-doc DB-tx hook (onChange-equivalent) runs the single
+         e. TODAY: during the `direct.transact` callback, as the Yjs
+            update `u` emits, Hocuspocus broadcasts it to other
+            subscribers immediately (before SQL commit). On rollback,
+            durable SQL state rolls
+            back; `BoundSyncService.rollback()` evicts the resident
+            Y.Doc only when no other connection holds the doc resident.
+            With a live WS peer, the rolled-back delta stays resident
+            and on that peer's local replica until reload (Phase 4 gap).
+         f. Hocuspocus's per-doc DB-tx hook (onChange-equivalent) runs the single
             write transaction assembled by the dispatcher:
               BEGIN DB tx:
                 compute next doc_updates.seq = prev + 1 (atomic per doc; §6.4)
@@ -913,7 +923,9 @@ Request → surface adapter → dispatcher:
                 )
                 INSERT outbox(event="audit.appended", audit_id, …)
               COMMIT
-         f. ack to waiter; Hocuspocus broadcasts u to other subscribers out-of-band
+         g. ack to waiter
+         h. PLANNED (Phase 4): move the broadcast here — after COMMIT —
+            via broadcast-on-commit / rollback-safe client buffering
        handler returns output O
   4. close OTel span; return O to surface adapter
 ```
@@ -923,7 +935,7 @@ Deny and error outcomes are written in a separate audit-only DB tx (no `doc_upda
 ### 6.2 Ownership — who writes what
 
 - **Dispatcher owns the write-path DB tx.** It assembles the full mutation — `doc_updates` + `outbox(doc.updated)` + `audit_events` + `outbox(audit.appended)` — and commits them together (F31). Effect is computed from `capability.audit.effectOnAllow(input, postState)` where `postState` is read inside the `direct.transact` closure before the DB tx commits.
-- **Hocuspocus** supplies the per-doc serializer and the `onChange`-equivalent DB-tx hook that the dispatcher's write-path tx runs inside. It does **not** independently write `doc_updates` or `audit_events`; it provides the concurrency boundary and broadcasts the accepted update to other subscribers after the dispatcher's tx commits.
+- **Hocuspocus** supplies the per-doc serializer and the `onChange`-equivalent DB-tx hook that the dispatcher's write-path tx runs inside. It does **not** independently write `doc_updates` or `audit_events`; it provides the concurrency boundary. **TODAY** it also broadcasts the Yjs update during the `direct.transact` callback, before the dispatcher tx commits. On rollback, `BoundSyncService.rollback()` only repairs in-memory state when no other connection holds the doc resident; with a live WebSocket peer, the rolled-back delta remains resident and on the peer's local replica until reload (`packages/sync/src/hocuspocus.ts:45-63`, `packages/sync/src/hocuspocus.integration.test.ts:511-570`). **PLANNED (Phase 4):** move broadcast to post-commit via buffered/broadcast-on-commit delivery.
 - **`onStoreDocument`** (debounced, non-concurrent per doc, ADR 0006) writes `doc_snapshots`. Compaction is its job and audit is not its concern.
 - **Outbox** (§6.3) is the only bridge between the write-path tx and downstream jobs; both `doc.updated` and `audit.appended` rows are inserted inside the same tx as the mutation they describe.
 - **Deny / error audit writes** are owned by the dispatcher in their own audit-only DB tx, after permission-check failure or handler exception. They use `effectOnDeny` / `effectOnError` (F32).
@@ -1305,7 +1317,7 @@ Red-team F2 correctly flagged that "exactly one row per mutation" and "same-inpu
 - **Collapse applies only to `category = "read"` invocations** where `collapseKey(input)` matches the prior row within 1s. A flooded agent running identical read calls gets collapsed rows (`collapsed_count += 1`) rather than 1000 near-duplicate rows.
 - **Auth / denial rows never collapse.** Every `outcome = "deny"` row is its own row regardless of input equivalence — denial is forensically valuable.
 
-**Single-tx semantics (F31).** For any accepted `category = "mutation"` invocation, the `doc_updates` row and the `audit_events` row commit in the **same DB transaction** alongside their respective `outbox` rows. There is no ordering in which a `doc_updates.seq=N` exists without its paired `audit_events` row, and no ordering in which an `audit_events` row of kind `block.*` / `doc.update_batch` / `doc.*` / `version.*` exists without the `doc_updates` row it describes. A crash-fuzz property test (§17.1) asserts: `∀ N in doc_updates: |audit_events linked to seq=N| == 1`.
+**Single-tx semantics (F31).** For any accepted **content mutation** (a `category = "mutation"` invocation that traverses `ctx.transact` — i.e. is *not* in `METADATA_ONLY_CAPABILITIES`), the `doc_updates` row and the `audit_events(outcome="allow")` row commit in the **same DB transaction** alongside their respective `outbox` rows. There is no ordering in which a `doc_updates.seq=N` exists without an accompanying allow-audit row from the same transaction, and none in which the allow-audit row exists without the `doc_updates` row from the same transaction. The pair is not joined by an `audit_events` foreign key on seq (the schema does not carry one); the invariant is held by the single-DB-transaction commit boundary. A crash-fuzz property test (§17.1) asserts the all-or-none commit of the five-row tuple (`docs` + `doc_updates` + `outbox(doc.updated)` + `audit_events` + `outbox(audit.appended)`) under fault injection at every in-tx query position. **Metadata-only mutations** (`block.set_visibility`, `doc.publish`, `doc.unpublish`, `doc.move`, `collection.*`) follow the same single-tx discipline against a different tuple, but only part of that tuple is landed today: the relational metadata write(s) the capability owns (e.g. `block.set_visibility` updates `blocks.visibility` + `docs.visibility_version` per §3.6 and §5.4 — capability-specific) **plus** `audit_events(outcome="allow")` **plus** `outbox(audit.appended)` commit together in the dispatcher's `withSystemTx`, or none. The fuller tuple that also includes capability-specific handler-emitted `ctx.outbox(...)` rows is still **planned** because production dispatcher wiring stubs `ctx.outbox(...)` as a no-op (see `packages/dispatcher/src/writepath.integration.test.ts:459` and the prop-test fixture at `packages/dispatcher/prop/writepath-atomicity.test.ts:422` — both annotate "handler-emitted outbox rows land in a later slice"). The metadata-only carve-out is therefore **implementation debt + verification debt**, not just verification debt. The metadata-only-set integration test (planned, §17.1 row 7b — Phase 4) will assert the all-or-none commit of that capability-specific tuple per metadata-only capability *after* `ctx.outbox` is wired. The F31 crash-fuzz does not exercise the metadata-only path because there is no `doc_updates` row whose absence to assert.
 
 **Outcome → row shape (F32).** Every `audit_events` row carries an `outcome` and an `effect` keyed by outcome:
 
@@ -2065,7 +2077,7 @@ export interface CapabilityContext {
 **What is explicitly absent:**
 
 - **No `audit` writer.** Handlers do not write audit rows. The dispatcher writes them in the outer tx using `capability.audit.effectOnAllow(input, postState)` for accepted mutations, and `effectOnDeny` / `effectOnError` for denied / errored invocations (F3 + F32 fix — §6.2, §9.3). A handler that tried to write an audit row would have no way to do so.
-- **No `jobs` enqueuer.** Handlers don't enqueue jobs directly. They emit events through `ctx.outbox(...)` (which lands in the same tx as the `doc_updates` + `audit_events` write). A background forwarder reads the outbox and calls `JobService.enqueue`. This is the transactional outbox pattern (F10 fix — §6.3).
+- **No `jobs` enqueuer.** Handlers don't enqueue jobs directly. They are intended to emit events through `ctx.outbox(...)` so the row lands in the same tx as the `doc_updates` + `audit_events` write; a background forwarder will then read the outbox and call `JobService.enqueue` (transactional outbox pattern, F10 — §6.3). **Status as of 2026-04-19:** `ctx.outbox(...)` is plumbed at the type level, but the dispatcher's production wiring stubs it as a no-op — handler-emitted outbox rows are not yet landing transactionally. Wiring is a later slice (the planned `metadata-only-set.integration.ts` in §17.1 row 7b will pin the contract once it lands). Until then, treat the in-tx guarantee for handler-emitted outbox rows as design intent, not landed behaviour. The dispatcher-emitted `outbox("doc.updated")` and `outbox("audit.appended")` rows *do* land in the same tx today (F31, verified by `packages/dispatcher/prop/writepath-atomicity.test.ts`).
 - **No raw Kysely, no raw Hocuspocus, no `globalThis`, no `process.env`.** Config comes through the dispatcher-assembled context. Better Auth primitives are wrapped by `packages/auth-service` (§16.1 / F28). No direct HTTP request/response object reaches the handler.
 
 Every handler signature is:
@@ -2359,9 +2371,9 @@ A pre-commit hook that's slow enough to cause friction is split, per AGENTS.md.
 
 ### 16.14 Capability versioning
 
-- Adding a capability: non-breaking. Contract tests add a row; pre-commit fails until every surface is generated.
-- Changing a capability's **input** schema in a backward-incompatible way: ship `doc.update_v2`; mark old `deprecated: { since, sunset, replacement: "doc.update_v2" }`. Deprecated capabilities still pass contract tests until sunset; old MCP tools / OpenAPI routes / CLI subcommands emit a warning.
-- Removing a capability: only after sunset. Contract tests confirm removal; migration notes in CHANGELOG.md.
+- Adding a capability: non-breaking. Once the surface generators and contract-test matrix land, contract tests add a row and pre-commit fails until every type-compatible surface is generated.
+- Changing a capability's **input** schema in a backward-incompatible way: ship `doc.update_v2`; mark old `deprecated: { since, sunset, replacement: "doc.update_v2" }`. Once the contract matrix lands, deprecated capabilities still pass contract tests until sunset; old MCP tools / OpenAPI routes / CLI subcommands emit a warning.
+- Removing a capability: only after sunset. Once the contract matrix lands, contract tests confirm removal; migration notes in CHANGELOG.md.
 - Renaming: forbidden. Add the new, deprecate the old. (Renames silently break clients.)
 
 ### 16.15 Working rules for a coding agent in this repo
@@ -2385,6 +2397,8 @@ These rules are what keep four surfaces and a CRDT backbone from drifting as cap
 
 ### 17.1 Stack wiring (ADR invariant mapping)
 
+This table is the **target invariant → test map**, not a claim that every package path below exists in the current tree. Unless a row explicitly calls out something as "currently landed", read package/test paths here as planned endpoints. As of P3.6, the landed proofs relevant to this sweep are the F31 crash-fuzz row plus the runtime/fixture coverage called out in row 7a; the four-surface contract rows remain planned because `apps/`, `packages/api-server`, `packages/cli`, `packages/mcp-server`, and `packages/contract-tests` are not in the repo yet.
+
 | # | Invariant (AGENTS.md) | Test kind | Location |
 |---|---|---|---|
 | 1 | Per-block-type Markdown fidelity round-trips cleanly under its declared tier | **Property** | `packages/blocks/test/fidelity.prop.ts` — per-type fuzz; 10k/PR, 1M nightly (ADR 0013) |
@@ -2395,11 +2409,11 @@ These rules are what keep four surfaces and a CRDT backbone from drifting as cap
 | 3 | Every *mutation* produces exactly one audit entry (no collapse) | **Unit + contract** | `packages/capabilities/test/audit-one-per-mutation.unit.ts` + `packages/contract-tests/test/collapse-policy.ts` |
 | 3 | Sequence assignment is atomic + gapless per doc (F9) | **Property** | `packages/sync/test/seq-atomicity.prop.ts` |
 | 3 | Transactional outbox never loses a downstream event (F10) | **Property** | `packages/jobs/test/outbox.prop.ts` — crash-fuzz |
-| 4 | Every capability exists on every type-compatible surface | **Contract** | `packages/contract-tests/test/surface-parity.ts` — generated from registry |
-| 4 | Same input on all surfaces produces same output + audit | **Contract** | `packages/contract-tests/test/cross-surface-fixture.ts` |
+| 4 | Every capability exists on every type-compatible surface | **Planned contract** | Planned `packages/contract-tests/test/surface-parity.ts` — generated from the registry once the surface adapters and contract-test package land |
+| 4 | Same input on all surfaces produces same output + audit | **Planned contract** | Planned `packages/contract-tests/test/cross-surface-fixture.ts` — depends on `apps/`, `packages/api-server`, `packages/cli`, `packages/mcp-server`, and `packages/contract-tests`, none of which are in the tree today |
 | 5 | Permission checks in capability layer | **Contract + integration** | `packages/capabilities/test/permission-matrix.ts` (allow/deny fuzz) + `packages/db/test/tenant-isolation.prop.ts` (F4 cross-tenant fuzz against both drivers) |
 | 6 | Soft-deletes recoverable via first-class capability | **Property** | `packages/capabilities/test/inverse-restore.prop.ts` (ADR 0017) |
-| 7a | All **content** mutations flow through CRDT via `ctx.transact` | **Static + integration** | Planned `@editorzero/arch-lint` rules (`no-raw-ydoc-access`, `transact-called-at-most-once`) — F89, not yet implemented; until then: dispatcher runtime backstop + `packages/capabilities/test/write-path.integration.ts` |
+| 7a | All **content** mutations flow through CRDT via `ctx.transact` | **Static + integration** | Planned `@editorzero/arch-lint` rules (`no-raw-ydoc-access`, `transact-called-at-most-once`) — F89, not yet implemented. **Currently landed:** dispatcher runtime backstop (F92 — `TransactCalledTwiceError` + at-most-once guard in `packages/dispatcher/src/dispatcher.ts`) + dispatcher composition coverage via inline fixture capabilities at `packages/dispatcher/src/writepath.integration.test.ts`. **Open:** real-capability integration through dispatcher + Hocuspocus + SQLite is not yet exercised in any test (P3.6f scope acknowledgement, Phase 4 follow-up alongside surface adapters). |
 | 7b | Enumerated **metadata** capabilities (`block.set_visibility, doc.publish, doc.unpublish, doc.move, collection.*`) legally skip `ctx.transact` | **Static + integration** | Planned `@editorzero/arch-lint` whitelist in `transact-called-at-most-once` (zero calls allowed for enumerated set) — F89, not yet implemented; `packages/scopes` `METADATA_ONLY_CAPABILITIES` export is canonical and coherence script diffs it against `architecture.md` §6.5; planned `packages/capabilities/test/metadata-only-set.integration.ts` will assert the runtime behaviour — not yet implemented |
 | 8 | Agents are first-class principals | **Contract** | `packages/capabilities/test/agent-parity.ts` — every human-usable capability has an agent-usable analog or a declared `humanOnly` rationale |
 | — | Published-cache visibility (F5) | **Property** | `packages/app/test/public-cache-invariance.prop.ts` |
@@ -2411,7 +2425,7 @@ These rules are what keep four surfaces and a CRDT backbone from drifting as cap
 | — | Embedding reindex flip preserves recall (F30) | **Property** | `packages/search/test/reindex-flip.prop.ts` |
 | — | Mirror reconciler catches up after arbitrary crash sequence (F11) | **Property** | `packages/mirror/test/reconcile.prop.ts` |
 | — | Search visibility scoping — no internal-block leak (F17) | **Property** | `packages/search/test/visibility-scope.prop.ts` |
-| — | Audit + CRDT commit in one DB tx (F31) | **Property** | `packages/dispatcher/test/write-path-atomicity.prop.ts` — for every `doc_updates.seq=N`, `audit_events` has exactly one row linked to that seq, under crash-fuzz |
+| — | Audit + CRDT commit in one DB tx (F31) | **Property** | `packages/dispatcher/prop/writepath-atomicity.test.ts` — under fault injection at every in-tx query position, the five-row commit (`docs` + `doc_updates` + `outbox(doc.updated)` + `audit_events` + `outbox(audit.appended)`) is all-or-none across cold + warm code paths. The test does not assert a per-seq audit↔update foreign-key linkage; the schema does not carry one. (Landed P3.6e commit 2.) |
 | — | Delegator revocation closes agent sessions (F43) | **Property** | `packages/sync/test/delegator-revocation.prop.ts` |
 | — | Revocation survives Redis partition (F49) | **Property** | `packages/sync/test/revocation-redis-partition.prop.ts` |
 | — | Outbox poller HA — exactly-once forward (F40) | **Property** | `packages/jobs/test/outbox-ha.prop.ts` |
@@ -2429,7 +2443,7 @@ Phase 3 entry requires a measurement pass against ADR 0007's declared SQLite env
 - 500 updates/sec across a 10-doc hot set,
 - 100 jobs/min enqueue + consume,
 - outbox poller at 250 ms tick,
-- audit writer on every mutation.
+- audit writer on each exercised mutation path.
 
 Assertions:
 
@@ -2623,7 +2637,7 @@ Every row has a corresponding kind in the `AuditEffect` union (§16.3) or is a `
 | **Better Auth** | Credential lifecycle, OIDC/SAML/OAuth 2.1/DCR/PKCE, session storage, API keys, Agent Auth Protocol | Principal abstraction, per-tenant audience (we plumb), Hocuspocus session revocation, audit event model |
 | **Hocuspocus** | WebSocket sync, `onChange` durability hook, `onStoreDocument` snapshot trigger, Redis fan-out | Auth (calls our middleware), capability dispatch, permissions |
 | **BlockNote + Yjs** | Doc model, convergent editing, block IDs, ProseMirror integration | Persistence, permissions, audit |
-| **Capability registry** | The shape of every mutation/read; single source of truth for all surfaces | Handler implementation (modules own those), auth |
+| **Capability registry** | The shape of the capability set; single source of truth for the eventual surface adapters | Handler implementation (modules own those), auth |
 | **Dispatcher** | Resolving principal, evaluating permissions, enforcing rate limits, writing audit | Holding state, executing business logic |
 | **TenantScopedDb (Kysely)** | Unbypassable workspace predicate, type-time tenant safety | Table schema (Atlas owns migrations) |
 | **Kysely + Atlas CE** | Query building, migrations, Postgres/SQLite dialect split | Relational modeling for Better Auth (adapter-owned) |
@@ -2635,22 +2649,24 @@ Every row has a corresponding kind in the `AuditEffect` union (§16.3) or is a `
 
 ## Appendix C — Phase 3 entry checklist
 
-When Phase 3 begins, this doc should produce:
+This is a **deliverable specification**, not a status report. Each item describes what Phase 3 must produce before the verification stack is real. The authoritative status sweep — which items are CLOSED / PARTIAL / OPEN against the actual tree — is P3.7's job and lives in `docs/continuation.md` § Immediate focus until it lands here. Items 11 and 12 carry their own status because P3.6 landed evidence directly tied to them; the others stay in spec form.
+
+Phase 3 must produce:
 
 1. Monorepo scaffold: `apps/{app,admin}`, `packages/{capabilities,auth,db,sync,blocks,search,jobs,mirror,mcp-server,cli,contract-tests,observability,config,webhooks}`.
-2. Two empty capabilities (`workspace.create`, `doc.create`) wired into all four surfaces, exercising the full dispatcher path.
+2. Two empty capabilities (`workspace.create`, `doc.create`) to be wired into all four surface adapters, exercising the full dispatcher path.
 3. Hocuspocus wired in-process with the durability-boundary property test.
 4. SQLite + Postgres conformance runners both green on the trivial slice.
 5. Pre-commit + pre-push hooks green.
 6. `docker compose up` smoke-deploy green.
 7. `/metrics` exposes spans for the two capabilities.
-8. **SQLite load-ceiling measurement run (F48)** against ADR 0007's declared envelope; results committed to `packages/db/test/sqlite-ceiling.report.md`. If ceiling not met, ADR 0007 revised in the same commit.
-9. **Backup script scaffold (F34).** `scripts/backup.sh` created covering Postgres PITR + object-store snapshot coordination window and SQLite `VACUUM INTO` + object-store snapshot.
-10. **HNSW memory preflight** validated at declared 1M-embedding ceiling (F39 / §11.4). Green on workspaces sized to the declared ceiling; `admin.reembed_workspace` refuses below the required `maintenance_work_mem`.
-11. **ADR 0018 smoke test** (F70): `BlockNoteEditor.create({ collaboration })` inside `openDirectConnection.transact()` under concurrent edits — green.
-12. **Write-path single-tx crash-fuzz** (`write-path-atomicity.prop.ts`, F31) — green.
-13. **Reconcile-base-token flow** validated end-to-end with a minimal HTTP agent: `doc.get_markdown → edit → doc.update_from_markdown` survives concurrent human edit (F66/F73).
-14. **Redis partition revocation** (`revocation-redis-partition.prop.ts`, F49) — green.
-15. **SQLite load-ceiling validation** (F48) — confirmed via item 8 above.
+8. **SQLite load-ceiling measurement run (F48)** against ADR 0007's declared envelope; results to be committed to `packages/db/test/sqlite-ceiling.report.md`. If the ceiling is not met, ADR 0007 must be revised in the same commit.
+9. **Backup script scaffold (F34).** `scripts/backup.sh` to be created covering Postgres PITR + object-store snapshot coordination window and SQLite `VACUUM INTO` + object-store snapshot.
+10. **HNSW memory preflight** to be validated at the declared 1M-embedding ceiling (F39 / §11.4) — green on workspaces sized to the declared ceiling; `admin.reembed_workspace` must refuse below the required `maintenance_work_mem`.
+11. **ADR 0018 smoke test** (F70): `BlockNoteEditor.create({ collaboration })` inside `openDirectConnection.transact()` under concurrent edits. **Status: OPEN.** P3.6 landed lower-level evidence — the Y.Doc / Hocuspocus primitive is exercised end-to-end (`packages/sync/src/hocuspocus.integration.test.ts` for the no-WS sync contract; `packages/dispatcher/src/writepath.integration.test.ts` for rollback-rehydration through the dispatcher) — but **no test in the tree instantiates `BlockNoteEditor.create({ collaboration: { fragment } })` against the live Y.Doc**. Item 11's adapter-boundary smoke remains unverified. Two things are still required to close it: (a) a no-WS smoke that constructs the headless `BlockNoteEditor` against `openDirectConnection.transact()`'s Y.Doc and exercises an `editor.transact(insertBlocks/...)` call (can ride on the existing Hocuspocus-server fixture); (b) the WS-client concurrent-edit case from the original spec, which depends on the Phase 4 broadcast-buffering-until-commit fix (see ADR 0018 § "Out of scope").
+12. **Write-path single-tx crash-fuzz** (`packages/dispatcher/prop/writepath-atomicity.test.ts`, F31). **Status: CLOSED for content mutations** (P3.6e commit 2, `a9ca821`). Metadata-only mutations have no `doc_updates` pair and are not in scope of this fuzz; their atomicity is covered separately by the planned `metadata-only-set.integration.ts` (§17.1 row 7b, Phase 4).
+13. **Reconcile-base-token flow** to be validated end-to-end with a minimal HTTP agent: `doc.get_markdown → edit → doc.update_from_markdown` survives concurrent human edit (F66/F73). Token issuance is currently deferred in `packages/capabilities/src/doc/get.ts:49` until `doc.update_from_markdown` lands.
+14. **Redis partition revocation** (`packages/sync/test/revocation-redis-partition.prop.ts`, F49) — to be green.
+15. **SQLite load-ceiling validation** (F48) — to be confirmed by the `packages/db/test/sqlite-ceiling.report.md` deliverable from item 8 above. Status follows item 8: closed when that report file exists and meets the ADR 0007 envelope.
 
-At that point the verification stack is real. Subsequent capability implementations ride the same tracks.
+When all entries are CLOSED, the verification stack is real. Subsequent capability implementations ride the same tracks.
