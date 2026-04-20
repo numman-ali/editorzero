@@ -1657,6 +1657,8 @@ Thin pass-throughs, all covered by other ADRs:
 
 Same registry → MCP tools (per ADR 0009):
 
+*[Realised in slice 1 by `packages/mcp-server` — `createMcpHandler({ registry, dispatcher, serverInfo })` returns a Hono handler the trunk mounts at `/mcp` behind the same principal middleware `/docs/*` uses (cookie auth, transitional). The actual filter is `isMcpTool(cap)` (`cap.surfaces.includes("mcp") && cap.humanOnly !== true`), not the `category !== "admin"` shown in the pseudocode below; ADR 0026 documents the six load-bearing commitments — principal via Hono chain, deliberately stateless, registry → tool loop, three-way error cut, `humanOnly` structural filter, no slice-1 OAuth discovery. `outputSchema` is not published in slice 1; outputs travel as JSON in `content[0].text`. Contract-matrix parity at the adapter and trunk layers is enforced by `packages/mcp-server/src/create-mcp-handler.integration.test.ts` and `packages/api-server/src/composition/mcp-chain.integration.test.ts`.]*
+
 ```
 packages/mcp-server/src/index.ts
   import { capabilities } from "@editorzero/capabilities";

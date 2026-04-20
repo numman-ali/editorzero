@@ -23,7 +23,7 @@ Seven capabilities land end-to-end at the kernel layer + through the Hono API tr
 - **MCP** — `packages/mcp-server` via `@hono/mcp` + `@modelcontextprotocol/sdk` 1.x; Streamable-HTTP only.
 - **Web UI** — `apps/app` + `apps/admin` (Next.js 16 App Router).
 
-**Gated on @numman decision:** Phase-4 entry gate revision (Open Question 3). Appendix C's "all entries CLOSED" rule is unsatisfiable against the current tree; rule revision + dual-backend scope answer land at phase boundary. Current matrix: 2 CLOSED-for-content-mutations / 2 PARTIAL / 12 OPEN. Detail lives in `docs/architecture.md` § Appendix C.
+**Gated on @numman decision:** Phase-4 entry gate revision (Open Question 3). Appendix C's "all entries CLOSED" rule is unsatisfiable against the current tree; rule revision + dual-backend scope answer land at phase boundary. Last formal sweep (d3a55d2, 2026-04-19): 2 CLOSED-for-content-mutations / 2 PARTIAL / 12 OPEN. Several rows have moved since — `packages/{api-server, api-client, auth, mcp-server}` + `apps/cli` all landed in P3.7; row 1 (monorepo scaffold) and row 2 (capabilities reach all four surface adapters) are both materially closer to CLOSED. A fresh sweep belongs to phase-boundary review alongside the gate-rule revision rather than a mid-phase recount. Spec source for the items themselves: `docs/architecture.md` § Appendix C.
 
 ## Open questions for @numman
 
