@@ -11,18 +11,44 @@
  * Drift between the server's and CLI's registry would break the
  * capability-matrix parity invariant (AGENTS.md invariant 4). Both
  * registries import the same capability modules — they can't diverge
- * at the module level. The parity contract test added in the next
- * slice (commit 3) closes the remaining loop: every capability whose
- * `surfaces` array contains `"cli"` must appear in this registry's
- * `list()` output, and every command in the generated `ez <domain>`
- * tree must correspond to a capability with `surfaces: ["cli"]`.
+ * at the module level. The parity coherence test in
+ * `generator/parity.unit.test.ts` closes the remaining loop:
  *
- * **Today's registry** is N=1 (doc.list). The next commit widens it to
- * the six other doc capabilities + wires the parity check; no code
- * changes in this file between slices are expected beyond adding
- * capability imports.
+ *   - Every capability in this registry whose `surfaces` array
+ *     contains `"cli"` must have `deriveHttpBinding(cap)` point at
+ *     a real registered route on the api-server trunk (route-parity
+ *     guard: catches irregular plurals, prefix drift, verb drift).
+ *   - Every capability in this registry whose `surfaces` array
+ *     contains `"cli"` must be reachable as a subcommand under its
+ *     `<domain>` top-level command (root-wiring guard: catches a
+ *     capability added here but not exposed via `index.ts`).
+ *   - No orphan subcommands: every generated subcommand has a
+ *     capability backing it.
+ *
+ * **Today's registry** is the full doc domain (7 capabilities). Adding
+ * a new capability with `surfaces: ["cli"]` means: add the import +
+ * the `registerCapability(...)` call below, then the generated
+ * command tree and the parity test pick it up automatically.
  */
 
-import { createRegistry, docList, registerCapability } from "@editorzero/capabilities";
+import {
+  createRegistry,
+  docCreate,
+  docDelete,
+  docGet,
+  docList,
+  docPublish,
+  docRestore,
+  docUnpublish,
+  registerCapability,
+} from "@editorzero/capabilities";
 
-export const cliRegistry = createRegistry([registerCapability(docList)]);
+export const cliRegistry = createRegistry([
+  registerCapability(docCreate),
+  registerCapability(docDelete),
+  registerCapability(docGet),
+  registerCapability(docList),
+  registerCapability(docPublish),
+  registerCapability(docRestore),
+  registerCapability(docUnpublish),
+]);

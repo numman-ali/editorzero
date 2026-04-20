@@ -2,6 +2,7 @@ import { PassThrough } from "node:stream";
 
 import { docCreate, docGet, docList, registerCapability } from "@editorzero/capabilities";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import type { AuthCredentialStore, CredentialHeaders } from "../credential-store";
 import { runCapability } from "./invoke";
@@ -382,5 +383,62 @@ describe("runCapability", () => {
     const body = JSON.parse(read()) as { error: { code: string; server: unknown } };
     expect(body.error.code).toBe("request_failed");
     expect(body.error.server).toBe("unparseable-plain-text");
+  });
+
+  // ── Synthetic GET+query coverage (Codex review) ────────────────────────
+  // No real doc capability has a GET with non-path-param input — so the
+  // `buildUrl` query-string branch only lights up under a synthetic
+  // capability here. Lets the parity test earn its keep and keeps the
+  // buildUrl branch covered so the first real query-param read capability
+  // lands without a coverage drop.
+
+  it("synthetic GET capability with query fields builds a query string", async () => {
+    const store = makeStoreFake({ cookie: "session=x" });
+    const { stream } = captured();
+    const payload = { ok: true };
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    // biome-ignore lint/suspicious/noExplicitAny: synthetic capability stub — only exercises buildUrl/query branches.
+    const synthetic: any = {
+      id: "thing.search",
+      category: "read",
+      summary: "",
+      input: z
+        .object({
+          q: z.string(),
+          limit: z.string().optional(),
+        })
+        .strict(),
+      output: z.object({ ok: z.boolean() }),
+      requires: [],
+      surfaces: ["cli"],
+      audit: {
+        subjectFrom: () => ({ kind: "workspace" }),
+        effectOnAllow: () => ({ kind: "audit.access_log" }),
+        effectOnDeny: () => ({}),
+        effectOnError: () => ({}),
+        collapsePolicy: { collapsible: false },
+      },
+      invoke: async () => payload,
+    };
+
+    const exit = await runCapability(
+      synthetic,
+      { baseUrl: "http://localhost:3000", rawArgs: { q: "hello world", limit: "10" } },
+      { store, fetch, stdout: stream },
+    );
+
+    expect(exit).toBe(0);
+    const call = fetch.mock.calls[0];
+    if (call === undefined) throw new Error("unreachable");
+    const url = call[0] as string;
+    expect(url).toContain("/things/search?");
+    expect(url).toContain("limit=10");
+    expect(url).toContain("q=hello+world");
   });
 });

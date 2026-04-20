@@ -25,10 +25,10 @@ import { defineCommand, runMain } from "citty";
 
 import { authCommand } from "./auth";
 import { SessionCookieStore } from "./credential-store";
-import { createDomainCommand } from "./generator/command";
+import { createRootCommands } from "./generator/root";
 import { cliRegistry } from "./registry";
 
-const docCommand = createDomainCommand("doc", cliRegistry.list(), {
+const registryCommands = createRootCommands(cliRegistry, {
   storeFactory: () => new SessionCookieStore(),
   fetch,
   stdout: process.stdout,
@@ -40,8 +40,14 @@ const main = defineCommand({
     description: "editorzero — open-source AI-native docs + collaboration CLI",
   },
   subCommands: {
+    // `auth` is hand-written (not registry-derived) per ADR 0025 — the
+    // bootstrap seam predates the capability-registry surface. Every
+    // other top-level domain flows through `createRootCommands` so a
+    // capability with `surfaces: ["cli"]` in any domain is reachable
+    // from this binary without a second hand-mount. The parity test
+    // in `generator/parity.unit.test.ts` enforces that loop.
     auth: authCommand,
-    doc: docCommand,
+    ...registryCommands,
   },
 });
 
