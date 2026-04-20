@@ -1,0 +1,36 @@
+{
+  "name": "@editorzero/mcp-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist *.tsbuildinfo .tsbuildinfo.test",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@editorzero/capabilities": "workspace:*",
+    "@editorzero/dispatcher": "workspace:*",
+    "@editorzero/errors": "workspace:*",
+    "@editorzero/ids": "workspace:*",
+    "@editorzero/principal": "workspace:*",
+    "@editorzero/scopes": "workspace:*",
+    "@hono/mcp": "0.2.5",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "hono": "4.12.14",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
