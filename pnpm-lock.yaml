@@ -63,6 +63,34 @@ importers:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(tsx@4.21.0)(yaml@2.8.3)
 
+  apps/cli:
+    dependencies:
+      '@editorzero/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
+      citty:
+        specifier: 0.2.2
+        version: 0.2.2
+    devDependencies:
+      '@editorzero/api-server':
+        specifier: workspace:*
+        version: link:../../packages/api-server
+      '@editorzero/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@editorzero/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(tsx@4.21.0)(yaml@2.8.3))
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(tsx@4.21.0)(yaml@2.8.3)
+
   packages/api-client:
     dependencies:
       '@editorzero/api-server':
@@ -1474,6 +1502,9 @@ packages:
 
   chownr@1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
+
+  citty@0.2.2:
+    resolution: {integrity: sha512-+6vJA3L98yv+IdfKGZHBNiGW5KHn22e/JwID0Strsz8h4S/csAu/OuICwxrg44k5MRiZHWIo8XXuJgQTriRP4w==}
 
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
@@ -3688,6 +3719,8 @@ snapshots:
   check-error@2.1.3: {}
 
   chownr@1.1.4: {}
+
+  citty@0.2.2: {}
 
   cliui@8.0.1:
     dependencies:

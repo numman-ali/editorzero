@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "tsBuildInfoFile": "./.tsbuildinfo.test",
+    "rootDir": "."
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../packages/api-client" },
+    { "path": "../../packages/api-server" },
+    { "path": "../../packages/auth" },
+    { "path": "../../packages/db" }
+  ],
+  "exclude": ["node_modules", "dist"]
+}

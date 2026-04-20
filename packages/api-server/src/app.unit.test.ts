@@ -73,6 +73,14 @@ describe("api-server trunk composition", () => {
     expect(doc.paths?.[MOUNTED_PATH]?.get).toBeDefined();
     // biome-ignore lint/complexity/useLiteralKeys: tsconfig's noPropertyAccessFromIndexSignature (TS4111) forbids dot access on OpenAPI's `components.schemas` index signature.
     expect(doc.components?.schemas?.["HealthResponse"]).toBeDefined();
+    // `/infra/whoami` (ADR 0025) is composed into the same infraRoutes
+    // tuple — so the trunk's OpenAPI doc must expose it at exactly the
+    // folder-mirrored path. The runtime behaviour (auth-gated) is
+    // exercised in `auth-chain.integration.test.ts`; this assertion
+    // guards the path-mirror invariant only.
+    expect(doc.paths?.["/infra/whoami"]?.get).toBeDefined();
+    // biome-ignore lint/complexity/useLiteralKeys: same TS4111 reason as above.
+    expect(doc.components?.schemas?.["WhoamiResponse"]).toBeDefined();
   });
 
   it("createApiApp({ auth, loadRoles }) routes POST /auth/* to auth.handler", async () => {

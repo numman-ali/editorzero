@@ -173,14 +173,17 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     trunk.on(["POST", "GET"], "/auth/*", (c) => auth.handler(c.req.raw));
     // Principal middleware for every capability-domain prefix. Today
     // just `/docs/*`; future prefixes (`/blocks/*`, `/workspaces/*`)
-    // repeat this line.
+    // repeat this line. Also attached to `/infra/whoami` (ADR 0025)
+    // — the CLI's canonical principal-orientation route, auth-gated
+    // even though it shares the `/infra/` prefix with the public
+    // `/infra/health` liveness probe. Exact-path attachment keeps
+    // `/infra/health` public.
     const resolve = createBetterAuthResolver({ auth, loadRoles });
-    trunk.use(
-      "/docs/*",
-      createPrincipalMiddleware({
-        resolve: (c) => resolve(c.req.raw.headers),
-      }),
-    );
+    const principalMw = createPrincipalMiddleware({
+      resolve: (c) => resolve(c.req.raw.headers),
+    });
+    trunk.use("/docs/*", principalMw);
+    trunk.use("/infra/whoami", principalMw);
   }
   if (dispatcher !== undefined) {
     trunk.use("/docs/*", createDispatcherMiddleware({ dispatcher }));

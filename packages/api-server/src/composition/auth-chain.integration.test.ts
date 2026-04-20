@@ -325,6 +325,78 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(body.error).toBe("unauthenticated");
   });
 
+  // ── GET /infra/whoami — canonical principal-orientation route (ADR 0025) ─
+  //
+  // The CLI's `ez auth whoami` calls this route (not BA's
+  // `/auth/get-session`) so the caller sees the same `Principal` shape
+  // the dispatcher/gate enforces — `kind`, `workspace_id`, `roles`
+  // sourced from `workspace_members` via the ADR 0024 resolver. These
+  // tests exercise the full chain (BA session → principal middleware →
+  // whoami handler) against a real in-memory DB.
+  it("GET /infra/whoami 401s without a session cookie", async () => {
+    const { trunk } = await buildStack();
+    const res = await trunk.request("/infra/whoami");
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unauthenticated");
+  });
+
+  it("GET /infra/whoami returns the caller's Principal for an authenticated owner", async () => {
+    // Fresh signup mints a workspace + seeds `workspace_members` as
+    // `role: "owner"` via the ADR 0024 post-commit hook. Whoami should
+    // reflect that same owner role, the same workspace_id, and the
+    // session-backed credential shape (session_id non-null, token_id
+    // null — this is a cookie-authenticated session, not a bearer).
+    const { trunk } = await buildStack();
+    await signUp(trunk, "whoami-owner@example.com");
+    const signInRes = await signIn(trunk, "whoami-owner@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/infra/whoami", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kind: "user";
+      id: string;
+      workspace_id: string;
+      roles: readonly string[];
+      session_id: string | null;
+      token_id: string | null;
+    };
+    expect(body.kind).toBe("user");
+    expect(body.workspace_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
+    expect(body.roles).toEqual(["owner"]);
+    expect(body.session_id).not.toBeNull();
+    expect(body.token_id).toBeNull();
+  });
+
+  it("GET /infra/whoami reflects a role downgrade (loadRoles is the single source of role truth)", async () => {
+    // Override the hook-seeded "owner" to "member" and re-sign-in; the
+    // whoami projection must report "member" on the next call. This
+    // guards the invariant that the whoami route reads through the
+    // same `loadRoles` path the dispatcher/gate uses — not a cached
+    // or stale view.
+    const { trunk } = await buildStack();
+    await signUp(trunk, "whoami-member@example.com", { overrideRole: "member" });
+    const signInRes = await signIn(trunk, "whoami-member@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/infra/whoami", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { roles: readonly string[] };
+    expect(body.roles).toEqual(["member"]);
+  });
+
+  it("GET /infra/health stays public even after /infra/whoami is gated (regression check)", async () => {
+    // Adding principal middleware to `/infra/whoami` must not leak to
+    // `/infra/health` — the two routes share a prefix but differ in
+    // auth posture (ADR 0025 + the comment on `createApiApp`).
+    const { trunk } = await buildStack();
+    const res = await trunk.request("/infra/health");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe("ok");
+  });
+
   it("GET /docs/list round-trips through the full stack (auth → principal mw → dispatcher → doc.list capability)", async () => {
     const { auth, loadRoles, trunk } = await buildStack({ registerDocList: true });
     await signUp(trunk, "dana@example.com");

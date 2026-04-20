@@ -27,5 +27,6 @@
  */
 
 import { health } from "./health";
+import { whoami } from "./whoami";
 
-export const infraRoutes = [health] as const;
+export const infraRoutes = [health, whoami] as const;
