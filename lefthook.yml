@@ -78,12 +78,24 @@ pre-push:
           echo "skip: contract tests not yet scaffolded"
         fi
     e2e:
-      # Playwright + axe (§17.2 step 7).
+      # Two e2e flavours:
+      #   • CLI compiled-binary ↔ real HTTP server (`apps/cli/src/e2e/
+      #     *.e2e.test.ts`) — proves the `bun build --compile` artifact
+      #     actually round-trips over a real TCP listener. Unlike the
+      #     in-process integration tests, this spawns the shipping
+      #     binary and asserts AXI stdout over a real subprocess pipe.
+      #   • Playwright + axe (§17.2 step 7) — Web UI e2e, still
+      #     scaffold-gated until `packages/e2e/` lands.
+      #
+      # The CLI e2e is unconditional: `apps/cli` exists and its
+      # `test:e2e` script is authoritative. A scaffold check would be
+      # a silent-skip foot-gun if someone deleted the test dir.
       run: |
+        pnpm -C apps/cli test:e2e
         if [ -d packages/e2e/test ]; then
           pnpm -C packages/e2e test
         else
-          echo "skip: e2e suite not yet scaffolded"
+          echo "skip: playwright suite not yet scaffolded"
         fi
 
 # ── Commit message hook: DCO sign-off enforcement ──────────────────────────

@@ -12,7 +12,8 @@
     { "path": "../../packages/auth" },
     { "path": "../../packages/capabilities" },
     { "path": "../../packages/db" },
-    { "path": "../../packages/ids" }
+    { "path": "../../packages/ids" },
+    { "path": "../../packages/sync" }
   ],
   "exclude": ["node_modules", "dist"]
 }

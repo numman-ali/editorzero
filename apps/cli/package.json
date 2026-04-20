@@ -16,9 +16,11 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
+    "build:compile": "bun build --compile --outfile ./dist/ez ./src/index.ts",
     "clean": "rm -rf dist *.tsbuildinfo .tsbuildinfo.test",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "@editorzero/api-client": "workspace:*",
@@ -31,6 +33,8 @@
     "@editorzero/auth": "workspace:*",
     "@editorzero/db": "workspace:*",
     "@editorzero/ids": "workspace:*",
+    "@editorzero/sync": "workspace:^",
+    "@hono/node-server": "^1.19.14",
     "@vitest/coverage-v8": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
