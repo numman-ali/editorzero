@@ -230,4 +230,50 @@ describe("createMcpHandler (JSON-RPC roundtrip)", () => {
       error: { code: "permission_denied" },
     });
   });
+
+  it("derivation parity: tool list equals the registry's mcp-surface + not-humanOnly slice", async () => {
+    // Contract invariant (AGENTS.md #4 + ADR 0026 commitments 1, 5): the
+    // MCP tool list is **derived** from the registry, not maintained by
+    // hand. The literal assertions above each exercise one filter case;
+    // this one fixes the derivation itself — the set of ids in
+    // `tools/list` must be exactly the set produced by applying the
+    // public semantic filter (`surfaces.includes("mcp") && !humanOnly`)
+    // to the registry's capabilities.
+    //
+    // The expected set is computed from the registry input using the
+    // semantic predicate (not `isMcpTool`), so this test would fail if a
+    // future refactor silently widened or narrowed `isMcpTool` beyond
+    // the contract ADR 0026 encodes.
+    const caps = [
+      makeCap({ id: "doc.alpha", summary: "Alpha — mcp-surface, agent-safe" }),
+      makeCap({ id: "doc.beta", summary: "Beta — mcp-surface, agent-safe" }),
+      makeCap({
+        id: "workspace.purge",
+        summary: "Purge — mcp-surface but human-only",
+        humanOnly: true,
+      }),
+      makeCap({
+        id: "admin.ping",
+        summary: "Ping — api-only, never exposed to mcp",
+        surfaces: ["api"],
+      }),
+      makeCap({
+        id: "doc.gamma",
+        summary: "Gamma — multi-surface including mcp",
+        surfaces: ["api", "cli", "mcp", "ui"],
+      }),
+    ];
+    harness = await makeHarness({ caps });
+
+    const result = await harness.client.listTools();
+    const toolNames = result.tools.map((t) => t.name).sort();
+
+    const expected = caps
+      .filter((c) => c.surfaces.includes("mcp") && c.humanOnly !== true)
+      .map((c) => c.id as string)
+      .sort();
+
+    expect(toolNames).toEqual(expected);
+    expect(toolNames).toEqual(["doc.alpha", "doc.beta", "doc.gamma"]);
+  });
 });

@@ -25,7 +25,17 @@
  */
 
 import { createAuth, runAuthMigrations } from "@editorzero/auth";
-import { createRegistry, docCreate, docList, registerCapability } from "@editorzero/capabilities";
+import {
+  createRegistry,
+  docCreate,
+  docDelete,
+  docGet,
+  docList,
+  docPublish,
+  docRestore,
+  docUnpublish,
+  registerCapability,
+} from "@editorzero/capabilities";
 import {
   createDocUpdatesReader,
   createDocUpdatesWriter,
@@ -89,7 +99,24 @@ async function buildStack() {
     trustedOrigins: ["http://localhost:3000"],
   });
   await runAuthMigrations(auth);
-  const capabilities = [registerCapability(docList), registerCapability(docCreate)];
+  // Register the full P3.7 production doc capability set. The literal
+  // slice (just docList + docCreate) was fine while this test only
+  // asserted two literal ids on tools/list, but the derivation-parity
+  // case below proves the stronger invariant (AGENTS.md #4): every
+  // mcp-surface capability in the registry is exposed as a tool through
+  // the real trunk composition — not just the ones we remembered to
+  // mention in a hand-written assertion. Registration is inline per
+  // capability because `registerCapability<I, O>` can't unify `I` / `O`
+  // across heterogeneous capability types in a single `.map(...)`.
+  const capabilities = [
+    registerCapability(docCreate),
+    registerCapability(docDelete),
+    registerCapability(docGet),
+    registerCapability(docList),
+    registerCapability(docPublish),
+    registerCapability(docRestore),
+    registerCapability(docUnpublish),
+  ];
   const registry = createRegistry(capabilities);
   const sync = new HocuspocusSync({
     docUpdatesWriter: createDocUpdatesWriter(),
@@ -154,15 +181,41 @@ async function makeMcpClient(
 }
 
 describe("MCP chain — trunk + auth + dispatcher + createMcpHandler", () => {
-  it("lists every registered mcp-surface capability as a tool (cookie-authenticated)", async () => {
+  it("tools/list equals the production registry's mcp-filter — derivation parity through the real trunk", async () => {
+    // Contract invariant (AGENTS.md #4 + ADR 0026 commitments 1, 5):
+    // every mcp-surface capability the caller registers must appear as
+    // a tool in `tools/list` — no silent drops from the adapter, no
+    // ghost tools the registry doesn't know about. The expected set is
+    // derived from the registered capabilities using the public
+    // semantic filter (`surfaces.includes("mcp") && !humanOnly`), not
+    // from a hand-maintained literal, so adding a new mcp-surface
+    // capability in the production set below makes this test pick it
+    // up automatically. The in-adapter version of this assertion lives
+    // in `packages/mcp-server/src/create-mcp-handler.integration.test
+    // .ts`; this one proves the same contract holds through the real
+    // cookie-auth + trunk-composition stack.
     const { trunk } = await buildStack();
     const cookie = await signUpAndSignIn(trunk);
     const client = await makeMcpClient(trunk, cookie);
 
     const result = await client.listTools();
 
-    const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["doc.create", "doc.list"]);
+    const toolNames = result.tools.map((t) => t.name).sort();
+    const expected = [docCreate, docDelete, docGet, docList, docPublish, docRestore, docUnpublish]
+      .filter((c) => c.surfaces.includes("mcp") && c.humanOnly !== true)
+      .map((c) => c.id as string)
+      .sort();
+
+    expect(toolNames).toEqual(expected);
+    expect(toolNames).toEqual([
+      "doc.create",
+      "doc.delete",
+      "doc.get",
+      "doc.list",
+      "doc.publish",
+      "doc.restore",
+      "doc.unpublish",
+    ]);
   });
 
   it("dispatches doc.list via tools/call and returns the empty workspace list", async () => {
