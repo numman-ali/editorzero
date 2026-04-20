@@ -17,7 +17,7 @@ Turn the 20 accepted ADRs into a system design that is:
 
 Anything still open after this doc is listed in [§19 Open questions](#19-open-questions-carried).
 
-This file mixes **target-state architecture** with **landed-status callouts**. Unless a paragraph explicitly says something is "currently landed", "open", "planned", or cites a concrete test/file as present evidence, read package inventories, surface adapters, and verification paths below as the intended architecture rather than a claim that the current tree already contains every listed package or harness. Phase-closure truth lives in `docs/continuation.md`, and the sections touched by P3.6 call out their current status inline. **Package-layout references (e.g., `packages/cli`) in six load-bearing sites — §5 "Four-surface adapters" intro, §16.1 monorepo layout tree, §16.2 layered architecture diagram + lint-enforced import rules, §16.7 codegen inventory (CLI command tree row), §17.1 "Stack wiring" table prelude, and §17.1 row 4 (`cross-surface-fixture` / invariant 4) — predate [ADR 0021](adr/0021-surface-transport-topology.md) (surface-transport topology; 2026-04-18). Each is marked inline with `[stale pre-ADR-0021; see ADR 0021 / Appendix C item 1]` so the deferral is visible at the point of use; ADR 0021 + Appendix C item 1 are canonical for any scaffold / lint / codegen question, and Appendix C row 1 in `docs/continuation.md` carries the master inventory. A separate reconcile slice will rewrite the references in place.**
+This file mixes **target-state architecture** with **landed-status callouts**. Unless a paragraph explicitly says something is "currently landed", "open", "planned", or cites a concrete test/file as present evidence, read package inventories, surface adapters, and verification paths below as the intended architecture rather than a claim that the current tree already contains every listed package or harness. Phase-closure truth lives in `docs/continuation.md`, and the sections touched by P3.6+ call out their current status inline.
 
 ## 1.1 Design posture — engineering for coding agents
 
@@ -818,7 +818,7 @@ MVP is `v1`. Breaking changes ship a new capability id alongside (`doc.update_v2
 
 ## 5. Four-surface adapters
 
-Invariant #4 is the **target parity contract**, not current-tree status: as of P3.6 the shared registry/dispatcher/sync primitive is landed, but `apps/`, `packages/api-server`, `packages/cli`, `packages/mcp-server`, and `packages/contract-tests` are not in the repo yet. *[stale pre-ADR-0021 package names; see ADR 0021 / Appendix C item 1.]* The subsections below describe the intended adapters and matrix; when those surfaces land, hand-written adapter glue is **forbidden**.
+Invariant #4 is the **target parity contract**, not current-tree status: as of P3.7 the shared registry/dispatcher/sync primitive + Hono trunk + CLI surface + MCP adapter have all landed (`packages/api-server`, `packages/api-client`, `packages/mcp-server`, `apps/cli`); still absent are `apps/{app,admin}` (Web UI) and `packages/contract-tests` (cross-surface parity harness). The subsections below describe the intended adapters and matrix; for surfaces that have landed, hand-written adapter glue is **forbidden** — the three existing surfaces all derive from the capability registry.
 
 > **Read [ADR 0021](adr/0021-surface-transport-topology.md) before implementing any §5.x slice.** It names the Hono app as the single trunk, commits each eventual surface adapter (Server Actions / RSC / CLI / MCP) to consuming it via typed RPC (`hc<AppType>` — in-process via `app.request` for server-side callers, HTTP for clients), drops MCP stdio in favour of Streamable HTTP, names `citty` as the CLI framework, and pins `@hono/mcp` as the MCP integration. The subsections below describe the resulting surfaces; the ADR is the why.
 
@@ -1716,7 +1716,8 @@ pnpm workspaces, single root `tsconfig.json` with project references, single `pa
 editorzero/
 ├── apps/
 │   ├── app/                       # Next.js 16 — (app)/ (public)/ (api)/
-│   └── admin/                     # Next.js 16 — operator console, gated
+│   ├── admin/                     # Next.js 16 — operator console, gated
+│   └── cli/                       # Bun-compiled CLI from registry (ADR 0021)
 ├── packages/
 │   ├── ids/                       # Branded ID types + parsers (no runtime deps)
 │   ├── scopes/                    # Scope vocabulary + helpers
@@ -1760,9 +1761,9 @@ editorzero/
 │   ├── search/                    # SearchService + FTS + vector drivers
 │   ├── jobs/                      # JobService + pg-boss + SQLite drivers
 │   ├── mirror/                    # git + S3 sinks + projection pipeline
-│   ├── mcp-server/                # MCP derivation from registry
-│   ├── api-server/                # Hono routes from registry + OpenAPI gen
-│   ├── cli/                       # Bun-compiled CLI from registry
+│   ├── mcp-server/                # MCP derivation from registry (ADR 0026)
+│   ├── api-server/                # Hono routes from registry + OpenAPI gen (ADR 0021)
+│   ├── api-client/                # Typed-RPC client via `hc<AppType>` (ADR 0021)
 │   ├── observability/             # OTel SDK + shared tracer/logger/meter
 │   ├── contract-tests/            # Cross-surface parity matrix (generated)
 │   └── e2e/                       # Playwright + axe
@@ -1773,8 +1774,6 @@ editorzero/
 ├── docs/                          # ADRs, architecture, runbook, threat model
 └── .github/                       # OSS hygiene
 ```
-
-*[stale pre-ADR-0021 layout; see ADR 0021 / Appendix C item 1 — `cli/` should sit under `apps/` (not `packages/`), and `packages/api-client` is missing from the tree above.]*
 
 **Package boundaries are contracts.** A package's public exports are its `index.ts` barrel; anything not exported is private. Cross-package imports go through the barrel, never deep paths. Enforced by a Biome rule.
 
@@ -1818,12 +1817,12 @@ Import direction is strictly downward. Higher layers import from lower; never th
   └───────────────────────────────────────────────┘
 ```
 
-*[stale pre-ADR-0021 package names — the diagram above and the import rules below reference `cli` as a package-level surface and omit `api-client`; see ADR 0021 / Appendix C item 1 for the canonical topology. Lint rules derived from this section will need to be rebuilt against ADR 0021 when `@editorzero/arch-lint` lands.]*
+The surface-adapters box includes `api-server` / `mcp-server` at `packages/*` and `apps/cli` / `apps/app` (Server Actions) per ADR 0021. `api-client` (typed-RPC client via `hc<AppType>`) is not a surface adapter itself — it rides alongside `api-server` for consumers, so it sits at the capability-layer boundary rather than in this diagram. Lint rules derived from this section will crystallize as a dedicated `@editorzero/arch-lint` package when it lands.
 
 **Layer import rules (enforced by Biome + custom tsmorph lint):**
 
 - `capabilities/*` may import from: `ids`, `scopes`, `principal`, `audit`, `auth-service`, domain-service packages, `dispatcher` (for types only).
-- `capabilities/*` may **not** import from: `db` (use `ctx.db`), `sync` (use `ctx.transact`), `auth` (use `auth-service`), `api-server`, `cli`, `mcp-server`, `apps/*`. Business logic lives in services, not handlers.
+- `capabilities/*` may **not** import from: `db` (use `ctx.db`), `sync` (use `ctx.transact`), `auth` (use `auth-service`), `api-server`, `mcp-server`, `apps/*` (CLI + Next.js UI). Business logic lives in services, not handlers.
 - Service packages (including `auth-service`) may import from: `ids`, `scopes`, `principal`, `db/repos`, infrastructure (`auth`, `sync`, `observability`), sibling service packages (sparingly, document in the import). May **not** import from: any surface package, `dispatcher`, `capabilities`.
 - Repo packages (`db/repos/*`) may import from: `db` (Kysely) only. May **not** import services, capabilities, surfaces.
 - Surface adapters may import from: `capabilities/registry`, `dispatcher`. Never services or repos directly.
@@ -2168,8 +2167,8 @@ An agent can guess the path for any file type given the thing they want. No surp
 | Kysely DB types | Atlas `schema/*.sql` | `kysely-codegen` | `packages/db/src/generated/` | `pnpm codegen` | yes |
 | Capability registry barrel | `capabilities/src/**/*.ts` | small bun script | `packages/capabilities/src/registry.ts` | build + watch | yes |
 | OpenAPI spec | Capability zod schemas | `@hono/zod-openapi` at runtime; snapshot via `pnpm openapi:snapshot` | `packages/api-server/openapi.snapshot.json` | CI on change | yes (snapshot); runtime otherwise |
-| MCP tool list | Capability registry | `packages/mcp-server/src/register.ts` | runtime | runtime | n/a |
-| CLI command tree | Capability registry | `packages/cli/src/register.ts` *[stale pre-ADR-0021; see ADR 0021 / Appendix C item 1]* | runtime + frozen in `bun build --compile` | build | n/a (baked into binary) |
+| MCP tool list | Capability registry | `packages/mcp-server/src/create-mcp-handler.ts` (registry → tool loop at handler-factory time) | runtime | runtime | n/a |
+| CLI command tree | Capability registry | `apps/cli/src/registry.ts` + `apps/cli/src/generator/` | runtime + frozen in `bun build --compile` | build | n/a (baked into binary) |
 | Contract-test matrix | Capability registry | `packages/contract-tests/src/generate.ts` | `packages/contract-tests/generated/` | `pnpm test:contract` | yes |
 | BlockNote schema | BlockSpecs registry | barrel | `packages/blocks/src/schema.ts` | build | yes |
 
@@ -2419,7 +2418,7 @@ These rules are what keep four surfaces and a CRDT backbone from drifting as cap
 
 ### 17.1 Stack wiring (ADR invariant mapping)
 
-This table is the **target invariant → test map**, not a claim that every package path below exists in the current tree. Unless a row explicitly calls out something as "currently landed", read package/test paths here as planned endpoints. As of P3.6, the landed proofs relevant to this sweep are the F31 crash-fuzz row plus the runtime/fixture coverage called out in row 7a; the four-surface contract rows remain planned because `apps/`, `packages/api-server`, `packages/cli`, `packages/mcp-server`, and `packages/contract-tests` are not in the repo yet. *[stale pre-ADR-0021 package names; see ADR 0021 / Appendix C item 1.]*
+This table is the **target invariant → test map**, not a claim that every package path below exists in the current tree. Unless a row explicitly calls out something as "currently landed", read package/test paths here as planned endpoints. As of P3.7, the landed proofs relevant to this sweep are the F31 crash-fuzz row plus the runtime/fixture coverage called out in row 7a; the cross-surface contract rows remain planned because `packages/contract-tests` and `apps/{app,admin}` are still absent — but the surfaces those rows generate against (`packages/api-server`, `packages/mcp-server`, `apps/cli`) have all landed, so the remaining gap is the contract-test harness itself, not the adapters.
 
 | # | Invariant (AGENTS.md) | Test kind | Location |
 |---|---|---|---|
@@ -2432,7 +2431,7 @@ This table is the **target invariant → test map**, not a claim that every pack
 | 3 | Sequence assignment is atomic + gapless per doc (F9) | **Property** | `packages/sync/test/seq-atomicity.prop.ts` |
 | 3 | Transactional outbox never loses a downstream event (F10) | **Property** | `packages/jobs/test/outbox.prop.ts` — crash-fuzz |
 | 4 | Every capability exists on every type-compatible surface | **Planned contract** | Planned `packages/contract-tests/test/surface-parity.ts` — generated from the registry once the surface adapters and contract-test package land |
-| 4 | Same input on all surfaces produces same output + audit | **Planned contract** | Planned `packages/contract-tests/test/cross-surface-fixture.ts` — depends on `apps/`, `packages/api-server`, `packages/cli`, `packages/mcp-server`, and `packages/contract-tests`, none of which are in the tree today *[stale pre-ADR-0021 package names; see ADR 0021 / Appendix C item 1]* |
+| 4 | Same input on all surfaces produces same output + audit | **Planned contract** | Planned `packages/contract-tests/test/cross-surface-fixture.ts` — depends on `packages/contract-tests` (absent) and `apps/{app,admin}` (absent); the three transactional surfaces it generates against (`packages/api-server`, `packages/mcp-server`, `apps/cli`) are landed. Adapter-level MCP↔registry parity is enforced today in `packages/mcp-server/src/create-mcp-handler.integration.test.ts` + `packages/api-server/src/composition/mcp-chain.integration.test.ts`. |
 | 5 | Permission checks in capability layer | **Contract + integration** | `packages/capabilities/test/permission-matrix.ts` (allow/deny fuzz) + `packages/db/test/tenant-isolation.prop.ts` (F4 cross-tenant fuzz against both drivers) |
 | 6 | Soft-deletes recoverable via first-class capability | **Property** | `packages/capabilities/test/inverse-restore.prop.ts` (ADR 0017) |
 | 7a | All **content** mutations flow through CRDT via `ctx.transact` | **Static + integration** | Planned `@editorzero/arch-lint` rules (`no-raw-ydoc-access`, `transact-called-at-most-once`) — F89, not yet implemented. **Currently landed:** dispatcher runtime backstop (F92 — `TransactCalledTwiceError` + at-most-once guard in `packages/dispatcher/src/dispatcher.ts`) + dispatcher composition coverage via inline fixture capabilities at `packages/dispatcher/src/writepath.integration.test.ts`. **Open:** real-capability integration through dispatcher + Hocuspocus + SQLite is not yet exercised in any test (P3.6f scope acknowledgement, Phase 4 follow-up alongside surface adapters). |
