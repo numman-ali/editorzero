@@ -262,6 +262,8 @@ CREATE UNIQUE INDEX docs_published_slug_unique
 
 **Published URL resolution** (red-team F20 fix). The `(public)/[domain]/[slug]` route resolves `(custom_domain → workspace_id, slug → published_slug)`. `published_slug` is populated on `doc.publish` (default: copy of `slug`, collision-resolved by appending `-2`, `-3`, …) and cleared on `doc.unpublish`. Workspace-internal `slug` can collide across collections (intentional — two collections can each have "Getting started"); public URLs cannot.
 
+**v1 implementation scope (P3.7 — `doc.publish` landed 2026-04-20).** `published_slug` and `published_at` are the *target* DDL above but not yet in the live schema (`packages/db/src/schema.ts` → `DocsTable` has `slug`, `visibility`, `visibility_version`, no `published_*`). The first `doc.publish` capability slice is **visibility-only**: flip `visibility="public"`, bump `visibility_version`, emit `doc.publish` audit. `published_slug` collision handling + `published_at` column population land with the public-route renderer slice that also ships `doc.unpublish`; until then the `(public)/[domain]/[slug]` route itself does not exist and `doc.list` / `doc.get` return every non-deleted doc regardless of `visibility`. The capability's response shape + audit effect already carry a `published_at` field sourced from `ctx.now()`, so the later schema widening is an additive migration (DDL adds columns; handler's UPDATE grows to set them; API contract unchanged).
+
 ### 3.6 Blocks (projected-read-only)
 
 ```

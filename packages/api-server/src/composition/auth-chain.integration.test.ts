@@ -36,6 +36,7 @@ import {
   docCreate,
   docGet,
   docList,
+  docPublish,
   registerCapability,
 } from "@editorzero/capabilities";
 import {
@@ -84,6 +85,7 @@ async function buildStack(
     registerDocList?: boolean;
     registerDocCreate?: boolean;
     registerDocGet?: boolean;
+    registerDocPublish?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -101,6 +103,7 @@ async function buildStack(
     ...(options.registerDocList ? [registerCapability(docList)] : []),
     ...(options.registerDocCreate ? [registerCapability(docCreate)] : []),
     ...(options.registerDocGet ? [registerCapability(docGet)] : []),
+    ...(options.registerDocPublish ? [registerCapability(docPublish)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -614,5 +617,131 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
       headers: { cookie: kateCookie },
     });
     expect(kateRes.status).toBe(404);
+  });
+
+  // ── POST /docs/publish/:doc_id — first metadata-only mutation ────────
+  //
+  // End-to-end coverage for the publish route scopes down to what the
+  // real Better Auth stack can actually exercise. The resolver hardcodes
+  // `roles: ["member"]` (see `@editorzero/auth` → `resolver.ts`), and
+  // `member` role's `ROLE_SCOPES` (dispatcher/src/gate.ts) does NOT
+  // include `doc:publish` — so every real authenticated caller today
+  // hits the gate's deny branch. The happy-path allow test lands when
+  // the `workspace_members` slice ships role widening to `admin` / `owner`
+  // (resolver.ts header comment). Route unit test + capability unit
+  // test cover the allow behaviour at lower layers.
+  it("POST /docs/publish/:doc_id 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({
+      registerDocPublish: true,
+    });
+    const res = await trunk.request("/docs/publish/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /docs/publish/:doc_id with a non-UUID param returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocPublish: true,
+    });
+    await signUp(trunk, "liam@example.com");
+    const signInRes = await signIn(trunk, "liam@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/publish/not-a-uuid", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(400);
+
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/publish/:doc_id 403s for a member role (no doc:publish scope)", async () => {
+    // Proves the scope gate fires for a real authenticated member.
+    // Better Auth's resolver minted a `member` principal; the
+    // dispatcher's `PermissionGate` denies because `member`'s
+    // ROLE_SCOPES set doesn't include `doc:publish`. Deny-audit row
+    // lands via `withAuditTx` — a separate short-lived tx from any
+    // write-path, so we see `outcome: "deny"` even though the handler
+    // never ran. The doc doesn't need to exist (gate runs before the
+    // handler's SELECT); any valid UUIDv7 exercises the gate.
+    const { trunk } = await buildStack({
+      registerDocPublish: true,
+    });
+    await signUp(trunk, "mia@example.com");
+    const signInRes = await signIn(trunk, "mia@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/publish/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(403);
+
+    // One deny audit row lands; no allow, no rename mutation.
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.capability_id).toBe("doc.publish");
+    expect(audits[0]?.outcome).toBe("deny");
+  });
+
+  it("POST /docs/publish/:doc_id for a doc in a different workspace denies before reaching the SELECT (scope gate fires first)", async () => {
+    // Cross-workspace protection on doc.publish is owned by two layers:
+    // (a) the dispatcher's scope gate (member lacks `doc:publish`, so
+    // the deny fires here before the handler), and (b) the tenant-
+    // scoped `ctx.db` with `WorkspaceScopingPlugin` (if the gate ever
+    // allowed the handler to run, the SELECT-on-UPDATE would return 0
+    // rows for cross-workspace targets → 404). Today only (a) is
+    // observable because every authenticated user is a member. When
+    // role widening lands, a follow-up test on the allow path will
+    // exercise (b) with an admin principal.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocPublish: true,
+      withSync: true,
+    });
+    await signUp(trunk, "nora@example.com");
+    const noraSignIn = await signIn(trunk, "nora@example.com");
+    const noraCookie = sessionCookieFrom(noraSignIn);
+    await signUp(trunk, "oscar@example.com");
+    const oscarSignIn = await signIn(trunk, "oscar@example.com");
+    const oscarCookie = sessionCookieFrom(oscarSignIn);
+
+    // Nora creates a doc.
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie: noraCookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Nora's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    // Oscar tries to publish it. Gate denies (member role).
+    const res = await trunk.request(`/docs/publish/${doc_id}`, {
+      method: "POST",
+      headers: { cookie: oscarCookie },
+    });
+    expect(res.status).toBe(403);
+
+    // Confirm the row was not mutated — visibility still "workspace",
+    // visibility_version still 0. `driver.system()` is typed against
+    // the real schema, so the id column wants a `DocId` brand; the
+    // wire-form string off `createBody.doc_id` needs to be re-branded
+    // via the idempotent `DocId()` factory (already a valid UUIDv7
+    // string from the create handler).
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["visibility", "visibility_version"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.visibility).toBe("workspace");
+    expect(row.visibility_version).toBe(0);
   });
 });

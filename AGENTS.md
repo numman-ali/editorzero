@@ -58,6 +58,7 @@ Direct-to-main, solo + agent flow. No PRs. A bad commit is fix-forward; never `-
    ```
    Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
    ```
+4. **Push.** `git push` after every commit lands. Direct-to-main + no-PR flow means origin is the only off-machine backup and the only place external observers (Codex, @numman, anyone watching the public repo) see progress. Never `--force` / `--force-with-lease` to main; pre-push hooks (integration lane) still run.
 
 Bundle related in-flight work into one commit. Don't ceremonially split.
 
