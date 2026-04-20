@@ -59,6 +59,7 @@ All ADRs are **Accepted (v2, post-refresh)** as of 2026-04-17 unless noted. The 
 | [0023](0023-postgres-driver-substrate.md) | **Postgres driver substrate: `pg` + testcontainers + dual-backend conformance** | **Proposed (new, 2026-04-19)** |
 | [0024](0024-workspace-membership-shape.md) | **Workspace membership shape: custom `workspace_members` table; Better Auth for credentials only** | **Proposed (new, 2026-04-20)** |
 | [0025](0025-cli-auth-bootstrap-credential-store.md) | **CLI auth bootstrap: email+password → session cookie (transitional); `AuthCredentialStore` seam; `/infra/whoami`** | **Proposed (new, 2026-04-20)** |
+| [0026](0026-mcp-auth-bootstrap-session-cookie.md) | **MCP first-slice: transitional cookie auth + deliberately stateless** | **Proposed (new, 2026-04-20)** |
 
 ## Review trails
 
