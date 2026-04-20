@@ -182,14 +182,14 @@ packages/api-server/src/
 ```
 
 - **Each route is a folder**, not a file. When a route grows beyond a single file (schema + handler + middleware wiring + types), decomposition happens in-place without a filesystem refactor.
-- **Folder path == URL path.** `routes/infra/health/` exposes `/infra/health`; `routes/docs/create/` exposes `/docs/create`. The `createRoute({ path: "..." })` value mirrors the folder path. This makes the filesystem a self-documenting routing table — an agent finding the handler for a URL navigates the folder tree. No registry lookup needed.
+- **File path == URL path.** `routes/infra/health.ts` exposes `/infra/health`; `routes/docs/create.ts` exposes `/docs/create`. The `createRoute({ path: "..." })` value mirrors the file path. This makes the filesystem a self-documenting routing table — an agent finding the handler for a URL navigates the tree. No registry lookup needed. (Pattern mirrors `@editorzero/capabilities`: one file per capability at `src/<domain>/<capability>.ts` with its unit test co-located as `<capability>.unit.test.ts`; the only `index.ts` per domain is the grouping aggregator.)
 - **Path segments must be identifier-friendly.** `hc<AppType>` surfaces path segments as dot-access properties — `client.infra.health.$get()`, `client.docs.create.$post()`. No hyphens; deliberate singular/plural casing; no punctuation that breaks JS identifiers. Non-capability endpoints live under `infra/` so they're visibly not capability endpoints.
-- **Domain index exports one `as const` tuple.** `routes/<domain>/index.ts` imports every sibling route folder's `index.ts` and exports `export const <domain>Routes = [...] as const`. Adding a route is a domain-local change; the trunk only knows about the domain tuple.
+- **Domain index exports one `as const` tuple.** `routes/<domain>/index.ts` imports every sibling route file (`./create`, `./get`, …) and exports `export const <domain>Routes = [...] as const`. Adding a route is a domain-local change; the trunk only knows about the domain tuple.
 - **Trunk spread is inline at the `openapiRoutes` call site.** `new OpenAPIHono<ApiEnv>().openapiRoutes([...infraRoutes, ...docsRoutes] as const)`. The `as const` on the spread literal preserves tuple element types across the spread; Codex verified this is the intended 1.3.0 pattern, not a loophole.
 
 ### Per-route test posture: minimal-app isolation
 
-Each `routes/<domain>/<capability>/index.unit.test.ts` mounts **only its own route** on a fresh `OpenAPIHono<ApiEnv>` via `openapiRoutes([thatRoute] as const)` and exercises it through `testClient`. Not the full trunk.
+Each `routes/<domain>/<capability>.unit.test.ts` mounts **only its own route** on a fresh `OpenAPIHono<ApiEnv>` via `openapiRoutes([thatRoute] as const)` and exercises it through `testClient`. Not the full trunk.
 
 | Alternative | Why rejected |
 |---|---|

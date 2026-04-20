@@ -27,8 +27,8 @@ import type { UserPrincipal } from "@editorzero/principal";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { describe, expect, it } from "vitest";
 
-import type { ApiEnv } from "../../../env";
-import { create } from "./index";
+import type { ApiEnv } from "../../env";
+import { create } from "./create";
 
 const TEST_PRINCIPAL: UserPrincipal = {
   kind: "user",

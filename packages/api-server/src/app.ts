@@ -14,11 +14,12 @@
  * `/docs/*` differs. `hc<AppType>` bindings do not need to know
  * whether auth is wired.
  *
- * **Composition primitive.** Routes live one-per-folder under
- * `src/routes/<domain>/<capability>/index.ts` as `defineOpenAPIRoute(
- * { route, handler })` exports. Each domain aggregates its routes into
- * a readonly tuple in `src/routes/<domain>/index.ts`. The trunk
- * spreads every domain tuple into a single literal at the
+ * **Composition primitive.** Routes live one-per-file under
+ * `src/routes/<domain>/<capability>.ts` (co-located unit test at
+ * `<capability>.unit.test.ts`) as `defineOpenAPIRoute({ route, handler })`
+ * exports. Each domain aggregates its routes into a readonly tuple in
+ * `src/routes/<domain>/index.ts` (the only `index.ts` per domain). The
+ * trunk spreads every domain tuple into a single literal at the
  * `openapiRoutes(...)` call site. This is the
  * `@hono/zod-openapi@1.3.0` "Modular Organization" pattern.
  *

@@ -52,7 +52,7 @@ import { CapabilityId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
 import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
 
-import type { ApiEnv } from "../../../env";
+import type { ApiEnv } from "../../env";
 
 const DOC_CREATE_ID = CapabilityId("doc.create");
 

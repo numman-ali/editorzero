@@ -29,8 +29,8 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { testClient } from "hono/testing";
 import { describe, expect, it } from "vitest";
 
-import type { ApiEnv } from "../../../env";
-import { health } from "./index";
+import type { ApiEnv } from "../../env";
+import { health } from "./health";
 
 const isolated = new OpenAPIHono<ApiEnv>().openapiRoutes([health] as const);
 

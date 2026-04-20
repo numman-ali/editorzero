@@ -31,9 +31,9 @@
  *      `composition/auth-chain.integration.test.ts`.
  *
  * Per-route behavioural tests (response shape, input validation, etc.)
- * live alongside each route at `routes/<domain>/<capability>/index.
- * unit.test.ts`. Do not bloat this file with per-route assertions;
- * keep it focused on composition-layer invariants.
+ * live alongside each route at `routes/<domain>/<capability>.unit.test.ts`.
+ * Do not bloat this file with per-route assertions; keep it focused on
+ * composition-layer invariants.
  */
 
 import type { Auth } from "@editorzero/auth";

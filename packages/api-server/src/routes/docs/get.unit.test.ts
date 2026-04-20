@@ -1,6 +1,6 @@
 /**
  * Minimal-app test for `GET /docs/get/:doc_id` (ADR 0021 §Per-route
- * test posture). Mirrors `routes/docs/{list,create}/index.unit.test.ts`:
+ * test posture). Mirrors `routes/docs/{list,create}.unit.test.ts`:
  * mounts only this route on a fresh `OpenAPIHono<ApiEnv>` + a fixture
  * middleware chain that seeds `c.var.principal` + `c.var.dispatcher`.
  *
@@ -28,8 +28,8 @@ import type { UserPrincipal } from "@editorzero/principal";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { describe, expect, it } from "vitest";
 
-import type { ApiEnv } from "../../../env";
-import { get } from "./index";
+import type { ApiEnv } from "../../env";
+import { get } from "./get";
 
 const TEST_PRINCIPAL: UserPrincipal = {
   kind: "user",
