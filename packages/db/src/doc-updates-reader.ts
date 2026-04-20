@@ -4,29 +4,36 @@
  * `createSqliteDriver` and `createPostgresDriver`; empirically verified by
  * `packages/db/test/integration/writers.integration.test.ts`.
  *
- * Reads `doc_updates.update_blob` for a doc in seq order. Consumed by
- * the Hocuspocus `onLoadDocument` hook — each blob is applied to the
- * freshly-instantiated Y.Doc via `Y.applyUpdate`, rehydrating the
- * CRDT to the committed state before a handler's `ctx.transact` runs.
+ * Reads `doc_updates.update_blob` for a doc in seq order. Two call
+ * shapes — both return the same rows in the same order, but pick the
+ * one that matches the caller's transactional posture:
  *
- * **Reads through the write-path tx handle.** The reader accepts the
- * same `AuditTx` brand the audit + doc-updates writers accept, and
- * casts it back to `Transaction<SystemDatabase>` internally. Under
- * SQLite + better-sqlite3's single-connection model, a concurrent
- * read against `driver.system()` while `withSystemTx` holds the
- * connection would block on `acquireConnection` until the tx commits —
- * and `onLoadDocument` fires *inside* that tx. Routing the read
- * through the tx's own Kysely handle shares the connection, avoiding
- * the deadlock. Postgres's pool model tolerates a second connection,
- * but the shared-handle contract keeps the call site dialect-agnostic.
+ *   1. `readByDoc(tx: AuditTx, doc_id)` — **write-path hydration.**
+ *      Called by the Hocuspocus `onLoadDocument` hook during
+ *      `ctx.transact`, when the dispatcher is inside a write-path SQL
+ *      tx. Reads through the tx's own Kysely handle so the read
+ *      shares better-sqlite3's single connection with the enclosing
+ *      `withSystemTx` — a concurrent `driver.system()` read would
+ *      block on `acquireConnection` until commit, and `onLoadDocument`
+ *      fires *inside* that tx. Postgres's pool tolerates a second
+ *      connection, but sharing the handle keeps the call site
+ *      dialect-agnostic.
+ *   2. `readByDocUntransacted(db: Kysely<SystemDatabase>, doc_id)` —
+ *      **read-path hydration.** Called by the Hocuspocus
+ *      `onLoadDocument` hook under `HocuspocusSync.read(doc_id, fn)` —
+ *      the dispatcher's read lane intentionally opens no SQL tx
+ *      (§6.4: reads must not take the RESERVED lock `BEGIN IMMEDIATE`
+ *      grabs). The untransacted handle is `driver.system()`; under
+ *      WAL mode on SQLite it runs concurrently with live writers,
+ *      and on Postgres it draws from the pool without contention.
  *
- * **Read-your-own-writes is not a concern here.** Hydration runs in
- * `onLoadDocument`, which fires during `openDirectConnection` at the
- * start of `ctx.transact`. No `doc_updates` row for this doc has
- * been inserted in the tx yet — the writer runs after the handler
- * completes its CRDT mutation (§6.4). The read therefore returns the
- * same rows it would from a separate read-only connection:
- * committed state.
+ * **Read-your-own-writes is not a concern** on either shape. Hydration
+ * runs in `onLoadDocument`, which fires during `openDirectConnection`
+ * at the start of `ctx.transact` / `sync.read`. On the write path,
+ * no `doc_updates` row for this doc has been INSERTed in the tx yet —
+ * the writer runs *after* the handler's CRDT mutation completes. On
+ * the read path, there is no writer at all. Both shapes therefore
+ * return committed state only.
  *
  * **Why a reader and not `sync` reaching into Kysely directly.** The
  * `no-raw-kysely-outside-db` coherence check (§8.1a + §17) pins every
@@ -45,25 +52,28 @@
 
 import type { AuditTx } from "@editorzero/audit";
 import type { DocId } from "@editorzero/ids";
-import type { Transaction } from "kysely";
+import type { Kysely, Transaction } from "kysely";
 
-import type { SystemDatabase } from "./schema";
+import type { SystemDatabase, SystemDb } from "./schema";
 
 export interface DocUpdatesReader {
   readByDoc(tx: AuditTx, doc_id: DocId): Promise<Uint8Array[]>;
+  readByDocUntransacted(db: SystemDb, doc_id: DocId): Promise<Uint8Array[]>;
 }
 
 export function createDocUpdatesReader(): DocUpdatesReader {
+  const readRows = async (handle: Kysely<SystemDatabase>, doc_id: DocId): Promise<Uint8Array[]> => {
+    const rows = await handle
+      .selectFrom("doc_updates")
+      .select("update_blob")
+      .where("doc_id", "=", doc_id)
+      .orderBy("seq", "asc")
+      .execute();
+    return rows.map((r) => r.update_blob);
+  };
   return {
-    readByDoc: async (auditTx, doc_id) => {
-      const tx = auditTx as unknown as Transaction<SystemDatabase>;
-      const rows = await tx
-        .selectFrom("doc_updates")
-        .select("update_blob")
-        .where("doc_id", "=", doc_id)
-        .orderBy("seq", "asc")
-        .execute();
-      return rows.map((r) => r.update_blob);
-    },
+    readByDoc: async (auditTx, doc_id) =>
+      readRows(auditTx as unknown as Transaction<SystemDatabase>, doc_id),
+    readByDocUntransacted: async (db, doc_id) => readRows(db, doc_id),
   };
 }

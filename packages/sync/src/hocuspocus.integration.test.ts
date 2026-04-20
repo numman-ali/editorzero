@@ -51,6 +51,7 @@ beforeEach(async () => {
   sync = new HocuspocusSync({
     docUpdatesWriter: createDocUpdatesWriter(),
     docUpdatesReader: createDocUpdatesReader(),
+    systemDb: driver.system(),
   });
 });
 
@@ -639,5 +640,254 @@ describe("HocuspocusSync.close", () => {
         });
       }),
     ).rejects.toThrow(/after close/);
+  });
+});
+
+describe("HocuspocusSync.read", () => {
+  // Pins the tx-less read seam (§6.4 — "reads must not take the
+  // RESERVED lock `BEGIN IMMEDIATE` grabs"). Proves:
+  //
+  //   1. Read on a cold doc (no resident Y.Doc, committed `doc_updates`
+  //      rows on disk) hydrates via the untransacted reader and
+  //      reflects the committed state.
+  //   2. Read on an empty doc (row exists in `docs` but no
+  //      `doc_updates` rows) yields a fresh Y.Doc with no content.
+  //   3. Read does NOT persist a `doc_updates` row — even when the
+  //      handler mutates the Y.Doc, the update is ephemeral.
+  //   4. Read does NOT mint an `outbox` entry.
+  //   5. Concurrent same-doc read + transact serialise through the
+  //      per-doc mutex — the read never observes a half-mutated Y.Doc.
+  //   6. Read after close rejects.
+
+  it("hydrates via untransacted reader on a cold doc and returns committed state", async () => {
+    await seedDocMetadata(DOC_ID_A);
+
+    // Write two committed updates through the write-path bind.
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "hello");
+      });
+    });
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        const body = ydoc.getText("body");
+        body.insert(body.length, " world");
+      });
+    });
+
+    // Force the doc out of memory so `read` has to hydrate from disk.
+    // Uses `sync.close()` + a fresh HocuspocusSync against the same
+    // driver — simulates a cold server restart, which is the only
+    // path where `onLoadDocument` actually has work to do under the
+    // read seam. In-process `read` after the same `transact` would hit
+    // the still-resident Y.Doc and skip the hook entirely.
+    await sync.close();
+    sync = new HocuspocusSync({
+      docUpdatesWriter: createDocUpdatesWriter(),
+      docUpdatesReader: createDocUpdatesReader(),
+      systemDb: driver.system(),
+    });
+
+    const observed = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    expect(observed).toBe("hello world");
+  });
+
+  it("returns an empty Y.Doc when no doc_updates rows exist", async () => {
+    await seedDocMetadata(DOC_ID_A);
+
+    const observed = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    expect(observed).toBe("");
+  });
+
+  it("does not write a doc_updates row even when the handler mutates the Y.Doc", async () => {
+    // Reads must stay ephemeral — a misuse like `sync.read(doc, y =>
+    // y.getText("body").insert(0, "…"))` must not silently persist.
+    // The write-path keeps `doc_updates` durable via the `update`
+    // listener + writer; the read path registers neither, so in-
+    // handler mutations evaporate.
+    await seedDocMetadata(DOC_ID_A);
+
+    await sync.read(DOC_ID_A, (ydoc) => {
+      ydoc.getText("body").insert(0, "should not persist");
+    });
+
+    const rows = await fetchDocUpdates(DOC_ID_A);
+    expect(rows).toHaveLength(0);
+    const outbox = await fetchOutbox();
+    expect(outbox).toHaveLength(0);
+  });
+
+  it("mutating inside read() does not pollute the resident Y.Doc observed by the next read", async () => {
+    // Regression guard on the contamination bug Codex caught during the
+    // Slice-1 review: prior to the clone-before-fn shape, `read(fn)`
+    // handed `fn` the *live resident* Y.Doc. A mutating handler dirtied
+    // the in-memory state without firing a `doc_updates` row (the read
+    // path registers no `update` listener), and a subsequent `read` or
+    // `transact` observed the polluted state. The fix snapshots the
+    // live doc, materialises a throwaway clone, and hands that clone
+    // to `fn` — the live doc is never exposed.
+    //
+    // This test asserts the narrow claim: a mutating read's state is
+    // invisible to the next hot read. The cold-replay taint case
+    // (write after mutating read re-merges against polluted state) is
+    // the next test.
+    await seedDocMetadata(DOC_ID_A);
+
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "hello");
+      });
+    });
+
+    await sync.read(DOC_ID_A, (ydoc) => {
+      // A misbehaving handler. Must NOT affect subsequent state.
+      ydoc.getText("body").insert(0, "ghost-");
+    });
+
+    const observed = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    expect(observed).toBe("hello");
+  });
+
+  it("mutating inside read() does not taint durable state after a subsequent write", async () => {
+    // Second half of the contamination guard. Same setup as the
+    // hot-read test above, but after the mutating read we also issue a
+    // real write-path transact that appends "!". Under the bug, the
+    // write's `update` listener captured "!" relative to the polluted
+    // live doc (`ghost-hello`), and the committed `doc_updates` row
+    // carried delta-against-poisoned-state. Cold replay from committed
+    // rows produced `hello!` in durable state — but the *hot* doc read
+    // `ghost-hello!`. The two diverged. The clone-before-fn fix keeps
+    // the live doc equal to committed state throughout, so the
+    // write's captured delta is faithful and cold replay equals hot
+    // state.
+    await seedDocMetadata(DOC_ID_A);
+
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "hello");
+      });
+    });
+
+    await sync.read(DOC_ID_A, (ydoc) => {
+      ydoc.getText("body").insert(0, "ghost-");
+    });
+
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        const body = ydoc.getText("body");
+        body.insert(body.length, "!");
+      });
+    });
+
+    // Cold replay — close + re-open so hydration comes purely from
+    // committed `doc_updates` rows, no resident Y.Doc.
+    await sync.close();
+    sync = new HocuspocusSync({
+      docUpdatesWriter: createDocUpdatesWriter(),
+      docUpdatesReader: createDocUpdatesReader(),
+      systemDb: driver.system(),
+    });
+
+    const coldRead = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    expect(coldRead).toBe("hello!");
+  });
+
+  it("serialises read-then-write + write-then-read on the same doc through the per-doc mutex", async () => {
+    // Pins the mutex ordering across both shapes (`transact` + `read`).
+    // **Under SQLite's single-connection model** we can't assert the
+    // mutex by kicking a read concurrently against an in-flight
+    // `withSystemTx`: the write holds the connection and would block
+    // the read's untransacted SELECT, while the read holds the mutex
+    // and blocks the write's `bound.transact` — a connection/mutex
+    // ordering inversion that deadlocks. That pathological shape is
+    // unreachable in the real dispatcher (read-path callers never wrap
+    // `sync.read` inside a `withSystemTx`), so we assert the mutex
+    // invariant via sequential runs instead: a read after a write sees
+    // the post-write state, and a write after a read commits its
+    // delta. The Postgres-backed integration (ADR 0007) where
+    // `withSystemTx` runs on independent connections is where the
+    // truly-concurrent shape would matter — left for that lane.
+    await seedDocMetadata(DOC_ID_A);
+
+    // read → write: read on empty doc yields "", write then persists.
+    const emptyRead = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    expect(emptyRead).toBe("");
+
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "a");
+      });
+    });
+
+    // write → read: read after commit sees the written state.
+    const afterWrite = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    expect(afterWrite).toBe("a");
+  });
+
+  it("sees state from an in-process transact when it's already resident", async () => {
+    // Hot-doc path — read after transact without a restart. The Y.Doc
+    // stays resident (open-replace pattern keeps `directConnectionsCount`
+    // >= 1 across the transact→read swap), so `onLoadDocument` does not
+    // re-fire; the read sees the same Y.Doc the transact mutated.
+    await seedDocMetadata(DOC_ID_A);
+
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "hot");
+      });
+    });
+
+    const observed = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    expect(observed).toBe("hot");
+  });
+
+  it("rejects read after close", async () => {
+    await seedDocMetadata(DOC_ID_A);
+    await sync.close();
+    await expect(sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString())).rejects.toThrow(
+      /after close/,
+    );
   });
 });

@@ -426,7 +426,11 @@ function mountContentDispatcher<I, O>(capability: Capability<I, O>): ContentMoun
   const auditWriter = createAuditWriter();
   const docUpdatesWriter = createDocUpdatesWriter();
   const docUpdatesReader = createDocUpdatesReader();
-  const sync = new HocuspocusSync({ docUpdatesWriter, docUpdatesReader });
+  const sync = new HocuspocusSync({
+    docUpdatesWriter,
+    docUpdatesReader,
+    systemDb: driver.system(),
+  });
   hocuspocus = sync;
   const runners: RunnerCounts = { writeTx: 0, read: 0 };
   let tick = 0;

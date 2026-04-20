@@ -98,7 +98,7 @@
  */
 
 import type { AuditTx } from "@editorzero/audit";
-import type { DocUpdatesReader, DocUpdatesWriter } from "@editorzero/db";
+import type { DocUpdatesReader, DocUpdatesWriter, SystemDb } from "@editorzero/db";
 import type { DocId, WorkspaceId } from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
 import { Hocuspocus } from "@hocuspocus/server";
@@ -126,14 +126,24 @@ export interface HocuspocusTxContext {
 export interface HocuspocusSyncDeps {
   readonly docUpdatesWriter: DocUpdatesWriter;
   /**
-   * Untransacted reader. Consumed by the `onLoadDocument` hook to
-   * replay committed `doc_updates` rows onto a freshly-instantiated
-   * Y.Doc. Hydration must see committed state only (see
-   * `doc-updates-reader.ts` docstring), so this is a
-   * `Kysely<SystemDatabase>` backed reader from `driver.system()`
-   * — never a `Transaction<SystemDatabase>`-backed one.
+   * Dispatches between two shapes from its call site inside the
+   * `onLoadDocument` hook — `readByDoc(auditTx, doc_id)` on the
+   * write-path (shares the enclosing SQL tx), and
+   * `readByDocUntransacted(systemDb, doc_id)` on the read-path
+   * (untransacted, no RESERVED lock). Both return committed state
+   * only (see `doc-updates-reader.ts` docstring).
    */
   readonly docUpdatesReader: DocUpdatesReader;
+  /**
+   * Untransacted `Kysely<SystemDatabase>` handle, supplied by the
+   * composition root via `driver.system()`. Consumed by the
+   * `onLoadDocument` hook on the read-path (when `HocuspocusSync.read`
+   * opens a doc without a SQL tx): hydration reads committed
+   * `doc_updates` via `docUpdatesReader.readByDocUntransacted(systemDb,
+   * doc_id)`. WAL on SQLite + the Postgres pool both let this run
+   * concurrently with live writers.
+   */
+  readonly systemDb: SystemDb;
   /**
    * Optional hocuspocus tuning. Defaults are test-safe: `debounce: 0`
    * + `unloadImmediately: false` keep `onStoreDocument` from firing
@@ -145,6 +155,23 @@ export interface HocuspocusSyncDeps {
     readonly unloadImmediately?: boolean;
     readonly name?: string;
   };
+}
+
+/**
+ * Internal marker for read-path opens (`HocuspocusSync.read` passes
+ * this as the `openDirectConnection` context). The hydration hook
+ * branches on presence of `__read` to route through the untransacted
+ * reader. Not exported — read callers don't construct this directly;
+ * they go through `HocuspocusSync.read(doc_id, fn)`.
+ *
+ * Kept out of the `HocuspocusTxContext` union because Codex's read-
+ * seam review called out "don't couple the read API to the write-
+ * bind context shape" — the read path has no principal / workspace_id
+ * need (no `doc_updates` attribution), and widening the exported
+ * type would force read callers to invent values.
+ */
+interface HocuspocusReadMarker {
+  readonly __read: true;
 }
 
 type DirectConnection = Awaited<ReturnType<Hocuspocus["openDirectConnection"]>>;
@@ -209,6 +236,7 @@ export class HocuspocusSync {
   constructor(deps: HocuspocusSyncDeps) {
     this.#docUpdatesWriter = deps.docUpdatesWriter;
     const reader = deps.docUpdatesReader;
+    const systemDb = deps.systemDb;
     // `unloadImmediately: false` keeps Y.Docs resident across the
     // per-doc `debounce` window after the last direct connection
     // drops (§6.4 assumes hot docs stay in memory under burst writes).
@@ -232,26 +260,28 @@ export class HocuspocusSync {
       // (verified at `Hocuspocus.esm.js:2458-2466`). Writing to the
       // canonical instance skips the extra encode/decode.
       //
-      // The hook reads `doc_updates` through `context.sqlTx` — the
-      // write-path tx handle passed into `openDirectConnection(name,
-      // context)` in `#runTransactLocked`. Reading through the same
-      // tx shares better-sqlite3's single connection; a separate
-      // `driver.system()` read would deadlock waiting for the tx to
-      // commit (see `doc-updates-reader.ts` docstring).
-      // Read-your-own-writes is not a concern: no `doc_updates` row
-      // for this doc has been INSERTed in the tx yet — the writer
-      // runs after the handler's CRDT mutation completes.
+      // **Three-way dispatch on `context`.**
       //
-      // **Non-bind opens (tests, Phase 4 WebSocket clients).** Any
-      // caller of `server.openDirectConnection(name, ctx)` whose
-      // `ctx` is not a `HocuspocusTxContext` — today only test
-      // fixtures simulating a concurrent connection holder, later
-      // also WebSocket client loads — skips hydration. The Phase 4
-      // WebSocket path will pair client opens with its own hydration
-      // shape (reading through `driver.system()` outside any tx);
-      // for Phase 3 the bind path is the only one that needs
-      // hydration, and opting out cleanly on non-bind opens keeps
-      // this hook narrowly-scoped.
+      //   1. Write-path bind — `context.sqlTx` set (+ `principal` +
+      //      `workspace_id`). Read through that tx's handle via
+      //      `reader.readByDoc(sqlTx, …)`. Sharing the handle is
+      //      load-bearing on SQLite: better-sqlite3 has one connection,
+      //      and a separate `driver.system()` read would deadlock
+      //      waiting for the tx to commit (see `doc-updates-reader.ts`).
+      //      Read-your-own-writes is not a concern — the writer runs
+      //      *after* the handler's CRDT mutation, so no `doc_updates`
+      //      row for this doc exists in the tx yet.
+      //   2. Read-path — `context.__read === true` (internal marker set
+      //      by `HocuspocusSync.read`). No SQL tx; hydrate via
+      //      `reader.readByDocUntransacted(systemDb, …)` on the captured
+      //      untransacted handle. SQLite's WAL + Postgres's pool both
+      //      tolerate this running concurrently with live writers.
+      //   3. Non-bind, non-read opens (today: test fixtures simulating
+      //      a concurrent connection holder; Phase 4: WebSocket client
+      //      loads). Skip hydration. The Phase 4 WebSocket path will
+      //      open with its own hydration marker; for Phase 3 the two
+      //      sanctioned openers (`bind().transact` + `read`) are the
+      //      only paths that need it.
       //
       // Throwing out of the hook causes Hocuspocus to
       // `unloadDocument` + `closeConnections` + rethrow — the
@@ -259,12 +289,24 @@ export class HocuspocusSync {
       // replay failure to the caller rather than loading a
       // partially-hydrated Y.Doc.
       onLoadDocument: async ({ document, documentName, context }) => {
-        const maybeCtx = context as Partial<HocuspocusTxContext> | null | undefined;
+        const maybeCtx = context as
+          | (Partial<HocuspocusTxContext> & Partial<HocuspocusReadMarker>)
+          | null
+          | undefined;
         const sqlTx = maybeCtx?.sqlTx;
-        if (sqlTx === undefined) return;
-        const blobs = await reader.readByDoc(sqlTx, documentName as DocId);
-        for (const blob of blobs) {
-          Y.applyUpdate(document, blob);
+        if (sqlTx !== undefined) {
+          const blobs = await reader.readByDoc(sqlTx, documentName as DocId);
+          for (const blob of blobs) {
+            Y.applyUpdate(document, blob);
+          }
+          return;
+        }
+        if (maybeCtx?.__read === true) {
+          const blobs = await reader.readByDocUntransacted(systemDb, documentName as DocId);
+          for (const blob of blobs) {
+            Y.applyUpdate(document, blob);
+          }
+          return;
         }
       },
     });
@@ -308,6 +350,109 @@ export class HocuspocusSync {
         /* no-op — see class docstring */
       },
     };
+  }
+
+  /**
+   * Tx-less read-path Y.Doc opener (§6.4 — "reads must not take the
+   * RESERVED lock `BEGIN IMMEDIATE` grabs"). Runs `fn` against a
+   * **throwaway clone** of the current live Y.Doc for `doc_id`,
+   * without opening a SQL write tx.
+   *
+   * Serialises against concurrent `bind().transact` on the same doc
+   * via `#withDocLock` — the per-doc mutex orders reads and writes
+   * on a given doc even though reads don't open a SQL tx, so a read
+   * never observes a half-mutated Y.Doc mid-`transact`.
+   *
+   * **Clone-before-fn (Codex Slice-1 finding — contamination guard).**
+   * The earlier shape handed `fn` the live resident Y.Doc. A
+   * misbehaving handler (`sync.read(doc, y => y.getText("body")
+   * .insert(0, "ghost"))`) dirtied in-memory state with no
+   * `doc_updates` row — the read path registers no `update` listener,
+   * so the mutation didn't persist, but it *did* stay resident.
+   * Subsequent reads saw the polluted text; worse, a later
+   * `bind().transact` captured its delta relative to the polluted
+   * state, committed a row that replayed cleanly from cold hydration
+   * but diverged from the hot Y.Doc. Cold vs. hot disagreement is
+   * exactly the class of bug the invariant-7 atomicity machinery is
+   * supposed to prevent. The fix: snapshot the live doc under the
+   * mutex via `Y.encodeStateAsUpdate`, materialise a fresh throwaway
+   * `Y.Doc` from that snapshot, hand the throwaway to `fn`, destroy
+   * it in `finally`. Handler mutations touch only the clone; the
+   * resident doc stays identical to committed state + any in-flight
+   * writer's applied updates.
+   *
+   * **No principal / workspace_id.** Reads don't attribute
+   * `doc_updates` rows or mint audit entries; the read API stays
+   * narrower than the write-bind context so callers can't
+   * accidentally thread mismatched identity through a read path.
+   * Codex's Slice-1 review flagged this too — widening later (when a
+   * kernel-split `ctx.readDoc` lands — Phase 3.7+) is cheap;
+   * narrowing later is a breaking change.
+   *
+   * **Cost.** `Y.encodeStateAsUpdate` + `Y.applyUpdate` on a clone
+   * per read call is O(doc state). Undo/redo history is not
+   * preserved on the clone (Yjs `encodeStateAsUpdate` is
+   * state-only) — acceptable because the read path has no
+   * undo/redo semantics anyway. Callers must read plain data out of
+   * the clone inside `fn`; Y types returned after `clone.destroy()`
+   * have undefined behaviour.
+   *
+   * **Visibility gap on commit-in-flight writes (acknowledged).**
+   * The mutex orders reads after any in-flight `bind().transact`
+   * body has fully returned, but the outer SQL tx may not have
+   * committed yet. A read's clone can therefore carry Y.Doc
+   * mutations whose `doc_updates` row has not yet been visible to
+   * other connections. If the outer tx subsequently rolls back,
+   * `bound.rollback()` evicts the resident Y.Doc — but our read's
+   * clone already returned. This is the Phase-4 broadcast-
+   * suppression gap (class docstring "In-memory rollback scope");
+   * Phase 3's single-writer tests tolerate the sub-millisecond
+   * window.
+   */
+  async read<T>(doc_id: DocId, fn: (ydoc: Y.Doc) => T | Promise<T>): Promise<T> {
+    return this.#withDocLock(doc_id, () => this.#runRead(doc_id, fn));
+  }
+
+  async #runRead<T>(doc_id: DocId, fn: (ydoc: Y.Doc) => T | Promise<T>): Promise<T> {
+    if (this.#closed) {
+      throw new Error("HocuspocusSync: read called after close()");
+    }
+    // Mirrors the open-replace pattern in `#runTransactLocked` — open
+    // a fresh DirectConnection carrying *this invocation's* read marker,
+    // register it as the per-doc singleton, disconnect the previous
+    // holder in `finally` after the new one is stored so the Y.Doc
+    // stays resident across the swap. If the doc was already hot (from
+    // a prior transact or read), Hocuspocus reuses the existing
+    // Document without re-firing `onLoadDocument`; the marker only
+    // governs hydration on first load.
+    const readMarker: HocuspocusReadMarker = { __read: true };
+    const direct = await this.#server.openDirectConnection(doc_id, readMarker);
+    const previous = this.#liveConnections.get(doc_id);
+    this.#liveConnections.set(doc_id, direct);
+    try {
+      // Snapshot the live doc under the mutex. `direct.transact` is
+      // the only documented way to get a Y.Doc reference off a
+      // `DirectConnection` (3.4.4 source — the callback receives the
+      // canonical `Document` instance). We read-only, no listener.
+      let snapshot: Uint8Array | undefined;
+      await direct.transact((liveDoc) => {
+        snapshot = Y.encodeStateAsUpdate(liveDoc as unknown as Y.Doc);
+      });
+      if (snapshot === undefined) {
+        throw new Error("HocuspocusSync: direct.transact did not yield a Y.Doc");
+      }
+      const clone = new Y.Doc();
+      Y.applyUpdate(clone, snapshot);
+      try {
+        return await fn(clone);
+      } finally {
+        clone.destroy();
+      }
+    } finally {
+      if (previous !== undefined && previous !== direct) {
+        await previous.disconnect();
+      }
+    }
   }
 
   /**

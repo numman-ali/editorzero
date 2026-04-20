@@ -94,6 +94,10 @@ async function readByDoc(doc_id: DocId): Promise<Uint8Array[]> {
   return driver.withSystemTx(async (tx) => reader.readByDoc(asAuditTx(tx), doc_id));
 }
 
+async function readByDocUntransacted(doc_id: DocId): Promise<Uint8Array[]> {
+  return reader.readByDocUntransacted(driver.system(), doc_id);
+}
+
 describe("createDocUpdatesReader.readByDoc", () => {
   it("returns an empty array when the doc has no updates", async () => {
     const blobs = await readByDoc(DOC_A);
@@ -125,6 +129,39 @@ describe("createDocUpdatesReader.readByDoc", () => {
     await seedUpdate(DOC_B, 1, new Uint8Array([20]));
     const blobsA = await readByDoc(DOC_A);
     const blobsB = await readByDoc(DOC_B);
+    expect(blobsA.map((b) => Array.from(b))).toEqual([[10]]);
+    expect(blobsB.map((b) => Array.from(b))).toEqual([[20]]);
+  });
+});
+
+describe("createDocUpdatesReader.readByDocUntransacted", () => {
+  it("returns the same rows as readByDoc when run on committed state", async () => {
+    // Pin the read-path hydration contract: outside any write-path tx,
+    // the untransacted handle returns committed `doc_updates` in seq
+    // order — identical to what `readByDoc` returns inside a tx. A
+    // regression that made the two methods diverge would silently
+    // desynchronise read-path hydration from write-path hydration.
+    await seedUpdate(DOC_A, 1, new Uint8Array([1]));
+    await seedUpdate(DOC_A, 2, new Uint8Array([2]));
+    await seedUpdate(DOC_A, 3, new Uint8Array([3]));
+    const viaTx = await readByDoc(DOC_A);
+    const viaBase = await readByDocUntransacted(DOC_A);
+    expect(viaBase.map((b) => Array.from(b))).toEqual(viaTx.map((b) => Array.from(b)));
+  });
+
+  it("orders by seq ascending on the untransacted path", async () => {
+    await seedUpdate(DOC_A, 3, new Uint8Array([3]));
+    await seedUpdate(DOC_A, 1, new Uint8Array([1]));
+    await seedUpdate(DOC_A, 2, new Uint8Array([2]));
+    const blobs = await readByDocUntransacted(DOC_A);
+    expect(blobs.map((b) => Array.from(b))).toEqual([[1], [2], [3]]);
+  });
+
+  it("scopes to the requested doc on the untransacted path", async () => {
+    await seedUpdate(DOC_A, 1, new Uint8Array([10]));
+    await seedUpdate(DOC_B, 1, new Uint8Array([20]));
+    const blobsA = await readByDocUntransacted(DOC_A);
+    const blobsB = await readByDocUntransacted(DOC_B);
     expect(blobsA.map((b) => Array.from(b))).toEqual([[10]]);
     expect(blobsB.map((b) => Array.from(b))).toEqual([[20]]);
   });

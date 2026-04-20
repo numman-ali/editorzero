@@ -101,6 +101,7 @@ async function buildStack(
       ? new HocuspocusSync({
           docUpdatesWriter: createDocUpdatesWriter(),
           docUpdatesReader: createDocUpdatesReader(),
+          systemDb: driver.system(),
         })
       : undefined;
   if (sync !== undefined) openSyncs.push(sync);

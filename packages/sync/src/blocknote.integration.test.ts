@@ -63,6 +63,7 @@ beforeEach(async () => {
   sync = new HocuspocusSync({
     docUpdatesWriter: createDocUpdatesWriter(),
     docUpdatesReader: createDocUpdatesReader(),
+    systemDb: driver.system(),
   });
 });
 

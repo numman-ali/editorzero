@@ -30,6 +30,7 @@
 
 import type { AgentId, CollectionId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { CapabilityCategory, SubjectKind } from "@editorzero/scopes";
+import type { Kysely } from "kysely";
 
 /**
  * Tables the tenant-scoping plugin enforces `workspace_id` predicates
@@ -242,3 +243,16 @@ export interface SystemDatabase extends Database {
   readonly doc_counters: DocCountersTable;
   readonly outbox: OutboxTable;
 }
+
+/**
+ * The unscoped system-DB handle type (`Kysely<SystemDatabase>`). Exposed
+ * as a named alias so packages outside `packages/db/**` — which the
+ * `no-raw-kysely-outside-db` coherence rule forbids from importing
+ * `kysely` directly — can still type their deps that receive the handle
+ * from composition. Consumers today: `@editorzero/sync` (read-path
+ * hydration hook takes an untransacted `SystemDb` to replay committed
+ * `doc_updates`); future consumers: any write-path participant that
+ * needs to type a dep on the base handle without reaching for raw
+ * `Kysely`.
+ */
+export type SystemDb = Kysely<SystemDatabase>;

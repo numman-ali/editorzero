@@ -365,7 +365,11 @@ async function runTrial(opts: TrialOpts): Promise<TrialResult> {
   driver.exec(SQLITE_FULL_DDL);
   const docUpdatesWriter = createDocUpdatesWriter();
   const docUpdatesReader = createDocUpdatesReader();
-  const sync = new HocuspocusSync({ docUpdatesWriter, docUpdatesReader });
+  const sync = new HocuspocusSync({
+    docUpdatesWriter,
+    docUpdatesReader,
+    systemDb: driver.system(),
+  });
   const fault = new FaultController();
   // Kysely plugin routed through `@editorzero/db` to honour
   // `no-raw-kysely-outside-db`. The plugin's `transformQuery` invokes

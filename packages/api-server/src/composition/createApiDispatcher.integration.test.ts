@@ -359,6 +359,7 @@ describe("createApiDispatcher", () => {
     const sync = new HocuspocusSync({
       docUpdatesWriter: createDocUpdatesWriter(),
       docUpdatesReader: createDocUpdatesReader(),
+      systemDb: driver.system(),
     });
     try {
       const fixture: Capability<FixtureInput, FixtureOutput> = {
@@ -430,6 +431,7 @@ describe("createApiDispatcher", () => {
     const sync = new HocuspocusSync({
       docUpdatesWriter: createDocUpdatesWriter(),
       docUpdatesReader: createDocUpdatesReader(),
+      systemDb: driver.system(),
     });
     try {
       const fixture = buildFixture(async (ctx, input) => {
