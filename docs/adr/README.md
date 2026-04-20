@@ -57,6 +57,7 @@ All ADRs are **Accepted (v2, post-refresh)** as of 2026-04-17 unless noted. The 
 | [0021](0021-surface-transport-topology.md) | **Surface transport topology: Hono app as trunk, typed RPC for all surfaces** | **Accepted (new, 2026-04-18)** |
 | [0022](0022-agent-editing-constraints.md) | **Agent-editing constraints on block capabilities** (precondition hash, reserved selectors, deferred ergonomic wrappers) | **Accepted (new, 2026-04-18)** |
 | [0023](0023-postgres-driver-substrate.md) | **Postgres driver substrate: `pg` + testcontainers + dual-backend conformance** | **Proposed (new, 2026-04-19)** |
+| [0024](0024-workspace-membership-shape.md) | **Workspace membership shape: custom `workspace_members` table; Better Auth for credentials only** | **Proposed (new, 2026-04-20)** |
 
 ## Review trails
 
