@@ -34,9 +34,11 @@ import { createAuth, createBetterAuthResolver, runAuthMigrations } from "@editor
 import {
   createRegistry,
   docCreate,
+  docDelete,
   docGet,
   docList,
   docPublish,
+  docRestore,
   docUnpublish,
   registerCapability,
 } from "@editorzero/capabilities";
@@ -88,6 +90,8 @@ async function buildStack(
     registerDocGet?: boolean;
     registerDocPublish?: boolean;
     registerDocUnpublish?: boolean;
+    registerDocDelete?: boolean;
+    registerDocRestore?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -107,6 +111,8 @@ async function buildStack(
     ...(options.registerDocGet ? [registerCapability(docGet)] : []),
     ...(options.registerDocPublish ? [registerCapability(docPublish)] : []),
     ...(options.registerDocUnpublish ? [registerCapability(docUnpublish)] : []),
+    ...(options.registerDocDelete ? [registerCapability(docDelete)] : []),
+    ...(options.registerDocRestore ? [registerCapability(docRestore)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -856,6 +862,223 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
     expect(row.visibility).toBe("workspace");
+    expect(row.visibility_version).toBe(0);
+  });
+
+  // ── POST /docs/delete/:doc_id — soft-delete (ADR 0017, invariant 6) ──
+  //
+  // Scope is `doc:delete`, not `doc:publish` — distinct authz envelope
+  // from publish/unpublish but same "member lacks it" fact pattern, so
+  // the observable coverage is identical (401 / 400 / 403-member /
+  // 403-cross-workspace). Happy-path allow lands with role widening.
+  it("POST /docs/delete/:doc_id 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({
+      registerDocDelete: true,
+    });
+    const res = await trunk.request("/docs/delete/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /docs/delete/:doc_id with a non-UUID param returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocDelete: true,
+    });
+    await signUp(trunk, "tina@example.com");
+    const signInRes = await signIn(trunk, "tina@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/delete/not-a-uuid", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(400);
+
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/delete/:doc_id 403s for a member role (no doc:delete scope)", async () => {
+    // Same gate-fires-first pattern as publish/unpublish. `doc:delete`
+    // is an `editor`-tier scope (AGENT_SCOPE_TIERS); a `member` doesn't
+    // hold it, so the PermissionGate denies before the handler runs
+    // and one deny-audit row lands via `withAuditTx`.
+    const { trunk } = await buildStack({
+      registerDocDelete: true,
+    });
+    await signUp(trunk, "uma@example.com");
+    const signInRes = await signIn(trunk, "uma@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/delete/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(403);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.capability_id).toBe("doc.delete");
+    expect(audits[0]?.outcome).toBe("deny");
+  });
+
+  it("POST /docs/delete/:doc_id for a doc in a different workspace denies before reaching the SELECT (scope gate fires first)", async () => {
+    // Mirror of publish's cross-workspace test. The `doc:delete`
+    // gate fires before the handler; tenant-scoped SELECT would be
+    // the second guard on the allow path (observable after role
+    // widening lands).
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocDelete: true,
+      withSync: true,
+    });
+    await signUp(trunk, "vera@example.com");
+    const veraSignIn = await signIn(trunk, "vera@example.com");
+    const veraCookie = sessionCookieFrom(veraSignIn);
+    await signUp(trunk, "walt@example.com");
+    const waltSignIn = await signIn(trunk, "walt@example.com");
+    const waltCookie = sessionCookieFrom(waltSignIn);
+
+    // Vera creates a doc.
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie: veraCookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Vera's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    // Walt tries to delete it. Gate denies (member role).
+    const res = await trunk.request(`/docs/delete/${doc_id}`, {
+      method: "POST",
+      headers: { cookie: waltCookie },
+    });
+    expect(res.status).toBe(403);
+
+    // Row unchanged — deleted_at still null, version still 0.
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["deleted_at", "visibility_version"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.deleted_at).toBeNull();
+    expect(row.visibility_version).toBe(0);
+  });
+
+  // ── POST /docs/restore/:doc_id — revive (ADR 0017, invariant 6) ──────
+  //
+  // Same authz envelope as delete (scope `doc:delete`), same member-
+  // lacks-it observable pattern.
+  it("POST /docs/restore/:doc_id 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({
+      registerDocRestore: true,
+    });
+    const res = await trunk.request("/docs/restore/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /docs/restore/:doc_id with a non-UUID param returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocRestore: true,
+    });
+    await signUp(trunk, "xena@example.com");
+    const signInRes = await signIn(trunk, "xena@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/restore/not-a-uuid", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(400);
+
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/restore/:doc_id 403s for a member role (no doc:delete scope)", async () => {
+    const { trunk } = await buildStack({
+      registerDocRestore: true,
+    });
+    await signUp(trunk, "yuri@example.com");
+    const signInRes = await signIn(trunk, "yuri@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/restore/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(403);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.capability_id).toBe("doc.restore");
+    expect(audits[0]?.outcome).toBe("deny");
+  });
+
+  it("POST /docs/restore/:doc_id for a doc in a different workspace denies before reaching the SELECT (scope gate fires first)", async () => {
+    // Cross-workspace restore; same posture as the delete sibling.
+    // The doc is seeded as soft-deleted under Zara's workspace to
+    // exercise restore's semantics; Aaron's member-role deny fires
+    // before the SELECT runs regardless.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocDelete: true,
+      registerDocRestore: true,
+      withSync: true,
+    });
+    await signUp(trunk, "zara@example.com");
+    const zaraSignIn = await signIn(trunk, "zara@example.com");
+    const zaraCookie = sessionCookieFrom(zaraSignIn);
+    await signUp(trunk, "aaron@example.com");
+    const aaronSignIn = await signIn(trunk, "aaron@example.com");
+    const aaronCookie = sessionCookieFrom(aaronSignIn);
+
+    // Zara creates a doc — we can't actually delete it via the API
+    // (member lacks doc:delete), so seed the soft-delete directly via
+    // the driver to set up the restore target state.
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie: zaraCookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Zara's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    await driver.withSystemTx(async (tx) => {
+      await tx
+        .updateTable("docs")
+        .set({ deleted_at: 1_000_000 })
+        .where("id", "=", DocId(doc_id))
+        .execute();
+    });
+
+    // Aaron tries to restore it. Gate denies (member role).
+    const res = await trunk.request(`/docs/restore/${doc_id}`, {
+      method: "POST",
+      headers: { cookie: aaronCookie },
+    });
+    expect(res.status).toBe(403);
+
+    // Row unchanged — deleted_at still set, version not bumped.
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["deleted_at", "visibility_version"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.deleted_at).toBe(1_000_000);
     expect(row.visibility_version).toBe(0);
   });
 });

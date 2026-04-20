@@ -29,9 +29,11 @@
  */
 
 import { create } from "./create";
+import { del } from "./delete";
 import { get } from "./get";
 import { list } from "./list";
 import { publish } from "./publish";
+import { restore } from "./restore";
 import { unpublish } from "./unpublish";
 
-export const docsRoutes = [list, create, get, publish, unpublish] as const;
+export const docsRoutes = [list, create, get, publish, unpublish, del, restore] as const;

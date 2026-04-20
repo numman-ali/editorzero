@@ -106,6 +106,13 @@ export type QueueName = (typeof QUEUE_NAMES)[number];
  * block of the Y.Doc, so `doc.rename` is a content mutation via
  * `ctx.transact` like any other.
  *
+ * `doc.delete` / `doc.restore` ARE in this set (ADR 0017): soft-delete is
+ * a `docs.deleted_at` flip; blocks + `doc_updates` are preserved on
+ * delete and recovered-in-place on restore, so the Y.Doc itself is never
+ * mutated. Search-index rebuild + embeddings re-activation + notification
+ * cancellation (ADR 0017 cascade) run as post-commit jobs, not inside the
+ * write-path tx.
+ *
  * The planned `transact-called-at-most-once` arch-lint rule will
  * allow zero `ctx.transact` calls for capabilities in this set
  * (F89 — the `@editorzero/arch-lint` package is not yet implemented).
@@ -116,6 +123,8 @@ export const METADATA_ONLY_CAPABILITIES = [
   "block.set_visibility",
   "doc.publish",
   "doc.unpublish",
+  "doc.delete",
+  "doc.restore",
   "doc.move",
   "collection.create",
   "collection.update",

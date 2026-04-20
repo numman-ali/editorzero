@@ -81,6 +81,21 @@ Fuzz against docs of varying sizes and cascade shapes. Inverse-restore is the in
 - Search and notifications degrade gracefully on delete and restore.
 - The inverse-restore property test gives us confidence the semantics hold.
 
+## v1 implementation scope (2026-04-20)
+
+The first `doc.delete` + `doc.restore` capability slice lands the **relational liveness flip** only:
+
+- `doc.delete` UPDATEs `docs.deleted_at = now` + bumps `visibility_version` (public-route cache invalidation, architecture.md §5.4). Handler returns 404 on already-deleted — idempotent state arrival is not idempotent operation, and re-deleting would slide the 30-day recovery-window anchor.
+- `doc.restore` is the inverse flip with the same version bump. Handler returns 404 on already-live (no no-op audit rows).
+- Capability id `doc.delete` → audit effect kind `doc.soft_delete` (the `soft_` prefix distinguishes from `doc.purge` for forensic readers).
+- Both capabilities are on the metadata-only lane (`METADATA_ONLY_CAPABILITIES` in `packages/scopes` widened accordingly; architecture.md §6.5 + §5.4 + Appendix C 7b/16 updated in lockstep). No Y.Doc touching, no `doc_updates` row.
+
+**Cascade side-effects deferred.** The cascade listed under §"What gets soft-deleted (cascade on doc delete)" (search-index removal, embedding deactivation, notification cancellation, custom-domain unregistration on workspace delete) requires backing systems that are not in the tree yet (search index, embeddings, notifications, Caddy proxy orchestration). Cascade jobs attach as post-commit consumers of the `outbox` rows the metadata-only write-path already emits (the relevant queue names — `search_reindex`, `restore_search`, `dcr_cleanup` — are already reserved in `packages/scopes` → `QUEUE_NAMES`). No change to the v1 handler shape when they land — purely additive.
+
+**Workspace-level + hard-delete deferred.** `workspace.delete` / `workspace.restore` / `workspace.purge` / `doc.purge` all sit post-Phase-3 — no runtime systems exist yet that need their cascade semantics. The 30-day recovery-window reaper (ADR 0014 cron `reaper` queue) is future.
+
+**Inverse-restore property test status.** Still OPEN (Phase 3 harness). The current unit tests assert the relational flip + version bump; the property test's stronger claim — "bit-identical state modulo `audit_events` across delete→restore under fuzzed sizes + cascade shapes" — lands once blocks and doc_updates have adapter-driven mutation flows beyond `doc.create`'s seed.
+
 ## Revisit triggers
 - A compliance requirement mandates immediate purge for specific classes of data (e.g., GDPR "right to erasure" for PII) — carve out a distinct purge path that still audits who executed it.
 - Storage cost of retained-but-invisible CRDT state becomes material at scale — introduce snapshot-only retention for trashed docs.
