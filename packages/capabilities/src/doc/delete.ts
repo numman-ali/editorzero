@@ -38,9 +38,10 @@
  *
  * **Public-route cache invalidation — `visibility_version` bumps.** The
  * public-route contract (architecture.md §5.4) keys its cache on
- * `(workspace_id, published_slug, visibility_version)` and uses the
- * version as its sole invalidation signal for capabilities in this
- * lane (publish / unpublish / block.set_visibility). A soft-delete of
+ * `(workspace_id, doc_id, latest_snapshot_seq, visibility_version)`
+ * and uses the version as its sole invalidation signal for
+ * capabilities in this lane (publish / unpublish /
+ * block.set_visibility / delete / restore). A soft-delete of
  * a *published* doc must flip the public-route from "renders" to
  * "404" — without a version bump, a cached render would keep serving
  * a deleted-but-published doc. The handler therefore bumps
