@@ -37,6 +37,7 @@
  */
 
 import type { Auth } from "@editorzero/auth";
+import type { LoadRoles } from "@editorzero/db";
 import { hc } from "hono/client";
 import { testClient } from "hono/testing";
 import { describe, expect, it } from "vitest";
@@ -74,13 +75,16 @@ describe("api-server trunk composition", () => {
     expect(doc.components?.schemas?.["HealthResponse"]).toBeDefined();
   });
 
-  it("createApiApp({ auth }) routes POST /auth/* to auth.handler", async () => {
+  it("createApiApp({ auth, loadRoles }) routes POST /auth/* to auth.handler", async () => {
     // Composition-boundary assertion: any request matching `/auth/*`
     // reaches the injected Better Auth handler. Uses a fake auth object
     // typed as `Auth` so we don't spin up a real SQLite driver + Better
-    // Auth instance just to assert the wiring. The full round-trip with
-    // a real Better Auth instance is covered in
-    // `composition/auth-chain.integration.test.ts`.
+    // Auth instance just to assert the wiring. `loadRoles` is paired
+    // with `auth` by the factory's runtime guard (ADR 0024); a never-
+    // called stub satisfies the pairing without exercising the role
+    // lookup (the `/auth/*` mount doesn't run principal resolution).
+    // The full round-trip with a real Better Auth + loadRoles is
+    // covered in `composition/auth-chain.integration.test.ts`.
     let handlerCalls = 0;
     let seenUrl: string | undefined;
     let seenMethod: string | undefined;
@@ -95,8 +99,11 @@ describe("api-server trunk composition", () => {
         });
       },
     } as unknown as Auth;
+    const fakeLoadRoles: LoadRoles = async () => {
+      throw new Error("loadRoles must not be called when only /auth/* is exercised");
+    };
 
-    const trunk = createApiApp({ auth: fakeAuth });
+    const trunk = createApiApp({ auth: fakeAuth, loadRoles: fakeLoadRoles });
     const res = await trunk.request("/auth/sign-in/email", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -121,5 +128,22 @@ describe("api-server trunk composition", () => {
     const trunk = createApiApp();
     const res = await trunk.request("/auth/sign-in/email", { method: "POST" });
     expect(res.status).toBe(404);
+  });
+
+  it("createApiApp({ auth }) without loadRoles throws at composition time (ADR 0024 pairing)", () => {
+    // ADR 0024: the resolver needs `loadRoles` to read `workspace_members`;
+    // providing `auth` without it is a boot-time misconfiguration. Fail
+    // loud here rather than at first request (where the failure would
+    // surface as an unhelpful 500).
+    const fakeAuth = { handler: async () => new Response() } as unknown as Auth;
+    expect(() => createApiApp({ auth: fakeAuth })).toThrow(/auth.+without.+loadRoles/i);
+  });
+
+  it("createApiApp({ loadRoles }) without auth throws at composition time (ADR 0024 pairing)", () => {
+    // Mirror of the previous guard: `loadRoles` is only consumed via the
+    // auth resolver; providing it without `auth` is dead code and
+    // almost certainly a caller bug.
+    const fakeLoadRoles: LoadRoles = async () => null;
+    expect(() => createApiApp({ loadRoles: fakeLoadRoles })).toThrow(/loadRoles.+without.+auth/i);
   });
 });

@@ -45,6 +45,7 @@ import {
 import {
   createDocUpdatesReader,
   createDocUpdatesWriter,
+  createLoadRoles,
   createSqliteDriver,
   SQLITE_FULL_DDL,
   type SqliteDriver,
@@ -132,12 +133,17 @@ async function buildStack(
   const dispatcher = createApiDispatcher(
     sync === undefined ? { driver, registry } : { driver, registry, sync },
   );
-  const trunk = createApiApp({ auth, dispatcher });
-  return { auth, dispatcher, trunk };
+  const loadRoles = createLoadRoles(driver);
+  const trunk = createApiApp({ auth, loadRoles, dispatcher });
+  return { auth, dispatcher, loadRoles, trunk };
 }
 
-async function signUp(trunk: Awaited<ReturnType<typeof buildStack>>["trunk"], email: string) {
-  return trunk.request("/auth/sign-up/email", {
+async function signUp(
+  trunk: Awaited<ReturnType<typeof buildStack>>["trunk"],
+  email: string,
+  opts: { readonly overrideRole?: "admin" | "member" | "guest" | "remove" } = {},
+) {
+  const res = await trunk.request("/auth/sign-up/email", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -146,6 +152,25 @@ async function signUp(trunk: Awaited<ReturnType<typeof buildStack>>["trunk"], em
       name: email.split("@")[0],
     }),
   });
+  // Post-ADR 0024 the `user.create.after` hook in
+  // `@editorzero/auth`'s `createAuth` seeds a `workspace_members`
+  // row as `role: "owner"` post-commit on signup (BA fires `after`
+  // hooks via `queueAfterTransactionHook`; hook errors propagate as
+  // signup failures — not atomic, but fail-loud). The user just
+  // minted a fresh workspace and owns it by construction, so the
+  // default signup path needs NO test-side seeding. `overrideRole`
+  // exists only to exercise scenarios the hook can't produce on
+  // its own: "admin" / "member" / "guest" for scope-gate tests
+  // that assert a specific deny behaviour, and "remove" for the
+  // strict-on-missing branch.
+  if (res.status === 200 && opts.overrideRole !== undefined) {
+    if (opts.overrideRole === "remove") {
+      await removeMembership(email);
+    } else {
+      await overrideRole(email, opts.overrideRole);
+    }
+  }
+  return res;
 }
 
 async function signIn(trunk: Awaited<ReturnType<typeof buildStack>>["trunk"], email: string) {
@@ -154,6 +179,51 @@ async function signIn(trunk: Awaited<ReturnType<typeof buildStack>>["trunk"], em
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password: "correct-horse-battery-staple" }),
   });
+}
+
+/**
+ * Look up the hook-seeded `workspace_members` row for `email` and
+ * rewrite its `role` column to `role`. Used to construct a test
+ * scenario the production bootstrap path can't: downgrade a user
+ * from the auto-minted `"owner"` to `"member"` / `"admin"` / `"guest"`
+ * so scope-gate deny assertions parameterize on the intended role
+ * without re-implementing the whole bootstrap.
+ */
+async function overrideRole(email: string, role: "admin" | "member" | "guest"): Promise<void> {
+  const user_id = await lookupUserIdByEmail(email);
+  await driver
+    .system()
+    .updateTable("workspace_members")
+    .set({ role, updated_at: Date.now() })
+    .where("user_id", "=", user_id)
+    .execute();
+}
+
+/**
+ * Hard-delete the hook-seeded `workspace_members` row to exercise
+ * the resolver's strict-on-missing branch (ADR 0024). Production
+ * can't normally hit this branch: the bootstrap hook runs post-
+ * commit on every signup and its errors propagate as signup
+ * failures (fail-loud), so a signed-in user without an active
+ * membership row is a rare structural scenario. In-test we
+ * simulate the "row went missing" state (future partial-hook-
+ * failure, ADR 0017 cascade, or migration gap).
+ */
+async function removeMembership(email: string): Promise<void> {
+  const user_id = await lookupUserIdByEmail(email);
+  await driver.system().deleteFrom("workspace_members").where("user_id", "=", user_id).execute();
+}
+
+async function lookupUserIdByEmail(email: string): Promise<UserId> {
+  const row = await driver
+    .system()
+    // biome-ignore lint/suspicious/noExplicitAny: user table is Better Auth's, outside our Database type.
+    .selectFrom("user" as any)
+    .select(["id" as never])
+    .where("email" as never, "=", email as never)
+    .executeTakeFirstOrThrow();
+  const typed = row as { id: string };
+  return UserId(typed.id);
 }
 
 describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
@@ -175,7 +245,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
   });
 
   it("sign-in through the trunk returns a session cookie the resolver can consume", async () => {
-    const { auth, trunk } = await buildStack();
+    const { auth, loadRoles, trunk } = await buildStack();
     await signUp(trunk, "bob@example.com");
 
     const signInRes = await signIn(trunk, "bob@example.com");
@@ -184,7 +254,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const cookie = sessionCookieFrom(signInRes);
     expect(cookie).toContain("session_token");
 
-    const resolver = createBetterAuthResolver(auth);
+    const resolver = createBetterAuthResolver({ auth, loadRoles });
     const principal = await resolver(new Headers({ cookie }));
     expect(principal).not.toBeNull();
     if (principal === null) throw new Error("unreachable");
@@ -193,17 +263,18 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
   });
 
   it("principal + dispatcher middleware attach to c.var for an authenticated probe route", async () => {
-    const { auth, dispatcher, trunk } = await buildStack();
+    const { auth, dispatcher, loadRoles, trunk } = await buildStack();
     // Mount the probe BEFORE the first request — Hono's SmartRouter
     // lazily builds its match tree on first request, and once built it
     // refuses further `.use()` / `.get()` calls. Real capability routes
     // compose through `openapiRoutes([...] as const)` at factory time,
     // so they land before any request too. This test uses the same
     // mount-early discipline.
+    const resolve = createBetterAuthResolver({ auth, loadRoles });
     trunk.use(
       "/probe",
       createPrincipalMiddleware({
-        resolve: (c) => createBetterAuthResolver(auth)(c.req.raw.headers),
+        resolve: (c) => resolve(c.req.raw.headers),
       }),
     );
     trunk.use("/probe", createDispatcherMiddleware({ dispatcher }));
@@ -237,11 +308,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
   });
 
   it("principal middleware returns 401 when no session cookie is present", async () => {
-    const { auth, dispatcher, trunk } = await buildStack();
+    const { auth, dispatcher, loadRoles, trunk } = await buildStack();
+    const resolve = createBetterAuthResolver({ auth, loadRoles });
     trunk.use(
       "/probe",
       createPrincipalMiddleware({
-        resolve: (c) => createBetterAuthResolver(auth)(c.req.raw.headers),
+        resolve: (c) => resolve(c.req.raw.headers),
       }),
     );
     trunk.use("/probe", createDispatcherMiddleware({ dispatcher }));
@@ -254,21 +326,14 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
   });
 
   it("GET /docs/list round-trips through the full stack (auth → principal mw → dispatcher → doc.list capability)", async () => {
-    const { trunk } = await buildStack({ registerDocList: true });
+    const { auth, loadRoles, trunk } = await buildStack({ registerDocList: true });
     await signUp(trunk, "dana@example.com");
     const signInRes = await signIn(trunk, "dana@example.com");
     const cookie = sessionCookieFrom(signInRes);
 
     // Resolve the principal once to discover the minted workspace_id
     // so we can seed a docs row inside that tenant.
-    const principal = await createBetterAuthResolver(
-      createAuth({
-        driver,
-        baseURL: "http://localhost:3000",
-        secret: "test-secret-do-not-use-in-production-at-all",
-        trustedOrigins: ["http://localhost:3000"],
-      }),
-    )(new Headers({ cookie }));
+    const principal = await createBetterAuthResolver({ auth, loadRoles })(new Headers({ cookie }));
     if (principal === null) throw new Error("unexpected null principal after sign-in");
     const workspace_id = principal.workspace_id;
 
@@ -317,7 +382,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     // should see ONLY her own workspace's doc, not Eve's. This
     // proves the `WorkspaceScopingPlugin` + principal-workspace_id
     // chain correctly isolates reads (invariant 5 + ADR 0023 §3.2).
-    const { trunk } = await buildStack({ registerDocList: true });
+    const { auth, loadRoles, trunk } = await buildStack({ registerDocList: true });
     await signUp(trunk, "dana@example.com");
     await signUp(trunk, "eve@example.com");
     const danaSignIn = await signIn(trunk, "dana@example.com");
@@ -325,14 +390,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const eveSignIn = await signIn(trunk, "eve@example.com");
     const eveCookie = sessionCookieFrom(eveSignIn);
 
-    const resolver = createBetterAuthResolver(
-      createAuth({
-        driver,
-        baseURL: "http://localhost:3000",
-        secret: "test-secret-do-not-use-in-production-at-all",
-        trustedOrigins: ["http://localhost:3000"],
-      }),
-    );
+    const resolver = createBetterAuthResolver({ auth, loadRoles });
     const danaPrincipal = await resolver(new Headers({ cookie: danaCookie }));
     const evePrincipal = await resolver(new Headers({ cookie: eveCookie }));
     if (danaPrincipal === null || evePrincipal === null) {
@@ -630,15 +688,13 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
 
   // ── POST /docs/publish/:doc_id — first metadata-only mutation ────────
   //
-  // End-to-end coverage for the publish route scopes down to what the
-  // real Better Auth stack can actually exercise. The resolver hardcodes
-  // `roles: ["member"]` (see `@editorzero/auth` → `resolver.ts`), and
-  // `member` role's `ROLE_SCOPES` (dispatcher/src/gate.ts) does NOT
-  // include `doc:publish` — so every real authenticated caller today
-  // hits the gate's deny branch. The happy-path allow test lands when
-  // the `workspace_members` slice ships role widening to `admin` / `owner`
-  // (resolver.ts header comment). Route unit test + capability unit
-  // test cover the allow behaviour at lower layers.
+  // Post-ADR 0024 the resolver sources role from `workspace_members`,
+  // populated by the `user.create.after` bootstrap hook in
+  // `@editorzero/auth` as `role: "owner"` on every fresh signup. The
+  // default `signUp(...)` call therefore produces an owner principal
+  // (has `doc:publish`), so the allow test below needs no explicit
+  // override. Deny tests use `{ overrideRole: "member" }` to downgrade
+  // the hook-seeded row and parameterize on the missing scope.
   it("POST /docs/publish/:doc_id 401s without a session cookie", async () => {
     const { trunk } = await buildStack({
       registerDocPublish: true,
@@ -679,7 +735,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const { trunk } = await buildStack({
       registerDocPublish: true,
     });
-    await signUp(trunk, "mia@example.com");
+    await signUp(trunk, "mia@example.com", { overrideRole: "member" });
     const signInRes = await signIn(trunk, "mia@example.com");
     const cookie = sessionCookieFrom(signInRes);
 
@@ -702,23 +758,24 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
 
   it("POST /docs/publish/:doc_id for a doc in a different workspace denies before reaching the SELECT (scope gate fires first)", async () => {
     // Cross-workspace protection on doc.publish is owned by two layers:
-    // (a) the dispatcher's scope gate (member lacks `doc:publish`, so
-    // the deny fires here before the handler), and (b) the tenant-
-    // scoped `ctx.db` with `WorkspaceScopingPlugin` (if the gate ever
-    // allowed the handler to run, the SELECT-on-UPDATE would return 0
-    // rows for cross-workspace targets → 404). Today only (a) is
-    // observable because every authenticated user is a member. When
-    // role widening lands, a follow-up test on the allow path will
-    // exercise (b) with an admin principal.
+    // (a) the dispatcher's scope gate (the signing-in member principal
+    // lacks `doc:publish`, so the deny fires here before the handler),
+    // and (b) the tenant-scoped `ctx.db` with `WorkspaceScopingPlugin`
+    // (if the gate ever allowed the handler to run, the SELECT-on-UPDATE
+    // would return 0 rows for cross-workspace targets → 404). This test
+    // parameterizes on the default `"member"` seed so (a) is the
+    // observable branch; the (b) layer is exercised by the happy-path
+    // allow test above (owner seed) plus the doc.list tenant-isolation
+    // test — both pin the same scoping-plugin predicate.
     const { trunk } = await buildStack({
       registerDocCreate: true,
       registerDocPublish: true,
       withSync: true,
     });
-    await signUp(trunk, "nora@example.com");
+    await signUp(trunk, "nora@example.com", { overrideRole: "member" });
     const noraSignIn = await signIn(trunk, "nora@example.com");
     const noraCookie = sessionCookieFrom(noraSignIn);
-    await signUp(trunk, "oscar@example.com");
+    await signUp(trunk, "oscar@example.com", { overrideRole: "member" });
     const oscarSignIn = await signIn(trunk, "oscar@example.com");
     const oscarCookie = sessionCookieFrom(oscarSignIn);
 
@@ -754,15 +811,78 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(row.visibility_version).toBe(0);
   });
 
+  it("POST /docs/publish/:doc_id flips visibility to public for an owner principal", async () => {
+    // Happy-path allow — post-ADR 0024 the resolver reads role from
+    // `workspace_members`, so seeding `"owner"` lets the caller clear
+    // the scope gate. The route response carries the post-state
+    // projection; the durable row flips to `visibility="public"` with
+    // `visibility_version` bumped from 0 → 1 in the same write-path tx
+    // that wrote the allow-audit row. No `doc_updates` row lands —
+    // publish is metadata-only, never touches `ctx.transact`.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocPublish: true,
+      withSync: true,
+    });
+    await signUp(trunk, "paula@example.com");
+    const signInRes = await signIn(trunk, "paula@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Paula's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    const res = await trunk.request(`/docs/publish/${doc_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      doc_id: string;
+      visibility: "public";
+      visibility_version: number;
+      published_at: number;
+    };
+    expect(body.doc_id).toBe(doc_id);
+    expect(body.visibility).toBe("public");
+    expect(body.visibility_version).toBe(1);
+    expect(body.published_at).toBeGreaterThan(0);
+
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["visibility", "visibility_version"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.visibility).toBe("public");
+    expect(row.visibility_version).toBe(1);
+
+    // Audit trail: create (allow) + publish (allow). Two rows total; no
+    // deny, no `doc_updates` row from publish (metadata-only).
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits.map((a) => ({ id: a.capability_id, o: a.outcome }))).toEqual([
+      { id: "doc.create", o: "allow" },
+      { id: "doc.publish", o: "allow" },
+    ]);
+  });
+
   // ── POST /docs/unpublish/:doc_id — inverse of publish ────────────────
   //
-  // Shares publish's authz envelope: scope `doc:publish`, member role
-  // lacks it, real Better Auth resolver hardcodes members. So every
-  // authenticated caller today hits the gate's deny branch; the happy-
-  // path allow lands when `workspace_members` widens roles (resolver.ts
-  // header comment). Only the deny / missing-auth / malformed-param
-  // branches are reachable here; the allow branch is covered by the
-  // route unit test + capability unit test at lower layers.
+  // Same authz envelope as publish (scope `doc:publish`, owners/admins
+  // hold it, members don't). Default `signUp(...)` produces the auto-
+  // minted owner principal (hook-seeded); deny tests use
+  // `{ overrideRole: "member" }`. Allow test below publishes then
+  // unpublishes to exercise the return-to-workspace transition end-
+  // to-end.
   it("POST /docs/unpublish/:doc_id 401s without a session cookie", async () => {
     const { trunk } = await buildStack({
       registerDocUnpublish: true,
@@ -799,7 +919,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const { trunk } = await buildStack({
       registerDocUnpublish: true,
     });
-    await signUp(trunk, "quinn@example.com");
+    await signUp(trunk, "quinn@example.com", { overrideRole: "member" });
     const signInRes = await signIn(trunk, "quinn@example.com");
     const cookie = sessionCookieFrom(signInRes);
 
@@ -821,19 +941,19 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
 
   it("POST /docs/unpublish/:doc_id for a doc in a different workspace denies before reaching the SELECT (scope gate fires first)", async () => {
     // Mirror of the publish cross-workspace test — two layers of
-    // protection, but only the scope-gate layer is observable today
-    // (every authenticated user is a member). When role widening lands,
-    // a follow-up allow-path test will exercise the tenant-scoped
-    // SELECT's 404 on cross-workspace targets.
+    // protection, but the scope-gate layer is what this test pins
+    // (member seed lacks `doc:publish`, so the deny fires here). The
+    // happy-path allow test above + the doc.list tenant-isolation test
+    // cover the scoping-plugin layer under an owner principal.
     const { trunk } = await buildStack({
       registerDocCreate: true,
       registerDocUnpublish: true,
       withSync: true,
     });
-    await signUp(trunk, "rose@example.com");
+    await signUp(trunk, "rose@example.com", { overrideRole: "member" });
     const roseSignIn = await signIn(trunk, "rose@example.com");
     const roseCookie = sessionCookieFrom(roseSignIn);
-    await signUp(trunk, "sam@example.com");
+    await signUp(trunk, "sam@example.com", { overrideRole: "member" });
     const samSignIn = await signIn(trunk, "sam@example.com");
     const samCookie = sessionCookieFrom(samSignIn);
 
@@ -865,12 +985,78 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(row.visibility_version).toBe(0);
   });
 
+  it("POST /docs/unpublish/:doc_id flips a published doc back to workspace for an owner principal", async () => {
+    // Happy-path allow. The flow is: create (workspace, v0) → publish
+    // (public, v1) → unpublish (workspace, v2). Each allow audit row
+    // lands in order; no deny, no `doc_updates` rows from publish /
+    // unpublish (both metadata-only).
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocPublish: true,
+      registerDocUnpublish: true,
+      withSync: true,
+    });
+    await signUp(trunk, "rachel@example.com");
+    const signInRes = await signIn(trunk, "rachel@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Rachel's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    const publishRes = await trunk.request(`/docs/publish/${doc_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(publishRes.status).toBe(200);
+
+    const res = await trunk.request(`/docs/unpublish/${doc_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      doc_id: string;
+      visibility: "workspace";
+      visibility_version: number;
+    };
+    expect(body.doc_id).toBe(doc_id);
+    expect(body.visibility).toBe("workspace");
+    expect(body.visibility_version).toBe(2);
+
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["visibility", "visibility_version"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.visibility).toBe("workspace");
+    expect(row.visibility_version).toBe(2);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits.map((a) => ({ id: a.capability_id, o: a.outcome }))).toEqual([
+      { id: "doc.create", o: "allow" },
+      { id: "doc.publish", o: "allow" },
+      { id: "doc.unpublish", o: "allow" },
+    ]);
+  });
+
   // ── POST /docs/delete/:doc_id — soft-delete (ADR 0017, invariant 6) ──
   //
   // Scope is `doc:delete`, not `doc:publish` — distinct authz envelope
-  // from publish/unpublish but same "member lacks it" fact pattern, so
-  // the observable coverage is identical (401 / 400 / 403-member /
-  // 403-cross-workspace). Happy-path allow lands with role widening.
+  // from publish/unpublish but same "member lacks it" fact pattern.
+  // Deny tests downgrade the hook-seeded owner to `"member"`; the allow
+  // test uses the default owner to exercise the soft-delete transition
+  // end-to-end.
   it("POST /docs/delete/:doc_id 401s without a session cookie", async () => {
     const { trunk } = await buildStack({
       registerDocDelete: true,
@@ -907,7 +1093,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const { trunk } = await buildStack({
       registerDocDelete: true,
     });
-    await signUp(trunk, "uma@example.com");
+    await signUp(trunk, "uma@example.com", { overrideRole: "member" });
     const signInRes = await signIn(trunk, "uma@example.com");
     const cookie = sessionCookieFrom(signInRes);
 
@@ -937,10 +1123,10 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
       registerDocDelete: true,
       withSync: true,
     });
-    await signUp(trunk, "vera@example.com");
+    await signUp(trunk, "vera@example.com", { overrideRole: "member" });
     const veraSignIn = await signIn(trunk, "vera@example.com");
     const veraCookie = sessionCookieFrom(veraSignIn);
-    await signUp(trunk, "walt@example.com");
+    await signUp(trunk, "walt@example.com", { overrideRole: "member" });
     const waltSignIn = await signIn(trunk, "walt@example.com");
     const waltCookie = sessionCookieFrom(waltSignIn);
 
@@ -971,10 +1157,73 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(row.visibility_version).toBe(0);
   });
 
+  it("POST /docs/delete/:doc_id soft-deletes a doc for an owner principal", async () => {
+    // Happy-path allow. Create (live) → delete (soft-deleted, version
+    // bumped, `deleted_at` populated with a non-null epoch). Two allow
+    // audit rows land in order; no `doc_updates` rows from delete
+    // (metadata-only — the soft-delete is a row UPDATE, not a Y.Doc
+    // mutation).
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocDelete: true,
+      withSync: true,
+    });
+    await signUp(trunk, "tara@example.com");
+    const signInRes = await signIn(trunk, "tara@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Tara's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    const res = await trunk.request(`/docs/delete/${doc_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      doc_id: string;
+      deleted_at: number;
+      visibility_version: number;
+    };
+    expect(body.doc_id).toBe(doc_id);
+    expect(body.deleted_at).toBeGreaterThan(0);
+    expect(body.visibility_version).toBe(1);
+
+    // Durable row soft-deleted; the tenant-scoped `docs` view filter
+    // hides it from subsequent reads, but the raw system row still
+    // carries `deleted_at`.
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["deleted_at", "visibility_version"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.deleted_at).toBe(body.deleted_at);
+    expect(row.visibility_version).toBe(1);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits.map((a) => ({ id: a.capability_id, o: a.outcome }))).toEqual([
+      { id: "doc.create", o: "allow" },
+      { id: "doc.delete", o: "allow" },
+    ]);
+  });
+
   // ── POST /docs/restore/:doc_id — revive (ADR 0017, invariant 6) ──────
   //
   // Same authz envelope as delete (scope `doc:delete`), same member-
-  // lacks-it observable pattern.
+  // lacks-it observable pattern for the deny branch. Allow branch uses
+  // the default owner; the happy-path test creates → deletes → restores
+  // to exercise revive semantics end-to-end.
   it("POST /docs/restore/:doc_id 401s without a session cookie", async () => {
     const { trunk } = await buildStack({
       registerDocRestore: true,
@@ -1007,7 +1256,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const { trunk } = await buildStack({
       registerDocRestore: true,
     });
-    await signUp(trunk, "yuri@example.com");
+    await signUp(trunk, "yuri@example.com", { overrideRole: "member" });
     const signInRes = await signIn(trunk, "yuri@example.com");
     const cookie = sessionCookieFrom(signInRes);
 
@@ -1038,10 +1287,10 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
       registerDocRestore: true,
       withSync: true,
     });
-    await signUp(trunk, "zara@example.com");
+    await signUp(trunk, "zara@example.com", { overrideRole: "member" });
     const zaraSignIn = await signIn(trunk, "zara@example.com");
     const zaraCookie = sessionCookieFrom(zaraSignIn);
-    await signUp(trunk, "aaron@example.com");
+    await signUp(trunk, "aaron@example.com", { overrideRole: "member" });
     const aaronSignIn = await signIn(trunk, "aaron@example.com");
     const aaronCookie = sessionCookieFrom(aaronSignIn);
 
@@ -1080,5 +1329,70 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBe(1_000_000);
     expect(row.visibility_version).toBe(0);
+  });
+
+  it("POST /docs/restore/:doc_id revives a soft-deleted doc for an owner principal", async () => {
+    // Happy-path allow. Create → delete → restore; the `deleted_at`
+    // column returns to NULL on the durable row and `visibility_version`
+    // bumps to 2 (one bump per metadata mutation). Three allow audits
+    // land in order; no `doc_updates` rows from delete or restore
+    // (both metadata-only).
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocDelete: true,
+      registerDocRestore: true,
+      withSync: true,
+    });
+    await signUp(trunk, "uma2@example.com");
+    const signInRes = await signIn(trunk, "uma2@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Uma's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    const deleteRes = await trunk.request(`/docs/delete/${doc_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(deleteRes.status).toBe(200);
+
+    const res = await trunk.request(`/docs/restore/${doc_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      doc_id: string;
+      visibility_version: number;
+    };
+    expect(body.doc_id).toBe(doc_id);
+    expect(body.visibility_version).toBe(2);
+
+    // Durable row restored — deleted_at back to null, version bumped.
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["deleted_at", "visibility_version"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.deleted_at).toBeNull();
+    expect(row.visibility_version).toBe(2);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits.map((a) => ({ id: a.capability_id, o: a.outcome }))).toEqual([
+      { id: "doc.create", o: "allow" },
+      { id: "doc.delete", o: "allow" },
+      { id: "doc.restore", o: "allow" },
+    ]);
   });
 });

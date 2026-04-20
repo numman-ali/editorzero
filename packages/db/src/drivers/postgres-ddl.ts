@@ -89,6 +89,18 @@ export const DOC_COUNTERS_DDL = `
   );
 ` as const;
 
+export const WORKSPACE_MEMBERS_DDL = `
+  CREATE TABLE workspace_members (
+    workspace_id TEXT   NOT NULL,
+    user_id      TEXT   NOT NULL,
+    role         TEXT   NOT NULL CHECK (role IN ('owner','admin','member','guest')),
+    created_at   BIGINT NOT NULL,
+    updated_at   BIGINT NOT NULL,
+    deleted_at   BIGINT,
+    PRIMARY KEY (workspace_id, user_id)
+  );
+` as const;
+
 export const AUDIT_EVENTS_DDL = `
   CREATE TABLE audit_events (
     id                TEXT PRIMARY KEY,
@@ -137,6 +149,7 @@ export const FULL_DDL = [
   DOC_SNAPSHOTS_DDL,
   DOC_UPDATES_DDL,
   DOC_COUNTERS_DDL,
+  WORKSPACE_MEMBERS_DDL,
   AUDIT_EVENTS_DDL,
   OUTBOX_DDL,
 ].join("\n");

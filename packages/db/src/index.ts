@@ -31,7 +31,9 @@ export {
   DOCS_DDL,
   FULL_DDL as SQLITE_FULL_DDL,
   OUTBOX_DDL,
+  WORKSPACE_MEMBERS_DDL,
 } from "./drivers/sqlite-ddl";
+export { createLoadRoles, type LoadRoles, type LoadRolesDriver } from "./load-roles";
 export { createQueryFaultPlugin, describeQueryNode, type QueryTag } from "./query-fault";
 export type {
   AuditEventsTable,
@@ -44,6 +46,7 @@ export type {
   SystemDatabase,
   SystemDb,
   TenantScopedTable,
+  WorkspaceMembersTable,
 } from "./schema";
 export { TENANT_SCOPED_TABLES } from "./schema";
 export type { TenantScopedDb } from "./tenant";

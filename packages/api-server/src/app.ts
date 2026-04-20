@@ -83,6 +83,7 @@
 
 import type { Auth } from "@editorzero/auth";
 import { createBetterAuthResolver } from "@editorzero/auth";
+import type { LoadRoles } from "@editorzero/db";
 import type { Dispatcher } from "@editorzero/dispatcher";
 import { EditorZeroError } from "@editorzero/errors";
 import { OpenAPIHono } from "@hono/zod-openapi";
@@ -98,12 +99,29 @@ export interface CreateApiAppOptions {
    * Better Auth instance. When provided, `auth.handler` is mounted
    * on `/auth/*` (POST + GET) so Better Auth's sign-up / sign-in /
    * session endpoints compose under the trunk, and
-   * `createBetterAuthResolver(auth)` powers the `/docs/*` principal
-   * middleware. Omit for tests or smoke-level composition checks
-   * that don't need the auth stack — capability routes still mount
-   * but `/docs/*` 401s on every request (no resolver → no principal).
+   * `createBetterAuthResolver({ auth, loadRoles })` powers the
+   * `/docs/*` principal middleware. Omit for tests or smoke-level
+   * composition checks that don't need the auth stack — capability
+   * routes still mount but `/docs/*` 401s on every request (no
+   * resolver → no principal).
+   *
+   * **Pairing constraint.** When `auth` is provided, `loadRoles`
+   * MUST also be provided (ADR 0024 — the resolver reads roles
+   * from `workspace_members` via the callable). The factory throws
+   * at composition time if the pair is broken; this keeps the
+   * failure loud at boot rather than silent at first request.
    */
   readonly auth?: Auth;
+  /**
+   * Layer-1 role lookup (ADR 0024). Produced via
+   * `createLoadRoles(driver)` in `@editorzero/db`. Injected rather
+   * than constructed here because the composition root owns the
+   * driver; the api-server factory stays ignorant of Kysely +
+   * `SystemDatabase` (pinned to `packages/db/**` by the
+   * `no-raw-kysely-outside-db` coherence rule). Paired with `auth`;
+   * see the doc-block on `auth` above for the runtime guard.
+   */
+  readonly loadRoles?: LoadRoles;
   /**
    * Dispatcher composition-root instance. Required in production for
    * `/docs/*` routes to actually execute capabilities; without it,
@@ -117,7 +135,21 @@ export interface CreateApiAppOptions {
 }
 
 export function createApiApp(options: CreateApiAppOptions = {}) {
-  const { auth, dispatcher } = options;
+  const { auth, loadRoles, dispatcher } = options;
+
+  if (auth !== undefined && loadRoles === undefined) {
+    throw new Error(
+      "createApiApp: `auth` was provided without `loadRoles`. ADR 0024 requires " +
+        "the role-lookup callable at composition time. Pass " +
+        "`loadRoles: createLoadRoles(driver)` from `@editorzero/db`.",
+    );
+  }
+  if (auth === undefined && loadRoles !== undefined) {
+    throw new Error(
+      "createApiApp: `loadRoles` was provided without `auth`. The two must be " +
+        "provided together — `loadRoles` is only consumed by the auth resolver.",
+    );
+  }
   const trunk = new OpenAPIHono<ApiEnv>();
 
   // **Error mapper** — every `EditorZeroError` subclass carries its
@@ -137,15 +169,16 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     throw err;
   });
 
-  if (auth !== undefined) {
+  if (auth !== undefined && loadRoles !== undefined) {
     trunk.on(["POST", "GET"], "/auth/*", (c) => auth.handler(c.req.raw));
     // Principal middleware for every capability-domain prefix. Today
     // just `/docs/*`; future prefixes (`/blocks/*`, `/workspaces/*`)
     // repeat this line.
+    const resolve = createBetterAuthResolver({ auth, loadRoles });
     trunk.use(
       "/docs/*",
       createPrincipalMiddleware({
-        resolve: (c) => createBetterAuthResolver(auth)(c.req.raw.headers),
+        resolve: (c) => resolve(c.req.raw.headers),
       }),
     );
   }

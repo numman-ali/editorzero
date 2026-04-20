@@ -115,6 +115,46 @@ export const DOC_COUNTERS_DDL = `
 ` as const;
 
 /**
+ * `workspace_members` — user↔workspace membership with role (architecture.md
+ * §3.4; ADR 0024). Composite PK `(workspace_id, user_id)` — one active
+ * membership per user-per-workspace. `role` CHECK-constrained to the
+ * four-value `Role` union; the resolver maps `role` → `Role[]` at
+ * principal-projection time, and `ROLE_SCOPES` in
+ * `packages/dispatcher/src/gate.ts` projects `Role[]` → `Scope[]`.
+ *
+ * `deleted_at` for ADR 0017 cascade — workspace soft-delete transitively
+ * soft-deletes all member rows. Re-adding a previously-removed member is
+ * a `deleted_at = NULL` UPDATE (revive-in-place), never a second INSERT
+ * (composite PK would collide); `workspace.add_member` (future slice)
+ * codifies this in its handler contract.
+ *
+ * No FK declarations — `workspaces` is not yet in our DDL (the `docs`
+ * table also references `workspace_id` without an FK for the same
+ * reason), and the `user_id` target table is owned by Better Auth
+ * (`user`, singular; default `modelName`, not overridden in
+ * `create-auth.ts`). FKs land when Atlas + kysely-codegen take over
+ * schema management (architecture.md §16.9).
+ *
+ * Read by the auth resolver via `driver.system()` with an explicit
+ * `workspace_id` filter — `workspace_members` is not yet in
+ * `TENANT_SCOPED_TABLES` because no capability consumes it through a
+ * tenant-scoped handle today; the `workspace.list_members` /
+ * `workspace.add_member` slices will add it to that list in lockstep
+ * with the capability declarations.
+ */
+export const WORKSPACE_MEMBERS_DDL = `
+  CREATE TABLE workspace_members (
+    workspace_id TEXT    NOT NULL,
+    user_id      TEXT    NOT NULL,
+    role         TEXT    NOT NULL CHECK (role IN ('owner','admin','member','guest')),
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    deleted_at   INTEGER,
+    PRIMARY KEY (workspace_id, user_id)
+  );
+` as const;
+
+/**
  * `audit_events` — every outcome of every capability invocation
  * (architecture.md §3.11). Two indexes per the architecture document.
  */
@@ -173,6 +213,7 @@ export const FULL_DDL = [
   DOC_SNAPSHOTS_DDL,
   DOC_UPDATES_DDL,
   DOC_COUNTERS_DDL,
+  WORKSPACE_MEMBERS_DDL,
   AUDIT_EVENTS_DDL,
   OUTBOX_DDL,
 ].join("\n");

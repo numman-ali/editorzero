@@ -29,7 +29,7 @@
  */
 
 import type { AgentId, CollectionId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
-import type { CapabilityCategory, SubjectKind } from "@editorzero/scopes";
+import type { CapabilityCategory, Role, SubjectKind } from "@editorzero/scopes";
 import type { Kysely } from "kysely";
 
 /**
@@ -131,6 +131,41 @@ export interface DocCountersTable {
   readonly doc_id: DocId;
   readonly next_seq: number;
   readonly updated_at: number;
+}
+
+/**
+ * `workspace_members` — user↔workspace membership with role
+ * (architecture.md §3.4; ADR 0024). One row per active user-per-
+ * workspace; `role` is the Layer-1 source the resolver reads at
+ * principal-projection time. `ROLE_SCOPES` in
+ * `packages/dispatcher/src/gate.ts` maps `Role` → `Scope[]`.
+ *
+ * Deliberately on `SystemDatabase` but NOT on `Database` and NOT in
+ * `TENANT_SCOPED_TABLES` — the only consumer today is the auth
+ * resolver, which queries via `driver.system()` with an explicit
+ * `workspace_id` filter (resolver runs *before* a tenant context
+ * exists). When `workspace.list_members` / `workspace.add_member`
+ * capabilities land, this interface moves to `Database` and
+ * `TENANT_SCOPED_TABLES` in the same commit as those capability
+ * declarations.
+ *
+ * `role` typed as `Role` so Kysely selects narrow to the four-value
+ * union without a runtime check. The DDL's `CHECK (role IN (…))`
+ * constraint is the database-side enforcement; together they keep
+ * role drift impossible modulo a migration change.
+ *
+ * Revive-in-place: the composite PK `(workspace_id, user_id)` means
+ * re-adding a soft-deleted member is an UPDATE that clears
+ * `deleted_at` (and possibly overwrites `role`), not an INSERT.
+ * Codified in the future `workspace.add_member` capability's handler.
+ */
+export interface WorkspaceMembersTable {
+  readonly workspace_id: WorkspaceId;
+  readonly user_id: UserId;
+  readonly role: Role;
+  readonly created_at: number;
+  readonly updated_at: number;
+  readonly deleted_at: number | null;
 }
 
 /**
@@ -242,6 +277,7 @@ export interface Database {
 export interface SystemDatabase extends Database {
   readonly doc_counters: DocCountersTable;
   readonly outbox: OutboxTable;
+  readonly workspace_members: WorkspaceMembersTable;
 }
 
 /**

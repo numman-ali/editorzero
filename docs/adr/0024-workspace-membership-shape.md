@@ -216,43 +216,58 @@ Permanent fallback to `["member"]` preserves the current bug under
 a different shape; once the table exists, its absence is a
 structural error, not a default.
 
-### 3. Backfill migration
+### 3. Backfill migration — trivial (pre-production tree)
 
-One-time `INSERT workspace_members(workspace_id, user_id, role,
-created_at, updated_at) SELECT user.workspaceId, user.id, 'owner',
+No production deploys exist yet, so no existing users need a
+backfill for this slice to land safely. When the first production
+deploy approaches, a one-time
+`INSERT workspace_members(workspace_id, user_id, role, created_at,
+updated_at) SELECT user.workspaceId, user.id, 'owner',
 user.createdAt, user.createdAt FROM user WHERE user.workspaceId IS
-NOT NULL AND NOT EXISTS (...)` covers every existing user. Runs as
-part of the slice landing this ADR's implementation; no deploy
-window where existing users are locked out.
+NOT NULL AND NOT EXISTS (...)` runs alongside the deploy to cover
+every pre-hook user; post-hook signups are covered by item 4.
 
-### 4. Signup bootstrap — deferred
+### 4. Signup bootstrap — BA after-hook (lands with this ADR)
 
 BA 1.6.5's `databaseHooks.user.create.after` runs **post-commit**,
 not inside the user-insert tx. Sources: BA docs describe after
-hooks as post-create actions; the 1.5 blog explicitly confirms
-after hooks now run after commit; the shipped runtime
+hooks as post-create actions; the shipped runtime
 (`better-auth/dist/db/with-hooks.mjs`) queues them via
-`queueAfterTransactionHook`. Atomic user + membership insert
+`queueAfterTransactionHook`, and `@better-auth/core`'s
+`runWithTransaction` drains `pendingHooks` only after `adapter.
+transaction(...)` resolves. Atomic user + membership insert
 through BA's public hook API is structurally unsupported.
 
-Two options when this lands (separate slice):
+The shipped approach: **BA `user.create.after` inserts the
+`workspace_members` row as `role: "owner"` post-commit.** The
+signing-up user owns the workspace they just minted, so `"owner"`
+is the structurally correct role. `onConflict((oc) => oc.columns([
+"workspace_id", "user_id"]).doNothing())` makes the insert
+retry-safe without clobbering a soft-deleted revive state.
+
+Atomicity caveat: if the `after` hook fails between user-commit
+and membership-insert, BA's `signUpEmail` throws (the hook
+propagates its error via `runWithTransaction`'s `pendingHooks`
+loop). The user row is committed but the client sees a 500. Net
+state: orphaned user row, no session. This is **strictly better
+than a silent-401 on first request**; recovery costs the user a
+retry (which hits the user-email uniqueness constraint) or a
+background reconcile (out of scope for MVP). The observable
+failure surface is "rare signup 500" rather than "every fresh
+signup 401s forever" — the latter was the production gap Codex
+caught before commit.
+
+Two future evolutions this shape composes into:
 - **Own signup orchestration.** Custom `/auth/signup` route that
   wraps `auth.api.signUpEmail` + `workspace_members` insert in one
   editorzero-owned tx. Gives us atomicity; costs us BA's default
-  signup flow semantics.
-- **Accept two-phase with compensation.** BA `user.create.before`
-  hook still mints `workspaceId`; post-signup, the first
-  authenticated request backfills the membership row if missing.
-  Race window is bounded; strict resolver treats missing row as
-  401, so the worst case is one retry.
-
-This ADR doesn't choose between them — the trade-off wants
-real-workload pressure (signup failure modes, email-verification
-integration) before committing. For now, **new-user signup in the
-current tree follows the existing `create-auth.ts` path
-(workspaceId minted on user row); the backfill migration (item 3)
-covers bootstrap-in-place.** When signup hooks matter, a follow-up
-ADR decides between own-orchestration and two-phase.
+  signup flow semantics. Revisit if the after-hook failure rate
+  ever becomes observable.
+- **Invite-driven signup.** When multi-workspace lands (item 6),
+  the `before` hook resolves the workspace from invitation
+  context instead of minting a fresh one, and the `after` hook
+  inserts membership with the invite's role. No change to the
+  hook shape — only the data source shifts.
 
 ### 5. Revive-in-place semantics
 

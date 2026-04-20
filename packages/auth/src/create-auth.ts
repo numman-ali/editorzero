@@ -53,7 +53,7 @@
  */
 
 import type { SqliteDriver } from "@editorzero/db";
-import { generateWorkspaceId, uuidV7 } from "@editorzero/ids";
+import { generateWorkspaceId, UserId, uuidV7, WorkspaceId } from "@editorzero/ids";
 import { betterAuth } from "better-auth";
 
 /**
@@ -164,18 +164,74 @@ export function createAuth(options: CreateAuthOptions) {
           // `workspaceId` NOT NULL constraint.
           //
           // MVP shape: one workspace per user; each new user gets
-          // their own workspace. When multi-workspace lands with a
-          // `workspace_members` table, this hook either (a) resolves
-          // an existing workspace from invitation context, or (b)
-          // mints a new workspace row alongside the user — the
-          // editorzero-owned `workspace_members` table owns the
-          // join from that point forward.
+          // their own workspace. When multi-workspace lands with an
+          // invitation/signup-bootstrap replacement this hook either
+          // (a) resolves an existing workspace from invitation context,
+          // or (b) mints a new workspace row alongside the user — the
+          // editorzero-owned `workspace_members` table still owns the
+          // join (see `after` below).
           before: async (user) => ({
             data: {
               ...user,
               workspaceId: generateWorkspaceId(),
             },
           }),
+          // **Post-commit bootstrap (ADR 0024).** The resolver is
+          // strict-on-missing — a valid session without a
+          // `workspace_members` row → 401. This hook populates that
+          // row as the user's auto-minted workspace gets created, so
+          // fresh sign-ups can authenticate against `/docs/*`
+          // immediately. Role `"owner"` matches the "user owns the
+          // workspace they just minted" invariant.
+          //
+          // **Runs after commit.** Better Auth's `create.after` fires
+          // via `queueAfterTransactionHook` (verified in
+          // `@better-auth/core/dist/context/transaction.mjs`) —
+          // pending hooks execute after the tx commits. If this
+          // insert fails, the error propagates back to the caller of
+          // `auth.api.signUpEmail`, which fails loud on signup. The
+          // user row is committed but no session exists yet, so
+          // recovery requires the caller to delete the orphan user
+          // row or use a reconcile job; neither is in scope for the
+          // MVP — the current lever is "signup throws, surface to UI,
+          // ask user to retry" (bad once, bad rarely; audit log will
+          // show the orphaned user + failed audit in the next slice).
+          //
+          // **Idempotent on conflict.** `onConflict((oc) =>
+          // oc.columns(["workspace_id", "user_id"]).doNothing())`
+          // protects against accidental double-invocation (e.g., a
+          // retry that got through BA's internal debounce). The
+          // composite PK is the natural uniqueness key; `doNothing`
+          // is the revive-in-place-safe variant because a previously-
+          // soft-deleted row stays soft-deleted rather than being
+          // silently overwritten by an unrelated re-signup.
+          after: async (user) => {
+            const workspaceId = (user as { workspaceId?: unknown }).workspaceId;
+            if (typeof workspaceId !== "string" || workspaceId.length === 0) {
+              // Defensive: `before` always sets workspaceId, so this
+              // branch is unreachable in the happy path. If it ever
+              // fires it means a future hook chain mutated `user.
+              // workspaceId` back out; fail loud rather than silent-
+              // 401 later.
+              throw new Error(
+                "user.create.after: workspaceId missing on user row — before hook did not run or was overridden",
+              );
+            }
+            const now = Date.now();
+            await driver
+              .system()
+              .insertInto("workspace_members")
+              .values({
+                workspace_id: WorkspaceId(workspaceId),
+                user_id: UserId(user.id),
+                role: "owner",
+                created_at: now,
+                updated_at: now,
+                deleted_at: null,
+              })
+              .onConflict((oc) => oc.columns(["workspace_id", "user_id"]).doNothing())
+              .execute();
+          },
         },
       },
     },

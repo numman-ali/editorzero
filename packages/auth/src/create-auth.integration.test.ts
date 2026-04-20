@@ -21,7 +21,13 @@
  * stack.
  */
 
-import { createSqliteDriver, SQLITE_FULL_DDL, type SqliteDriver } from "@editorzero/db";
+import {
+  createLoadRoles,
+  createSqliteDriver,
+  type LoadRoles,
+  SQLITE_FULL_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createAuth } from "./create-auth";
@@ -115,7 +121,14 @@ describe("@editorzero/auth", () => {
     expect(user.workspaceId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
   });
 
-  it("sign-in → resolver → UserPrincipal round-trip", async () => {
+  it("sign-in → resolver → UserPrincipal round-trip (role sourced from workspace_members by signup-bootstrap hook)", async () => {
+    // ADR 0024: the `user.create.after` bootstrap hook in
+    // `create-auth.ts` inserts a `workspace_members` row as
+    // `role: "owner"` post-commit, so the resolver can immediately
+    // source the role from there without any separate backfill
+    // migration. This test exercises the end-to-end path — signup
+    // through BA, which fires the hook, which seeds membership, which
+    // the resolver reads at principal resolution.
     const auth = buildAuth();
     await runAuthMigrations(auth);
 
@@ -126,6 +139,17 @@ describe("@editorzero/auth", () => {
         name: "Bob",
       },
     });
+
+    // Confirm the hook populated the membership row. The role is
+    // `"owner"` because a fresh signup mints a fresh workspace and
+    // the signing-up user owns it by construction.
+    const memberRow = await driver
+      .system()
+      .selectFrom("workspace_members")
+      .select(["role", "deleted_at"])
+      .executeTakeFirstOrThrow();
+    expect(memberRow.role).toBe("owner");
+    expect(memberRow.deleted_at).toBeNull();
 
     const signInResponse = await auth.api.signInEmail({
       body: {
@@ -139,24 +163,75 @@ describe("@editorzero/auth", () => {
     const cookieHeader = sessionCookieFrom(signInResponse);
     expect(cookieHeader.length).toBeGreaterThan(0);
 
-    const resolver = createBetterAuthResolver(auth);
+    const resolver = createBetterAuthResolver({ auth, loadRoles: createLoadRoles(driver) });
     const headers = new Headers({ cookie: cookieHeader });
     const principal = await resolver(headers);
 
     expect(principal).not.toBeNull();
     if (principal === null) throw new Error("unreachable — principal checked above");
     expect(principal.kind).toBe("user");
-    expect(principal.roles).toEqual(["member"]);
+    expect(principal.roles).toEqual(["owner"]);
     expect(principal.token_id).toBeNull();
     expect(principal.session_id).not.toBeNull();
     expect(principal.workspace_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
   });
 
-  it("resolver returns null for requests without a session cookie", async () => {
+  it("resolver returns null when the session is valid but no workspace_members row exists (ADR 0024 strict-on-missing)", async () => {
+    // Post-ADR 0024 the membership table is authoritative; a signed-
+    // in user without a `workspace_members` row is structurally
+    // invalid. Production can't normally hit this branch: the
+    // `user.create.after` hook in `create-auth.ts` seeds the row
+    // post-commit on every signup and hook errors propagate as
+    // signup failures (fail-loud, not atomic). But a future
+    // partial-failure of that hook, an ADR 0017 cascade that
+    // soft-deleted the row, or a migration gap could all produce a
+    // signed-in user without an active membership row. The resolver
+    // must refuse to mint an unprivileged principal by falling back;
+    // it returns null → 401.
+    //
+    // To exercise this branch in isolation we delete the hook-seeded
+    // row after signup, then resolve. The assertion pins the strict
+    // contract regardless of how the row went missing.
     const auth = buildAuth();
     await runAuthMigrations(auth);
 
-    const resolver = createBetterAuthResolver(auth);
+    await auth.api.signUpEmail({
+      body: {
+        email: "dora@example.com",
+        password: "correct-horse-battery-staple",
+        name: "Dora",
+      },
+    });
+    // Simulate the "membership row went missing" state the resolver
+    // must handle. Hard-delete is fine — the resolver already
+    // filters `deleted_at IS NULL`, so a soft-delete would exercise
+    // the same branch.
+    await driver.system().deleteFrom("workspace_members").execute();
+
+    const signInResponse = await auth.api.signInEmail({
+      body: {
+        email: "dora@example.com",
+        password: "correct-horse-battery-staple",
+      },
+      asResponse: true,
+    });
+    const cookieHeader = sessionCookieFrom(signInResponse);
+
+    const resolver = createBetterAuthResolver({ auth, loadRoles: createLoadRoles(driver) });
+    const principal = await resolver(new Headers({ cookie: cookieHeader }));
+    expect(principal).toBeNull();
+  });
+
+  it("resolver returns null for requests without a session cookie", async () => {
+    // loadRoles is unreachable on this branch — getSession returns
+    // null first. A never-called stub verifies that invariant.
+    const auth = buildAuth();
+    await runAuthMigrations(auth);
+
+    const loadRoles: LoadRoles = async () => {
+      throw new Error("loadRoles must not be called when session is null");
+    };
+    const resolver = createBetterAuthResolver({ auth, loadRoles });
     const principal = await resolver(new Headers());
     expect(principal).toBeNull();
   });
@@ -211,7 +286,12 @@ describe("@editorzero/auth", () => {
       asResponse: true,
     });
     const cookieHeader = sessionCookieFrom(signInResponse);
-    const resolver = createBetterAuthResolver(auth);
+    // loadRoles is unreachable on this branch too — the workspaceId
+    // guard in the resolver fires before the membership lookup.
+    const loadRoles: LoadRoles = async () => {
+      throw new Error("loadRoles must not be called when workspaceId is missing");
+    };
+    const resolver = createBetterAuthResolver({ auth, loadRoles });
     const principal = await resolver(new Headers({ cookie: cookieHeader }));
     expect(principal).toBeNull();
   });

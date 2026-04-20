@@ -65,6 +65,7 @@ const DROP_TABLES_SQL = `
   DROP TABLE IF EXISTS doc_counters;
   DROP TABLE IF EXISTS doc_updates;
   DROP TABLE IF EXISTS doc_snapshots;
+  DROP TABLE IF EXISTS workspace_members;
   DROP TABLE IF EXISTS docs;
 `;
 

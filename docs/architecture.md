@@ -205,15 +205,26 @@ Better Auth tables (`api_key`, `agent_auth_*`, `oauth_*`, `session`, `account`) 
 ```
 workspace_members(
   workspace_id    TEXT NOT NULL REFERENCES workspaces(id),
-  user_id         TEXT NOT NULL REFERENCES users(id),
-  role            TEXT NOT NULL,                  -- owner | admin | member | guest
+  user_id         TEXT NOT NULL REFERENCES user(id),  -- Better Auth default modelName is singular
+  role            TEXT NOT NULL,                      -- owner | admin | member | guest
   created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
   deleted_at      INTEGER,
   PRIMARY KEY (workspace_id, user_id)
 )
 ```
 
-Role → default permissions mapping lives in code, not rows. Per-doc overrides in `doc_acls`.
+Role → default permissions mapping lives in code (`ROLE_SCOPES` in `packages/dispatcher/src/gate.ts`), not rows. Per-doc overrides land in `doc_acls` when the ACL layer ships (§8.1 Layer 1).
+
+**Ownership (ADR 0024).** Membership is editorzero-owned, not Better Auth-owned. BA stores credentials (`user`, `session`, `account`, `verification` tables) and mints `workspaceId` on `user.create.before`; editorzero owns the `(workspace_id, user_id) → role` join and the ADR 0017 soft-delete cascade. The resolver reads role from `workspace_members` via the `LoadRoles` callable injected at composition time — strict-on-missing: a valid session without a membership row → null → 401.
+
+**Signup bootstrap.** A companion `user.create.after` hook in `@editorzero/auth`'s `createAuth` inserts the `workspace_members` row as `role: "owner"` post-commit (BA fires `after` hooks via `queueAfterTransactionHook` after the user-insert tx commits). The signing-up user owns the workspace they just auto-minted, so `"owner"` is the structurally correct role. The insert uses `onConflict doNothing` on the `(workspace_id, user_id)` PK for retry-safety. If the `after` hook fails, BA's `signUpEmail` throws and signup fails loud — better than a silent-401 on first request. Production never hits strict-on-missing today; the resolver's null branch exists for future partial-hook-failure, ADR 0017 cascade, and migration-gap scenarios.
+
+**Revive-in-place on re-add.** The composite PK `(workspace_id, user_id)` forces UPDATE semantics when a soft-deleted member is re-added: clearing `deleted_at`, bumping `updated_at`, and overwriting `role` on the same row. INSERT would violate the PK; a caller that re-adds a removed member gets the same row revived, not a history of adds/removes. Historical add/remove timeline lives in the audit log (`audit_events` rows for `workspace_members.add` / `.remove`), not on the membership row itself.
+
+**Agents are not members.** Agents (ADR 0016) are first-class peer principals with their own `agents` table keyed by `(workspace_id, id)` and their own scope vocabulary. They do NOT appear in `workspace_members` — the distinction keeps `LoadRoles(workspace_id, user_id)` a user-only lookup and prevents BA's session layer from ever carrying an agent principal. Agent-facing authz runs through `AgentPrincipal.scopes` on the same `PermissionGate`; the two principal kinds share the gate, not the source table.
+
+**Evolution axes (revisit triggers in ADR 0024).** (a) multi-workspace + invites — today one workspace per user, auto-minted on signup; (b) organisations above workspaces; (c) teams within workspaces; (d) platform-admin role (distinct from workspace `owner`). Each lands as an additive slice when the product need surfaces; the current table shape composes forward without a breaking migration.
 
 ### 3.5 Docs and collections
 
