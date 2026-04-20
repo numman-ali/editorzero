@@ -154,4 +154,45 @@ describe("api-server trunk composition", () => {
     const fakeLoadRoles: LoadRoles = async () => null;
     expect(() => createApiApp({ loadRoles: fakeLoadRoles })).toThrow(/loadRoles.+without.+auth/i);
   });
+
+  it("createApiApp({ registry }) without dispatcher throws (ADR 0026 MCP mount)", () => {
+    // The MCP handler closes over the dispatcher; mounting `/mcp` with
+    // only a registry would advertise tool calls with no execution
+    // path. Fail loud at boot rather than at first tools/call.
+    const fakeRegistry = { list: () => [] } as unknown as Parameters<
+      typeof createApiApp
+    >[0] extends infer O
+      ? O extends { registry?: infer R }
+        ? R
+        : never
+      : never;
+    expect(() => createApiApp({ registry: fakeRegistry })).toThrow(
+      /registry.+without.+dispatcher/i,
+    );
+  });
+
+  it("createApiApp({ registry, dispatcher }) without auth throws (ADR 0026 slice 1)", () => {
+    // Slice 1 of the MCP adapter reads principal via the cookie chain;
+    // without auth + loadRoles there is no principal middleware on
+    // `/mcp` and every tool call would crash reading `c.var.principal`.
+    // Require the full auth stack at composition time.
+    const fakeRegistry = { list: () => [] } as unknown as Parameters<
+      typeof createApiApp
+    >[0] extends infer O
+      ? O extends { registry?: infer R }
+        ? R
+        : never
+      : never;
+    const fakeDispatcher = {
+      dispatch: async () => ({}),
+      deps: {} as never,
+    } as unknown as Parameters<typeof createApiApp>[0] extends infer O
+      ? O extends { dispatcher?: infer D }
+        ? D
+        : never
+      : never;
+    expect(() => createApiApp({ registry: fakeRegistry, dispatcher: fakeDispatcher })).toThrow(
+      /registry.+without.+auth/i,
+    );
+  });
 });

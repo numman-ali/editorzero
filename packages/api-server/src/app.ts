@@ -83,9 +83,11 @@
 
 import type { Auth } from "@editorzero/auth";
 import { createBetterAuthResolver } from "@editorzero/auth";
+import type { Registry } from "@editorzero/capabilities";
 import type { LoadRoles } from "@editorzero/db";
 import type { Dispatcher } from "@editorzero/dispatcher";
 import { EditorZeroError } from "@editorzero/errors";
+import { createMcpHandler } from "@editorzero/mcp-server";
 import { OpenAPIHono } from "@hono/zod-openapi";
 
 import type { ApiEnv } from "./env";
@@ -132,10 +134,34 @@ export interface CreateApiAppOptions {
    * probe tests it's used in.
    */
   readonly dispatcher?: Dispatcher;
+  /**
+   * Capability registry. When provided alongside `dispatcher`, the
+   * MCP adapter mounts at `/mcp` behind the same principal chain
+   * that `/docs/*` uses (ADR 0026). The adapter reads the registry
+   * once at mount time to build the tool list; capabilities are
+   * filtered via `isMcpTool` (`surfaces.includes("mcp") &&
+   * !humanOnly`). Omit when building a trunk that does not expose
+   * MCP — e.g., the zero-arg `app` default used by api-client smoke
+   * bindings.
+   *
+   * **Pairing constraint.** `registry` requires `dispatcher`: the
+   * MCP handler closes over the dispatcher to execute tool calls.
+   * The factory throws at composition time if `registry` arrives
+   * without `dispatcher`; providing `dispatcher` without `registry`
+   * is fine (MCP simply does not mount).
+   */
+  readonly registry?: Registry;
+  /**
+   * Server identity advertised in the MCP `initialize` handshake.
+   * Optional: defaults to `{ name: "editorzero", version: "0.0.0" }`.
+   * Production should pass the real package version — the MCP client
+   * surfaces this to end-users as `serverInfo`.
+   */
+  readonly mcpServerInfo?: { readonly name: string; readonly version: string };
 }
 
 export function createApiApp(options: CreateApiAppOptions = {}) {
-  const { auth, loadRoles, dispatcher } = options;
+  const { auth, loadRoles, dispatcher, registry, mcpServerInfo } = options;
 
   if (auth !== undefined && loadRoles === undefined) {
     throw new Error(
@@ -148,6 +174,23 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     throw new Error(
       "createApiApp: `loadRoles` was provided without `auth`. The two must be " +
         "provided together — `loadRoles` is only consumed by the auth resolver.",
+    );
+  }
+  if (registry !== undefined && dispatcher === undefined) {
+    throw new Error(
+      "createApiApp: `registry` was provided without `dispatcher`. The MCP " +
+        "adapter closes over the dispatcher to execute tool calls; passing a " +
+        "registry without a dispatcher would mount `/mcp` with no way to run " +
+        "capabilities.",
+    );
+  }
+  if (registry !== undefined && auth === undefined) {
+    throw new Error(
+      "createApiApp: `registry` was provided without `auth`. ADR 0026 slice 1 " +
+        "mounts `/mcp` behind the session-cookie principal chain; without auth + " +
+        "loadRoles the route would have no principal middleware and every tool " +
+        "call would crash reading `c.var.principal`. Provide `auth` + `loadRoles` " +
+        "alongside `registry`, or omit `registry` to not expose MCP.",
     );
   }
   const trunk = new OpenAPIHono<ApiEnv>();
@@ -184,6 +227,27 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     });
     trunk.use("/docs/*", principalMw);
     trunk.use("/infra/whoami", principalMw);
+    // `/mcp` is authenticated via the same principal chain (ADR 0026
+    // commitment 1: session cookie resolves to `c.var.principal`; no
+    // `authInfo.extra.principal` smuggling). The composition guards
+    // above ensure `registry` only arrives when `auth`/`loadRoles` do.
+    if (registry !== undefined && dispatcher !== undefined) {
+      trunk.use("/mcp", principalMw);
+      // MCP adapter mount (ADR 0026). Outside the OpenAPI route system:
+      // MCP uses JSON-RPC over Streamable HTTP, not the zod-validated
+      // capability shape. Same shape as `/auth/*` — registered on the
+      // non-typed `.all()` method so `hc<AppType>` RPC typing is not
+      // contaminated by a non-REST contract. No OAuth discovery metadata
+      // mounts here (ADR 0026 commitment 6 — slice 1 only).
+      trunk.all(
+        "/mcp",
+        createMcpHandler({
+          registry,
+          dispatcher,
+          serverInfo: mcpServerInfo ?? { name: "editorzero", version: "0.0.0" },
+        }),
+      );
+    }
   }
   if (dispatcher !== undefined) {
     trunk.use("/docs/*", createDispatcherMiddleware({ dispatcher }));

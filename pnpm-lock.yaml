@@ -145,6 +145,9 @@ importers:
       '@editorzero/ids':
         specifier: workspace:*
         version: link:../ids
+      '@editorzero/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
       '@editorzero/observability':
         specifier: workspace:*
         version: link:../observability
@@ -167,6 +170,9 @@ importers:
         specifier: 'catalog:'
         version: 4.3.6
     devDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.3.6)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
