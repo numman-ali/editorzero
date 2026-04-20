@@ -6,5 +6,5 @@
     "tsBuildInfoFile": "./.tsbuildinfo"
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../../packages/api-client" }]
+  "references": [{ "path": "../../packages/api-client" }, { "path": "../../packages/capabilities" }]
 }

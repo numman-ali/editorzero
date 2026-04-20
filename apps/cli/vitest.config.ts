@@ -10,6 +10,10 @@ export default extendVitestConfig({
         // v8-ignore pragmas.
         "src/index.ts",
         "src/auth/index.ts",
+        // Registry is a one-line `createRegistry([...])` manifest — no
+        // logic, and running `registry.list()` through every test would
+        // drag unrelated capabilities into each unit suite.
+        "src/registry.ts",
       ],
     },
   },

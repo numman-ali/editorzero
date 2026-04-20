@@ -10,7 +10,9 @@
     { "path": "../../packages/api-client" },
     { "path": "../../packages/api-server" },
     { "path": "../../packages/auth" },
-    { "path": "../../packages/db" }
+    { "path": "../../packages/capabilities" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/ids" }
   ],
   "exclude": ["node_modules", "dist"]
 }

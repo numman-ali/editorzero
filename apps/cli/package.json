@@ -22,12 +22,15 @@
   },
   "dependencies": {
     "@editorzero/api-client": "workspace:*",
-    "citty": "0.2.2"
+    "@editorzero/capabilities": "workspace:*",
+    "citty": "0.2.2",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@editorzero/api-server": "workspace:*",
     "@editorzero/auth": "workspace:*",
     "@editorzero/db": "workspace:*",
+    "@editorzero/ids": "workspace:*",
     "@vitest/coverage-v8": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

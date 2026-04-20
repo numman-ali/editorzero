@@ -68,9 +68,15 @@ importers:
       '@editorzero/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@editorzero/capabilities':
+        specifier: workspace:*
+        version: link:../../packages/capabilities
       citty:
         specifier: 0.2.2
         version: 0.2.2
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
     devDependencies:
       '@editorzero/api-server':
         specifier: workspace:*
@@ -81,6 +87,9 @@ importers:
       '@editorzero/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@editorzero/ids':
+        specifier: workspace:*
+        version: link:../../packages/ids
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(tsx@4.21.0)(yaml@2.8.3))
