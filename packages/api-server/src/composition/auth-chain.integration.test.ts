@@ -37,6 +37,7 @@ import {
   docGet,
   docList,
   docPublish,
+  docUnpublish,
   registerCapability,
 } from "@editorzero/capabilities";
 import {
@@ -86,6 +87,7 @@ async function buildStack(
     registerDocCreate?: boolean;
     registerDocGet?: boolean;
     registerDocPublish?: boolean;
+    registerDocUnpublish?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -104,6 +106,7 @@ async function buildStack(
     ...(options.registerDocCreate ? [registerCapability(docCreate)] : []),
     ...(options.registerDocGet ? [registerCapability(docGet)] : []),
     ...(options.registerDocPublish ? [registerCapability(docPublish)] : []),
+    ...(options.registerDocUnpublish ? [registerCapability(docUnpublish)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -735,6 +738,117 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     // wire-form string off `createBody.doc_id` needs to be re-branded
     // via the idempotent `DocId()` factory (already a valid UUIDv7
     // string from the create handler).
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["visibility", "visibility_version"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.visibility).toBe("workspace");
+    expect(row.visibility_version).toBe(0);
+  });
+
+  // ── POST /docs/unpublish/:doc_id — inverse of publish ────────────────
+  //
+  // Shares publish's authz envelope: scope `doc:publish`, member role
+  // lacks it, real Better Auth resolver hardcodes members. So every
+  // authenticated caller today hits the gate's deny branch; the happy-
+  // path allow lands when `workspace_members` widens roles (resolver.ts
+  // header comment). Only the deny / missing-auth / malformed-param
+  // branches are reachable here; the allow branch is covered by the
+  // route unit test + capability unit test at lower layers.
+  it("POST /docs/unpublish/:doc_id 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({
+      registerDocUnpublish: true,
+    });
+    const res = await trunk.request("/docs/unpublish/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /docs/unpublish/:doc_id with a non-UUID param returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocUnpublish: true,
+    });
+    await signUp(trunk, "peter@example.com");
+    const signInRes = await signIn(trunk, "peter@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/unpublish/not-a-uuid", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(400);
+
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/unpublish/:doc_id 403s for a member role (no doc:publish scope)", async () => {
+    // Same gate-fires-first shape as publish — the scope `doc:publish`
+    // guards both directions, and `member` doesn't hold it. A single
+    // deny-audit row lands via `withAuditTx`; no write-path tx opens,
+    // so no `docs.visibility` bump is possible.
+    const { trunk } = await buildStack({
+      registerDocUnpublish: true,
+    });
+    await signUp(trunk, "quinn@example.com");
+    const signInRes = await signIn(trunk, "quinn@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/unpublish/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(403);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.capability_id).toBe("doc.unpublish");
+    expect(audits[0]?.outcome).toBe("deny");
+  });
+
+  it("POST /docs/unpublish/:doc_id for a doc in a different workspace denies before reaching the SELECT (scope gate fires first)", async () => {
+    // Mirror of the publish cross-workspace test — two layers of
+    // protection, but only the scope-gate layer is observable today
+    // (every authenticated user is a member). When role widening lands,
+    // a follow-up allow-path test will exercise the tenant-scoped
+    // SELECT's 404 on cross-workspace targets.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocUnpublish: true,
+      withSync: true,
+    });
+    await signUp(trunk, "rose@example.com");
+    const roseSignIn = await signIn(trunk, "rose@example.com");
+    const roseCookie = sessionCookieFrom(roseSignIn);
+    await signUp(trunk, "sam@example.com");
+    const samSignIn = await signIn(trunk, "sam@example.com");
+    const samCookie = sessionCookieFrom(samSignIn);
+
+    // Rose creates a doc.
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie: roseCookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Rose's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    // Sam tries to unpublish it. Gate denies (member role).
+    const res = await trunk.request(`/docs/unpublish/${doc_id}`, {
+      method: "POST",
+      headers: { cookie: samCookie },
+    });
+    expect(res.status).toBe(403);
+
+    // Row unchanged — visibility still "workspace", visibility_version
+    // still 0. Same brand-via-`DocId()` dance as the publish sibling.
     const row = await driver
       .system()
       .selectFrom("docs")

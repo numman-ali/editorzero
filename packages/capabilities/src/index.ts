@@ -29,3 +29,4 @@ export { docCreate } from "./doc/create";
 export { docGet } from "./doc/get";
 export { docList } from "./doc/list";
 export { docPublish } from "./doc/publish";
+export { docUnpublish } from "./doc/unpublish";
