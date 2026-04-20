@@ -35,9 +35,10 @@
  * DDL + backfill plan + public-route behaviour in this capability's
  * commit, this slice lands the **capability + route shape** only:
  * visibility flip to `"public"`, `visibility_version` bump, audit-row
- * emit. The DDL + public-route substrate land in the slice that also
- * ships `doc.unpublish` + the public read-path renderer; at that point
- * this handler's UPDATE grows to set `published_slug = slug` +
+ * emit. The DDL + public-route substrate land in the public read-path
+ * renderer slice (the inverse capability `doc.unpublish` already
+ * shipped alongside this one with the same deferral posture); at that
+ * point this handler's UPDATE grows to set `published_slug = slug` +
  * `published_at = now` in the same statement, and `doc.get_markdown`'s
  * public-route uses `published_slug` as the URL key. No handler logic
  * from this file is load-bearing for that transition; the callers of
