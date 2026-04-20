@@ -35,6 +35,7 @@ import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { AccessPath, UserPrincipal } from "@editorzero/principal";
 import { HocuspocusSync } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type * as Y from "yjs";
 import { z } from "zod";
 
 import { createApiDispatcher } from "./createApiDispatcher";
@@ -520,15 +521,118 @@ describe("createApiDispatcher", () => {
     expect(at).toBeLessThanOrEqual(after);
   });
 
-  it("runRead rejects ctx.transact calls (reads must not mutate content)", async () => {
-    // Covers the read-path `transact: async () => { throw ... }` branch.
-    // A read-category handler that calls `ctx.transact` is a contract
-    // violation — content mutation must route through the write path.
+  it("runRead routes ctx.transact through sync.read when sync is wired", async () => {
+    // Positive-path mirror of the "no sync" rejection below. Pins
+    // that a read-category handler calling `ctx.transact(doc_id, fn)`
+    // actually reaches `HocuspocusSync.read` — dispatcher wiring
+    // contract, not Y.Doc semantics (which live in the sync package's
+    // own integration suite).
+    //
+    // Pre-seed the doc via the write-path bind so committed
+    // `doc_updates` exist, then dispatch a read fixture that reads
+    // `getText("body")` off the Y.Doc clone. The handler's returned
+    // string is the read's projection; asserting it equals the
+    // committed text proves the full route: dispatcher → runRead →
+    // sync.read → clone → fn → plain data out.
+    const sync = new HocuspocusSync({
+      docUpdatesWriter: createDocUpdatesWriter(),
+      docUpdatesReader: createDocUpdatesReader(),
+      systemDb: driver.system(),
+    });
+    try {
+      // Seed docs metadata directly — the write-path bind below only
+      // inserts `doc_updates`, not the parent `docs` row.
+      await driver
+        .system()
+        .insertInto("docs")
+        .values({
+          id: DOC_ID,
+          workspace_id: WORKSPACE_ID,
+          collection_id: null,
+          title: "seed",
+          slug: "seed",
+          order_key: "a",
+          visibility: "workspace",
+          visibility_version: 0,
+          created_by: USER_ID,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: null,
+        })
+        .execute();
+      // Seed the Y.Doc with "committed" text via a real write-path
+      // transact — asAuditTx imported via the local helper below to
+      // keep this test hermetic from the wider api-server bind-tx
+      // scaffolding.
+      const { asAuditTx } = await import("@editorzero/db");
+      await driver.withSystemTx(async (tx) => {
+        const bound = sync.bind({
+          sqlTx: asAuditTx(tx),
+          principal: testUser(),
+          workspace_id: WORKSPACE_ID,
+        });
+        await bound.transact(DOC_ID, (ydoc) => {
+          ydoc.getText("body").insert(0, "committed");
+        });
+      });
+
+      // A read fixture whose handler projects the Y.Doc clone's text.
+      // If the wiring is broken, either `ctx.transact` throws (old
+      // stub), or the returned text is empty (clone not hydrated).
+      // The `as Y.Doc` cast mirrors what `doc.get` does at its seed
+      // site (kernel's `TEditor = unknown` default; a future sub-slice
+      // sharpens this to Y.Doc and drops the cast).
+      let observedText = "";
+      const readFixture: Capability<FixtureInput, FixtureOutput> = {
+        ...buildFixture(
+          async (ctx, input) => {
+            observedText = await ctx.transact(DocId(input.doc_id), (ydoc) =>
+              (ydoc as Y.Doc).getText("body").toString(),
+            );
+            return { doc_id: input.doc_id, title: observedText };
+          },
+          ["doc:read"],
+        ),
+        category: "read",
+        requires: ["doc:read"],
+      };
+      const registry = createRegistry([registerCapability(readFixture)]);
+      const dispatcher = createApiDispatcher({
+        driver,
+        registry,
+        sync,
+        now: () => 1,
+      });
+
+      const result = await dispatcher.dispatch({
+        capability_id: FIXTURE_ID,
+        input: { doc_id: DOC_ID, title: "ignored" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      });
+
+      expect(observedText).toBe("committed");
+      expect(result).toEqual({ doc_id: DOC_ID, title: "committed" });
+    } finally {
+      await sync.close();
+    }
+  });
+
+  it("runRead rejects ctx.transact when no sync is wired", async () => {
+    // Covers the read-path `transact` throw branch for the sync-absent
+    // case. A read-category handler that calls `ctx.transact` with no
+    // `HocuspocusSync` in the factory options cannot project Y.Doc
+    // state — the descriptive error points operators at the wiring
+    // gap rather than silently failing. With `sync` wired, the read
+    // path routes through `sync.read` (integration proven in
+    // `packages/sync/src/hocuspocus.integration.test.ts`); the
+    // api-server factory owns only the "no sync → throw" branch here.
     const badReadFixture: Capability<FixtureInput, FixtureOutput> = {
       ...buildFixture(
         async (ctx, input) => {
           await ctx.transact(DocId(input.doc_id), () => {
-            // Unreachable — the read-path stub throws.
+            // Unreachable — the read-path stub throws without sync.
           });
           return { doc_id: input.doc_id, title: input.title };
         },
@@ -548,6 +652,6 @@ describe("createApiDispatcher", () => {
         access: testAccess(),
         trace_id: null,
       }),
-    ).rejects.toThrow(/reads must not call ctx\.transact/u);
+    ).rejects.toThrow(/ctx\.transact is not wired on the read path/u);
   });
 });

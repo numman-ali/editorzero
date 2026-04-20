@@ -83,6 +83,7 @@
 import type { Auth } from "@editorzero/auth";
 import { createBetterAuthResolver } from "@editorzero/auth";
 import type { Dispatcher } from "@editorzero/dispatcher";
+import { EditorZeroError } from "@editorzero/errors";
 import { OpenAPIHono } from "@hono/zod-openapi";
 
 import type { ApiEnv } from "./env";
@@ -117,6 +118,23 @@ export interface CreateApiAppOptions {
 export function createApiApp(options: CreateApiAppOptions = {}) {
   const { auth, dispatcher } = options;
   const trunk = new OpenAPIHono<ApiEnv>();
+
+  // **Error mapper** — every `EditorZeroError` subclass carries its
+  // HTTP status + code literal (`packages/errors/src/index.ts`);
+  // dispatch-path throws surface here when a capability handler (or
+  // the dispatcher itself) raises. Plain non-typed errors fall through
+  // to Hono's default 500. Narrow projection: status from
+  // `err.httpStatus`, body `{ error: err.code }` — same shape every
+  // route's zod error response already documents for 400/401/403.
+  // Principal-middleware 401s are returned via `c.json(...)` directly
+  // (not thrown), so this mapper doesn't touch them.
+  trunk.onError((err, c) => {
+    if (err instanceof EditorZeroError) {
+      // biome-ignore lint/suspicious/noExplicitAny: httpStatus is a number literal on each subclass (400/403/404/409/429/500/...); Hono's ContentfulStatusCode union doesn't surface through EditorZeroError's base type. Cast is safe because every subclass defines a valid HTTP status.
+      return c.json({ error: err.code }, err.httpStatus as any);
+    }
+    throw err;
+  });
 
   if (auth !== undefined) {
     trunk.on(["POST", "GET"], "/auth/*", (c) => auth.handler(c.req.raw));

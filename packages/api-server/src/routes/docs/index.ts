@@ -25,6 +25,7 @@
  */
 
 import { create } from "./create";
+import { get } from "./get";
 import { list } from "./list";
 
-export const docsRoutes = [list, create] as const;
+export const docsRoutes = [list, create, get] as const;

@@ -31,7 +31,13 @@
  */
 
 import { createAuth, createBetterAuthResolver, runAuthMigrations } from "@editorzero/auth";
-import { createRegistry, docCreate, docList, registerCapability } from "@editorzero/capabilities";
+import {
+  createRegistry,
+  docCreate,
+  docGet,
+  docList,
+  registerCapability,
+} from "@editorzero/capabilities";
 import {
   createDocUpdatesReader,
   createDocUpdatesWriter,
@@ -74,7 +80,12 @@ function sessionCookieFrom(response: Response): string {
 }
 
 async function buildStack(
-  options: { registerDocList?: boolean; registerDocCreate?: boolean; withSync?: boolean } = {},
+  options: {
+    registerDocList?: boolean;
+    registerDocCreate?: boolean;
+    registerDocGet?: boolean;
+    withSync?: boolean;
+  } = {},
 ) {
   const auth = createAuth({
     driver,
@@ -89,6 +100,7 @@ async function buildStack(
   const capabilities = [
     ...(options.registerDocList ? [registerCapability(docList)] : []),
     ...(options.registerDocCreate ? [registerCapability(docCreate)] : []),
+    ...(options.registerDocGet ? [registerCapability(docGet)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -468,5 +480,139 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     // the capability's own input schema would reach).
     const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
     expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/create → GET /docs/get/:doc_id returns the freshly-minted doc with seed blocks", async () => {
+    // End-to-end read-path test. Create mints the doc + seeds
+    // blocks via ctx.transact on the write path; the resulting
+    // doc_updates row is the durable state. The get read-path must
+    // hydrate the Y.Doc via sync.read (onLoadDocument →
+    // readByDocUntransacted → applyUpdate onto a clone) so the
+    // handler's readBlocks projection returns the header +
+    // paragraph the writer seeded. This test covers every layer of
+    // the P3.7 stack: auth → principal mw → dispatcher mw →
+    // createApiDispatcher → runRead → sync.read → capability
+    // handler → readBlocks → route response.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocGet: true,
+      withSync: true,
+    });
+    await signUp(trunk, "henry@example.com");
+    const signInRes = await signIn(trunk, "henry@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Henry's doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      doc_id: string;
+      title: string;
+      seed_blocks: ReadonlyArray<{ id: string; type: string }>;
+    };
+
+    const getRes = await trunk.request(`/docs/get/${createBody.doc_id}`, { headers: { cookie } });
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as {
+      doc: { id: string; title: string; visibility: string };
+      blocks: ReadonlyArray<{ id: string; type: string }>;
+    };
+
+    expect(getBody.doc.id).toBe(createBody.doc_id);
+    expect(getBody.doc.title).toBe("Henry's doc");
+    expect(getBody.doc.visibility).toBe("workspace");
+    // The seed blocks the writer inserted (heading + paragraph) must
+    // project out of the Y.Doc clone. Identity-matching on block IDs
+    // proves the hydration applied the committed doc_updates row —
+    // a broken read would return [] or different IDs.
+    expect(getBody.blocks.map((b) => b.type)).toEqual(["heading", "paragraph"]);
+    expect(getBody.blocks.map((b) => b.id)).toEqual(createBody.seed_blocks.map((b) => b.id));
+  });
+
+  it("GET /docs/get/:doc_id for a missing doc returns 404", async () => {
+    // NotFoundError from the capability projects through the error
+    // mapper to HTTP 404. doc.get's "not present OR soft-deleted"
+    // branch — caller sees `not_found` either way (header comment in
+    // doc/get.ts explains why a 410 for soft-deletes would leak
+    // trash-visibility to readers without delete permission).
+    const { trunk } = await buildStack({
+      registerDocGet: true,
+      withSync: true,
+    });
+    await signUp(trunk, "iris@example.com");
+    const signInRes = await signIn(trunk, "iris@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const missing = "018f0000-0000-7000-8000-0000000000e9";
+    const res = await trunk.request(`/docs/get/${missing}`, { headers: { cookie } });
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /docs/get/:doc_id 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({
+      registerDocGet: true,
+      withSync: true,
+    });
+    const res = await trunk.request("/docs/get/018f0000-0000-7000-8000-0000000000a1");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /docs/get/:doc_id with a non-UUID param returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocGet: true,
+      withSync: true,
+    });
+    await signUp(trunk, "jack@example.com");
+    const signInRes = await signIn(trunk, "jack@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/get/not-a-uuid", { headers: { cookie } });
+    expect(res.status).toBe(400);
+
+    // No audit row — route-level zod param validation rejected before
+    // the dispatcher was invoked.
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("GET /docs/get/:doc_id for a doc in a different workspace returns 404 (tenant isolation)", async () => {
+    // Eve creates a doc; Kate (a different tenant) queries it by id.
+    // The `WorkspaceScopingPlugin` auto-injects Kate's `workspace_id`
+    // predicate on the SELECT inside doc.get's handler — the row is
+    // invisible, the handler throws NotFoundError, and Kate sees a
+    // plain 404 with no "yes this exists but is not yours" signal.
+    // Regression guard on cross-workspace read isolation (invariant 5
+    // + ADR 0023 §3.2); same class of isolation already proven on
+    // doc.list, re-proven here so doc.get's path-param shape doesn't
+    // accidentally bypass the plugin's predicate.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocGet: true,
+      withSync: true,
+    });
+    await signUp(trunk, "eve2@example.com");
+    const eveSignIn = await signIn(trunk, "eve2@example.com");
+    const eveCookie = sessionCookieFrom(eveSignIn);
+    await signUp(trunk, "kate@example.com");
+    const kateSignIn = await signIn(trunk, "kate@example.com");
+    const kateCookie = sessionCookieFrom(kateSignIn);
+
+    // Eve creates a doc.
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie: eveCookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Eve's private doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as { doc_id: string };
+
+    // Kate tries to read it by id.
+    const kateRes = await trunk.request(`/docs/get/${createBody.doc_id}`, {
+      headers: { cookie: kateCookie },
+    });
+    expect(kateRes.status).toBe(404);
   });
 });

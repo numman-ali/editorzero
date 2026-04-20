@@ -130,6 +130,9 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(tsx@4.21.0)(yaml@2.8.3)
+      yjs:
+        specifier: 'catalog:'
+        version: 13.6.30
 
   packages/audit:
     dependencies:

@@ -34,17 +34,20 @@
  * a descriptive error — tests and smokes that don't exercise content
  * mutations don't need to boot Hocuspocus.
  *
- * **Read-path `ctx.transact` remains stubbed today.** `doc.get` calls
- * `ctx.transact(doc_id, fn)` in `category: "read"` context to project
- * the block array from the Y.Doc. Wiring `HocuspocusSync` into
- * `runRead` requires an `AuditTx` for the hydration hook
- * (`onLoadDocument` reads `doc_updates` via the sqlTx). Opening a
- * real tx on the read path would acquire the RESERVED lock
- * `runInWriteTx` holds (§6.4), defeating the read/write
- * concurrency story. A tx-less read-path bind variant on
- * `HocuspocusSync` is a separate architectural seam; the
- * `GET /docs/get/:doc_id` route lands with that change. For now,
- * `runRead` preserves the "reads must not call ctx.transact" stub.
+ * **Read-path `ctx.transact` routes through `HocuspocusSync.read`.**
+ * `doc.get` calls `ctx.transact(doc_id, fn)` in `category: "read"`
+ * context to project the block array from the Y.Doc. The sync seam's
+ * tx-less `read(doc_id, fn)` variant (landed alongside this wiring)
+ * opens a DirectConnection with an internal `__read` marker so
+ * `onLoadDocument` hydrates via the untransacted reader (no RESERVED
+ * lock contention with `runInWriteTx`'s `BEGIN IMMEDIATE`), snapshots
+ * the live Y.Doc under the per-doc mutex, and hands `fn` a
+ * throwaway clone — handler mutations can't pollute resident state.
+ * When `sync` is absent, `runRead.ctx.transact` throws a descriptive
+ * error (same posture as the write path). The read surface will
+ * formalise as a distinct `ctx.readDoc` in the next slice (kernel
+ * split); for now the single `ctx.transact` entry multiplexes on
+ * `category`.
  *
  * **`outbox` remains a no-op stub** — the metadata-only mutation
  * atomicity artefact (continuation.md §Immediate focus) lands this
@@ -186,9 +189,24 @@ export function createApiDispatcher(options: CreateApiDispatcherOptions): Dispat
         db: driver.scoped(principal.workspace_id),
         // biome-ignore lint/suspicious/noEmptyBlockStatements: deliberate no-op stub; reads don't normally emit outbox events, but read-path extras still expose the method — real implementation lands with the sync-service slice.
         outbox: () => {},
-        transact: async () => {
-          throw new Error("reads must not call ctx.transact");
-        },
+        // Read-path `ctx.transact` routes through `HocuspocusSync.read`
+        // — tx-less, no `doc_updates` row, no `__read` marker exposed
+        // on the capability surface. The read seam's clone-before-fn
+        // shape keeps handler mutations out of the resident Y.Doc,
+        // and `#withDocLock` orders this against concurrent
+        // `bind().transact` on the same doc. Same "sync optional"
+        // posture as the write path: no sync → informative throw.
+        transact:
+          sync === undefined
+            ? async () => {
+                throw new Error(
+                  "createApiDispatcher: ctx.transact is not wired on the read path — " +
+                    "no `sync` option was passed to createApiDispatcher. doc.get and other " +
+                    "read capabilities that project Y.Doc state require a HocuspocusSync " +
+                    "instance.",
+                );
+              }
+            : sync.read.bind(sync),
       };
       return fn(extras);
     },
