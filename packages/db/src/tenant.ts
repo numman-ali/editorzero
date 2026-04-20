@@ -29,7 +29,7 @@
  * CTEs, subselects, and INSERT…SELECT bodies are all scoped too. The
  * chosen primitives (`WhereNode.cloneWithOperation`,
  * `InsertQueryNode.cloneWith`) are Kysely 0.28's documented plugin
- * surface — see `packages/db/README.md` (TODO) for the reference map.
+ * surface (`OperationNodeTransformer` hooks + node-level helpers).
  *
  * Alias- and join-awareness: SELECT and DELETE walk both `from.froms`
  * and `joins[].table`; UPDATE walks its primary `table` plus any
