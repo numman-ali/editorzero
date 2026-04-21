@@ -37,6 +37,8 @@
  */
 
 import type { Auth } from "@editorzero/auth";
+import type { Registry } from "@editorzero/capabilities";
+import { createRegistry } from "@editorzero/capabilities";
 import type { LoadRoles } from "@editorzero/db";
 import type { Dispatcher } from "@editorzero/dispatcher";
 import { hc } from "hono/client";
@@ -45,6 +47,21 @@ import { describe, expect, it } from "vitest";
 
 import { type AppType, app, createApiApp } from "./index";
 
+function unreachable(message: string): never {
+  throw new Error(message);
+}
+
+function makeFakeAuth(handler: Auth["handler"] = async () => new Response()): Auth {
+  return {
+    handler,
+    api: {
+      getSession: async () => null,
+    },
+  } as Auth;
+}
+
+const emptyRegistry: Registry = createRegistry([]);
+
 // Minimal Dispatcher stand-in for composition-boundary tests that need
 // the triad guard satisfied but never actually dispatch. Never called
 // on the `/auth/*` or `/infra/health` paths these tests exercise.
@@ -52,7 +69,9 @@ const fakeDispatcher: Dispatcher = {
   dispatch: async () => {
     throw new Error("fakeDispatcher.dispatch must not be called in these tests");
   },
-  deps: {} as Dispatcher["deps"],
+  get deps() {
+    return unreachable("fakeDispatcher.deps must not be read in these tests");
+  },
 };
 
 const MOUNTED_PATH = "/infra/health" as const;
@@ -109,17 +128,15 @@ describe("api-server trunk composition", () => {
     let handlerCalls = 0;
     let seenUrl: string | undefined;
     let seenMethod: string | undefined;
-    const fakeAuth = {
-      handler: async (req: Request) => {
-        handlerCalls += 1;
-        seenUrl = req.url;
-        seenMethod = req.method;
-        return new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      },
-    } as unknown as Auth;
+    const fakeAuth = makeFakeAuth(async (req: Request) => {
+      handlerCalls += 1;
+      seenUrl = req.url;
+      seenMethod = req.method;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
     const fakeLoadRoles: LoadRoles = async () => {
       throw new Error("loadRoles must not be called when only /auth/* is exercised");
     };
@@ -160,7 +177,7 @@ describe("api-server trunk composition", () => {
     // providing `auth` without it is a boot-time misconfiguration. Fail
     // loud here rather than at first request (where the failure would
     // surface as an unhelpful 500).
-    const fakeAuth = { handler: async () => new Response() } as unknown as Auth;
+    const fakeAuth = makeFakeAuth();
     expect(() => createApiApp({ auth: fakeAuth })).toThrow(/auth.+without.+loadRoles/i);
   });
 
@@ -176,14 +193,7 @@ describe("api-server trunk composition", () => {
     // The MCP handler closes over the dispatcher; mounting `/mcp` with
     // only a registry would advertise tool calls with no execution
     // path. Fail loud at boot rather than at first tools/call.
-    const fakeRegistry = { list: () => [] } as unknown as Parameters<
-      typeof createApiApp
-    >[0] extends infer O
-      ? O extends { registry?: infer R }
-        ? R
-        : never
-      : never;
-    expect(() => createApiApp({ registry: fakeRegistry })).toThrow(
+    expect(() => createApiApp({ registry: emptyRegistry })).toThrow(
       /registry.+without.+dispatcher/i,
     );
   });
@@ -192,7 +202,7 @@ describe("api-server trunk composition", () => {
     // `/docs/*` routes mount unconditionally and read `c.var.dispatcher`
     // in-handler. Without the dispatcher middleware the first request
     // would crash with TypeError — caught loud at boot instead.
-    const fakeAuth = { handler: async () => new Response() } as unknown as Auth;
+    const fakeAuth = makeFakeAuth();
     const fakeLoadRoles: LoadRoles = async () => null;
     expect(() => createApiApp({ auth: fakeAuth, loadRoles: fakeLoadRoles })).toThrow(
       /auth.+without.+dispatcher/i,
@@ -213,22 +223,7 @@ describe("api-server trunk composition", () => {
     // without auth + loadRoles there is no principal middleware on
     // `/mcp` and every tool call would crash reading `c.var.principal`.
     // Require the full auth stack at composition time.
-    const fakeRegistry = { list: () => [] } as unknown as Parameters<
-      typeof createApiApp
-    >[0] extends infer O
-      ? O extends { registry?: infer R }
-        ? R
-        : never
-      : never;
-    const fakeDispatcher = {
-      dispatch: async () => ({}),
-      deps: {} as never,
-    } as unknown as Parameters<typeof createApiApp>[0] extends infer O
-      ? O extends { dispatcher?: infer D }
-        ? D
-        : never
-      : never;
-    expect(() => createApiApp({ registry: fakeRegistry, dispatcher: fakeDispatcher })).toThrow(
+    expect(() => createApiApp({ registry: emptyRegistry, dispatcher: fakeDispatcher })).toThrow(
       /registry.+without.+auth/i,
     );
   });

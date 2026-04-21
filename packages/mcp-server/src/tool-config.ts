@@ -24,6 +24,7 @@
  */
 
 import type { AnyCapability } from "@editorzero/capabilities";
+import type { CapabilityId } from "@editorzero/ids";
 import type { ZodRawShape } from "zod";
 import { ZodObject } from "zod";
 
@@ -34,9 +35,9 @@ export interface McpToolConfig {
 
 export class NonObjectInputSchemaError extends Error {
   override readonly name = "NonObjectInputSchemaError";
-  readonly capability_id: string;
+  readonly capability_id: CapabilityId;
 
-  constructor(capability_id: string) {
+  constructor(capability_id: CapabilityId) {
     super(
       `Capability "${capability_id}" cannot be exposed as an MCP tool: input schema ` +
         `must be a ZodObject. MCP tools take named arguments — top-level unions, ` +
@@ -46,12 +47,16 @@ export class NonObjectInputSchemaError extends Error {
   }
 }
 
+function isToolInputObject(schema: AnyCapability["input"]): schema is ZodObject<ZodRawShape> {
+  return schema instanceof ZodObject;
+}
+
 export function toToolConfig(cap: AnyCapability): McpToolConfig {
-  if (!(cap.input instanceof ZodObject)) {
+  if (!isToolInputObject(cap.input)) {
     throw new NonObjectInputSchemaError(cap.id);
   }
   return {
     description: cap.summary,
-    inputSchema: cap.input.shape as ZodRawShape,
+    inputSchema: cap.input.shape,
   };
 }

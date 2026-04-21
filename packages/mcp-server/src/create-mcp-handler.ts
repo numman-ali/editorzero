@@ -84,8 +84,10 @@ export function createMcpHandler(deps: McpHandlerDeps): Handler<McpEnv> {
   // construction (packages/capabilities/src/registry.ts), so the tool
   // list is stable across requests. Config objects are stable too
   // (`toToolConfig` is pure), so we precompute them.
-  const tools = registry.list().filter(isMcpTool);
-  const toolConfigs = tools.map((cap) => ({ cap, config: toToolConfig(cap) }));
+  const toolConfigs = registry
+    .list()
+    .filter(isMcpTool)
+    .map((cap) => ({ cap, config: toToolConfig(cap) }));
 
   return async (c: Context<McpEnv>) => {
     const principal = c.var.principal;
@@ -95,14 +97,14 @@ export function createMcpHandler(deps: McpHandlerDeps): Handler<McpEnv> {
     });
 
     for (const { cap, config } of toolConfigs) {
-      server.registerTool(cap.id, config, async (args: unknown) => {
-        return await runTool({
+      server.registerTool(cap.id, config, (args: unknown) =>
+        runTool({
           capability: cap,
           input: args,
           principal,
           dispatcher,
-        });
-      });
+        }),
+      );
     }
 
     const transport = new StreamableHTTPTransport();

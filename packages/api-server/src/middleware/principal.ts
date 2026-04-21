@@ -68,7 +68,7 @@ export function createPrincipalMiddleware(
   return async (c, next) => {
     const principal = await resolve(c);
     if (principal === null) {
-      return c.json({ error: "unauthenticated" as const }, 401);
+      return c.json({ error: "unauthenticated" }, 401);
     }
     c.set("principal", principal);
     return next();

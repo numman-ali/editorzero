@@ -61,8 +61,27 @@ function makePrincipal(): UserPrincipal {
   };
 }
 
+function unexpectedAccess(message: string): never {
+  throw new Error(message);
+}
+
 function makeDispatcher(dispatch: Dispatcher["dispatch"]): Dispatcher {
-  return { dispatch, deps: {} as Dispatcher["deps"] };
+  return {
+    dispatch,
+    get deps() {
+      return unexpectedAccess("makeDispatcher.deps must not be read in runTool tests");
+    },
+  };
+}
+
+function firstDispatchInvocation(
+  dispatch: ReturnType<typeof vi.fn<Dispatcher["dispatch"]>>,
+): DispatchInvocation {
+  const invocation = dispatch.mock.calls[0]?.[0];
+  if (invocation === undefined) {
+    throw new Error("dispatch was not called");
+  }
+  return invocation;
 }
 
 describe("runTool", () => {
@@ -80,7 +99,7 @@ describe("runTool", () => {
     await runTool({ capability, input: { foo: "bar" }, principal, dispatcher });
 
     expect(dispatch).toHaveBeenCalledTimes(1);
-    const call = dispatch.mock.calls[0]?.[0] as DispatchInvocation;
+    const call = firstDispatchInvocation(dispatch);
     expect(call.capability_id).toBe(capability.id);
     expect(call.input).toEqual({ foo: "bar" });
     expect(call.principal).toBe(principal);

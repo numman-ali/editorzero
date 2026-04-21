@@ -49,6 +49,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { createApiApp } from "../app";
 import { createApiDispatcher } from "./createApiDispatcher";
@@ -56,6 +57,20 @@ import { createApiDispatcher } from "./createApiDispatcher";
 let driver: SqliteDriver;
 const openSyncs: HocuspocusSync[] = [];
 const openClients: Client[] = [];
+
+const TextContentSchema = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+});
+const DocListOutputSchema = z.object({
+  docs: z.array(z.object({ id: z.string(), title: z.string() })),
+});
+const DocCreateOutputSchema = z.object({
+  doc_id: z.string(),
+  title: z.string(),
+  seed_blocks: z.array(z.object({ id: z.string(), type: z.string() })),
+});
+type ToolCallResult = Awaited<ReturnType<Client["callTool"]>>;
 
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
@@ -89,6 +104,27 @@ function sessionCookieFrom(response: Response): string {
     .map((c) => c.split(";")[0]?.trim() ?? "")
     .filter((c) => c.length > 0)
     .join("; ");
+}
+
+function expectContentResult(result: ToolCallResult): { readonly content: readonly unknown[] } {
+  if (!("content" in result)) {
+    throw new Error("expected an immediate tool result with content");
+  }
+  if (!Array.isArray(result.content)) {
+    throw new Error("expected tool result content to be an array");
+  }
+  return { content: result.content };
+}
+
+function parseToolJson<T extends z.ZodTypeAny>(result: ToolCallResult, schema: T): z.output<T> {
+  const content = z
+    .array(TextContentSchema)
+    .nonempty()
+    .parse(expectContentResult(result).content)[0];
+  if (content === undefined) {
+    throw new Error("expected at least one text content item");
+  }
+  return schema.parse(JSON.parse(content.text));
 }
 
 async function buildStack() {
@@ -203,7 +239,7 @@ describe("MCP chain — trunk + auth + dispatcher + createMcpHandler", () => {
     const toolNames = result.tools.map((t) => t.name).sort();
     const expected = [docCreate, docDelete, docGet, docList, docPublish, docRestore, docUnpublish]
       .filter((c) => c.surfaces.includes("mcp") && c.humanOnly !== true)
-      .map((c) => c.id as string)
+      .map((c) => c.id)
       .sort();
 
     expect(toolNames).toEqual(expected);
@@ -226,9 +262,7 @@ describe("MCP chain — trunk + auth + dispatcher + createMcpHandler", () => {
     const result = await client.callTool({ name: "doc.list", arguments: {} });
 
     expect(result.isError).toBeFalsy();
-    const content = result.content as Array<{ type: string; text: string }>;
-    const payload = JSON.parse(content[0]?.text ?? "") as { docs: unknown[] };
-    expect(Array.isArray(payload.docs)).toBe(true);
+    const payload = parseToolJson(result, DocListOutputSchema);
     expect(payload.docs).toEqual([]);
   });
 
@@ -243,21 +277,13 @@ describe("MCP chain — trunk + auth + dispatcher + createMcpHandler", () => {
     });
 
     expect(result.isError).toBeFalsy();
-    const content = result.content as Array<{ type: string; text: string }>;
-    const payload = JSON.parse(content[0]?.text ?? "") as {
-      doc_id: string;
-      title: string;
-      seed_blocks: Array<{ id: string; type: string }>;
-    };
+    const payload = parseToolJson(result, DocCreateOutputSchema);
     expect(payload.doc_id).toBeDefined();
     expect(payload.title).toBe("Hello from MCP");
     expect(payload.seed_blocks.length).toBeGreaterThan(0);
 
     const listResult = await client.callTool({ name: "doc.list", arguments: {} });
-    const listContent = listResult.content as Array<{ type: string; text: string }>;
-    const listPayload = JSON.parse(listContent[0]?.text ?? "") as {
-      docs: Array<{ doc_id: string; title: string }>;
-    };
+    const listPayload = parseToolJson(listResult, DocListOutputSchema);
     expect(listPayload.docs.length).toBe(1);
     expect(listPayload.docs[0]?.title).toBe("Hello from MCP");
   });

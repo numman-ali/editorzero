@@ -92,6 +92,7 @@ import type { Dispatcher } from "@editorzero/dispatcher";
 import { EditorZeroError } from "@editorzero/errors";
 import { createMcpHandler } from "@editorzero/mcp-server";
 import { OpenAPIHono } from "@hono/zod-openapi";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 import type { ApiEnv } from "./env";
 import { createDispatcherMiddleware } from "./middleware/dispatcher";
@@ -248,8 +249,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
   // (not thrown), so this mapper doesn't touch them.
   trunk.onError((err, c) => {
     if (err instanceof EditorZeroError) {
-      // biome-ignore lint/suspicious/noExplicitAny: httpStatus is a number literal on each subclass (400/403/404/409/429/500/...); Hono's ContentfulStatusCode union doesn't surface through EditorZeroError's base type. Cast is safe because every subclass defines a valid HTTP status.
-      return c.json({ error: err.code }, err.httpStatus as any);
+      return c.json({ error: err.code }, err.httpStatus as ContentfulStatusCode);
     }
     throw err;
   });

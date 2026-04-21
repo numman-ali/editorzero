@@ -77,14 +77,63 @@ function makePrincipal(): UserPrincipal {
   };
 }
 
+function unexpectedAccess(message: string): never {
+  throw new Error(message);
+}
+
 function makeDispatcher(dispatch: Dispatcher["dispatch"]): Dispatcher {
-  return { dispatch, deps: {} as Dispatcher["deps"] };
+  return {
+    dispatch,
+    get deps() {
+      return unexpectedAccess(
+        "makeDispatcher.deps must not be read in createMcpHandler integration tests",
+      );
+    },
+  };
 }
 
 interface Harness {
   readonly client: Client;
   readonly dispatch: ReturnType<typeof vi.fn<Dispatcher["dispatch"]>>;
   readonly close: () => Promise<void>;
+}
+
+type ToolCallResult = Awaited<ReturnType<Client["callTool"]>>;
+
+const TextContentSchema = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+});
+
+function expectContentResult(result: ToolCallResult): { readonly content: readonly unknown[] } {
+  if (!("content" in result)) {
+    throw new Error("expected an immediate tool result with content");
+  }
+  if (!Array.isArray(result.content)) {
+    throw new Error("expected tool result content to be an array");
+  }
+  return { content: result.content };
+}
+
+function parseToolJson<T>(result: ToolCallResult, schema: z.ZodType<T>): T {
+  const content = z
+    .array(TextContentSchema)
+    .nonempty()
+    .parse(expectContentResult(result).content)[0];
+  if (content === undefined) {
+    throw new Error("expected at least one text content item");
+  }
+  return schema.parse(JSON.parse(content.text));
+}
+
+function firstDispatchInvocation(
+  dispatch: ReturnType<typeof vi.fn<Dispatcher["dispatch"]>>,
+): DispatchInvocation {
+  const invocation = dispatch.mock.calls[0]?.[0];
+  if (invocation === undefined) {
+    throw new Error("dispatch was not called");
+  }
+  return invocation;
 }
 
 async function makeHarness(opts: {
@@ -199,15 +248,16 @@ describe("createMcpHandler (JSON-RPC roundtrip)", () => {
     });
 
     expect(harness.dispatch).toHaveBeenCalledTimes(1);
-    const invocation = harness.dispatch.mock.calls[0]?.[0] as DispatchInvocation;
+    const invocation = firstDispatchInvocation(harness.dispatch);
     expect(invocation.capability_id).toBe(CapabilityId("doc.alpha"));
     expect(invocation.input).toEqual({ echo: "hello" });
     expect(invocation.principal).toBe(principal);
     expect(invocation.access.workspace_id).toBe(principal.workspace_id);
 
     expect(result.isError).toBeFalsy();
-    const content = result.content as Array<{ type: string; text: string }>;
-    expect(JSON.parse(content[0]?.text ?? "")).toEqual({ echoed: "server-reply" });
+    expect(parseToolJson(result, z.object({ echoed: z.string() }))).toEqual({
+      echoed: "server-reply",
+    });
   });
 
   it("maps EditorZeroError from dispatch to isError + structuredContent", async () => {
@@ -270,7 +320,7 @@ describe("createMcpHandler (JSON-RPC roundtrip)", () => {
 
     const expected = caps
       .filter((c) => c.surfaces.includes("mcp") && c.humanOnly !== true)
-      .map((c) => c.id as string)
+      .map((c) => c.id)
       .sort();
 
     expect(toolNames).toEqual(expected);
