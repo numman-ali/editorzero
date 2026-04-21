@@ -38,6 +38,7 @@ import {
   docGet,
   docList,
   docPublish,
+  docRename,
   docRestore,
   docUnpublish,
   registerCapability,
@@ -93,6 +94,7 @@ async function buildStack(
     registerDocUnpublish?: boolean;
     registerDocDelete?: boolean;
     registerDocRestore?: boolean;
+    registerDocRename?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -114,6 +116,7 @@ async function buildStack(
     ...(options.registerDocUnpublish ? [registerCapability(docUnpublish)] : []),
     ...(options.registerDocDelete ? [registerCapability(docDelete)] : []),
     ...(options.registerDocRestore ? [registerCapability(docRestore)] : []),
+    ...(options.registerDocRename ? [registerCapability(docRename)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -1466,5 +1469,219 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
       { id: "doc.delete", o: "allow" },
       { id: "doc.restore", o: "allow" },
     ]);
+  });
+
+  // ── POST /docs/rename/:doc_id — first content-mutation after create ──
+  //
+  // Scope is `doc:write` (members, admins, owners hold it; guests do
+  // not). Same content-mutation lane as `doc.create` — the handler
+  // dual-writes `docs.title` + the Y.Doc title block in the same
+  // write-path tx, so `withSync: true` is required.
+
+  it("POST /docs/rename/:doc_id 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({
+      registerDocRename: true,
+      withSync: true,
+    });
+    const res = await trunk.request("/docs/rename/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Renamed" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /docs/rename/:doc_id with a non-UUID param returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocRename: true,
+      withSync: true,
+    });
+    await signUp(trunk, "pam@example.com");
+    const signInRes = await signIn(trunk, "pam@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/rename/not-a-uuid", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Renamed" }),
+    });
+    expect(res.status).toBe(400);
+
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/rename/:doc_id with an empty title returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocRename: true,
+      withSync: true,
+    });
+    await signUp(trunk, "quinn@example.com");
+    const signInRes = await signIn(trunk, "quinn@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/rename/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "   " }),
+    });
+    expect(res.status).toBe(400);
+
+    // Route-level zod body validation rejected before the dispatcher
+    // — no audit row.
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/rename/:doc_id 403s for a guest role (no doc:write scope)", async () => {
+    // Guests have `doc:read` + `comment:*` but NOT `doc:write` per
+    // `ROLE_SCOPES` in `packages/dispatcher/src/gate.ts`. Members /
+    // admins / owners hold `doc:write` (that's the create/rename/
+    // update lane), so `guest` is the only workspace-role tier that
+    // denies. Deny audit row lands + nothing else runs.
+    const { trunk } = await buildStack({
+      registerDocRename: true,
+      withSync: true,
+    });
+    await signUp(trunk, "rick@example.com", { overrideRole: "guest" });
+    const signInRes = await signIn(trunk, "rick@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/rename/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Renamed" }),
+    });
+    expect(res.status).toBe(403);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.capability_id).toBe("doc.rename");
+    expect(audits[0]?.outcome).toBe("deny");
+  });
+
+  it("POST /docs/rename/:doc_id renames a doc for an owner principal (title + slug + updated_at)", async () => {
+    // End-to-end happy path: create → rename → get. Verifies the
+    // dual-write bridge (docs.title row update + Y.Doc title block
+    // mutation via ctx.transact) lands atomically in the write-path
+    // tx, and that both `doc.get` (reads docs.title directly) and
+    // the hydrated block tree reflect the new title.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocGet: true,
+      registerDocRename: true,
+      withSync: true,
+    });
+    await signUp(trunk, "susan@example.com");
+    const signInRes = await signIn(trunk, "susan@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Old Title" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    const renameRes = await trunk.request(`/docs/rename/${doc_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "New Title" }),
+    });
+    expect(renameRes.status).toBe(200);
+    const renameBody = (await renameRes.json()) as {
+      doc_id: string;
+      title: string;
+      slug: string;
+      updated_at: number;
+    };
+    expect(renameBody.doc_id).toBe(doc_id);
+    expect(renameBody.title).toBe("New Title");
+    expect(renameBody.slug).toBe("new-title");
+    expect(renameBody.updated_at).toBeGreaterThan(0);
+
+    // Durable row-side: docs.title + slug + updated_at updated.
+    const row = await driver
+      .system()
+      .selectFrom("docs")
+      .select(["title", "slug", "updated_at"])
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    expect(row.title).toBe("New Title");
+    expect(row.slug).toBe("new-title");
+    expect(row.updated_at).toBe(renameBody.updated_at);
+
+    // Durable block-side: `GET /docs/get/:doc_id` hydrates from
+    // `doc_updates` (onLoadDocument → readByDocUntransacted → apply)
+    // and projects the blocks. The heading-1 title block reflects
+    // the rename. Two doc_updates rows — seed (from create) + rename
+    // (from ctx.transact).
+    const updates = await driver
+      .system()
+      .selectFrom("doc_updates")
+      .select(["seq"])
+      .where("doc_id", "=", DocId(doc_id))
+      .orderBy("seq", "asc")
+      .execute();
+    expect(updates.map((u) => u.seq)).toEqual([1, 2]);
+
+    const getRes = await trunk.request(`/docs/get/${doc_id}`, { headers: { cookie } });
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as {
+      doc: { id: string; title: string };
+      blocks: ReadonlyArray<{ type: string; content?: unknown }>;
+    };
+    expect(getBody.doc.title).toBe("New Title");
+    // First block is the heading-1 carrying the new title; second
+    // is the paragraph seed.
+    expect(getBody.blocks[0]?.type).toBe("heading");
+
+    // Audit trail: create + rename + get, all allows.
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits.map((a) => ({ id: a.capability_id, o: a.outcome }))).toEqual([
+      { id: "doc.create", o: "allow" },
+      { id: "doc.rename", o: "allow" },
+      { id: "doc.get", o: "allow" },
+    ]);
+  });
+
+  it("POST /docs/rename/:doc_id 404s a missing doc (rename is live-doc only)", async () => {
+    const { trunk } = await buildStack({
+      registerDocRename: true,
+      withSync: true,
+    });
+    await signUp(trunk, "tara@example.com");
+    const signInRes = await signIn(trunk, "tara@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const missing = "018f0000-0000-7000-8000-0000000000e9";
+    const res = await trunk.request(`/docs/rename/${missing}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Attempt" }),
+    });
+    expect(res.status).toBe(404);
+
+    // Dispatcher ran (scope check passed, handler threw
+    // NotFoundError post-UPDATE). Error-class audit row lands —
+    // this is the dispatcher's `effectOnError` projection.
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.capability_id).toBe("doc.rename");
+    expect(audits[0]?.outcome).toBe("error");
   });
 });

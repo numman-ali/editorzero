@@ -30,5 +30,6 @@ export { docDelete } from "./doc/delete";
 export { docGet } from "./doc/get";
 export { docList } from "./doc/list";
 export { docPublish } from "./doc/publish";
+export { docRename } from "./doc/rename";
 export { docRestore } from "./doc/restore";
 export { docUnpublish } from "./doc/unpublish";

@@ -4,6 +4,7 @@ import {
   docGet,
   docList,
   docPublish,
+  docRename,
   docRestore,
   docUnpublish,
   registerCapability,
@@ -77,6 +78,18 @@ describe("deriveHttpBinding", () => {
       pathTemplate: "/docs/restore/:doc_id",
       paramName: "doc_id",
       bodyOrQueryKeys: [],
+    });
+  });
+
+  it("doc.rename → POST /docs/rename/:doc_id with body={title}", () => {
+    // `doc.rename`'s input carries both `doc_id` (the path param) and
+    // `title` (the body). The derivation removes `doc_id` from the
+    // body-keys list because `hasParam` matched it.
+    expect(deriveHttpBinding(registerCapability(docRename))).toEqual({
+      verb: "POST",
+      pathTemplate: "/docs/rename/:doc_id",
+      paramName: "doc_id",
+      bodyOrQueryKeys: ["title"],
     });
   });
 

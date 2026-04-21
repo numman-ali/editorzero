@@ -27,8 +27,9 @@
  *   - `POST /docs/unpublish/:doc_id`           (doc.unpublish)
  *   - `POST /docs/delete/:doc_id`              (doc.delete)
  *   - `POST /docs/restore/:doc_id`             (doc.restore)
+ *   - `POST /docs/rename/:doc_id`              (doc.rename; body={title})
  *
- * All seven derive correctly from the rules above. The `deriveHttpBinding`
+ * All eight derive correctly from the rules above. The `deriveHttpBinding`
  * tests assert that; the parity contract test (commit 3) closes the
  * loop against the real registered routes.
  */

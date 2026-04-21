@@ -29,3 +29,4 @@ export { HocuspocusSync, type HocuspocusSyncDeps, type HocuspocusTxContext } fro
 export { type LiveEditor, withLiveEditor } from "./live-editor";
 export { MemorySyncService } from "./memory";
 export type { BoundSyncService, SyncService } from "./service";
+export { setDocTitle } from "./set-title";

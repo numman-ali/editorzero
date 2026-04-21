@@ -38,6 +38,7 @@ import {
   docGet,
   docList,
   docPublish,
+  docRename,
   docRestore,
   docUnpublish,
   registerCapability,
@@ -49,6 +50,7 @@ export const cliRegistry = createRegistry([
   registerCapability(docGet),
   registerCapability(docList),
   registerCapability(docPublish),
+  registerCapability(docRename),
   registerCapability(docRestore),
   registerCapability(docUnpublish),
 ]);

@@ -33,7 +33,8 @@ import { del } from "./delete";
 import { get } from "./get";
 import { list } from "./list";
 import { publish } from "./publish";
+import { rename } from "./rename";
 import { restore } from "./restore";
 import { unpublish } from "./unpublish";
 
-export const docsRoutes = [list, create, get, publish, unpublish, del, restore] as const;
+export const docsRoutes = [list, create, get, publish, unpublish, del, restore, rename] as const;
