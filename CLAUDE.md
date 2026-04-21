@@ -6,9 +6,11 @@
 Codex is a peer engineer Nomi set up to support review and delegated implementation. He runs as "ez codex" in the EditorZero workspace; I run as "ez claude" in the same workspace. Surface IDs renumber across cmux restarts, so resolve them at use-time rather than hardcoding:
 
 ```bash
-cmux list-pane-surfaces  # lists all surfaces in the current workspace
+cmux tree --workspace workspace:<N>  # full pane+surface tree across the workspace
 # → find the row labeled "ez codex" — its surface:N is the target.
 ```
+
+**Use `cmux tree`, not `cmux list-pane-surfaces`.** `list-pane-surfaces` only returns surfaces in the *focused* pane, so if Codex runs in a different pane it silently returns empty and you'll think he's offline. `tree` walks every pane under the workspace.
 
 ### Send
 
