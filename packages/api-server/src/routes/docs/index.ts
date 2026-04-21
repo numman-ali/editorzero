@@ -36,5 +36,16 @@ import { publish } from "./publish";
 import { rename } from "./rename";
 import { restore } from "./restore";
 import { unpublish } from "./unpublish";
+import { update } from "./update";
 
-export const docsRoutes = [list, create, get, publish, unpublish, del, restore, rename] as const;
+export const docsRoutes = [
+  list,
+  create,
+  get,
+  publish,
+  unpublish,
+  del,
+  restore,
+  rename,
+  update,
+] as const;

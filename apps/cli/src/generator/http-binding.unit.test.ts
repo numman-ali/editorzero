@@ -7,6 +7,7 @@ import {
   docRename,
   docRestore,
   docUnpublish,
+  docUpdate,
   registerCapability,
 } from "@editorzero/capabilities";
 import { describe, expect, it } from "vitest";
@@ -90,6 +91,18 @@ describe("deriveHttpBinding", () => {
       pathTemplate: "/docs/rename/:doc_id",
       paramName: "doc_id",
       bodyOrQueryKeys: ["title"],
+    });
+  });
+
+  it("doc.update → POST /docs/update/:doc_id with body={ops}", () => {
+    // Same shape as `doc.rename` but body carries `ops` (the
+    // discriminated-union op array). Derivation strips `doc_id`
+    // (matched as path param) and leaves `ops` as the lone body key.
+    expect(deriveHttpBinding(registerCapability(docUpdate))).toEqual({
+      verb: "POST",
+      pathTemplate: "/docs/update/:doc_id",
+      paramName: "doc_id",
+      bodyOrQueryKeys: ["ops"],
     });
   });
 

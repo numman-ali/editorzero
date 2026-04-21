@@ -41,6 +41,7 @@ import {
   docRename,
   docRestore,
   docUnpublish,
+  docUpdate,
   registerCapability,
 } from "@editorzero/capabilities";
 
@@ -53,4 +54,5 @@ export const cliRegistry = createRegistry([
   registerCapability(docRename),
   registerCapability(docRestore),
   registerCapability(docUnpublish),
+  registerCapability(docUpdate),
 ]);

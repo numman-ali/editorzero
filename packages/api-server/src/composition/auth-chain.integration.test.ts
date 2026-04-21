@@ -41,6 +41,7 @@ import {
   docRename,
   docRestore,
   docUnpublish,
+  docUpdate,
   registerCapability,
 } from "@editorzero/capabilities";
 import {
@@ -95,6 +96,7 @@ async function buildStack(
     registerDocDelete?: boolean;
     registerDocRestore?: boolean;
     registerDocRename?: boolean;
+    registerDocUpdate?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -117,6 +119,7 @@ async function buildStack(
     ...(options.registerDocDelete ? [registerCapability(docDelete)] : []),
     ...(options.registerDocRestore ? [registerCapability(docRestore)] : []),
     ...(options.registerDocRename ? [registerCapability(docRename)] : []),
+    ...(options.registerDocUpdate ? [registerCapability(docUpdate)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -1683,5 +1686,325 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(audits).toHaveLength(1);
     expect(audits[0]?.capability_id).toBe("doc.rename");
     expect(audits[0]?.outcome).toBe("error");
+  });
+});
+
+describe("POST /docs/update/:doc_id — full stack", () => {
+  // `doc.update` is F12 canonical batched content-mutation. Same lane
+  // as `doc.create` and `doc.rename`: dispatcher runs the handler inside
+  // a write-path tx, handler opens `ctx.transact` → `withLiveEditor` →
+  // `editor.transact` to apply all ops as one y-prosemirror step.
+  // Scopes: `doc:write` + `block:write` (both held by member / admin /
+  // owner; guest holds neither).
+
+  it("POST /docs/update/:doc_id 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({
+      registerDocUpdate: true,
+      withSync: true,
+    });
+    const res = await trunk.request("/docs/update/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ops: [
+          {
+            op: "update",
+            block_id: "018f0000-0000-7000-8000-00000000b001",
+            patch: { content: "x" },
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /docs/update/:doc_id with a non-UUID param returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocUpdate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "ursula@example.com");
+    const signInRes = await signIn(trunk, "ursula@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/update/not-a-uuid", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        ops: [
+          {
+            op: "update",
+            block_id: "018f0000-0000-7000-8000-00000000b001",
+            patch: { content: "x" },
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(400);
+
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/update/:doc_id with an empty ops array returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({
+      registerDocUpdate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "vera@example.com");
+    const signInRes = await signIn(trunk, "vera@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/update/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ ops: [] }),
+    });
+    expect(res.status).toBe(400);
+
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(0);
+  });
+
+  it("POST /docs/update/:doc_id 403s for a guest role (no doc:write / block:write)", async () => {
+    // Guests hold only `doc:read` + `block:read` + `comment:*` +
+    // `workspace:read` per `ROLE_SCOPES`. `doc.update` requires
+    // `doc:write` + `block:write`; guest lacks both — the gate denies
+    // on the first missing scope.
+    const { trunk } = await buildStack({
+      registerDocUpdate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "walt@example.com", { overrideRole: "guest" });
+    const signInRes = await signIn(trunk, "walt@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/docs/update/018f0000-0000-7000-8000-0000000000a1", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        ops: [
+          {
+            op: "update",
+            block_id: "018f0000-0000-7000-8000-00000000b001",
+            patch: { content: "x" },
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(403);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.capability_id).toBe("doc.update");
+    expect(audits[0]?.outcome).toBe("deny");
+  });
+
+  it("create → update (append paragraph) → get reflects the inserted block end-to-end", async () => {
+    // Full-stack happy path: owner creates a doc (seeded with
+    // heading-1 + paragraph), then issues an `insert` op appending a
+    // paragraph after the seed paragraph. `GET /docs/get/:doc_id`
+    // hydrates from `doc_updates` (onLoadDocument → apply) and
+    // projects the inserted block.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocGet: true,
+      registerDocUpdate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "xander@example.com");
+    const signInRes = await signIn(trunk, "xander@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Empty" }),
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      doc_id: string;
+      seed_blocks: ReadonlyArray<{ id: string; type: string }>;
+    };
+    const doc_id = createBody.doc_id;
+    const paragraphSeedId = createBody.seed_blocks[1]?.id;
+    expect(paragraphSeedId).toBeDefined();
+
+    const updateRes = await trunk.request(`/docs/update/${doc_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        ops: [
+          {
+            op: "insert",
+            block: { type: "paragraph", content: "Appended by doc.update" },
+            after_block_id: paragraphSeedId,
+          },
+        ],
+      }),
+    });
+    expect(updateRes.status).toBe(200);
+    const updateBody = (await updateRes.json()) as {
+      doc_id: string;
+      applied_ops: ReadonlyArray<{
+        op: string;
+        block?: { id: string; type: string };
+      }>;
+      updated_at: number;
+    };
+    expect(updateBody.doc_id).toBe(doc_id);
+    expect(updateBody.applied_ops).toHaveLength(1);
+    expect(updateBody.applied_ops[0]?.op).toBe("insert");
+    const insertedId = updateBody.applied_ops[0]?.block?.id;
+    expect(insertedId).toBeDefined();
+
+    // Two doc_updates rows: seed (doc.create) + insert (doc.update).
+    const updates = await driver
+      .system()
+      .selectFrom("doc_updates")
+      .select(["seq"])
+      .where("doc_id", "=", DocId(doc_id))
+      .orderBy("seq", "asc")
+      .execute();
+    expect(updates.map((u) => u.seq)).toEqual([1, 2]);
+
+    // `GET /docs/get/:doc_id` hydrates from doc_updates and projects
+    // the inserted block. `withLiveEditor` mount adds BlockNote's
+    // normalisation-tail paragraph, so post-insert block list is:
+    // [heading-1 title, paragraph-seed, paragraph-inserted, trailing-
+    // paragraph-from-mount]. Test asserts the inserted id is present
+    // and the count is 4 — the mount tail is stable BlockNote
+    // behaviour, not noise.
+    const getRes = await trunk.request(`/docs/get/${doc_id}`, { headers: { cookie } });
+    expect(getRes.status).toBe(200);
+    const getBody = (await getRes.json()) as {
+      blocks: ReadonlyArray<{ id: string; type: string; content?: unknown }>;
+    };
+    expect(getBody.blocks).toHaveLength(4);
+    const insertedIdx = getBody.blocks.findIndex((b) => b.id === insertedId);
+    expect(insertedIdx).toBeGreaterThanOrEqual(0);
+    expect(getBody.blocks[insertedIdx]?.type).toBe("paragraph");
+
+    // Audit trail: create + update + get, all allows.
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits.map((a) => ({ id: a.capability_id, o: a.outcome }))).toEqual([
+      { id: "doc.create", o: "allow" },
+      { id: "doc.update", o: "allow" },
+      { id: "doc.get", o: "allow" },
+    ]);
+  });
+
+  it("POST /docs/update/:doc_id 404s a missing doc", async () => {
+    const { trunk } = await buildStack({
+      registerDocUpdate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "yasmin@example.com");
+    const signInRes = await signIn(trunk, "yasmin@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const missing = "018f0000-0000-7000-8000-0000000000e9";
+    const res = await trunk.request(`/docs/update/${missing}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        ops: [
+          {
+            op: "update",
+            block_id: "018f0000-0000-7000-8000-00000000b001",
+            patch: { content: "x" },
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(404);
+
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.capability_id).toBe("doc.update");
+    expect(audits[0]?.outcome).toBe("error");
+  });
+
+  it("update op with a stale expect_prior_content_hash → 409 + error audit", async () => {
+    // Full-stack StalePreconditionError path: create a doc, then issue
+    // an update op with a deliberately wrong hash. The handler reads
+    // the current block inside `withLiveEditor`, compares the hash,
+    // throws StalePreconditionError (maps to 409). No block mutation
+    // lands (the write-path tx rolls back on throw; doc_updates still
+    // has only the seed row).
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocUpdate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "zara@example.com");
+    const signInRes = await signIn(trunk, "zara@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Precondition" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id, seed_blocks } = (await createRes.json()) as {
+      doc_id: string;
+      seed_blocks: ReadonlyArray<{ id: string }>;
+    };
+    const titleBlockId = seed_blocks[0]?.id;
+    expect(titleBlockId).toBeDefined();
+
+    const staleHash = "0".repeat(64);
+    const res = await trunk.request(`/docs/update/${doc_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        ops: [
+          {
+            op: "update",
+            block_id: titleBlockId,
+            patch: { content: "Shouldn't land" },
+            expect_prior_content_hash: staleHash,
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(409);
+
+    // doc_updates still only has the seed row — the mutation rolled
+    // back atomically.
+    const updates = await driver
+      .system()
+      .selectFrom("doc_updates")
+      .select(["seq"])
+      .where("doc_id", "=", DocId(doc_id))
+      .orderBy("seq", "asc")
+      .execute();
+    expect(updates.map((u) => u.seq)).toEqual([1]);
+
+    // Error-class audit row for the stale update.
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits.map((a) => ({ id: a.capability_id, o: a.outcome }))).toEqual([
+      { id: "doc.create", o: "allow" },
+      { id: "doc.update", o: "error" },
+    ]);
   });
 });

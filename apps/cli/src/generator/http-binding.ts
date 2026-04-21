@@ -28,10 +28,11 @@
  *   - `POST /docs/delete/:doc_id`              (doc.delete)
  *   - `POST /docs/restore/:doc_id`             (doc.restore)
  *   - `POST /docs/rename/:doc_id`              (doc.rename; body={title})
+ *   - `POST /docs/update/:doc_id`              (doc.update; body={ops})
  *
- * All eight derive correctly from the rules above. The `deriveHttpBinding`
- * tests assert that; the parity contract test (commit 3) closes the
- * loop against the real registered routes.
+ * All nine derive correctly from the rules above. The `deriveHttpBinding`
+ * tests assert that; the parity contract test closes the loop against
+ * the real registered routes.
  */
 
 import type { AnyCapability } from "@editorzero/capabilities";

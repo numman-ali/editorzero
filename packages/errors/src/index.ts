@@ -14,7 +14,7 @@
  * surfaces key on; `httpStatus` is the canonical HTTP mapping.
  */
 
-import type { CapabilityId, DocId } from "@editorzero/ids";
+import type { BlockId, CapabilityId, DocId } from "@editorzero/ids";
 import type { SubjectKind } from "@editorzero/scopes";
 
 import type { DenyReason, HandlerError } from "./handler-error";
@@ -148,6 +148,52 @@ export class ConflictError extends EditorZeroError {
   constructor(params: { message?: string; retry_after_ms?: number | null }) {
     super(params.message ?? "conflict");
     this.retry_after_ms = params.retry_after_ms ?? null;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "conflict" };
+  }
+}
+
+/**
+ * `doc.update` op carried `expect_prior_content_hash` and the live
+ * block's canonical-JSON hash did not match (ADR 0022 §57). The
+ * precondition check runs *inside* `ctx.transact` before any op applies;
+ * on mismatch the handler throws this error, the transact closure
+ * unwinds, and the outer write-path tx rolls back — no partial write
+ * lands. Callers re-fetch the block and retry with a fresh hash.
+ *
+ * Projects to `{ kind: "conflict" }` in audit (shares the handler-error
+ * variant with `ConflictError` — the audit layer intentionally folds
+ * "optimistic-concurrency rejects" into one kind; surfaces disambiguate
+ * on the wire-level `code` (`stale_precondition` vs `conflict`) for
+ * retry-policy differentiation. The audit log doesn't need the two
+ * flavours distinguished because both are "write was rejected before it
+ * landed"; surfaces care because "your fetched state is stale" (hint:
+ * re-fetch + retry) differs from "generic concurrent-write lost"
+ * (hint: backoff + retry).
+ */
+export class StalePreconditionError extends EditorZeroError {
+  readonly code = "stale_precondition";
+  readonly httpStatus = 409;
+  readonly block_id: BlockId;
+  readonly expected_hash: string;
+  readonly actual_hash: string;
+
+  constructor(params: {
+    message?: string;
+    block_id: BlockId;
+    expected_hash: string;
+    actual_hash: string;
+  }) {
+    super(
+      params.message ??
+        `expect_prior_content_hash mismatch on block ${params.block_id}: ` +
+          `expected ${params.expected_hash}, got ${params.actual_hash}`,
+    );
+    this.block_id = params.block_id;
+    this.expected_hash = params.expected_hash;
+    this.actual_hash = params.actual_hash;
   }
 
   toHandlerError(): HandlerError {
