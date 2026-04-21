@@ -53,6 +53,7 @@ import {
 import type * as Y from "yjs";
 
 import { BLOCKNOTE_FRAGMENT } from "./blocks";
+import { ensureDomGlobals } from "./dom-shim";
 
 /**
  * Loose BlockNote editor type — same widening `blocks.ts` uses so the
@@ -67,6 +68,12 @@ export async function withLiveEditor<R>(
   ydoc: Y.Doc,
   fn: (editor: LiveEditor) => Promise<R> | R,
 ): Promise<R> {
+  // Defensive: api-server composition already calls this at boot, but
+  // callers that construct the helper directly (integration tests,
+  // future surface adapters) still need the globals. Idempotent under
+  // the `typeof document` guard so the eager api-server boot + this
+  // lazy check don't double-register.
+  ensureDomGlobals();
   const fragment = ydoc.getXmlFragment(BLOCKNOTE_FRAGMENT);
   const editor = BlockNoteEditor.create({
     collaboration: {

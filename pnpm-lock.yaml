@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@happy-dom/global-registrator':
+      specifier: ^15.2.0
+      version: 15.11.7
     '@types/better-sqlite3':
       specifier: ^7.6.13
       version: 7.6.13
@@ -535,6 +538,9 @@ importers:
       '@editorzero/principal':
         specifier: workspace:*
         version: link:../principal
+      '@happy-dom/global-registrator':
+        specifier: 'catalog:'
+        version: 15.11.7
       '@hocuspocus/server':
         specifier: 3.4.4
         version: 3.4.4(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30)
@@ -911,6 +917,10 @@ packages:
       prosemirror-model: ^1.0.0
       prosemirror-state: ^1.0.0
       prosemirror-view: ^1.0.0
+
+  '@happy-dom/global-registrator@15.11.7':
+    resolution: {integrity: sha512-mfOoUlIw8VBiJYPrl5RZfMzkXC/z7gbSpi2ecycrj/gRWLq2CMV+Q+0G+JPjeOmuNFgg0skEIzkVFzVYFP6URw==}
+    engines: {node: '>=18.0.0'}
 
   '@hocuspocus/common@3.4.4':
     resolution: {integrity: sha512-RykIJ0tsHHMP4Xk+4UCbc7SO5LgGxGUSTdbh6anJEsaALAyqinf1Nn5HYuMjLPolAmsar1v++m9zufR09NLpXA==}
@@ -3491,6 +3501,10 @@ snapshots:
       prosemirror-state: 1.4.4
       prosemirror-transform: 1.12.0
       prosemirror-view: 1.41.8
+
+  '@happy-dom/global-registrator@15.11.7':
+    dependencies:
+      happy-dom: 15.11.7
 
   '@hocuspocus/common@3.4.4':
     dependencies:

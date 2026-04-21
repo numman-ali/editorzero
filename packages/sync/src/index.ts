@@ -24,6 +24,7 @@ export {
   readBlocks,
   seedBlocks,
 } from "./blocks";
+export { ensureDomGlobals } from "./dom-shim";
 export { HocuspocusSync, type HocuspocusSyncDeps, type HocuspocusTxContext } from "./hocuspocus";
 export { type LiveEditor, withLiveEditor } from "./live-editor";
 export { MemorySyncService } from "./memory";

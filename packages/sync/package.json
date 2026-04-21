@@ -24,6 +24,7 @@
     "@editorzero/db": "workspace:*",
     "@editorzero/ids": "workspace:*",
     "@editorzero/principal": "workspace:*",
+    "@happy-dom/global-registrator": "catalog:",
     "@hocuspocus/server": "3.4.4",
     "yjs": "catalog:"
   },

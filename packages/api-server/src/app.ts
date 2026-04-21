@@ -91,6 +91,7 @@ import type { LoadRoles } from "@editorzero/db";
 import type { Dispatcher } from "@editorzero/dispatcher";
 import { EditorZeroError } from "@editorzero/errors";
 import { createMcpHandler } from "@editorzero/mcp-server";
+import { ensureDomGlobals } from "@editorzero/sync";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
@@ -236,6 +237,24 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
         "`c.var.principal`. Provide all three together or none.",
     );
   }
+
+  // **DOM shim for content-mutation capabilities.** `doc.rename` (and
+  // future `doc.update`) open a live `BlockNoteEditor` inside
+  // `ctx.transact`; ProseMirror's `view.dispatch` path requires
+  // `document` / `window` on `globalThis`. `ensureDomGlobals` is
+  // idempotent (typeof-guarded), so this coexists with tests that
+  // pre-install a DOM via `@vitest-environment happy-dom`.
+  //
+  // Conditional on `dispatcher !== undefined`: the zero-arg
+  // `createApiApp()` is a typed-RPC binding shape used by
+  // `@editorzero/api-client` + trunk-composition smokes that never
+  // invoke a handler — keeping the shim out of that path avoids a
+  // surprise module-load side effect for consumers that just bind
+  // `hc<AppType>` over the types.
+  if (dispatcher !== undefined) {
+    ensureDomGlobals();
+  }
+
   const trunk = new OpenAPIHono<ApiEnv>();
 
   // **Error mapper** — every `EditorZeroError` subclass carries its
