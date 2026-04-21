@@ -6,14 +6,15 @@
  * never raw Yjs (enforced by `no-raw-ydoc-access` — coherence check
  * today, future `@editorzero/arch-lint` rule).
  *
- * `seedBlocks` / `readBlocks` (see `./blocks`) are the BlockNote ↔
- * Y.Doc conversion helpers this slice ships — pure converters that
- * write / read BlockNote blocks on the shared Y.XmlFragment. A live-
- * editor mutation path (BlockNoteEditor bound to the fragment for
- * `doc.rename` / `doc.update`) is deferred to the ADR 0018 empirical-
- * verification gate (Phase 3.6): that path needs either `jsdom` +
- * `editor.mount()` or a Hocuspocus direct connection, and we don't
- * want to bake that choice in before the verification exercise.
+ * Three BlockNote-integration primitives:
+ *   - `seedBlocks` / `readBlocks` (`./blocks`): pure converters for
+ *     first-time seeds + read projections; no DOM needed.
+ *   - `withLiveEditor` (`./live-editor`): mount a BlockNoteEditor bound
+ *     to the fragment, hand to callback, tear down on exit. Needed by
+ *     content-mutation capabilities (`doc.rename`, future `doc.update`)
+ *     where y-prosemirror's `view.dispatch` path must fire. Requires a
+ *     global DOM — api-server runtime registers happy-dom at boot;
+ *     tests use `@vitest-environment happy-dom`.
  */
 
 export {
@@ -24,5 +25,6 @@ export {
   seedBlocks,
 } from "./blocks";
 export { HocuspocusSync, type HocuspocusSyncDeps, type HocuspocusTxContext } from "./hocuspocus";
+export { type LiveEditor, withLiveEditor } from "./live-editor";
 export { MemorySyncService } from "./memory";
 export type { BoundSyncService, SyncService } from "./service";

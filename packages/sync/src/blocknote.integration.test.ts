@@ -24,12 +24,6 @@
  */
 
 import {
-  BlockNoteEditor,
-  type BlockSchema,
-  type InlineContentSchema,
-  type StyleSchema,
-} from "@blocknote/core";
-import {
   asAuditTx,
   createDocUpdatesReader,
   createDocUpdatesWriter,
@@ -41,14 +35,9 @@ import { DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import {
-  BLOCKNOTE_FRAGMENT,
-  type LooseBlock,
-  type LoosePartialBlock,
-  readBlocks,
-  seedBlocks,
-} from "./blocks";
+import { type LooseBlock, type LoosePartialBlock, readBlocks, seedBlocks } from "./blocks";
 import { HocuspocusSync, type HocuspocusTxContext } from "./hocuspocus";
+import { withLiveEditor } from "./live-editor";
 
 const WORKSPACE_ID = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const USER_ID = UserId("018f0000-0000-7000-8000-000000000002");
@@ -145,50 +134,12 @@ function summarize(blocks: readonly LooseBlock[]): Array<[string, string]> {
   });
 }
 
-/**
- * Construct a headless `BlockNoteEditor` bound to the given live
- * `Y.XmlFragment` and mount it onto a detached DOM element.
- *
- * **Why the mount.** The collab plugin (y-prosemirror) writes back to
- * the fragment via ProseMirror's `appendTransaction` chain, but
- * transactions only get applied to the EditorState through `view.dispatch`.
- * Without an `EditorView`, `editor.insertBlocks` is a silent no-op:
- * the plugin's hook never fires and the fragment never sees the change.
- * Verified empirically — the first iteration of this smoke skipped
- * `mount()` and produced zero `doc_updates` rows. Same constraint the
- * `blocks.ts` docstring already flags ("server-side that means either
- * a `jsdom` + `editor.mount(...)` dance or `Hocuspocus.openDirectConnection`")
- * — it's not "or", it's "both": the DirectConnection gives us the live
- * fragment, the mount gives us a working dispatch path. **Production
- * surface adapters that mutate via `BlockNoteEditor` will need a DOM
- * shim (jsdom / happy-dom) in their runtime, not just at test time.**
- *
- * Caller MUST call `dispose()` when done. Unmount + destroy in that
- * order — `unmount` detaches the view, `destroy` releases ProseMirror
- * state + the y-prosemirror plugin's listeners.
- */
-type LiveEditor = BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>;
-
-function liveEditor(fragment: Y.XmlFragment): {
-  readonly editor: LiveEditor;
-  dispose(): void;
-} {
-  const editor = BlockNoteEditor.create({
-    collaboration: {
-      fragment,
-      user: { name: "ez claude", color: "#000000" },
-    },
-  }) as unknown as LiveEditor;
-  const host = document.createElement("div");
-  editor.mount(host);
-  return {
-    editor,
-    dispose: () => {
-      editor.unmount();
-      editor._tiptapEditor.destroy();
-    },
-  };
-}
+// The mount/dispose ceremony lives in `withLiveEditor` (live-editor.ts)
+// — see that file's header for why `editor.mount(host)` is required
+// (the collab plugin's writes only flush through ProseMirror's
+// `view.dispatch`, which needs a mounted EditorView). This smoke is
+// now the first caller; `doc.rename` (and future content-mutation
+// capabilities) reuse the same helper from `ctx.transact`.
 
 describe("BlockNoteEditor adapter-boundary smoke (Appendix C item 11)", () => {
   it("editor.transact(insertBlocks) writes to the live fragment + persists durably", async () => {
@@ -219,10 +170,8 @@ describe("BlockNoteEditor adapter-boundary smoke (Appendix C item 11)", () => {
         workspace_id: WORKSPACE_ID,
       };
       const bound = sync.bind(ctx);
-      await bound.transact(DOC_ID, (ydoc) => {
-        const fragment = ydoc.getXmlFragment(BLOCKNOTE_FRAGMENT);
-        const { editor, dispose } = liveEditor(fragment);
-        try {
+      await bound.transact(DOC_ID, async (ydoc) => {
+        await withLiveEditor(ydoc, (editor) => {
           const referenceId = editor.document[0]?.id;
           if (referenceId === undefined) {
             throw new Error("expected seeded block to be visible to live editor");
@@ -234,9 +183,7 @@ describe("BlockNoteEditor adapter-boundary smoke (Appendix C item 11)", () => {
               "after",
             );
           });
-        } finally {
-          dispose();
-        }
+        });
       });
     });
 
@@ -284,10 +231,8 @@ describe("BlockNoteEditor adapter-boundary smoke (Appendix C item 11)", () => {
         workspace_id: WORKSPACE_ID,
       };
       const bound = sync.bind(ctx);
-      await bound.transact(DOC_ID, (ydoc) => {
-        const fragment = ydoc.getXmlFragment(BLOCKNOTE_FRAGMENT);
-        const { editor, dispose } = liveEditor(fragment);
-        try {
+      await bound.transact(DOC_ID, async (ydoc) => {
+        await withLiveEditor(ydoc, (editor) => {
           const referenceId = editor.document[0]?.id;
           if (referenceId === undefined) throw new Error("no seeded block visible");
           editor.transact(() => {
@@ -297,9 +242,7 @@ describe("BlockNoteEditor adapter-boundary smoke (Appendix C item 11)", () => {
               "after",
             );
           });
-        } finally {
-          dispose();
-        }
+        });
       });
     });
 
@@ -350,10 +293,8 @@ describe("BlockNoteEditor adapter-boundary smoke (Appendix C item 11)", () => {
         };
         const bound = sync.bind(ctx);
         try {
-          await bound.transact(DOC_ID, (ydoc) => {
-            const fragment = ydoc.getXmlFragment(BLOCKNOTE_FRAGMENT);
-            const { editor, dispose } = liveEditor(fragment);
-            try {
+          await bound.transact(DOC_ID, async (ydoc) => {
+            await withLiveEditor(ydoc, (editor) => {
               const referenceId = editor.document[0]?.id;
               if (referenceId === undefined) throw new Error("no seeded block visible");
               editor.transact(() => {
@@ -363,9 +304,7 @@ describe("BlockNoteEditor adapter-boundary smoke (Appendix C item 11)", () => {
                   "after",
                 );
               });
-            } finally {
-              dispose();
-            }
+            });
           });
           throw new Error("post-transact throw");
         } catch (err) {
@@ -398,5 +337,79 @@ describe("BlockNoteEditor adapter-boundary smoke (Appendix C item 11)", () => {
       });
     });
     expect(summarize(projected)).toEqual([["paragraph", "seeded"]]);
+  });
+
+  it("editor.transact(updateBlock) persists an in-place edit — closes the `updateBlock` empirical gap", async () => {
+    // Parallel shape to the first `insertBlocks` test, but exercising
+    // `updateBlock` against an existing block. The `view.dispatch`
+    // path is shared (both routes go through the same collab-plugin
+    // hook), so this asserts the prediction from the first test: if
+    // `insertBlocks` works under happy-dom, `updateBlock` works too.
+    // The future `doc.rename` capability's handler mutates the
+    // heading-1 title block via exactly this path, so this case is
+    // the direct smoke for that write.
+    await seedDocMetadata(DOC_ID);
+
+    // Seed: a heading-1 (the title) + a paragraph — same shape
+    // `doc.create` emits today.
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID, (ydoc) => {
+        seedBlocks(ydoc, [
+          {
+            type: "heading",
+            props: { level: 1 },
+            content: "Old Title",
+          } as unknown as LoosePartialBlock,
+          { type: "paragraph", content: "body" } as LoosePartialBlock,
+        ]);
+      });
+    });
+
+    // Mutate: update the heading's content in-place via the live
+    // editor's `updateBlock` — the write path `doc.rename` uses.
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      const bound = sync.bind(ctx);
+      await bound.transact(DOC_ID, async (ydoc) => {
+        await withLiveEditor(ydoc, (editor) => {
+          const titleBlock = editor.document[0];
+          if (titleBlock === undefined) throw new Error("no title block visible");
+          editor.transact(() => {
+            // Same loose-partial cast as the seed + insertBlocks sites:
+            // BlockNote's default-schema concrete types don't overlap
+            // the `BlockSchema` base the project widens to.
+            editor.updateBlock(titleBlock, {
+              content: "New Title",
+            } as unknown as LoosePartialBlock);
+          });
+        });
+      });
+    });
+
+    // Two doc_updates rows: seed (seq=1), update (seq=2).
+    const rows = await fetchDocUpdates(DOC_ID);
+    expect(rows.map((r) => r.seq)).toEqual([1, 2]);
+    expect(await fetchOutboxEvents()).toEqual(["doc.updated", "doc.updated"]);
+
+    // Replay onto a fresh Y.Doc — the title's content is "New Title",
+    // proving `updateBlock`'s mutation flushed through the collab
+    // plugin into the fragment (the prediction from test #1 verified).
+    const replay = new Y.Doc();
+    for (const row of rows) Y.applyUpdate(replay, row.update_blob);
+    const projected = summarize(readBlocks(replay));
+    expect(projected[0]).toEqual(["heading", "New Title"]);
+    // Body paragraph survives the rename — the rename touched only
+    // the title block.
+    expect(projected[1]).toEqual(["paragraph", "body"]);
   });
 });

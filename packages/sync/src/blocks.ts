@@ -10,13 +10,12 @@
  *
  * What they deliberately do NOT do:
  *   - Provide a live `editor.transact` surface for ongoing mutations.
- *     The BlockNote collaboration plugin requires a mounted ProseMirror
- *     view to flush edits back into the `Y.XmlFragment`; server-side
- *     that means either a `jsdom` + `editor.mount(document.createElement(
- *     "div"))` dance or `Hocuspocus.openDirectConnection`. ADR 0018's
- *     empirical-verification gate (Phase 3.6) picks the path; until
- *     then content *mutations* beyond the initial seed go through a
- *     follow-up helper, not this file.
+ *     That path needs a mounted `EditorView` so y-prosemirror's
+ *     `view.dispatch` can flush edits back into the `Y.XmlFragment` —
+ *     `withLiveEditor` (in `./live-editor`) owns that lifecycle.
+ *     Content-mutation capabilities (`doc.rename`, future `doc.update`)
+ *     call it inside `ctx.transact`; this file's pure converters stay
+ *     DOM-free and serve first-time seeds + read projections.
  *   - Preserve history on `seedBlocks`. BlockNote's `blocksToYXmlFragment`
  *     is explicitly documented as "for importing existing content for
  *     the first time" — running it against a non-empty fragment would
