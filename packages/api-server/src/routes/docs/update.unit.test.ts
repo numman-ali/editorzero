@@ -217,6 +217,24 @@ describe("POST /docs/update/:doc_id", () => {
     expect(dispatchCalled).toBe(false);
   });
 
+  it("empty update patch (no-op) → 400 before the dispatcher runs", async () => {
+    let dispatchCalled = false;
+    const app = buildApp(async () => {
+      dispatchCalled = true;
+      throw new Error("dispatcher must not run on empty patch");
+    });
+
+    const res = await app.request(`/docs/update/${VALID_DOC_ID}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ops: [{ op: "update", block_id: VALID_BLOCK_ID, patch: {} }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(dispatchCalled).toBe(false);
+  });
+
   it("unknown op-level key → 400 before the dispatcher runs (strict)", async () => {
     let dispatchCalled = false;
     const app = buildApp(async () => {

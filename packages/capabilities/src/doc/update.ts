@@ -21,7 +21,9 @@
  *     (placement `before` against block 0).
  *   - `update` — replace a block's content / type / props in place.
  *     Uses `editor.updateBlock(block, patch)`. Supports the optional
- *     `expect_prior_content_hash` precondition (ADR 0022 §57).
+ *     `expect_prior_content_hash` precondition (ADR 0022 §57). Empty
+ *     patch `{}` is rejected at the input schema — see the refinement
+ *     on `UpdatePatchInput` below for why.
  *   - `remove` — delete a block. Uses `editor.removeBlocks`. Also
  *     supports `expect_prior_content_hash`. Audit effect captures the
  *     **preimage** so a reducer can reconstruct deletion-undo.
@@ -152,13 +154,26 @@ const InsertBlockInput = z
   })
   .strict();
 
+// `UpdatePatchInput` must carry at least one of `type` / `props` /
+// `content` — an empty patch is a semantic no-op that we don't want to
+// accept as a mutation. BlockNote's `updateBlock` does not early-return
+// on an empty patch: the call flows through `updateBlockTr` into
+// ProseMirror's `setNodeMarkup`, which always emits a `ReplaceAroundStep`
+// on success. That would produce a `doc_updates` write + bump
+// `docs.updated_at` for a change that expresses nothing, which pollutes
+// the audit log and the rate-limit budget. Reject at the schema level
+// so the dispatcher's pre-validation audit row carries the reason.
 const UpdatePatchInput = z
   .object({
     type: z.string().min(1).optional(),
     props: z.record(z.string(), z.unknown()).optional(),
     content: z.unknown().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (patch) => patch.type !== undefined || patch.props !== undefined || patch.content !== undefined,
+    { message: "patch must contain at least one of `type`, `props`, or `content`" },
+  );
 
 const InsertOpInput = z
   .object({

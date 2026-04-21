@@ -14,8 +14,8 @@
  * **Status codes.**
  *   200 — applied; body carries `applied_ops` with each op's post-state
  *         (post-image for insert/update, pre-image for remove).
- *   400 — malformed `doc_id`, bad op shape, unknown discriminator, or
- *         missing required op field.
+ *   400 — malformed `doc_id`, bad op shape, unknown discriminator,
+ *         missing required op field, or empty update patch (no-op).
  *   401 — unauthenticated.
  *   403 — caller lacks `doc:write` or `block:write`.
  *   404 — doc missing/soft-deleted, or an op references a block_id
@@ -60,13 +60,22 @@ const InsertBlockBody = z
   })
   .strict();
 
+// Mirrors the capability's refinement — at least one of `type`/`props`/
+// `content` must be present. Empty `{}` patch is a semantic no-op (see
+// `packages/capabilities/src/doc/update.ts` note on `UpdatePatchInput`),
+// so reject pre-dispatcher rather than drive a successful mutation shape
+// with no real change.
 const UpdatePatchBody = z
   .object({
     type: z.string().min(1).optional(),
     props: z.record(z.string(), z.unknown()).optional(),
     content: z.unknown().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (patch) => patch.type !== undefined || patch.props !== undefined || patch.content !== undefined,
+    { message: "patch must contain at least one of `type`, `props`, or `content`" },
+  );
 
 const InsertOpBody = z
   .object({
@@ -202,10 +211,16 @@ const updateRouteDef = createRoute({
       },
     },
     409: {
-      description: "Stale precondition (expect_prior_content_hash mismatch) or write conflict.",
+      description:
+        "Stale precondition (expect_prior_content_hash mismatch) or write conflict. " +
+        "`stale_precondition` = hash mismatch (caller re-fetches + retries with fresh " +
+        "hash). `conflict` = dispatcher seq-unique retry exhaustion (caller backs off + " +
+        "retries). Both map to 409; the `error` code discriminates retry policy.",
       content: {
         "application/json": {
-          schema: z.object({ error: z.literal("conflict") }),
+          schema: z.object({
+            error: z.union([z.literal("stale_precondition"), z.literal("conflict")]),
+          }),
         },
       },
     },

@@ -581,6 +581,32 @@ describe("doc.update", () => {
     expect(uppercase.success).toBe(false);
   });
 
+  it("rejects an empty `patch` on an update op (no-op guard)", () => {
+    // An empty patch is a semantic no-op — BlockNote's `updateBlock`
+    // still drives it through ProseMirror's `setNodeMarkup`, which
+    // emits a `ReplaceAroundStep` and produces a `doc_updates` write
+    // for a change that expresses nothing. Reject at the schema level
+    // so the dispatcher's pre-validation audit row carries the reason.
+    const empty = docUpdate.input.safeParse({
+      doc_id: DOC_A1,
+      ops: [{ op: "update", block_id: BLOCK_BODY, patch: {} }],
+    });
+    expect(empty.success).toBe(false);
+  });
+
+  it("accepts a `patch` that supplies any one of type/props/content", () => {
+    // The refinement is "at least one of" — all three single-key
+    // shapes parse successfully. These happy-path assertions guard
+    // against an over-strict tightening (e.g. requiring all three).
+    for (const patch of [{ type: "heading" }, { props: { level: 2 } }, { content: "x" }] as const) {
+      const ok = docUpdate.input.safeParse({
+        doc_id: DOC_A1,
+        ops: [{ op: "update", block_id: BLOCK_BODY, patch }],
+      });
+      expect(ok.success).toBe(true);
+    }
+  });
+
   it("rejects unknown keys on an op (strict)", () => {
     const result = docUpdate.input.safeParse({
       doc_id: DOC_A1,

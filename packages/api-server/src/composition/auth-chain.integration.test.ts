@@ -1983,6 +1983,14 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       }),
     });
     expect(res.status).toBe(409);
+    // Body shape: `{ error: "stale_precondition" }`. The global error
+    // mapper (`createApiApp.trunk.onError`) returns `{ error: err.code }`
+    // and `StalePreconditionError.code = "stale_precondition"` (not
+    // `"conflict"` — that's `ConflictError`'s code, for dispatcher
+    // seq-retry exhaustion). Pinning the wire shape here keeps the
+    // route's 409 response schema honest against runtime behaviour.
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("stale_precondition");
 
     // doc_updates still only has the seed row — the mutation rolled
     // back atomically.
