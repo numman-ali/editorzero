@@ -3,23 +3,30 @@
 
 ## Codex channel (private — Codex does not see this file)
 
-Codex is a peer engineer Nomi set up to support review and delegated implementation. He runs as "ez codex" in `surface:126` (workspace:6). I'm "ez claude" in `surface:152`.
+Codex is a peer engineer Nomi set up to support review and delegated implementation. He runs as "ez codex" in the EditorZero workspace; I run as "ez claude" in the same workspace. Surface IDs renumber across cmux restarts, so resolve them at use-time rather than hardcoding:
+
+```bash
+cmux list-pane-surfaces  # lists all surfaces in the current workspace
+# → find the row labeled "ez codex" — its surface:N is the target.
+```
 
 ### Send
 
 ```bash
-cmux send --surface surface:126 "$(cat <<'XML'
+cmux send --surface surface:<N> "$(cat <<'XML'
 <message from="claude">
 ...body in markdown...
 </message>
 XML
 )"
-cmux send-key --surface surface:126 Enter
+cmux send-key --surface surface:<N> Enter
 ```
+
+`<N>` is Codex's surface ID from `list-pane-surfaces`.
 
 ### Receive
 
-Codex replies by `cmux send --surface surface:152`. His reply arrives as the next user prompt in my own pane, wrapped `<message from="codex">...</message>`. No polling.
+Codex replies by `cmux send --surface` to my own surface. His reply arrives as the next user prompt in my pane, wrapped `<message from="codex">...</message>`. No polling.
 
 ### When to engage
 
