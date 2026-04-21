@@ -3,11 +3,14 @@
  *
  * Exports:
  *
- *   - `createApiApp({ auth?, dispatcher? })` — composition-root
- *     factory. Production callers construct one instance at boot
- *     with a Better Auth instance + dispatcher; the returned app is
- *     served by the HTTP adapter (and every other surface via
- *     `hc<AppType>` / `createServerClient({ app })`).
+ *   - `createApiApp({ auth, loadRoles, dispatcher, registry? })` —
+ *     composition-root factory. Production callers construct one
+ *     instance at boot with a Better Auth instance + `loadRoles` +
+ *     dispatcher; the returned app is served by the HTTP adapter
+ *     (and every other surface via `hc<AppType>` /
+ *     `createServerClient({ app })`). The triad `{ auth, loadRoles,
+ *     dispatcher }` is all-or-nothing — partial shapes throw at
+ *     composition time (see `app.ts` docblock).
  *   - `app` — zero-arg default instance used by smoke tests and
  *     typed-RPC binding consumers that don't need the auth stack.
  *     `AppType` binds to this value.

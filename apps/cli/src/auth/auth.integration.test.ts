@@ -25,8 +25,9 @@
 
 import { PassThrough } from "node:stream";
 
-import { createApiApp } from "@editorzero/api-server";
+import { createApiApp, createApiDispatcher } from "@editorzero/api-server";
 import { createAuth, runAuthMigrations } from "@editorzero/auth";
+import { createRegistry } from "@editorzero/capabilities";
 import {
   createLoadRoles,
   createSqliteDriver,
@@ -54,11 +55,16 @@ afterEach(async () => {
 });
 
 async function buildTrunk() {
-  // No dispatcher wired — this slice exercises only `/auth/*` +
-  // `/infra/whoami`, neither of which reads `c.var.dispatcher`. The
-  // production composition root adds one; tests that drive
-  // `/docs/*` (in `packages/api-server/src/composition/auth-chain.
-  // integration.test.ts`) construct one via `createApiDispatcher`.
+  // This slice exercises only `/auth/*` + `/infra/whoami`, neither
+  // of which reads `c.var.dispatcher`. `createApiApp` rejects
+  // partial triad shapes at composition time (the triad guard in
+  // `packages/api-server/src/app.ts` — partials would crash
+  // `/docs/*` on first request), so we build a real
+  // `createApiDispatcher` against an empty registry: matches the
+  // production composition shape, skips Hocuspocus + capability
+  // wiring that this auth-only smoke doesn't need. Full-stack
+  // coverage of `/docs/*` lives in
+  // `packages/api-server/src/composition/auth-chain.integration.test.ts`.
   const auth = createAuth({
     driver,
     baseURL: BASE_URL,
@@ -67,7 +73,9 @@ async function buildTrunk() {
   });
   await runAuthMigrations(auth);
   const loadRoles = createLoadRoles(driver);
-  return createApiApp({ auth, loadRoles });
+  const registry = createRegistry([]);
+  const dispatcher = createApiDispatcher({ driver, registry });
+  return createApiApp({ auth, loadRoles, dispatcher });
 }
 
 function makeStoreFake(): AuthCredentialStore & {

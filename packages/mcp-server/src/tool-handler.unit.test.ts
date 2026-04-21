@@ -1,8 +1,18 @@
 import type { Capability } from "@editorzero/capabilities";
 import { registerCapability } from "@editorzero/capabilities";
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
-import { NotFoundError, PermissionDeniedError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
+import {
+  ConflictError,
+  InternalError,
+  NotFoundError,
+  PermissionDeniedError,
+  RateLimitError,
+  ResourceLimitError,
+  TransactCalledTwiceError,
+  UpstreamError,
+  ValidationError,
+} from "@editorzero/errors";
+import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { Principal, UserPrincipal } from "@editorzero/principal";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -134,6 +144,134 @@ describe("runTool", () => {
     expect(result.structuredContent).toMatchObject({
       error: { code: "not_found" },
     });
+  });
+
+  it("preserves RateLimitError message (user-safe class)", async () => {
+    const dispatcher = makeDispatcher(async () => {
+      throw new RateLimitError({ bucket: "agent.workspace.default", retry_after_ms: 1500 });
+    });
+    const capability = makeCap();
+
+    const result = await runTool({ capability, input: {}, principal, dispatcher });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: "rate limited (agent.workspace.default)",
+    });
+    expect(result.structuredContent).toEqual({
+      error: {
+        code: "rate_limited",
+        message: "rate limited (agent.workspace.default)",
+      },
+    });
+  });
+
+  it("preserves ConflictError message (user-safe class)", async () => {
+    const dispatcher = makeDispatcher(async () => {
+      throw new ConflictError({ message: "seq collision" });
+    });
+    const capability = makeCap();
+
+    const result = await runTool({ capability, input: {}, principal, dispatcher });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toEqual({ type: "text", text: "seq collision" });
+    expect(result.structuredContent).toEqual({
+      error: { code: "conflict", message: "seq collision" },
+    });
+  });
+
+  it("preserves ResourceLimitError message (user-safe class)", async () => {
+    const dispatcher = makeDispatcher(async () => {
+      throw new ResourceLimitError({ detail: "yjs update exceeds 256 KB" });
+    });
+    const capability = makeCap();
+
+    const result = await runTool({ capability, input: {}, principal, dispatcher });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: "yjs update exceeds 256 KB",
+    });
+    expect(result.structuredContent).toEqual({
+      error: { code: "resource_limit", message: "yjs update exceeds 256 KB" },
+    });
+  });
+
+  it("redacts UpstreamError message to generic text (internal class)", async () => {
+    // UpstreamError carries the downstream service name + status in
+    // its message — model-visible output shouldn't leak
+    // infrastructure identifiers. The stable `code` stays so MCP
+    // clients can still route; the unsafe detail stays in server
+    // logs via the dispatcher's audit path.
+    const dispatcher = makeDispatcher(async () => {
+      throw new UpstreamError({
+        service: "internal-attachments-svc",
+        status: 502,
+      });
+    });
+    const capability = makeCap();
+
+    const result = await runTool({ capability, input: {}, principal, dispatcher });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toEqual({ type: "text", text: "internal error" });
+    expect(result.structuredContent).toEqual({
+      error: { code: "upstream_error", message: "internal error" },
+    });
+    // Belt-and-suspenders: leaked fields must NOT appear anywhere.
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("internal-attachments-svc");
+    expect(serialized).not.toContain("502");
+  });
+
+  it("redacts TransactCalledTwiceError message to generic text (internal class)", async () => {
+    // Handler-contract bug — message includes the capability ID +
+    // doc ID. Not model-visible detail.
+    const dispatcher = makeDispatcher(async () => {
+      throw new TransactCalledTwiceError({
+        capability_id: CapabilityId("doc.update"),
+        doc_id: DocId("018f0000-0000-7000-8000-0000000000d1"),
+      });
+    });
+    const capability = makeCap();
+
+    const result = await runTool({ capability, input: {}, principal, dispatcher });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toEqual({ type: "text", text: "internal error" });
+    expect(result.structuredContent).toEqual({
+      error: { code: "transact_called_twice", message: "internal error" },
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("doc.update");
+    expect(serialized).not.toContain("018f0000-0000-7000-8000-0000000000d1");
+  });
+
+  it("redacts InternalError message to generic text (internal class)", async () => {
+    // Catch-all / unclassified — message + trace_id are diagnostic,
+    // not user-facing. The `code` stays stable and the server-side
+    // trace_id remains the correlation handle in logs.
+    const dispatcher = makeDispatcher(async () => {
+      throw new InternalError({
+        message: "database driver panic: /var/log/ez/sql.log line 4411",
+        trace_id: "tr_abcdef0123",
+      });
+    });
+    const capability = makeCap();
+
+    const result = await runTool({ capability, input: {}, principal, dispatcher });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toEqual({ type: "text", text: "internal error" });
+    expect(result.structuredContent).toEqual({
+      error: { code: "internal_error", message: "internal error" },
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("database driver panic");
+    expect(serialized).not.toContain("tr_abcdef0123");
   });
 
   it("rethrows non-EditorZeroError throws so the SDK handles them (ADR 0026 commitment 4)", async () => {

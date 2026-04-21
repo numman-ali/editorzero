@@ -38,11 +38,22 @@
 
 import type { Auth } from "@editorzero/auth";
 import type { LoadRoles } from "@editorzero/db";
+import type { Dispatcher } from "@editorzero/dispatcher";
 import { hc } from "hono/client";
 import { testClient } from "hono/testing";
 import { describe, expect, it } from "vitest";
 
 import { type AppType, app, createApiApp } from "./index";
+
+// Minimal Dispatcher stand-in for composition-boundary tests that need
+// the triad guard satisfied but never actually dispatch. Never called
+// on the `/auth/*` or `/infra/health` paths these tests exercise.
+const fakeDispatcher: Dispatcher = {
+  dispatch: async () => {
+    throw new Error("fakeDispatcher.dispatch must not be called in these tests");
+  },
+  deps: {} as Dispatcher["deps"],
+};
 
 const MOUNTED_PATH = "/infra/health" as const;
 
@@ -83,16 +94,18 @@ describe("api-server trunk composition", () => {
     expect(doc.components?.schemas?.["WhoamiResponse"]).toBeDefined();
   });
 
-  it("createApiApp({ auth, loadRoles }) routes POST /auth/* to auth.handler", async () => {
+  it("createApiApp({ auth, loadRoles, dispatcher }) routes POST /auth/* to auth.handler", async () => {
     // Composition-boundary assertion: any request matching `/auth/*`
     // reaches the injected Better Auth handler. Uses a fake auth object
     // typed as `Auth` so we don't spin up a real SQLite driver + Better
     // Auth instance just to assert the wiring. `loadRoles` is paired
-    // with `auth` by the factory's runtime guard (ADR 0024); a never-
-    // called stub satisfies the pairing without exercising the role
-    // lookup (the `/auth/*` mount doesn't run principal resolution).
-    // The full round-trip with a real Better Auth + loadRoles is
-    // covered in `composition/auth-chain.integration.test.ts`.
+    // with `auth` by the factory's runtime guard (ADR 0024); `dispatcher`
+    // is required alongside them by the triad guard (partial shapes
+    // mount `/docs/*` with missing middleware). None of the three is
+    // actually called by `/auth/*` — they just satisfy the guards so
+    // composition succeeds. The full round-trip with a real Better
+    // Auth + loadRoles + dispatcher is covered in
+    // `composition/auth-chain.integration.test.ts`.
     let handlerCalls = 0;
     let seenUrl: string | undefined;
     let seenMethod: string | undefined;
@@ -111,7 +124,11 @@ describe("api-server trunk composition", () => {
       throw new Error("loadRoles must not be called when only /auth/* is exercised");
     };
 
-    const trunk = createApiApp({ auth: fakeAuth, loadRoles: fakeLoadRoles });
+    const trunk = createApiApp({
+      auth: fakeAuth,
+      loadRoles: fakeLoadRoles,
+      dispatcher: fakeDispatcher,
+    });
     const res = await trunk.request("/auth/sign-in/email", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -168,6 +185,26 @@ describe("api-server trunk composition", () => {
       : never;
     expect(() => createApiApp({ registry: fakeRegistry })).toThrow(
       /registry.+without.+dispatcher/i,
+    );
+  });
+
+  it("createApiApp({ auth, loadRoles }) without dispatcher throws (triad invariant)", () => {
+    // `/docs/*` routes mount unconditionally and read `c.var.dispatcher`
+    // in-handler. Without the dispatcher middleware the first request
+    // would crash with TypeError — caught loud at boot instead.
+    const fakeAuth = { handler: async () => new Response() } as unknown as Auth;
+    const fakeLoadRoles: LoadRoles = async () => null;
+    expect(() => createApiApp({ auth: fakeAuth, loadRoles: fakeLoadRoles })).toThrow(
+      /auth.+without.+dispatcher/i,
+    );
+  });
+
+  it("createApiApp({ dispatcher }) without auth throws (triad invariant)", () => {
+    // Mirror: `/docs/*` handlers read `c.var.principal` set by the
+    // principal middleware, which only attaches under the auth pair.
+    // Providing dispatcher alone would crash on first request.
+    expect(() => createApiApp({ dispatcher: fakeDispatcher })).toThrow(
+      /dispatcher.+without.+auth/i,
     );
   });
 

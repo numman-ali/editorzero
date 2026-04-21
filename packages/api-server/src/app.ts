@@ -2,17 +2,20 @@
  * Hono trunk — every editorzero surface (HTTP, CLI, MCP, Web UI in-
  * process callers) consumes this trunk via `hc<AppType>` (ADR 0021).
  *
- * **Two shapes.** `createApiApp({ auth?, dispatcher? })` is the
- * composition-root factory — the production trunk calls it once at
- * boot with a concrete Better Auth instance + dispatcher and caches
- * the returned app. `app` is a zero-arg default instance used by the
- * trunk-composition smoke, the api-client smoke, and any consumer
- * that needs an `AppType` binding without a running auth stack.
- * `AppType` (typed from the default `app`) is stable across both
- * shapes because the routes registered via `openapiRoutes([...] as
- * const)` are the same in both — only the middleware attached to
- * `/docs/*` differs. `hc<AppType>` bindings do not need to know
- * whether auth is wired.
+ * **Two shapes.** `createApiApp({ auth, loadRoles, dispatcher,
+ * registry? })` is the composition-root factory — the production
+ * trunk calls it once at boot with a concrete Better Auth instance,
+ * `loadRoles` callable, and dispatcher, and caches the returned app.
+ * `app` is a zero-arg default instance used by the trunk-composition
+ * smoke, the api-client smoke, and any consumer that needs an
+ * `AppType` binding without a running auth stack. Partial shapes
+ * (e.g., `{ auth, loadRoles }` without `dispatcher`, or `{ dispatcher }`
+ * without `auth`) are rejected at composition time — see the guards
+ * on `CreateApiAppOptions` below. `AppType` (typed from the default
+ * `app`) is stable across both shapes because the routes registered
+ * via `openapiRoutes([...] as const)` are the same in both — only the
+ * middleware attached to `/docs/*` differs. `hc<AppType>` bindings do
+ * not need to know whether auth is wired.
  *
  * **Composition primitive.** Routes live one-per-file under
  * `src/routes/<domain>/<capability>.ts` (co-located unit test at
@@ -102,16 +105,20 @@ export interface CreateApiAppOptions {
    * on `/auth/*` (POST + GET) so Better Auth's sign-up / sign-in /
    * session endpoints compose under the trunk, and
    * `createBetterAuthResolver({ auth, loadRoles })` powers the
-   * `/docs/*` principal middleware. Omit for tests or smoke-level
-   * composition checks that don't need the auth stack — capability
-   * routes still mount but `/docs/*` 401s on every request (no
-   * resolver → no principal).
+   * `/docs/*` + `/infra/whoami` principal middleware. Omit only for
+   * the zero-arg smoke-composition shape — see the triad guard
+   * below.
    *
-   * **Pairing constraint.** When `auth` is provided, `loadRoles`
-   * MUST also be provided (ADR 0024 — the resolver reads roles
-   * from `workspace_members` via the callable). The factory throws
-   * at composition time if the pair is broken; this keeps the
-   * failure loud at boot rather than silent at first request.
+   * **Triad constraint.** `{ auth, loadRoles, dispatcher }` is
+   * all-or-nothing. Partial shapes mount `/docs/*` routes with
+   * missing middleware — the handler then throws a TypeError on the
+   * first matching request (reads `c.var.principal` or
+   * `c.var.dispatcher`). The factory throws at composition time
+   * whenever the triad is partially provided; this keeps the
+   * failure loud at boot rather than a silent footgun at first
+   * request. ADR 0024 separately requires `auth` ↔ `loadRoles`
+   * pairing (the resolver reads `workspace_members` via the
+   * callable).
    */
   readonly auth?: Auth;
   /**
@@ -125,13 +132,20 @@ export interface CreateApiAppOptions {
    */
   readonly loadRoles?: LoadRoles;
   /**
-   * Dispatcher composition-root instance. Required in production for
-   * `/docs/*` routes to actually execute capabilities; without it,
-   * the dispatcher middleware is omitted and a capability route that
-   * reached its handler would crash reading `c.var.dispatcher`. In
-   * practice the principal middleware 401s first when auth is also
-   * absent, so the default zero-arg `app` stays safe for the health-
-   * probe tests it's used in.
+   * Dispatcher composition-root instance. Required alongside `auth`
+   * + `loadRoles` for `/docs/*` routes to mount a complete
+   * middleware chain. Part of the triad guard on `auth` above — the
+   * factory throws if `dispatcher` is provided without `auth`, or
+   * `auth` without `dispatcher`, since the partial shape would
+   * attach one middleware but not the other and the first
+   * capability request would crash reading `c.var.principal` /
+   * `c.var.dispatcher`. The zero-arg `app` default (no triad
+   * members) stays safe only for the typed-RPC binding + public
+   * `/infra/health` + `/infra/version` probes; a request to
+   * `/docs/*` on the zero-arg app still reaches an unguarded
+   * handler and crashes. That surface is intentional — typed-RPC
+   * callers never issue those requests, and the smoke tests cover
+   * only public paths.
    */
   readonly dispatcher?: Dispatcher;
   /**
@@ -163,6 +177,7 @@ export interface CreateApiAppOptions {
 export function createApiApp(options: CreateApiAppOptions = {}) {
   const { auth, loadRoles, dispatcher, registry, mcpServerInfo } = options;
 
+  // ADR 0024 — `auth` and `loadRoles` are the auth-resolver pair.
   if (auth !== undefined && loadRoles === undefined) {
     throw new Error(
       "createApiApp: `auth` was provided without `loadRoles`. ADR 0024 requires " +
@@ -176,6 +191,10 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
         "provided together — `loadRoles` is only consumed by the auth resolver.",
     );
   }
+  // ADR 0026 slice-1 — `registry` requires the full triad. Checked
+  // before the generic triad guards below so the diagnostic points
+  // at the MCP mount intent rather than an arbitrary pair-wise
+  // failure.
   if (registry !== undefined && dispatcher === undefined) {
     throw new Error(
       "createApiApp: `registry` was provided without `dispatcher`. The MCP " +
@@ -191,6 +210,29 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
         "loadRoles the route would have no principal middleware and every tool " +
         "call would crash reading `c.var.principal`. Provide `auth` + `loadRoles` " +
         "alongside `registry`, or omit `registry` to not expose MCP.",
+    );
+  }
+  // Triad invariant — `/docs/*` handlers read both `c.var.principal`
+  // (set by the principal middleware, which only attaches when
+  // `auth` + `loadRoles` are present) and `c.var.dispatcher` (set
+  // by the dispatcher middleware, which only attaches when
+  // `dispatcher` is present). A partial shape mounts the routes but
+  // leaves one middleware unattached — the first `/docs/*` request
+  // crashes with TypeError. Fail loud at composition time.
+  if (auth !== undefined && dispatcher === undefined) {
+    throw new Error(
+      "createApiApp: `auth` was provided without `dispatcher`. The `/docs/*` " +
+        "routes need both the principal middleware (from `auth` + `loadRoles`) " +
+        "and the dispatcher middleware; a partial shape would crash on first " +
+        "request reading `c.var.dispatcher`. Provide all three together or none.",
+    );
+  }
+  if (auth === undefined && dispatcher !== undefined) {
+    throw new Error(
+      "createApiApp: `dispatcher` was provided without `auth`. The `/docs/*` " +
+        "routes need the principal middleware alongside the dispatcher " +
+        "middleware; a partial shape would crash on first request reading " +
+        "`c.var.principal`. Provide all three together or none.",
     );
   }
   const trunk = new OpenAPIHono<ApiEnv>();
@@ -261,13 +303,18 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
  * `packages/api-client` smoke tests and the trunk-composition smoke
  * can bind `hc<AppType>` without spinning up a full auth stack.
  * Production composition roots construct their own via
- * `createApiApp({ auth, dispatcher })`.
+ * `createApiApp({ auth, loadRoles, dispatcher })`.
  *
- * **Capability routes mounted on this default app will 401** because
- * the principal middleware isn't wired (no `auth` passed). The RPC
- * surface is still typed (`hc<AppType>.docs.list.$get`); tests that
- * need to exercise the handler use `createApiApp({ auth, dispatcher })`
- * directly.
+ * **Capability routes mounted on this default app will crash on
+ * request** — no principal middleware (no `auth`) means no
+ * `c.var.principal`; no dispatcher middleware (no `dispatcher`)
+ * means no `c.var.dispatcher`; the handlers read both unguarded.
+ * The RPC surface is still typed (`hc<AppType>.docs.list.$get`);
+ * tests that need to exercise the handler use `createApiApp({ auth,
+ * loadRoles, dispatcher })` directly. Public `/infra/*` paths
+ * (health, version) stay safe because they don't read auth/dispatch
+ * context; `/infra/whoami` is gated by the principal chain and
+ * therefore also only functional on the full-triad shape.
  */
 export const app = createApiApp();
 
