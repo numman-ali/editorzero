@@ -34,6 +34,7 @@ export {
   WORKSPACE_MEMBERS_DDL,
 } from "./drivers/sqlite-ddl";
 export { createLoadRoles, type LoadRoles, type LoadRolesDriver } from "./load-roles";
+export { createOutboxWriter, type OutboxAppendInput, type OutboxWriter } from "./outbox-writer";
 export { createQueryFaultPlugin, describeQueryNode, type QueryTag } from "./query-fault";
 export type {
   AuditEventsTable,

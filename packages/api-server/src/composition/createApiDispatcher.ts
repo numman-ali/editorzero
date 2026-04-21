@@ -49,11 +49,16 @@
  * split); for now the single `ctx.transact` entry multiplexes on
  * `category`.
  *
- * **`outbox` remains a no-op stub** — the metadata-only mutation
- * atomicity artefact (continuation.md §Immediate focus) lands this
- * together with a capability that emits handler-owned outbox rows.
- * No capability registered today actually emits via `ctx.outbox`;
- * the stub is safe under that precondition.
+ * **`ctx.outbox` is wired transactionally.** Handler-emitted events
+ * are queued during `fn(extras, auditTx)` and flushed via
+ * `createOutboxWriter().append(auditTx, …)` before the tx commits,
+ * inside the same `BEGIN IMMEDIATE` region as the handler's
+ * `ctx.db` writes, the `doc_updates` rows (content mutations only),
+ * and the dispatcher-written audit row. A handler throw short-
+ * circuits the flush and `withSystemTx` rolls back the queued
+ * rows with everything else — single-tx atomicity, F10/F31. The
+ * read-path variant below throws when a read capability calls
+ * `ctx.outbox` (capability bug — reads must not emit).
  *
  * **`now: () => Date.now()` default** keeps tests deterministic by
  * letting them override with a fake clock. Production inherits the
@@ -66,7 +71,10 @@ import type { Registry } from "@editorzero/capabilities";
 import {
   asAuditTx,
   createAuditWriter,
+  createOutboxWriter,
   createTenantScopedDb,
+  type OutboxAppendInput,
+  type OutboxWriter,
   type SqliteDriver,
 } from "@editorzero/db";
 import {
@@ -106,6 +114,8 @@ export interface CreateApiDispatcherOptions {
    * passes it here, and closes it on shutdown.
    */
   readonly sync?: HocuspocusSync;
+  /** Defaults to `createOutboxWriter()` from `@editorzero/db`. */
+  readonly outboxWriter?: OutboxWriter;
   readonly logger?: Logger;
   readonly tracer?: Tracer;
   /** Defaults to `Date.now`. Tests override for deterministic timestamps. */
@@ -119,6 +129,7 @@ export function createApiDispatcher(options: CreateApiDispatcherOptions): Dispat
     gate = scopeOnlyGate(),
     auditWriter = createAuditWriter(),
     sync,
+    outboxWriter = createOutboxWriter(),
     logger = noopLogger,
     tracer = noopTracer,
     now = () => Date.now(),
@@ -150,16 +161,26 @@ export function createApiDispatcher(options: CreateApiDispatcherOptions): Dispat
                 principal,
                 workspace_id: principal.workspace_id,
               });
+        // Handler-emitted outbox rows are queued here and flushed
+        // after the handler returns but before the tx commits (see
+        // `try` block below). The kernel signature is synchronous
+        // (`outbox(event, payload) => void` in `@editorzero/capabilities`
+        // kernel.ts) so the dispatcher can't await the INSERT
+        // in-line — queueing keeps the handler surface sync while
+        // preserving single-tx atomicity (architecture.md §2101 —
+        // "design intent" until this slice). A handler throw short-
+        // circuits the flush, and `withSystemTx` rolls back the
+        // queued rows with everything else.
+        const outboxQueue: OutboxAppendInput[] = [];
         const extras: CapabilityContextExtras = {
           db: createTenantScopedDb(tx, principal.workspace_id),
-          // Outbox writes are tx-local in the real (P3.6c) wiring;
-          // placeholder here until the metadata-only mutation slice
-          // replaces the stub with `ctx.outbox(event)` →
-          // `INSERT INTO outbox (..., tx=<current>)`. No capability in
-          // the registry today calls `ctx.outbox` from the API trunk,
-          // so the stub is safe under that precondition.
-          // biome-ignore lint/suspicious/noEmptyBlockStatements: deliberate no-op stub — see comment above.
-          outbox: () => {},
+          outbox: (event, payload) => {
+            outboxQueue.push({
+              workspace_id: principal.workspace_id,
+              event,
+              payload,
+            });
+          },
           transact:
             bound === undefined
               ? async () => {
@@ -173,7 +194,18 @@ export function createApiDispatcher(options: CreateApiDispatcherOptions): Dispat
               : bound.transact.bind(bound),
         };
         try {
-          return await fn(extras, auditTx);
+          const result = await fn(extras, auditTx);
+          // Flush inside the tx, before return. Order: handler
+          // writes → handler-emitted outbox → dispatcher-written
+          // audit (the dispatcher writes its audit row in `fn`
+          // before returning, via `deps.auditWriter.write(auditTx,
+          // …)`). The forwarder reads by `outbox.id` (UUIDv7
+          // time-sorted); within-tx ordering between audit row and
+          // handler rows is not semantically load-bearing.
+          for (const row of outboxQueue) {
+            await outboxWriter.append(auditTx, row);
+          }
+          return result;
         } catch (err) {
           // The SQL tx is about to roll back. Drop the in-memory Y.Doc
           // for every `doc_id` the handler mutated so the next open
@@ -187,8 +219,19 @@ export function createApiDispatcher(options: CreateApiDispatcherOptions): Dispat
     runRead: async (principal, fn) => {
       const extras: CapabilityContextExtras = {
         db: driver.scoped(principal.workspace_id),
-        // biome-ignore lint/suspicious/noEmptyBlockStatements: deliberate no-op stub; reads don't normally emit outbox events, but read-path extras still expose the method — real implementation lands with the sync-service slice.
-        outbox: () => {},
+        // Read capabilities must not emit outbox events — the outbox
+        // is for transactional side-effects of mutations (F10/F31).
+        // A read calling `ctx.outbox` would either no-op silently
+        // (wrong — hides a capability bug) or insert outside any
+        // write-path tx (wrong — breaks the single-tx invariant).
+        // Throw loud; no capability in the registry today does this.
+        outbox: () => {
+          throw new Error(
+            "createApiDispatcher: ctx.outbox called from a read capability — " +
+              "outbox events are only emitted from mutation capabilities " +
+              "(architecture.md §6.3, ADR 0018 F10/F31).",
+          );
+        },
         // Read-path `ctx.transact` routes through `HocuspocusSync.read`
         // — tx-less, no `doc_updates` row, no `__read` marker exposed
         // on the capability surface. The read seam's clone-before-fn

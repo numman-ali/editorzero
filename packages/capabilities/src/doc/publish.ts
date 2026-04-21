@@ -165,6 +165,19 @@ export const docPublish: Capability<Input, Output> = {
       throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
     }
 
+    // `doc.visibility_changed` — downstream cache/public-route
+    // invalidator (§5.4, F5). Keyed on `visibility_version` so a
+    // forwarder seeing an out-of-order row can reject the stale
+    // one without coordination. Committed inside the same write-
+    // path tx as the UPDATE above via the dispatcher's `ctx.outbox`
+    // queue → `createOutboxWriter` flush (architecture.md §2101,
+    // ADR 0018 F10/F31).
+    ctx.outbox("doc.visibility_changed", {
+      doc_id: row.id,
+      visibility: "public",
+      visibility_version: row.visibility_version,
+    });
+
     return {
       doc_id: row.id,
       visibility: "public",

@@ -55,21 +55,36 @@ function userPrincipal(): UserPrincipal {
   };
 }
 
-function buildCtx(workspace_id: WorkspaceId, now: () => number = () => 1000): CapabilityContext {
-  return {
+interface OutboxCapture {
+  readonly event: string;
+  readonly payload: unknown;
+}
+
+function buildCtx(
+  workspace_id: WorkspaceId,
+  now: () => number = () => 1000,
+): { readonly ctx: CapabilityContext; readonly outboxEmits: readonly OutboxCapture[] } {
+  const outboxEmits: OutboxCapture[] = [];
+  const ctx: CapabilityContext = {
     principal: userPrincipal(),
     tenant: { workspace_id },
     db: driver.scoped(workspace_id),
+    // `doc.unpublish` is metadata-only (METADATA_ONLY_CAPABILITIES) —
+    // calling `ctx.transact` would violate the allowlist. The handler
+    // never does; this stub throws so a regression (handler quietly
+    // starts calling transact) surfaces as a test failure rather than
+    // a silent passing run against a noop.
     transact: () => {
       throw new Error("doc.unpublish: handler must not call ctx.transact (metadata-only)");
     },
-    outbox: () => {
-      /* no outbox emissions in v1 */
+    outbox: (event, payload) => {
+      outboxEmits.push({ event, payload });
     },
     logger: noopLogger,
     tracer: noopTracer,
     now,
   };
+  return { ctx, outboxEmits };
 }
 
 async function seedDocRow(params: {
@@ -113,7 +128,7 @@ describe("doc.unpublish", () => {
       visibility_version: 3,
     });
 
-    const ctx = buildCtx(WORKSPACE_A, () => 2_000_000);
+    const { ctx, outboxEmits } = buildCtx(WORKSPACE_A, () => 2_000_000);
     const out = await docUnpublish.handler(ctx, { doc_id: DOC_A1 });
 
     expect(out).toEqual({
@@ -131,6 +146,21 @@ describe("doc.unpublish", () => {
     expect(row.visibility).toBe("workspace");
     expect(row.visibility_version).toBe(4);
     expect(row.updated_at).toBe(2_000_000);
+
+    // Mirror of `doc.publish`'s emission: `doc.visibility_changed`
+    // with the new `visibility_version` as the invalidation key.
+    // The `visibility` discriminator tells the forwarder this is the
+    // un-publish side.
+    expect(outboxEmits).toEqual([
+      {
+        event: "doc.visibility_changed",
+        payload: {
+          doc_id: DOC_A1,
+          visibility: "workspace",
+          visibility_version: 4,
+        },
+      },
+    ]);
   });
 
   it("is idempotent at the state level (already-workspace bumps version anyway)", async () => {
@@ -145,11 +175,20 @@ describe("doc.unpublish", () => {
       visibility_version: 7,
     });
 
-    const ctx = buildCtx(WORKSPACE_A, () => 3_000_000);
+    const { ctx, outboxEmits } = buildCtx(WORKSPACE_A, () => 3_000_000);
     const out = await docUnpublish.handler(ctx, { doc_id: DOC_A1 });
 
     expect(out.visibility).toBe("workspace");
     expect(out.visibility_version).toBe(8);
+    // Same invalidation contract as publish: the event fires even
+    // though the state didn't transition, because the
+    // `visibility_version` bump is the cache-invalidation signal.
+    expect(outboxEmits).toEqual([
+      {
+        event: "doc.visibility_changed",
+        payload: { doc_id: DOC_A1, visibility: "workspace", visibility_version: 8 },
+      },
+    ]);
   });
 
   it("unpublishes a private doc back to workspace (narrow inverse of publish)", async () => {
@@ -166,18 +205,27 @@ describe("doc.unpublish", () => {
       visibility_version: 2,
     });
 
-    const ctx = buildCtx(WORKSPACE_A);
+    const { ctx, outboxEmits } = buildCtx(WORKSPACE_A);
     const out = await docUnpublish.handler(ctx, { doc_id: DOC_A1 });
 
     expect(out.visibility).toBe("workspace");
     expect(out.visibility_version).toBe(3);
+    expect(outboxEmits).toEqual([
+      {
+        event: "doc.visibility_changed",
+        payload: { doc_id: DOC_A1, visibility: "workspace", visibility_version: 3 },
+      },
+    ]);
   });
 
   it("throws NotFoundError when the doc does not exist", async () => {
-    const ctx = buildCtx(WORKSPACE_A);
+    const { ctx, outboxEmits } = buildCtx(WORKSPACE_A);
     await expect(docUnpublish.handler(ctx, { doc_id: DOC_MISSING })).rejects.toBeInstanceOf(
       NotFoundError,
     );
+    // Handler throws before the `ctx.outbox` call — no emission on
+    // the failed path, matching the single-tx atomicity guarantee.
+    expect(outboxEmits).toEqual([]);
   });
 
   it("treats soft-deleted docs as not found", async () => {
@@ -188,7 +236,7 @@ describe("doc.unpublish", () => {
       visibility: "public",
       deleted_at: 999,
     });
-    const ctx = buildCtx(WORKSPACE_A);
+    const { ctx, outboxEmits } = buildCtx(WORKSPACE_A);
     await expect(docUnpublish.handler(ctx, { doc_id: DOC_A2_DELETED })).rejects.toBeInstanceOf(
       NotFoundError,
     );
@@ -203,6 +251,7 @@ describe("doc.unpublish", () => {
       .executeTakeFirstOrThrow();
     expect(row.visibility).toBe("public");
     expect(row.visibility_version).toBe(0);
+    expect(outboxEmits).toEqual([]);
   });
 
   it("composes with Layer-2 scoping: workspace-A ctx cannot unpublish workspace-B doc", async () => {
@@ -212,7 +261,7 @@ describe("doc.unpublish", () => {
       title: "B1",
       visibility: "public",
     });
-    const ctxA = buildCtx(WORKSPACE_A);
+    const { ctx: ctxA, outboxEmits } = buildCtx(WORKSPACE_A);
     await expect(docUnpublish.handler(ctxA, { doc_id: DOC_B1 })).rejects.toBeInstanceOf(
       NotFoundError,
     );
@@ -226,6 +275,10 @@ describe("doc.unpublish", () => {
       .executeTakeFirstOrThrow();
     expect(row.visibility).toBe("public");
     expect(row.visibility_version).toBe(0);
+    // And no outbox leak across the tenant boundary — the emission
+    // would carry workspace-A's tenant_id on the outbox row, for a
+    // doc owned by B. The handler throws first, so nothing queues.
+    expect(outboxEmits).toEqual([]);
   });
 
   it("rejects a non-UUIDv7 doc_id at the input schema", () => {

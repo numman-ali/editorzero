@@ -118,7 +118,7 @@ function buildFixture(
 }
 
 describe("createApiDispatcher", () => {
-  it("allow path: handler db write commits + allow audit row lands", async () => {
+  it("allow path: handler db write commits + allow audit row lands + handler-emitted outbox row commits", async () => {
     const fixture = buildFixture(async (ctx, input) => {
       await ctx.db
         .insertInto("docs")
@@ -137,12 +137,11 @@ describe("createApiDispatcher", () => {
           deleted_at: null,
         })
         .execute();
-      // `ctx.outbox` is stubbed to a no-op until the sync-service
-      // integration slice lands; calling it should not throw and
-      // should not affect the dispatch outcome. Exercising the stub
-      // here pins the current behaviour so a future slice that
-      // replaces it with `INSERT INTO outbox` can't silently swallow
-      // calls from existing handlers.
+      // Handler-emitted outbox event lands in the same write-path tx
+      // as the `docs` INSERT and the `audit_events` allow row.
+      // Queued via `ctx.outbox(event, payload)` and flushed by
+      // `createApiDispatcher`'s post-handler step inside the same
+      // `BEGIN IMMEDIATE` region — see `runInWriteTx` in the factory.
       ctx.outbox("doc.updated", { doc_id: input.doc_id, version: 1 });
       return { doc_id: input.doc_id, title: input.title };
     });
@@ -163,11 +162,75 @@ describe("createApiDispatcher", () => {
       .selectFrom("audit_events")
       .select(["outcome", "capability_id"])
       .execute();
+    const outboxRows = await driver
+      .system()
+      .selectFrom("outbox")
+      .select(["event", "workspace_id", "payload"])
+      .execute();
 
     expect(docs).toHaveLength(1);
     expect(audits).toHaveLength(1);
     expect(audits[0]?.outcome).toBe("allow");
     expect(audits[0]?.capability_id).toBe(FIXTURE_ID);
+    // Two outbox rows: the dispatcher-written `audit.appended` fan-
+    // out (from `createAuditWriter`) + the handler-emitted
+    // `doc.updated` row (from `ctx.outbox`).
+    expect(outboxRows).toHaveLength(2);
+    const events = outboxRows.map((r) => r.event).sort();
+    expect(events).toEqual(["audit.appended", "doc.updated"]);
+    const docUpdated = outboxRows.find((r) => r.event === "doc.updated");
+    if (docUpdated === undefined) throw new Error("expected doc.updated row");
+    expect(docUpdated.workspace_id).toBe(WORKSPACE_ID);
+    expect(JSON.parse(docUpdated.payload)).toEqual({ doc_id: DOC_ID, version: 1 });
+  });
+
+  it("handler throw rolls back handler-emitted outbox rows with the tx", async () => {
+    // Atomicity: if the handler calls `ctx.outbox(...)` and then
+    // throws, neither the handler's `docs` insert nor the outbox
+    // row should persist. The error-outcome audit row lands via
+    // the separate short-lived `withAuditTx`, so the only outbox
+    // row that should exist is its `audit.appended` fan-out.
+    const fixture = buildFixture(async (ctx, input) => {
+      await ctx.db
+        .insertInto("docs")
+        .values({
+          id: DocId(input.doc_id),
+          workspace_id: WORKSPACE_ID,
+          collection_id: null,
+          title: input.title,
+          slug: "seed",
+          order_key: "a",
+          visibility: "workspace",
+          visibility_version: 0,
+          created_by: USER_ID,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: null,
+        })
+        .execute();
+      ctx.outbox("doc.updated", { doc_id: input.doc_id, version: 1 });
+      throw new Error("simulated handler failure after outbox emit");
+    });
+    const registry = createRegistry([registerCapability(fixture)]);
+    const dispatcher = createApiDispatcher({ driver, registry, now: () => 1 });
+
+    await expect(
+      dispatcher.dispatch({
+        capability_id: FIXTURE_ID,
+        input: { doc_id: DOC_ID, title: "Hello" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      }),
+    ).rejects.toThrow(/simulated handler failure/);
+
+    const docs = await driver.system().selectFrom("docs").select("id").execute();
+    const outboxEvents = await driver.system().selectFrom("outbox").select("event").execute();
+    expect(docs).toHaveLength(0);
+    // Only the error audit's `audit.appended` fan-out persists.
+    // The handler-emitted `doc.updated` rolled back with the write-
+    // path tx.
+    expect(outboxEvents.map((r) => r.event)).toEqual(["audit.appended"]);
   });
 
   it("gate deny: no db write, deny audit row lands via withAuditTx", async () => {
@@ -286,12 +349,6 @@ describe("createApiDispatcher", () => {
             .where("id", "=", DocId(input.doc_id))
             .executeTakeFirst();
           if (row === undefined) throw new Error("seeded doc not found");
-          // Exercise the read-path `outbox` stub (no-op today). Reads
-          // don't normally emit outbox events, but the stub exists on
-          // extras so reads calling it by mistake don't blow up —
-          // dispatcher-level validation that reads don't emit events is
-          // a separate concern.
-          ctx.outbox("doc.updated", { doc_id: input.doc_id, version: 1 });
           return { doc_id: row.id, title: row.title };
         },
         ["doc:read"],
@@ -314,6 +371,42 @@ describe("createApiDispatcher", () => {
     const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
     expect(audits).toHaveLength(1);
     expect(audits[0]?.outcome).toBe("allow");
+  });
+
+  it("read path: ctx.outbox throws (reads must not emit outbox events)", async () => {
+    // The single-tx outbox guarantee is a property of the write path
+    // — reads don't open `BEGIN IMMEDIATE` and have nowhere to write
+    // a row atomically. A read capability calling `ctx.outbox` is a
+    // capability bug; the dispatcher surfaces it as an error-outcome
+    // audit row rather than silently dropping the event.
+    const badReadFixture: Capability<FixtureInput, FixtureOutput> = {
+      ...buildFixture(
+        async (ctx, input) => {
+          ctx.outbox("illegal.from.read", { doc_id: input.doc_id });
+          return { doc_id: input.doc_id, title: "never reached" };
+        },
+        ["doc:read"],
+      ),
+      category: "read",
+      requires: ["doc:read"],
+    };
+    const registry = createRegistry([registerCapability(badReadFixture)]);
+    const dispatcher = createApiDispatcher({ driver, registry, now: () => 1 });
+
+    await expect(
+      dispatcher.dispatch({
+        capability_id: FIXTURE_ID,
+        input: { doc_id: DOC_ID, title: "ignored" },
+        principal: testUser(),
+        access: testAccess(),
+        trace_id: null,
+      }),
+    ).rejects.toThrow(/outbox called from a read capability/i);
+
+    // Error-outcome audit row landed (dispatcher's error-audit path).
+    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.outcome).toBe("error");
   });
 
   it("write path: ctx.transact throws when `sync` is not passed (content-mutation fails loud)", async () => {

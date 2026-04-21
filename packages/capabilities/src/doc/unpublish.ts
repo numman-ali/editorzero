@@ -151,6 +151,17 @@ export const docUnpublish: Capability<Input, Output> = {
       throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
     }
 
+    // `doc.visibility_changed` — mirrors the publish-side emit
+    // (packages/capabilities/src/doc/publish.ts). Same event
+    // name; the `visibility` discriminator tells the downstream
+    // forwarder which side flipped. Committed inside the same
+    // write-path tx as the UPDATE above (architecture.md §2101).
+    ctx.outbox("doc.visibility_changed", {
+      doc_id: row.id,
+      visibility: "workspace",
+      visibility_version: row.visibility_version,
+    });
+
     return {
       doc_id: row.id,
       visibility: "workspace",
