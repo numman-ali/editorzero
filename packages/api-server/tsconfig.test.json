@@ -5,7 +5,7 @@
     "tsBuildInfoFile": "./.tsbuildinfo.test",
     "rootDir": "."
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "prop/**/*"],
   "references": [],
   "exclude": ["node_modules", "dist"]
 }

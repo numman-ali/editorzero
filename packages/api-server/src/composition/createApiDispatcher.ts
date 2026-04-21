@@ -195,13 +195,15 @@ export function createApiDispatcher(options: CreateApiDispatcherOptions): Dispat
         };
         try {
           const result = await fn(extras, auditTx);
-          // Flush inside the tx, before return. Order: handler
-          // writes → handler-emitted outbox → dispatcher-written
-          // audit (the dispatcher writes its audit row in `fn`
-          // before returning, via `deps.auditWriter.write(auditTx,
-          // …)`). The forwarder reads by `outbox.id` (UUIDv7
-          // time-sorted); within-tx ordering between audit row and
-          // handler rows is not semantically load-bearing.
+          // Flush inside the tx, before return. Actual in-tx order:
+          // handler writes → dispatcher's allow-audit writes (invoked
+          // inside `fn` via `deps.auditWriter.write(auditTx, …)` —
+          // this is what emits `INSERT audit_events` + the paired
+          // `INSERT outbox(audit.appended)`) → handler-emitted outbox
+          // flush (this loop). The forwarder reads by `outbox.id`
+          // (UUIDv7 time-sorted); within-tx ordering between the
+          // audit row and the handler-emitted row is not semantically
+          // load-bearing — both commit atomically.
           for (const row of outboxQueue) {
             await outboxWriter.append(auditTx, row);
           }
