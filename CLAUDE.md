@@ -12,23 +12,27 @@ cmux tree --workspace workspace:<N>  # full pane+surface tree across the workspa
 
 **Use `cmux tree`, not `cmux list-pane-surfaces`.** `list-pane-surfaces` only returns surfaces in the *focused* pane, so if Codex runs in a different pane it silently returns empty and you'll think he's offline. `tree` walks every pane under the workspace.
 
+Resolve **my own** surface the same way — grep for `◀ here` in `cmux tree --workspace workspace:<N>`; the marker sits on the calling session's surface line.
+
 ### Send
 
+Include `reply-to="surface:<my-N>"` on the message envelope so Codex doesn't have to hunt for the return address. Without it he has to re-resolve the tree to find me; with sufficient rounds he will eventually reply into the wrong surface.
+
 ```bash
-cmux send --surface surface:<N> "$(cat <<'XML'
-<message from="claude">
+cmux send --surface surface:<codex-N> "$(cat <<'XML'
+<message from="claude" reply-to="surface:<my-N>">
 ...body in markdown...
 </message>
 XML
 )"
-cmux send-key --surface surface:<N> Enter
+cmux send-key --surface surface:<codex-N> Enter
 ```
 
-`<N>` is Codex's surface ID from `list-pane-surfaces`.
+`<codex-N>` is Codex's surface ID from `cmux tree`; `<my-N>` is my own, grepped from `◀ here` in the same tree output.
 
 ### Receive
 
-Codex replies by `cmux send --surface` to my own surface. His reply arrives as the next user prompt in my pane, wrapped `<message from="codex">...</message>`. No polling.
+Codex replies by `cmux send --surface` to my own surface. His reply arrives as the next user prompt in my pane, wrapped `<message from="codex" reply-to="surface:<codex-N>">...</message>` — use the `reply-to` as the target of my follow-up rather than re-resolving his surface each round. No polling.
 
 ### When to engage
 
