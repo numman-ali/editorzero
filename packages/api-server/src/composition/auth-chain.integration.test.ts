@@ -2710,9 +2710,10 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       settings: Record<string, unknown>;
     };
     // The bootstrap shape (see `create-auth.ts`): slug is
-    // `{local-part}-{6-hex}`, display name is `{local-part}'s
+    // `{local-part}-{12-hex}` (Codex review: 12-hex suffix for
+    // birthday-paradox safety), display name is `{local-part}'s
     // workspace`, retention defaults to 30, settings default to `{}`.
-    expect(body.slug).toMatch(/^wanda-[0-9a-f]{6}$/u);
+    expect(body.slug).toMatch(/^wanda-[0-9a-f]{12}$/u);
     expect(body.name).toBe("wanda's workspace");
     expect(body.trash_retention_days).toBe(30);
     expect(body.settings).toEqual({});
@@ -2807,6 +2808,27 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
       body: JSON.stringify({ trash_retention_days: 1000 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /workspaces/update rejects the empty patch → 400 (at-least-one-field refine)", async () => {
+    // Codex review pinned this: the route's zod body schema was
+    // previously `.strict()` without the refine, so OpenAPI / the
+    // generated `hc<AppType>` client would accept `{}` while the
+    // capability's input refine rejected it at runtime. The fix
+    // mirrored the refine at the route layer; this test pins the 400
+    // at the contract-boundary so a future refactor that drops the
+    // refine on one side or the other fails here.
+    const { trunk } = await buildStack({ registerWorkspaceUpdate: true });
+    await signUp(trunk, "rupert@example.com");
+    const signInRes = await signIn(trunk, "rupert@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/update", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
   });

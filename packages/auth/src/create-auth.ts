@@ -61,9 +61,11 @@ import { betterAuth } from "better-auth";
 /**
  * Lowercased, non-alphanumeric collapsed to single dash, trimmed,
  * capped at 40 chars. Used as the human-readable prefix of the
- * workspace slug; paired with `slugSuffix` (a deterministic 6-hex
- * suffix) so the final slug is always non-empty and unique even when
- * this prefix normalizes to an empty string.
+ * workspace slug; paired with `slugSuffix` to produce a deterministic
+ * unique slug. May return an empty string (e.g. `"+++"` → `""`);
+ * callers must guard that case — `"-{suffix}"` would leak a leading
+ * hyphen into the slug and partial-index-based uniqueness would still
+ * allow it but the URL shape is ugly.
  */
 function normalizeSlug(input: string): string {
   return input
@@ -74,15 +76,37 @@ function normalizeSlug(input: string): string {
 }
 
 /**
- * Deterministic 6-hex suffix derived from the workspace id. Paired
- * with `normalizeSlug(local-part)` to produce a slug that is unique
- * per workspace even when two users share an email local-part — the
- * partial unique index on `workspaces(slug) WHERE deleted_at IS NULL`
- * enforces the floor. Deterministic beats random here: reproducible
- * test fixtures and no retry loop on collision.
+ * Deterministic hex suffix derived from the workspace id via SHA-256.
+ * 12 hex = 48 bits of entropy; for common email local-parts like
+ * `admin` / `info` / `support` shared across many workspaces, 6 hex
+ * (24 bits) would see ~50% birthday-paradox collision risk at ~5k
+ * shared-prefix signups (Codex review). At 48 bits the same risk
+ * sits at ~20M shared-prefix signups — beyond any realistic scale.
+ * Collisions matter here because they would raise a UNIQUE violation
+ * inside the post-commit hook, stranding a committed BA `user` row
+ * without a matching workspace (fail-loud-on-signup, but painful).
+ *
+ * Deterministic-over-random for the usual reason: reproducible test
+ * fixtures and no retry loop.
  */
 function slugSuffix(workspaceId: WorkspaceId): string {
-  return createHash("sha256").update(workspaceId).digest("hex").slice(0, 6);
+  return createHash("sha256").update(workspaceId).digest("hex").slice(0, 12);
+}
+
+/**
+ * Compose the final slug — handles the empty-prefix case with a
+ * `workspace-` fallback so the slug never starts with a hyphen.
+ * Separated from the `slug = ...` line at the call-site so the
+ * fallback rule is visibly colocated with `normalizeSlug`'s
+ * "may-be-empty" contract. Exported for unit coverage of the
+ * fallback branch — an email local-part that normalizes to empty is
+ * hard to produce through a real Better Auth signup because the
+ * email validator rejects most shapes that would trigger it.
+ */
+export function composeWorkspaceSlug(localPart: string, workspaceId: WorkspaceId): string {
+  const prefix = normalizeSlug(localPart);
+  const suffix = slugSuffix(workspaceId);
+  return prefix.length > 0 ? `${prefix}-${suffix}` : `workspace-${suffix}`;
 }
 
 /**
@@ -259,15 +283,14 @@ export function createAuth(options: CreateAuthOptions) {
 
             // Derive slug/name from the email local-part. Display
             // name is the raw local-part ("alice" from
-            // alice@example.com); slug is normalized + deterministic
-            // suffix so two Alices in separate workspaces never
-            // collide on the partial unique index. Better Auth's
+            // alice@example.com); slug is `composeWorkspaceSlug`
+            // which handles the empty-prefix fallback. Better Auth's
             // email validator guarantees the address contains "@",
             // so `split("@")` always produces ≥ 2 elements — the cast
             // narrows TS's `string | undefined` for index 0 without
             // introducing an untested runtime branch.
             const [localPart] = user.email.split("@") as [string, ...string[]];
-            const slug = `${normalizeSlug(localPart)}-${slugSuffix(wsId)}`;
+            const slug = composeWorkspaceSlug(localPart, wsId);
             const displayName = `${localPart}'s workspace`;
 
             await driver

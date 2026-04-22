@@ -29,6 +29,11 @@ import type { ApiEnv } from "../../env";
 
 const WORKSPACE_UPDATE_ID = CapabilityId("workspace.update");
 
+// At-least-one-field refine mirrors the capability's input boundary so
+// the OpenAPI / `hc<AppType>` contract matches runtime behaviour. Without
+// it, generated clients would treat `{}` as valid while the capability
+// would throw at zod parse — the exact kind of route/capability drift
+// Codex flagged on `doc.update`'s follow-on fix.
 const UpdateRequest = z
   .object({
     name: z.string().trim().min(1, "name must not be empty or whitespace-only").optional(),
@@ -41,6 +46,10 @@ const UpdateRequest = z
     settings: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
+  .refine(
+    (v) => v.name !== undefined || v.trash_retention_days !== undefined || v.settings !== undefined,
+    { message: "at least one of name, trash_retention_days, settings must be provided" },
+  )
   .openapi("WorkspaceUpdateRequest");
 
 const UpdateResponse = z

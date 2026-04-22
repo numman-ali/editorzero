@@ -28,9 +28,10 @@ import {
   SQLITE_FULL_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
+import { WorkspaceId } from "@editorzero/ids";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createAuth } from "./create-auth";
+import { composeWorkspaceSlug, createAuth } from "./create-auth";
 import { runAuthMigrations } from "./migrate";
 import { createBetterAuthResolver } from "./resolver";
 
@@ -142,15 +143,17 @@ describe("@editorzero/auth", () => {
     });
 
     // Confirm the hook populated the `workspaces` anchor row. Slug
-    // is `{local-part}-{6-hex}`; display name is `{local-part}'s
-    // workspace`; diagnostic_salt is 16 random bytes; defaults from
-    // the DDL land for trash_retention_days (30) and settings ('{}').
+    // is `{local-part}-{12-hex}` (Codex review: 12-hex suffix widens
+    // birthday-paradox safety for common shared local-parts like
+    // `admin`); display name is `{local-part}'s workspace`;
+    // diagnostic_salt is 16 random bytes; defaults from the DDL land
+    // for trash_retention_days (30) and settings ('{}').
     const workspaceRow = await driver
       .system()
       .selectFrom("workspaces")
       .select(["slug", "name", "trash_retention_days", "diagnostic_salt", "settings"])
       .executeTakeFirstOrThrow();
-    expect(workspaceRow.slug).toMatch(/^bob-[0-9a-f]{6}$/u);
+    expect(workspaceRow.slug).toMatch(/^bob-[0-9a-f]{12}$/u);
     expect(workspaceRow.name).toBe("bob's workspace");
     expect(workspaceRow.trash_retention_days).toBe(30);
     expect(workspaceRow.diagnostic_salt.byteLength).toBe(16);
@@ -310,5 +313,23 @@ describe("@editorzero/auth", () => {
     const resolver = createBetterAuthResolver({ auth, loadRoles });
     const principal = await resolver(new Headers({ cookie: cookieHeader }));
     expect(principal).toBeNull();
+  });
+
+  it("composeWorkspaceSlug — local-part that normalizes to empty falls back to `workspace-` prefix", () => {
+    // Codex review: the `prefix.length > 0 ? ... : fallback` branch
+    // can be reached in principle with pathological local-parts, but
+    // Better Auth's email validator rejects most of them. Exercising
+    // the helper directly pins the fallback shape without depending
+    // on BA's acceptance of a weird email. The suffix is the first
+    // 12 hex of sha256(workspaceId) — reproducible here.
+    const wsId = WorkspaceId("018f0000-0000-7000-8000-000000000001");
+    const slug = composeWorkspaceSlug("+++", wsId);
+    expect(slug).toMatch(/^workspace-[0-9a-f]{12}$/u);
+  });
+
+  it("composeWorkspaceSlug — non-empty local-part prefixes the slug before the suffix", () => {
+    const wsId = WorkspaceId("018f0000-0000-7000-8000-000000000001");
+    const slug = composeWorkspaceSlug("Alice.Example+test", wsId);
+    expect(slug).toMatch(/^alice-example-test-[0-9a-f]{12}$/u);
   });
 });
