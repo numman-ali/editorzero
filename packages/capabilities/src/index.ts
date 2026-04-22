@@ -28,12 +28,14 @@ export { createRegistry, RegistryLookupError, registerCapability } from "./regis
 export { collectionCreate } from "./collection/create";
 export { collectionDelete } from "./collection/delete";
 export { collectionList } from "./collection/list";
+export { collectionMove } from "./collection/move";
 export { collectionRestore } from "./collection/restore";
 export { collectionUpdate } from "./collection/update";
 export { docCreate } from "./doc/create";
 export { docDelete } from "./doc/delete";
 export { docGet } from "./doc/get";
 export { docList } from "./doc/list";
+export { docMove } from "./doc/move";
 export { docPublish } from "./doc/publish";
 export { docRename } from "./doc/rename";
 export { docRestore } from "./doc/restore";

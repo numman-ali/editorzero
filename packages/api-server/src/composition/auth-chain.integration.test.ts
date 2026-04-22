@@ -35,6 +35,7 @@ import {
   collectionCreate,
   collectionDelete,
   collectionList,
+  collectionMove,
   collectionRestore,
   collectionUpdate,
   createRegistry,
@@ -42,6 +43,7 @@ import {
   docDelete,
   docGet,
   docList,
+  docMove,
   docPublish,
   docRename,
   docRestore,
@@ -102,11 +104,13 @@ async function buildStack(
     registerDocRestore?: boolean;
     registerDocRename?: boolean;
     registerDocUpdate?: boolean;
+    registerDocMove?: boolean;
     registerCollectionCreate?: boolean;
     registerCollectionList?: boolean;
     registerCollectionUpdate?: boolean;
     registerCollectionDelete?: boolean;
     registerCollectionRestore?: boolean;
+    registerCollectionMove?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -130,11 +134,13 @@ async function buildStack(
     ...(options.registerDocRestore ? [registerCapability(docRestore)] : []),
     ...(options.registerDocRename ? [registerCapability(docRename)] : []),
     ...(options.registerDocUpdate ? [registerCapability(docUpdate)] : []),
+    ...(options.registerDocMove ? [registerCapability(docMove)] : []),
     ...(options.registerCollectionCreate ? [registerCapability(collectionCreate)] : []),
     ...(options.registerCollectionList ? [registerCapability(collectionList)] : []),
     ...(options.registerCollectionUpdate ? [registerCapability(collectionUpdate)] : []),
     ...(options.registerCollectionDelete ? [registerCapability(collectionDelete)] : []),
     ...(options.registerCollectionRestore ? [registerCapability(collectionRestore)] : []),
+    ...(options.registerCollectionMove ? [registerCapability(collectionMove)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -2315,5 +2321,261 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       headers: { cookie },
     });
     expect(restoreRes.status).toBe(404);
+  });
+
+  // ── `collection.move` + `doc.move` — slice 3 full-stack coverage ────────
+  //
+  // Full chain: BA signup → signin → cookie → trunk → principal middleware
+  // → dispatcher middleware → capability → SQLite. Each test opts in to
+  // the exact capability set it needs.
+
+  it("POST /collections/move re-parents a collection", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionList: true,
+      registerCollectionMove: true,
+    });
+    await signUp(trunk, "ryan@example.com");
+    const signInRes = await signIn(trunk, "ryan@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    // Create two root collections: Parent + Movable.
+    const parentRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Parent" }),
+    });
+    const parent = (await parentRes.json()) as { collection_id: string };
+    const movableRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Movable" }),
+    });
+    const movable = (await movableRes.json()) as { collection_id: string };
+
+    const moveRes = await trunk.request(`/collections/move/${movable.collection_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ new_parent_id: parent.collection_id }),
+    });
+    expect(moveRes.status).toBe(200);
+    const moved = (await moveRes.json()) as {
+      collection_id: string;
+      new_parent_id: string;
+    };
+    expect(moved.new_parent_id).toBe(parent.collection_id);
+
+    // list should still surface Movable (flat list); parent_id reflected.
+    const listRes = await trunk.request("/collections/list", { headers: { cookie } });
+    const listBody = (await listRes.json()) as {
+      collections: ReadonlyArray<{ id: string; parent_id: string | null }>;
+    };
+    const row = listBody.collections.find((c) => c.id === movable.collection_id);
+    expect(row?.parent_id).toBe(parent.collection_id);
+  });
+
+  it("POST /collections/move 409 on target-scope slug collision", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionMove: true,
+    });
+    await signUp(trunk, "sasha@example.com");
+    const signInRes = await signIn(trunk, "sasha@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    // Parent A, Parent B. "Notes" lives under both — attempting to move
+    // A/Notes under B collides with B/Notes.
+    const pARes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "ParentA" }),
+    });
+    const pA = (await pARes.json()) as { collection_id: string };
+    const pBRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "ParentB" }),
+    });
+    const pB = (await pBRes.json()) as { collection_id: string };
+    const notesARes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Notes", parent_id: pA.collection_id }),
+    });
+    const notesA = (await notesARes.json()) as { collection_id: string };
+    await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Notes", parent_id: pB.collection_id }),
+    });
+
+    const moveRes = await trunk.request(`/collections/move/${notesA.collection_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ new_parent_id: pB.collection_id }),
+    });
+    expect(moveRes.status).toBe(409);
+    const body = (await moveRes.json()) as { error: string };
+    expect(body.error).toBe("slug_collision");
+  });
+
+  it("POST /collections/move 400 on cycle (moving ancestor under descendant)", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionMove: true,
+    });
+    await signUp(trunk, "tomas@example.com");
+    const signInRes = await signIn(trunk, "tomas@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    // Root → Mid → Leaf. Attempt to move Root under Leaf.
+    const rootRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Root" }),
+    });
+    const root = (await rootRes.json()) as { collection_id: string };
+    const midRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Mid", parent_id: root.collection_id }),
+    });
+    const mid = (await midRes.json()) as { collection_id: string };
+    const leafRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Leaf", parent_id: mid.collection_id }),
+    });
+    const leaf = (await leafRes.json()) as { collection_id: string };
+
+    const moveRes = await trunk.request(`/collections/move/${root.collection_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ new_parent_id: leaf.collection_id }),
+    });
+    expect(moveRes.status).toBe(400);
+  });
+
+  it("POST /collections/move 401 without cookie", async () => {
+    const { trunk } = await buildStack({ registerCollectionMove: true });
+    const res = await trunk.request("/collections/move/018f0000-0000-7000-8000-0000000000c1", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ new_parent_id: null }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /docs/move re-parents a doc into a collection", async () => {
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocList: true,
+      registerDocMove: true,
+      registerCollectionCreate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "uma@example.com");
+    const signInRes = await signIn(trunk, "uma@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const collRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Homes" }),
+    });
+    const collection = (await collRes.json()) as { collection_id: string };
+    const docRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Wandering doc" }),
+    });
+    const doc = (await docRes.json()) as { doc_id: string };
+
+    const moveRes = await trunk.request(`/docs/move/${doc.doc_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ new_collection_id: collection.collection_id }),
+    });
+    expect(moveRes.status).toBe(200);
+    const moved = (await moveRes.json()) as {
+      doc_id: string;
+      new_collection_id: string;
+    };
+    expect(moved.new_collection_id).toBe(collection.collection_id);
+  });
+
+  it("POST /docs/move 409 on target-scope slug collision", async () => {
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocMove: true,
+      registerCollectionCreate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "vic@example.com");
+    const signInRes = await signIn(trunk, "vic@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    // Collection A with two docs + Collection B with a doc whose slug
+    // will collide with a move.
+    const cARes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "A" }),
+    });
+    const cA = (await cARes.json()) as { collection_id: string };
+    const cBRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "B" }),
+    });
+    const cB = (await cBRes.json()) as { collection_id: string };
+    const docARes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Same", collection_id: cA.collection_id }),
+    });
+    const docA = (await docARes.json()) as { doc_id: string };
+    await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Same", collection_id: cB.collection_id }),
+    });
+
+    const moveRes = await trunk.request(`/docs/move/${docA.doc_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ new_collection_id: cB.collection_id }),
+    });
+    expect(moveRes.status).toBe(409);
+    const body = (await moveRes.json()) as { error: string };
+    expect(body.error).toBe("slug_collision");
+  });
+
+  it("POST /docs/move 404 when target collection is missing", async () => {
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocMove: true,
+      withSync: true,
+    });
+    await signUp(trunk, "wendy@example.com");
+    const signInRes = await signIn(trunk, "wendy@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const docRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Solo" }),
+    });
+    const doc = (await docRes.json()) as { doc_id: string };
+    const moveRes = await trunk.request(`/docs/move/${doc.doc_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ new_collection_id: "018f0000-0000-7000-8000-0000000000f9" }),
+    });
+    expect(moveRes.status).toBe(404);
+  });
+
+  it("POST /docs/move 401 without cookie", async () => {
+    const { trunk } = await buildStack({ registerDocMove: true });
+    const res = await trunk.request("/docs/move/018f0000-0000-7000-8000-0000000000d1", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ new_collection_id: null }),
+    });
+    expect(res.status).toBe(401);
   });
 });

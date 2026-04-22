@@ -59,6 +59,13 @@ const DOC_CREATE_ID = CapabilityId("doc.create");
 const CreateRequest = z
   .object({
     title: z.string().trim().min(1, "title must not be empty or whitespace-only"),
+    // Optional collection parent — mirrors `doc.create`'s capability
+    // input. `null` (explicit workspace root) is distinct from
+    // "omitted" on the wire; both coerce to null on the DB side.
+    // Added as part of slice 3 so the collections routes and the
+    // doc-move route compose end-to-end. The handler's tenant-scoped
+    // SELECT + 404-on-missing gate is unchanged.
+    collection_id: z.string().uuid().nullable().optional(),
   })
   .strict()
   .openapi("DocCreateRequest");

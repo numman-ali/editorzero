@@ -32,6 +32,7 @@ import { create } from "./create";
 import { del } from "./delete";
 import { get } from "./get";
 import { list } from "./list";
+import { move } from "./move";
 import { publish } from "./publish";
 import { rename } from "./rename";
 import { restore } from "./restore";
@@ -48,4 +49,5 @@ export const docsRoutes = [
   restore,
   rename,
   update,
+  move,
 ] as const;

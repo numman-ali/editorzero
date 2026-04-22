@@ -15,7 +15,8 @@
 import { create } from "./create";
 import { del } from "./delete";
 import { list } from "./list";
+import { move } from "./move";
 import { restore } from "./restore";
 import { update } from "./update";
 
-export const collectionsRoutes = [list, create, update, del, restore] as const;
+export const collectionsRoutes = [list, create, update, move, del, restore] as const;
