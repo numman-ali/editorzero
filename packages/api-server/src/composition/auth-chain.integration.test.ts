@@ -50,6 +50,8 @@ import {
   docUnpublish,
   docUpdate,
   registerCapability,
+  workspaceGet,
+  workspaceUpdate,
 } from "@editorzero/capabilities";
 import {
   createDocUpdatesReader,
@@ -111,6 +113,8 @@ async function buildStack(
     registerCollectionDelete?: boolean;
     registerCollectionRestore?: boolean;
     registerCollectionMove?: boolean;
+    registerWorkspaceGet?: boolean;
+    registerWorkspaceUpdate?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -141,6 +145,8 @@ async function buildStack(
     ...(options.registerCollectionDelete ? [registerCapability(collectionDelete)] : []),
     ...(options.registerCollectionRestore ? [registerCapability(collectionRestore)] : []),
     ...(options.registerCollectionMove ? [registerCapability(collectionMove)] : []),
+    ...(options.registerWorkspaceGet ? [registerCapability(workspaceGet)] : []),
+    ...(options.registerWorkspaceUpdate ? [registerCapability(workspaceUpdate)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -2675,5 +2681,151 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     expect(restoreD.status).toBe(400);
     const body = (await restoreD.json()) as { error: string };
     expect(body.error).toBe("validation_failed");
+  });
+
+  // ── Workspace domain ──────────────────────────────────────────────────
+
+  it("GET /workspaces/get round-trips: signup seeds workspaces row, read projects it", async () => {
+    // Post-693cada the `user.create.after` hook in `@editorzero/auth`
+    // seeds BOTH the `workspaces` anchor AND the `workspace_members`
+    // row. The read path through `workspace.get` composes with the
+    // self-scoped plugin (ADR 0023) so no manual `where("id", ...)`
+    // predicate is needed in the handler.
+    const { trunk } = await buildStack({ registerWorkspaceGet: true });
+    await signUp(trunk, "wanda@example.com");
+    const signInRes = await signIn(trunk, "wanda@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/get", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      workspace_id: string;
+      slug: string;
+      name: string;
+      trash_retention_days: number;
+      created_by: string;
+      settings: Record<string, unknown>;
+    };
+    // The bootstrap shape (see `create-auth.ts`): slug is
+    // `{local-part}-{6-hex}`, display name is `{local-part}'s
+    // workspace`, retention defaults to 30, settings default to `{}`.
+    expect(body.slug).toMatch(/^wanda-[0-9a-f]{6}$/u);
+    expect(body.name).toBe("wanda's workspace");
+    expect(body.trash_retention_days).toBe(30);
+    expect(body.settings).toEqual({});
+  });
+
+  it("GET /workspaces/get 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceGet: true });
+    const res = await trunk.request("/workspaces/get", { method: "GET" });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /workspaces/update patches name + retention + settings for an owner (full stack)", async () => {
+    const { trunk } = await buildStack({
+      registerWorkspaceGet: true,
+      registerWorkspaceUpdate: true,
+    });
+    await signUp(trunk, "oscar@example.com");
+    const signInRes = await signIn(trunk, "oscar@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const updateRes = await trunk.request("/workspaces/update", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Oscar HQ",
+        trash_retention_days: 90,
+        settings: { theme: "light" },
+      }),
+    });
+    expect(updateRes.status).toBe(200);
+    const updated = (await updateRes.json()) as {
+      workspace_id: string;
+      name: string;
+      trash_retention_days: number;
+      settings: Record<string, unknown>;
+    };
+    expect(updated.name).toBe("Oscar HQ");
+    expect(updated.trash_retention_days).toBe(90);
+    expect(updated.settings).toEqual({ theme: "light" });
+
+    // Read-back through `GET /workspaces/get` confirms the patch
+    // landed in the DB — not just echoed from the handler's
+    // `.returning(...)` clause.
+    const readRes = await trunk.request("/workspaces/get", {
+      method: "GET",
+      headers: { cookie },
+    });
+    const read = (await readRes.json()) as {
+      name: string;
+      trash_retention_days: number;
+      settings: Record<string, unknown>;
+    };
+    expect(read.name).toBe("Oscar HQ");
+    expect(read.trash_retention_days).toBe(90);
+    expect(read.settings).toEqual({ theme: "light" });
+  });
+
+  it("POST /workspaces/update 403s for a member role (no workspace:admin scope)", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceUpdate: true });
+    // Auto-seeded role is "owner"; overrideRole downgrades to "member"
+    // which carries workspace:read but NOT workspace:admin. The scope
+    // gate fires at Layer 1 before the handler runs.
+    await signUp(trunk, "mabel@example.com", { overrideRole: "member" });
+    const signInRes = await signIn(trunk, "mabel@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/update", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Hijack" }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /workspaces/update 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceUpdate: true });
+    const res = await trunk.request("/workspaces/update", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "x" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /workspaces/update rejects out-of-range retention → 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceUpdate: true });
+    await signUp(trunk, "percy@example.com");
+    const signInRes = await signIn(trunk, "percy@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/update", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ trash_retention_days: 1000 }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /workspaces/update rejects `slug` in the body → 400 (unknown key)", async () => {
+    // Slug is derived at bootstrap and is NOT part of this surface.
+    // The route's strict schema rejects the unknown key before the
+    // dispatcher runs — outbound share URLs can't be silently
+    // invalidated by a smuggled slug change.
+    const { trunk } = await buildStack({ registerWorkspaceUpdate: true });
+    await signUp(trunk, "quinn@example.com");
+    const signInRes = await signIn(trunk, "quinn@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/update", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ slug: "hijack" }),
+    });
+    expect(res.status).toBe(400);
   });
 });
