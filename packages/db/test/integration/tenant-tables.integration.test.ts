@@ -21,7 +21,7 @@
 import { CapabilityId, CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { TENANT_SCOPED_TABLES } from "../../src/schema";
+import { TENANT_SCOPE_COLUMNS } from "../../src/schema";
 import {
   type Backend,
   createPostgresBackend,
@@ -90,16 +90,12 @@ describe.each(backends)("tenant-table isolation — $name", ({ setup }) => {
     await backend.resetSchema();
   });
 
-  it("every TENANT_SCOPED_TABLES member is covered by a per-table test — drift guard", () => {
-    // If this list grows and a test below isn't added, the assertion
+  it("every TENANT_SCOPE_COLUMNS key is covered by a per-table test — drift guard", () => {
+    // If this map grows and a test below isn't added, the assertion
     // catches the drift so the floor keeps matching the schema.
-    expect([...TENANT_SCOPED_TABLES]).toEqual([
-      "collections",
-      "docs",
-      "doc_snapshots",
-      "doc_updates",
-      "audit_events",
-    ]);
+    expect(Object.keys(TENANT_SCOPE_COLUMNS).sort()).toEqual(
+      ["audit_events", "collections", "doc_snapshots", "doc_updates", "docs", "workspaces"].sort(),
+    );
   });
 
   it("collections: workspace-A handle returns only workspace-A rows", async () => {

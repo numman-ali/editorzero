@@ -52,9 +52,38 @@
  * `sendResetPassword` / `sendVerificationEmail` callbacks.
  */
 
+import { createHash, randomBytes } from "node:crypto";
+
 import type { SqliteDriver } from "@editorzero/db";
 import { generateWorkspaceId, UserId, uuidV7, WorkspaceId } from "@editorzero/ids";
 import { betterAuth } from "better-auth";
+
+/**
+ * Lowercased, non-alphanumeric collapsed to single dash, trimmed,
+ * capped at 40 chars. Used as the human-readable prefix of the
+ * workspace slug; paired with `slugSuffix` (a deterministic 6-hex
+ * suffix) so the final slug is always non-empty and unique even when
+ * this prefix normalizes to an empty string.
+ */
+function normalizeSlug(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+/**
+ * Deterministic 6-hex suffix derived from the workspace id. Paired
+ * with `normalizeSlug(local-part)` to produce a slug that is unique
+ * per workspace even when two users share an email local-part — the
+ * partial unique index on `workspaces(slug) WHERE deleted_at IS NULL`
+ * enforces the floor. Deterministic beats random here: reproducible
+ * test fixtures and no retry loop on collision.
+ */
+function slugSuffix(workspaceId: WorkspaceId): string {
+  return createHash("sha256").update(workspaceId).digest("hex").slice(0, 6);
+}
 
 /**
  * Concrete Better Auth instance returned by `createAuth`. Typed via
@@ -178,16 +207,24 @@ export function createAuth(options: CreateAuthOptions) {
           }),
           // **Post-commit bootstrap (ADR 0024).** The resolver is
           // strict-on-missing — a valid session without a
-          // `workspace_members` row → 401. This hook populates that
-          // row as the user's auto-minted workspace gets created, so
-          // fresh sign-ups can authenticate against `/docs/*`
-          // immediately. Role `"owner"` matches the "user owns the
+          // `workspace_members` row → 401. This hook lands both
+          // anchor rows for the minted workspace: the `workspaces`
+          // row (tenant-scope anchor, self-scoped per ADR 0023) and
+          // the `workspace_members` row (principal→workspace join).
+          // Members row role `"owner"` matches the "user owns the
           // workspace they just minted" invariant.
+          //
+          // **Ordering: workspaces first.** The auto-appended scope
+          // predicate on later reads joins against `workspaces.id`;
+          // until the row exists, a scoped handle reading `workspaces`
+          // returns empty even for the just-minted id. Inserting the
+          // anchor first keeps the two tables in FK-natural order for
+          // any observer iterating them.
           //
           // **Runs after commit.** Better Auth's `create.after` fires
           // via `queueAfterTransactionHook` (verified in
           // `@better-auth/core/dist/context/transaction.mjs`) —
-          // pending hooks execute after the tx commits. If this
+          // pending hooks execute after the tx commits. If either
           // insert fails, the error propagates back to the caller of
           // `auth.api.signUpEmail`, which fails loud on signup. The
           // user row is committed but no session exists yet, so
@@ -197,14 +234,14 @@ export function createAuth(options: CreateAuthOptions) {
           // ask user to retry" (bad once, bad rarely; audit log will
           // show the orphaned user + failed audit in the next slice).
           //
-          // **Idempotent on conflict.** `onConflict((oc) =>
-          // oc.columns(["workspace_id", "user_id"]).doNothing())`
-          // protects against accidental double-invocation (e.g., a
-          // retry that got through BA's internal debounce). The
-          // composite PK is the natural uniqueness key; `doNothing`
-          // is the revive-in-place-safe variant because a previously-
-          // soft-deleted row stays soft-deleted rather than being
-          // silently overwritten by an unrelated re-signup.
+          // **Idempotent on conflict.** Both inserts use `doNothing`
+          // against their natural uniqueness key (workspaces.id PK;
+          // workspace_members composite PK) so a retry that got
+          // through BA's internal debounce reconverges rather than
+          // double-inserts. `doNothing` is also the revive-in-place-
+          // safe variant — a previously-soft-deleted members row
+          // stays soft-deleted rather than being silently overwritten
+          // by an unrelated re-signup.
           after: async (user) => {
             const workspaceId = (user as { workspaceId?: unknown }).workspaceId;
             if (typeof workspaceId !== "string" || workspaceId.length === 0) {
@@ -217,12 +254,44 @@ export function createAuth(options: CreateAuthOptions) {
                 "user.create.after: workspaceId missing on user row — before hook did not run or was overridden",
               );
             }
+            const wsId = WorkspaceId(workspaceId);
             const now = Date.now();
+
+            // Derive slug/name from the email local-part. Display
+            // name is the raw local-part ("alice" from
+            // alice@example.com); slug is normalized + deterministic
+            // suffix so two Alices in separate workspaces never
+            // collide on the partial unique index. Better Auth's
+            // email validator guarantees the address contains "@",
+            // so `split("@")` always produces ≥ 2 elements — the cast
+            // narrows TS's `string | undefined` for index 0 without
+            // introducing an untested runtime branch.
+            const [localPart] = user.email.split("@") as [string, ...string[]];
+            const slug = `${normalizeSlug(localPart)}-${slugSuffix(wsId)}`;
+            const displayName = `${localPart}'s workspace`;
+
+            await driver
+              .system()
+              .insertInto("workspaces")
+              .values({
+                id: wsId,
+                slug,
+                name: displayName,
+                trash_retention_days: 30,
+                diagnostic_salt: randomBytes(16),
+                created_by: UserId(user.id),
+                created_at: now,
+                deleted_at: null,
+                settings: "{}",
+              })
+              .onConflict((oc) => oc.column("id").doNothing())
+              .execute();
+
             await driver
               .system()
               .insertInto("workspace_members")
               .values({
-                workspace_id: WorkspaceId(workspaceId),
+                workspace_id: wsId,
                 user_id: UserId(user.id),
                 role: "owner",
                 created_at: now,

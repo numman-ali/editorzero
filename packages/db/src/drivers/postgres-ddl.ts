@@ -33,6 +33,34 @@
  * drift; today it is a pairwise read.
  */
 
+/**
+ * `workspaces` — the tenant-scope root. Parallel to `sqlite-ddl.ts`
+ * WORKSPACES_DDL; see that header for the self-scope + diagnostic_salt
+ * + partial-slug-unique rationale.
+ *
+ * Type mappings from the SQLite dialect:
+ *   BLOB    → BYTEA        (diagnostic_salt: `Uint8Array` column)
+ *   INTEGER → BIGINT       (created_at, deleted_at — epoch-ms)
+ *   INTEGER → INTEGER      (trash_retention_days, bounded counter)
+ */
+export const WORKSPACES_DDL = `
+  CREATE TABLE workspaces (
+    id                   TEXT    PRIMARY KEY,
+    slug                 TEXT    NOT NULL,
+    name                 TEXT    NOT NULL,
+    trash_retention_days INTEGER NOT NULL DEFAULT 30
+      CHECK (trash_retention_days BETWEEN 7 AND 365),
+    diagnostic_salt      BYTEA   NOT NULL,
+    created_by           TEXT    NOT NULL,
+    created_at           BIGINT  NOT NULL,
+    deleted_at           BIGINT,
+    settings             TEXT    NOT NULL DEFAULT '{}'
+  );
+  CREATE UNIQUE INDEX workspaces_slug_unique
+    ON workspaces(slug)
+    WHERE deleted_at IS NULL;
+` as const;
+
 export const DOCS_DDL = `
   CREATE TABLE docs (
     id                 TEXT PRIMARY KEY,
@@ -180,6 +208,7 @@ export const OUTBOX_DDL = `
  * into it. Other orderings are free.
  */
 export const FULL_DDL = [
+  WORKSPACES_DDL,
   COLLECTIONS_DDL,
   DOCS_DDL,
   DOC_SNAPSHOTS_DDL,

@@ -33,21 +33,35 @@ import type { CapabilityCategory, Role, SubjectKind } from "@editorzero/scopes";
 import type { Kysely } from "kysely";
 
 /**
- * Tables the tenant-scoping plugin enforces `workspace_id` predicates
- * on. Every entry must have a `workspace_id` column of type
- * `WorkspaceId` (non-nullable). Non-tenant-scoped tables (`doc_counters`,
- * `outbox`, Better Auth's `session` / `account`) are queried without
- * the plugin.
+ * Per-table scope column for the tenant-scoping plugin. Every key here
+ * is a table the plugin must rewrite on SELECT/UPDATE/DELETE/INSERT;
+ * the value names the column the predicate binds to.
+ *
+ * Almost every tenant-scoped table carries a separate `workspace_id`
+ * column (`WorkspaceId` non-nullable). `workspaces` is the lone
+ * **self-scoped** exception: its `id` IS the workspace id, so the
+ * plugin scopes on `id` instead. Net effect through a tenant-scoped
+ * handle is identical — a caller can only ever see their own row.
+ *
+ * Non-tenant-scoped tables (`doc_counters`, `outbox`, Better Auth's
+ * `session` / `account`) are queried without the plugin.
+ *
+ * Extending this map requires a paired change: add the key here AND
+ * the table interface below AND (for `Database`-visible tables) an
+ * entry on `Database`. The `tenant-tables.integration.test.ts` drift
+ * guard enumerates every key and fails if a test isn't covering it.
  */
-export const TENANT_SCOPED_TABLES = [
-  "collections",
-  "docs",
-  "doc_snapshots",
-  "doc_updates",
-  "audit_events",
-] as const;
+export const TENANT_SCOPE_COLUMNS = {
+  collections: "workspace_id",
+  docs: "workspace_id",
+  doc_snapshots: "workspace_id",
+  doc_updates: "workspace_id",
+  audit_events: "workspace_id",
+  workspaces: "id",
+} as const;
 
-export type TenantScopedTable = (typeof TENANT_SCOPED_TABLES)[number];
+export type TenantScopedTable = keyof typeof TENANT_SCOPE_COLUMNS;
+export type TenantScopeColumn = (typeof TENANT_SCOPE_COLUMNS)[TenantScopedTable];
 
 /**
  * `collections` — folder-tree primitive for organizing docs
@@ -193,12 +207,12 @@ export interface DocCountersTable {
  * `packages/dispatcher/src/gate.ts` maps `Role` → `Scope[]`.
  *
  * Deliberately on `SystemDatabase` but NOT on `Database` and NOT in
- * `TENANT_SCOPED_TABLES` — the only consumer today is the auth
+ * `TENANT_SCOPE_COLUMNS` — the only consumer today is the auth
  * resolver, which queries via `driver.system()` with an explicit
  * `workspace_id` filter (resolver runs *before* a tenant context
  * exists). When `workspace.list_members` / `workspace.add_member`
  * capabilities land, this interface moves to `Database` and
- * `TENANT_SCOPED_TABLES` in the same commit as those capability
+ * `TENANT_SCOPE_COLUMNS` in the same commit as those capability
  * declarations.
  *
  * `role` typed as `Role` so Kysely selects narrow to the four-value
@@ -286,10 +300,57 @@ export interface OutboxTable {
 }
 
 /**
- * Handler-visible schema. Every table here is tenant-scoped
- * (`TENANT_SCOPED_TABLES` is a subset of `keyof Database` by
- * construction) and every query through `TenantScopedDb` is
- * auto-filtered on `workspace_id`.
+ * `workspaces` — the tenant-scope root (architecture.md §3.2).
+ *
+ * **Self-scoped.** `id` IS the workspace id; there is no separate
+ * `workspace_id` column. `TENANT_SCOPE_COLUMNS.workspaces === "id"`
+ * tells `WorkspaceScopingPlugin` to emit `id = <scope>` predicates
+ * rather than the usual `workspace_id = <scope>`. A handler holding
+ * a `TenantScopedDb` can therefore only ever see or update its own
+ * workspace row — the plugin forces the self-reference into every
+ * SELECT/UPDATE/DELETE and INSERT.
+ *
+ * **Creation path.** `workspace.create` (future slice, humanOnly +
+ * admin-gated) cannot run through the scoped handle: the plugin
+ * would force `id = principal.workspace_id` into the INSERT, which
+ * is precisely wrong — a creator is minting a *new* workspace, not
+ * their own. That capability goes through the system handle by
+ * design. Today's only writer is the Better Auth `user.create.after`
+ * hook, which already uses `driver.system()` for its bootstrap
+ * INSERT + `workspace_members` pair.
+ *
+ * **`diagnostic_salt`.** Per-workspace HMAC salt (F64), used by
+ * future `admin.diagnose` for content-hash redaction before export.
+ * 16 cryptographically-random bytes minted at workspace creation;
+ * rotated by a future `admin.secret_rotate --kind=diagnostic_salt`.
+ * No consumer in v1 but the column is NOT decorative — architecture
+ * §3.2 already references it.
+ *
+ * **`settings`.** JSON-serialised opaque map (defaults to `'{}'`).
+ * `workspace.update` validates the input as a plain object at the
+ * capability boundary, then `JSON.stringify`s for storage.
+ *
+ * **No `updated_at`.** Matches architecture.md §3.2 exactly; workspace
+ * reads are single-row-by-principal so there is no listing-by-freshness
+ * query today. Addable as an additive migration when needed.
+ */
+export interface WorkspacesTable {
+  readonly id: WorkspaceId;
+  readonly slug: string;
+  readonly name: string;
+  readonly trash_retention_days: number;
+  readonly diagnostic_salt: Uint8Array;
+  readonly created_by: UserId;
+  readonly created_at: number;
+  readonly deleted_at: number | null;
+  readonly settings: string;
+}
+
+/**
+ * Handler-visible schema. Every table here is tenant-scoped (each key
+ * appears in `TENANT_SCOPE_COLUMNS`) and every query through
+ * `TenantScopedDb` is auto-filtered on the per-table scope column —
+ * `workspace_id` for all but `workspaces` itself, which scopes on `id`.
  *
  * `doc_counters` and `outbox` are deliberately *absent* from this
  * type (F98). They are write-path internals that the dispatcher, the
@@ -301,7 +362,7 @@ export interface OutboxTable {
  * tenant via an internal table.
  *
  * Extend by adding tenant-scoped table interfaces here AND to
- * `TENANT_SCOPED_TABLES`. Internal tables go on `SystemDatabase`.
+ * `TENANT_SCOPE_COLUMNS`. Internal tables go on `SystemDatabase`.
  */
 export interface Database {
   readonly collections: CollectionsTable;
@@ -309,6 +370,7 @@ export interface Database {
   readonly doc_snapshots: DocSnapshotsTable;
   readonly doc_updates: DocUpdatesTable;
   readonly audit_events: AuditEventsTable;
+  readonly workspaces: WorkspacesTable;
 }
 
 /**

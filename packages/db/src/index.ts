@@ -33,6 +33,7 @@ export {
   FULL_DDL as SQLITE_FULL_DDL,
   OUTBOX_DDL,
   WORKSPACE_MEMBERS_DDL,
+  WORKSPACES_DDL,
 } from "./drivers/sqlite-ddl";
 export { createLoadRoles, type LoadRoles, type LoadRolesDriver } from "./load-roles";
 export { createOutboxWriter, type OutboxAppendInput, type OutboxWriter } from "./outbox-writer";
@@ -48,10 +49,12 @@ export type {
   OutboxTable,
   SystemDatabase,
   SystemDb,
+  TenantScopeColumn,
   TenantScopedTable,
   WorkspaceMembersTable,
+  WorkspacesTable,
 } from "./schema";
-export { TENANT_SCOPED_TABLES } from "./schema";
+export { TENANT_SCOPE_COLUMNS } from "./schema";
 export type { TenantScopedDb } from "./tenant";
 export {
   createTenantScopedDb,

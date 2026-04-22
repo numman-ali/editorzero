@@ -82,6 +82,7 @@ beforeEach(async () => {
     DROP TABLE IF EXISTS workspace_members;
     DROP TABLE IF EXISTS docs;
     DROP TABLE IF EXISTS collections;
+    DROP TABLE IF EXISTS workspaces;
     DROP TABLE IF EXISTS t_bigint;
     DROP TABLE IF EXISTS t_blob;
     DROP TABLE IF EXISTS t_sp;

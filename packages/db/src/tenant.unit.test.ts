@@ -540,6 +540,101 @@ describe("WorkspaceScopingPlugin — new tenant-scoped tables", () => {
   });
 });
 
+// ── Self-scoped table: `workspaces` ──────────────────────────────────────
+//
+// `workspaces.id` IS the workspace id; the plugin reads
+// `TENANT_SCOPE_COLUMNS.workspaces === "id"` and emits `id = <scope>`
+// predicates rather than `workspace_id = <scope>`. Same enforcement
+// shape, different scope column.
+
+describe("WorkspaceScopingPlugin — self-scoped `workspaces`", () => {
+  function seedWorkspace(id: WorkspaceId, slug: string, name: string, created_by: UserId) {
+    return {
+      id,
+      slug,
+      name,
+      trash_retention_days: 30,
+      diagnostic_salt: new Uint8Array(16),
+      created_by,
+      created_at: 1,
+      deleted_at: null,
+      settings: "{}",
+    };
+  }
+
+  it("SELECT through scope A returns only workspace A's row", async () => {
+    const sys = driver.system();
+    // Bootstrap-style INSERT goes through system handle (the scoped
+    // handle would force id = <scope>, which is exactly wrong for a
+    // genuine workspace creation).
+    await sys
+      .insertInto("workspaces")
+      .values(seedWorkspace(WORKSPACE_A, "a", "A", ALICE))
+      .execute();
+    await sys
+      .insertInto("workspaces")
+      .values(seedWorkspace(WORKSPACE_B, "b", "B", BOB))
+      .execute();
+
+    const a = driver.scoped(WORKSPACE_A);
+    const seen = await a.selectFrom("workspaces").selectAll().execute();
+    expect(seen.map((r) => r.id)).toEqual([WORKSPACE_A]);
+  });
+
+  it("INSERT through scoped handle with a mismatched id throws TenantScopeViolationError", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    // A scoped caller trying to mint workspace B's row — the plugin
+    // sees the explicit `id=WORKSPACE_B` column, compares against the
+    // scope (WORKSPACE_A), and throws scope_mismatch. Rejecting at
+    // query-build time is the belt-and-suspenders over "you shouldn't
+    // be doing this anyway" — workspace.create must go through the
+    // system handle by design.
+    const bogus = seedWorkspace(WORKSPACE_B, "b", "B", BOB);
+    await expect(() => a.insertInto("workspaces").values(bogus).execute()).rejects.toBeInstanceOf(
+      TenantScopeViolationError,
+    );
+  });
+
+  it("UPDATE through scope A cannot touch workspace B's row", async () => {
+    const sys = driver.system();
+    await sys
+      .insertInto("workspaces")
+      .values(seedWorkspace(WORKSPACE_A, "a", "A", ALICE))
+      .execute();
+    await sys
+      .insertInto("workspaces")
+      .values(seedWorkspace(WORKSPACE_B, "b", "B", BOB))
+      .execute();
+
+    const a = driver.scoped(WORKSPACE_A);
+    // Naming workspace B explicitly — the plugin's auto-appended
+    // `id = WORKSPACE_A` AND-s with the caller's `id = WORKSPACE_B`,
+    // producing an always-false predicate → zero rows affected.
+    const result = await a
+      .updateTable("workspaces")
+      .set({ name: "hijacked" })
+      .where("id", "=", WORKSPACE_B)
+      .execute();
+    expect(result[0]?.numUpdatedRows ?? 0n).toBe(0n);
+
+    // B's row untouched.
+    const b = driver.scoped(WORKSPACE_B);
+    const after = await b.selectFrom("workspaces").selectAll().execute();
+    expect(after[0]?.name).toBe("B");
+  });
+
+  it("aliased SELECT emits `w.id = ?`, not `w.workspace_id = ?`", () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const compiled = a.selectFrom("workspaces as w").select("w.id").compile();
+    // Positive assertion: the predicate lands on the aliased id.
+    expect(compiled.sql).toContain('"w"."id" = ?');
+    // Negative assertion: the default column name never appears —
+    // `workspaces` has no `workspace_id` column and the plugin must
+    // not invent one.
+    expect(compiled.sql).not.toContain("workspace_id");
+  });
+});
+
 // ── Internal tables (outbox / doc_counters) are NOT on the handler surface
 
 describe("TenantScopedDb narrows away internal tables (F98)", () => {

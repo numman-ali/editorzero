@@ -123,12 +123,13 @@ describe("@editorzero/auth", () => {
 
   it("sign-in → resolver → UserPrincipal round-trip (role sourced from workspace_members by signup-bootstrap hook)", async () => {
     // ADR 0024: the `user.create.after` bootstrap hook in
-    // `create-auth.ts` inserts a `workspace_members` row as
-    // `role: "owner"` post-commit, so the resolver can immediately
-    // source the role from there without any separate backfill
-    // migration. This test exercises the end-to-end path — signup
-    // through BA, which fires the hook, which seeds membership, which
-    // the resolver reads at principal resolution.
+    // `create-auth.ts` inserts a `workspaces` row (tenant-scope
+    // anchor) and a `workspace_members` row (role: "owner")
+    // post-commit, so the resolver can immediately source the role
+    // from there without any separate backfill migration. This test
+    // exercises the end-to-end path — signup through BA, which fires
+    // the hook, which seeds both rows, which the resolver reads at
+    // principal resolution.
     const auth = buildAuth();
     await runAuthMigrations(auth);
 
@@ -139,6 +140,21 @@ describe("@editorzero/auth", () => {
         name: "Bob",
       },
     });
+
+    // Confirm the hook populated the `workspaces` anchor row. Slug
+    // is `{local-part}-{6-hex}`; display name is `{local-part}'s
+    // workspace`; diagnostic_salt is 16 random bytes; defaults from
+    // the DDL land for trash_retention_days (30) and settings ('{}').
+    const workspaceRow = await driver
+      .system()
+      .selectFrom("workspaces")
+      .select(["slug", "name", "trash_retention_days", "diagnostic_salt", "settings"])
+      .executeTakeFirstOrThrow();
+    expect(workspaceRow.slug).toMatch(/^bob-[0-9a-f]{6}$/u);
+    expect(workspaceRow.name).toBe("bob's workspace");
+    expect(workspaceRow.trash_retention_days).toBe(30);
+    expect(workspaceRow.diagnostic_salt.byteLength).toBe(16);
+    expect(workspaceRow.settings).toBe("{}");
 
     // Confirm the hook populated the membership row. The role is
     // `"owner"` because a fresh signup mints a fresh workspace and

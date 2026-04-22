@@ -3,16 +3,24 @@
  * automatically workspace-scoped by the `WorkspaceScopingPlugin`
  * (architecture.md §8.1 / §8.1a). This is Layer 2 of the three-layer
  * permission enforcement model: Layer 1 is dispatcher-level scope
- * checks, Layer 2 is this auto-injected `workspace_id` predicate,
- * Layer 3 is Postgres RLS (on Postgres only).
+ * checks, Layer 2 is this auto-injected scope predicate, Layer 3 is
+ * Postgres RLS (on Postgres only).
  *
  * The invariant: a caller holding a `TenantScopedDb` cannot read,
  * write, or delete rows in a tenant-scoped table outside their
- * workspace — the plugin splices `workspace_id = <scope>` into
+ * workspace — the plugin splices `<scope_column> = <scope>` into
  * SELECT/UPDATE/DELETE WHERE clauses and forces the column into every
- * INSERT values list. An attempted INSERT with a different
- * `workspace_id` throws `TenantScopeViolationError` at query-build
+ * INSERT values list. An attempted INSERT with a mismatched scope
+ * column value throws `TenantScopeViolationError` at query-build
  * time.
+ *
+ * **Per-table scope column.** `TENANT_SCOPE_COLUMNS` (schema.ts) is a
+ * table→column map. Almost every tenant-scoped table uses
+ * `workspace_id`; `workspaces` is self-scoped on `id` (its PK IS the
+ * workspace id). The plugin looks the column up at emission time so a
+ * query like `selectFrom("workspaces as w")` emits `w.id = ?` while
+ * `selectFrom("docs as d")` emits `d.workspace_id = ?` — both from the
+ * same transform pass.
  *
  * The unscoped `Kysely<Database>` is intentionally not exported; the
  * only public construction path is `createTenantScopedDb`. The
@@ -77,7 +85,7 @@ import {
 } from "kysely";
 
 import type { Database, SystemDatabase, TenantScopedTable } from "./schema";
-import { TENANT_SCOPED_TABLES } from "./schema";
+import { TENANT_SCOPE_COLUMNS } from "./schema";
 
 /**
  * A `Kysely<Database>` whose every query auto-applies the
@@ -102,10 +110,15 @@ export type TenantScopedDb = Kysely<Database>;
 
 /**
  * Thrown when an INSERT into a tenant-scoped table carries an explicit
- * `workspace_id` value that disagrees with the plugin's scope, or when
+ * scope-column value that disagrees with the plugin's scope, or when
  * the INSERT shape is one the plugin can't safely modify (raw
  * positional insert without a `columns` list; `DEFAULT VALUES`;
- * INSERT…SELECT where the SELECT does not project `workspace_id`).
+ * INSERT…SELECT where the SELECT does not project the scope column).
+ *
+ * The `scope_mismatch` reason covers both `workspace_id` mismatches on
+ * child tables and `id` mismatches on `workspaces` itself (the
+ * self-scoped table). The `reason` field is deliberately coarse — per-
+ * column distinctions go into the message, not the enum.
  *
  * These are programming errors, not user-input errors — they shouldn't
  * land in production code. Surface them loudly so tests catch them.
@@ -114,7 +127,7 @@ export class TenantScopeViolationError extends Error {
   override readonly name = "TenantScopeViolationError";
   readonly table: string;
   readonly reason:
-    | "workspace_id_mismatch"
+    | "scope_mismatch"
     | "insert_missing_columns"
     | "insert_default_values"
     | "insert_select_unaudited";
@@ -166,10 +179,18 @@ export class WorkspaceScopingPlugin implements KyselyPlugin {
 
 // ── AST transformer ───────────────────────────────────────────────────────
 
-const TENANT_SCOPED_TABLE_SET: ReadonlySet<string> = new Set(TENANT_SCOPED_TABLES);
+const TENANT_SCOPED_TABLE_SET: ReadonlySet<string> = new Set(Object.keys(TENANT_SCOPE_COLUMNS));
 
 function isTenantScoped(name: string): name is TenantScopedTable {
   return TENANT_SCOPED_TABLE_SET.has(name);
+}
+
+/**
+ * Per-table scope column lookup. Narrowed only after `isTenantScoped`
+ * — callers outside this file go through the type guard first.
+ */
+function scopeColumnFor(name: TenantScopedTable): "workspace_id" | "id" {
+  return TENANT_SCOPE_COLUMNS[name];
 }
 
 /**
@@ -212,12 +233,34 @@ function tableName(node: TableNode): string {
   return node.table.identifier.name;
 }
 
-function workspacePredicate(ref: TableNode, workspace_id: WorkspaceId): OperationNode {
+/**
+ * Emit `<ref>.<scope_column> = <workspace_id>`. The scope column is
+ * looked up per-table via `TENANT_SCOPE_COLUMNS` — `id` for the
+ * self-scoped `workspaces` table, `workspace_id` for every other
+ * tenant-scoped table.
+ */
+function scopePredicate(
+  ref: TableNode,
+  scopeColumn: "workspace_id" | "id",
+  workspace_id: WorkspaceId,
+): OperationNode {
   return BinaryOperationNode.create(
-    ReferenceNode.create(ColumnNode.create("workspace_id"), ref),
+    ReferenceNode.create(ColumnNode.create(scopeColumn), ref),
     OperatorNode.create("="),
     ValueNode.create(workspace_id),
   );
+}
+
+/**
+ * Build one predicate per `ScopedRef`, reading the correct scope column
+ * for each table at emission time. Keeps `ScopedRef` itself annotation-
+ * free — the column is a property of the table name, not of any
+ * particular occurrence, so looking it up at the use-site is cheaper
+ * than threading it through the collection pipeline.
+ */
+function predicateFor(ref: ScopedRef, workspace_id: WorkspaceId): OperationNode {
+  const scopeColumn = scopeColumnFor(tableName(ref.tableNode) as TenantScopedTable);
+  return scopePredicate(ref.refNode, scopeColumn, workspace_id);
 }
 
 function conjunctionOver(predicates: readonly OperationNode[]): OperationNode {
@@ -275,9 +318,7 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
     const transformed = super.transformSelectQuery(node);
     const refs = collectScopedRefs(transformed.from?.froms, transformed.joins);
     if (refs.length === 0) return transformed;
-    const predicate = conjunctionOver(
-      refs.map((r) => workspacePredicate(r.refNode, this.#workspace_id)),
-    );
+    const predicate = conjunctionOver(refs.map((r) => predicateFor(r, this.#workspace_id)));
     return { ...transformed, where: appendAnd(transformed.where, predicate) };
   }
 
@@ -302,9 +343,7 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
        updateable here. */
     if (refs.length === 0) return transformed;
     /* v8 ignore stop */
-    const predicate = conjunctionOver(
-      refs.map((r) => workspacePredicate(r.refNode, this.#workspace_id)),
-    );
+    const predicate = conjunctionOver(refs.map((r) => predicateFor(r, this.#workspace_id)));
     return { ...transformed, where: appendAnd(transformed.where, predicate) };
   }
 
@@ -316,9 +355,7 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
        deletable here. */
     if (refs.length === 0) return transformed;
     /* v8 ignore stop */
-    const predicate = conjunctionOver(
-      refs.map((r) => workspacePredicate(r.refNode, this.#workspace_id)),
-    );
+    const predicate = conjunctionOver(refs.map((r) => predicateFor(r, this.#workspace_id)));
     return { ...transformed, where: appendAnd(transformed.where, predicate) };
   }
 
@@ -334,14 +371,16 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
        target is added. */
     if (!isTenantScoped(target)) return transformed;
     /* v8 ignore stop */
-    return forceWorkspaceIdInInsert(transformed, target, this.#workspace_id);
+    const scopeColumn = scopeColumnFor(target);
+    return forceScopeColumnInInsert(transformed, target, scopeColumn, this.#workspace_id);
   }
 }
 
 // ── INSERT augmentation ────────────────────────────────────────────────────
 //
-// The plugin has to force `workspace_id = <scope>` into each row. Three
-// shapes we handle + one shape we reject:
+// The plugin has to force `<scope_column> = <scope>` into each row. The
+// scope column is `workspace_id` for every non-self-scoped table and
+// `id` for `workspaces`. Three shapes we handle + one shape we reject:
 //
 // 1. `values` is a `ValuesNode` wrapping `ValueListNode` rows (the mixed-
 //    or non-primitive case) → append the scope as a new `ValueNode`.
@@ -349,13 +388,14 @@ class WorkspaceScopingTransformer extends OperationNodeTransformer {
 //    (Kysely's fast path for all-primitive rows) → append the scope
 //    literal value.
 // 3. `values` is a `SelectQueryNode` (INSERT…SELECT) → reject until we
-//    design `workspace_id` projection in SELECT bodies. Not needed for v1.
+//    design scope-column projection in SELECT bodies. Not needed for v1.
 // 4. `defaultValues: true` → reject; tenant-scoped tables cannot be
-//    inserted with all defaults because `workspace_id` has no default.
+//    inserted with all defaults because the scope column has no default.
 
-function forceWorkspaceIdInInsert(
+function forceScopeColumnInInsert(
   node: InsertQueryNode,
   target: string,
+  scopeColumn: "workspace_id" | "id",
   workspace_id: WorkspaceId,
 ): InsertQueryNode {
   if (node.defaultValues === true) {
@@ -363,7 +403,7 @@ function forceWorkspaceIdInInsert(
       target,
       "insert_default_values",
       `INSERT INTO ${target} DEFAULT VALUES is not permitted: ` +
-        `tenant-scoped tables require explicit workspace_id.`,
+        `tenant-scoped tables require explicit ${scopeColumn}.`,
     );
   }
 
@@ -375,7 +415,7 @@ function forceWorkspaceIdInInsert(
       target,
       "insert_missing_columns",
       `INSERT INTO ${target} without an explicit column list is not permitted: ` +
-        `tenant-scoped inserts must name columns so workspace_id can be injected safely.`,
+        `tenant-scoped inserts must name columns so ${scopeColumn} can be injected safely.`,
     );
   }
   /* v8 ignore stop */
@@ -389,12 +429,12 @@ function forceWorkspaceIdInInsert(
       target,
       "insert_missing_columns",
       `INSERT INTO ${target} without an explicit column list is not permitted: ` +
-        `tenant-scoped inserts must name columns so workspace_id can be injected safely.`,
+        `tenant-scoped inserts must name columns so ${scopeColumn} can be injected safely.`,
     );
   }
   /* v8 ignore stop */
 
-  const hasWorkspaceCol = columnNames.includes("workspace_id");
+  const hasScopeCol = columnNames.includes(scopeColumn);
 
   const values = node.values;
 
@@ -416,7 +456,7 @@ function forceWorkspaceIdInInsert(
       "insert_select_unaudited",
       `INSERT INTO ${target} … SELECT is not permitted through TenantScopedDb: ` +
         `cross-tenant leakage cannot be prevented from the plugin. ` +
-        `Use a typed repo that projects workspace_id explicitly.`,
+        `Use a typed repo that projects ${scopeColumn} explicitly.`,
     );
   }
 
@@ -432,12 +472,12 @@ function forceWorkspaceIdInInsert(
   }
   /* v8 ignore stop */
 
-  if (hasWorkspaceCol) {
-    assertValuesColumnMatchesScope(values, columnNames, target, workspace_id);
+  if (hasScopeCol) {
+    assertValuesColumnMatchesScope(values, columnNames, target, scopeColumn, workspace_id);
     return node;
   }
 
-  const newColumns = [...existingColumns, ColumnNode.create("workspace_id")];
+  const newColumns = [...existingColumns, ColumnNode.create(scopeColumn)];
   const newRows = values.values.map((row) => appendValueToRow(row, workspace_id));
   return {
     ...node,
@@ -464,16 +504,17 @@ function assertValuesColumnMatchesScope(
   values: ValuesNode,
   columnNames: readonly string[],
   target: string,
+  scopeColumn: "workspace_id" | "id",
   workspace_id: WorkspaceId,
 ): void {
-  const idx = columnNames.indexOf("workspace_id");
+  const idx = columnNames.indexOf(scopeColumn);
   for (const row of values.values) {
     const raw = extractRowValueAt(row, idx);
     if (raw !== workspace_id) {
       throw new TenantScopeViolationError(
         target,
-        "workspace_id_mismatch",
-        `INSERT INTO ${target} explicitly sets workspace_id=${String(raw)}, ` +
+        "scope_mismatch",
+        `INSERT INTO ${target} explicitly sets ${scopeColumn}=${String(raw)}, ` +
           `but the active TenantScopedDb is scoped to workspace_id=${workspace_id}. ` +
           `Either omit the column (it will be injected) or match the scope.`,
       );

@@ -23,6 +23,60 @@
  */
 
 /**
+ * `workspaces` — the tenant-scope root (architecture.md §3.2).
+ *
+ * `id` IS the workspace id — this is the only self-scoped table in v1
+ * (`TENANT_SCOPE_COLUMNS.workspaces === "id"`; the scoping plugin
+ * emits `id = <scope>` rather than `workspace_id = <scope>` for this
+ * table). No FK declarations — the other tables that reference
+ * `workspace_id` still have no SQL FK to `workspaces` (matches the
+ * `workspace_members` pattern; FKs land with Atlas + kysely-codegen,
+ * architecture.md §16.9).
+ *
+ * `slug` unique per workspace for URL routing (`<slug>.<root-host>`
+ * subdomain + custom-domain fallback). Partial unique index excludes
+ * soft-deleted rows so a restored workspace doesn't collide with a
+ * replacement minted after its delete. Inline `UNIQUE` from the
+ * architecture spec is *intent* — the partial index is the actual
+ * enforcement, same NULL-aware-soft-delete reason the collections /
+ * docs slug indexes use.
+ *
+ * `diagnostic_salt` (BLOB, 16 bytes) — per-workspace HMAC salt (F64)
+ * used by future `admin.diagnose` for content redaction. Rotated by
+ * `admin.secret_rotate --kind=diagnostic_salt` (future). Generated at
+ * workspace creation via `crypto.randomBytes(16)`; NOT derivable from
+ * any other field.
+ *
+ * `trash_retention_days` bounded to [7, 365] (ADR 0017). Default 30.
+ * Updatable by `workspace.update`.
+ *
+ * `settings` — JSON-serialised opaque map, default `'{}'`. v1 has no
+ * defined settings; the column exists so `workspace.update` can store
+ * arbitrary structured preferences without a per-field migration.
+ *
+ * No `updated_at` — matches architecture.md §3.2 exactly. Workspace
+ * reads are single-row-by-principal; no listing-by-freshness query
+ * consumes the column today.
+ */
+export const WORKSPACES_DDL = `
+  CREATE TABLE workspaces (
+    id                   TEXT    PRIMARY KEY,
+    slug                 TEXT    NOT NULL,
+    name                 TEXT    NOT NULL,
+    trash_retention_days INTEGER NOT NULL DEFAULT 30
+      CHECK (trash_retention_days BETWEEN 7 AND 365),
+    diagnostic_salt      BLOB    NOT NULL,
+    created_by           TEXT    NOT NULL,
+    created_at           INTEGER NOT NULL,
+    deleted_at           INTEGER,
+    settings             TEXT    NOT NULL DEFAULT '{}'
+  );
+  CREATE UNIQUE INDEX workspaces_slug_unique
+    ON workspaces(slug)
+    WHERE deleted_at IS NULL;
+` as const;
+
+/**
  * `docs` — canonical metadata row per document (architecture.md §3.5).
  *
  * `UNIQUE (id, workspace_id)` is the target for the composite FK from
@@ -176,12 +230,12 @@ export const DOC_COUNTERS_DDL = `
  * (composite PK would collide); `workspace.add_member` (future slice)
  * codifies this in its handler contract.
  *
- * No FK declarations — `workspaces` is not yet in our DDL (the `docs`
- * table also references `workspace_id` without an FK for the same
- * reason), and the `user_id` target table is owned by Better Auth
- * (`user`, singular; default `modelName`, not overridden in
- * `create-auth.ts`). FKs land when Atlas + kysely-codegen take over
- * schema management (architecture.md §16.9).
+ * No FK declarations — the `docs` table also references `workspace_id`
+ * without an FK for the same "cross-DDL independence" reason, and the
+ * `user_id` target table is owned by Better Auth (`user`, singular;
+ * default `modelName`, not overridden in `create-auth.ts`). FKs land
+ * when Atlas + kysely-codegen take over schema management
+ * (architecture.md §16.9).
  *
  * Read by the auth resolver via `driver.system()` with an explicit
  * `workspace_id` filter — `workspace_members` is not yet in
@@ -259,6 +313,7 @@ export const OUTBOX_DDL = `
  * domain tables grouped at the top.
  */
 export const FULL_DDL = [
+  WORKSPACES_DDL,
   COLLECTIONS_DDL,
   DOCS_DDL,
   DOC_SNAPSHOTS_DDL,
