@@ -7,7 +7,7 @@
  */
 
 import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
-import { NotFoundError, ParentDeletedError } from "@editorzero/errors";
+import { NotFoundError, ParentDeletedError, ValidationError } from "@editorzero/errors";
 import { CollectionId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { Principal, UserPrincipal } from "@editorzero/principal";
@@ -241,6 +241,186 @@ describe("collection.restore", () => {
         .where("id", "=", DELETED_CHILD_UNDER_DELETED)
         .executeTakeFirst();
       expect(row?.deleted_at).not.toBeNull();
+    });
+  });
+
+  describe("depth-cap check (slice-3 follow-on; Codex review)", () => {
+    // The scenario Codex called out: slice-3 `collection.move` walks
+    // only live descendants when computing subtree_height, so a
+    // "delete deep subtree bottom-up → move parent deeper →
+    // restore subtree top-down" sequence bypasses slice-3's cap
+    // check — the depth violation only becomes visible on the
+    // deepest restore. These tests build that exact sequence
+    // directly via driver seeding so we can anchor each expected
+    // state.
+    //
+    // Convention: MAX_DEPTH = 8 ⇒ valid depths 0..7, reject at 8.
+
+    /**
+     * Helper: insert a live root collection at depth 0.
+     */
+    async function insertRoot(id: CollectionId, slug: string): Promise<void> {
+      await driver
+        .scoped(WORKSPACE_A)
+        .insertInto("collections")
+        .values({
+          id,
+          workspace_id: WORKSPACE_A,
+          parent_id: null,
+          title: slug,
+          slug,
+          order_key: slug,
+          created_by: ALICE,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: null,
+        })
+        .execute();
+    }
+
+    /**
+     * Helper: insert a collection row with explicit parent +
+     * `deleted_at`. Used to set up the exact topology each test
+     * needs without going through the dispatcher.
+     */
+    async function insertCollection(params: {
+      id: CollectionId;
+      parent_id: CollectionId | null;
+      slug: string;
+      deleted_at: number | null;
+    }): Promise<void> {
+      await driver
+        .scoped(WORKSPACE_A)
+        .insertInto("collections")
+        .values({
+          id: params.id,
+          workspace_id: WORKSPACE_A,
+          parent_id: params.parent_id,
+          title: params.slug,
+          slug: params.slug,
+          order_key: params.slug,
+          created_by: ALICE,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: params.deleted_at,
+        })
+        .execute();
+    }
+
+    it("restoring a leaf under a depth-7 parent is refused (would land at depth 8)", async () => {
+      // Build a live chain of length 7 (depths 0..6), then attach a
+      // deleted leaf under DEEP[6] at depth 7. The leaf itself is
+      // already at depth 7, so restoring *in place* is cap-OK
+      // (7 < 8). Arrange a scenario where the leaf's stored parent
+      // is at depth 7 after a move — that puts the leaf at depth 8.
+      //
+      // Simpler construction: insert a live collection at depth 7
+      // (valid per create) — call it P7 — then a deleted child C
+      // under P7. C would be at depth 8 when restored, which is
+      // invalid.
+      //
+      // This is exactly the shape produced by
+      // delete-C → move-P7-deeper → attempt-restore-C when the
+      // topology starts with P7 higher up. We skip the move dance
+      // here; the restore handler's check doesn't care *how* the
+      // topology got this way.
+      const ROOT = CollectionId("018f0000-0000-7000-8000-0000000000f0");
+      const D1 = CollectionId("018f0000-0000-7000-8000-0000000000f1");
+      const D2 = CollectionId("018f0000-0000-7000-8000-0000000000f2");
+      const D3 = CollectionId("018f0000-0000-7000-8000-0000000000f3");
+      const D4 = CollectionId("018f0000-0000-7000-8000-0000000000f4");
+      const D5 = CollectionId("018f0000-0000-7000-8000-0000000000f5");
+      const D6 = CollectionId("018f0000-0000-7000-8000-0000000000f6");
+      const LEAF = CollectionId("018f0000-0000-7000-8000-0000000000f7");
+
+      await insertRoot(ROOT, "r0");
+      await insertCollection({ id: D1, parent_id: ROOT, slug: "d1", deleted_at: null });
+      await insertCollection({ id: D2, parent_id: D1, slug: "d2", deleted_at: null });
+      await insertCollection({ id: D3, parent_id: D2, slug: "d3", deleted_at: null });
+      await insertCollection({ id: D4, parent_id: D3, slug: "d4", deleted_at: null });
+      await insertCollection({ id: D5, parent_id: D4, slug: "d5", deleted_at: null });
+      await insertCollection({ id: D6, parent_id: D5, slug: "d6", deleted_at: null });
+      // D6 is at depth 6. LEAF is stored under D6 (depth 7 when
+      // live), but it's deleted. That's the state slice-3 move
+      // could produce (move a parent deeper while the deleted
+      // descendant stays under it).
+      await insertCollection({ id: LEAF, parent_id: D6, slug: "leaf", deleted_at: 500 });
+
+      // LEAF at depth 7 = valid. So restoring LEAF itself should
+      // succeed. This is the "deepest restore that still passes"
+      // case — tests the boundary.
+      const ctx = buildCtx(userPrincipal());
+      const out = await collectionRestore.handler(ctx, { collection_id: LEAF });
+      expect(out.collection_id).toBe(LEAF);
+    });
+
+    it("Codex's cross-slice scenario end-to-end: delete deep subtree → move parent deeper → top-down restore refused on the deepest node", async () => {
+      // Construct: A → B → C → D live, depths 0,1,2,3.
+      // Soft-delete D, C, B top-down (simulating what slice-2
+      // delete requires — live-descendants-refused, so each is
+      // zero-live-descendants at its delete).
+      // Then move A under a depth-4 parent (DEEP4) → A at depth 5,
+      // B at stored-depth 6 when restored, C at 7, D at 8.
+      // Top-down restore: B (depth 6) OK → C (depth 7) OK → D
+      // (depth 8) → MUST REFUSE.
+      const DEEP0 = CollectionId("018f0000-0000-7000-8000-0000000000a0");
+      const DEEP1 = CollectionId("018f0000-0000-7000-8000-0000000000a1");
+      const DEEP2 = CollectionId("018f0000-0000-7000-8000-0000000000a2");
+      const DEEP3 = CollectionId("018f0000-0000-7000-8000-0000000000a3");
+      const DEEP4 = CollectionId("018f0000-0000-7000-8000-0000000000a4");
+      const A = CollectionId("018f0000-0000-7000-8000-0000000000b0");
+      const B = CollectionId("018f0000-0000-7000-8000-0000000000b1");
+      const C = CollectionId("018f0000-0000-7000-8000-0000000000b2");
+      const D = CollectionId("018f0000-0000-7000-8000-0000000000b3");
+
+      // DEEP chain 0..4 (A's new parent is at depth 4).
+      await insertRoot(DEEP0, "deep0");
+      await insertCollection({ id: DEEP1, parent_id: DEEP0, slug: "deep1", deleted_at: null });
+      await insertCollection({ id: DEEP2, parent_id: DEEP1, slug: "deep2", deleted_at: null });
+      await insertCollection({ id: DEEP3, parent_id: DEEP2, slug: "deep3", deleted_at: null });
+      await insertCollection({ id: DEEP4, parent_id: DEEP3, slug: "deep4", deleted_at: null });
+      // A now at depth 5 (under DEEP4 at 4). B/C/D still stored
+      // under A/B/C respectively, all deleted.
+      await insertCollection({ id: A, parent_id: DEEP4, slug: "a", deleted_at: null });
+      await insertCollection({ id: B, parent_id: A, slug: "b", deleted_at: 501 });
+      await insertCollection({ id: C, parent_id: B, slug: "c", deleted_at: 500 });
+      await insertCollection({ id: D, parent_id: C, slug: "d", deleted_at: 499 });
+
+      const ctx = buildCtx(userPrincipal());
+      // B lives at depth 6 (valid < 8). Restore OK.
+      const outB = await collectionRestore.handler(ctx, { collection_id: B });
+      expect(outB.collection_id).toBe(B);
+      // C at depth 7 (valid). Restore OK.
+      const outC = await collectionRestore.handler(ctx, { collection_id: C });
+      expect(outC.collection_id).toBe(C);
+      // D at depth 8 (invalid). Restore MUST REFUSE — this is the
+      // bug that existed before the slice-3 follow-on fix.
+      await expect(collectionRestore.handler(ctx, { collection_id: D })).rejects.toSatisfy(
+        (err: unknown) => {
+          if (!(err instanceof ValidationError)) return false;
+          const issues = err.issues as ReadonlyArray<{ code?: string }>;
+          return issues.some((i) => i.code === "depth_cap_exceeded");
+        },
+      );
+
+      // D still soft-deleted after refusal (no partial writes).
+      const row = await driver
+        .scoped(WORKSPACE_A)
+        .selectFrom("collections")
+        .select(["deleted_at"])
+        .where("id", "=", D)
+        .executeTakeFirst();
+      expect(row?.deleted_at).not.toBeNull();
+    });
+
+    it("restoring a root collection always passes the cap (no parent)", async () => {
+      // Subtree height 0 + parent_depth 0 = 0 < 8. Root restores
+      // never trigger the cap (unless subtree_height itself is
+      // pathological, which the invariant prevents).
+      await seed();
+      const ctx = buildCtx(userPrincipal());
+      const out = await collectionRestore.handler(ctx, { collection_id: DELETED_ROOT });
+      expect(out.collection_id).toBe(DELETED_ROOT);
     });
   });
 

@@ -24,6 +24,24 @@
  * `ParentDeletedError` using the stored `parent_id`. Honest failure
  * over dangling restores.
  *
+ * **Depth-cap check.** Restore is the third op (alongside
+ * `collection.create` and `collection.move`) that can make a
+ * collection live again, so it has to enforce the same
+ * `COLLECTION_MAX_DEPTH` invariant. Slice-3 Codex review caught a
+ * cross-slice gap that required this check: `collection.move` walks
+ * only *live* descendants, so a sequence of "delete deep subtree
+ * bottom-up → move parent deeper → restore subtree top-down" can
+ * blow the cap — each restore looks cap-safe in isolation, but the
+ * deepest restore lands past `MAX_DEPTH`. Running the same ancestor
+ * walk + BFS subtree walk `collection.move` uses (and the same
+ * strict `>=` reject rule) closes the loop. Per invariant, a
+ * soft-deleted collection cannot have live descendants (since
+ * `collection.delete` refuses-with-live-descendants), so the
+ * subtree walk defensively returns 0 in the normal path; the walk
+ * exists for correctness against future cascade-delete paths or
+ * corrupt state, and the parent-depth count is the load-bearing
+ * piece today.
+ *
  * **Not-deleted handling.** `deleted_at IS NULL` → 404 (honest
  * projection, mirror of `doc.restore`). Restoring a live collection
  * has no defined state change; silently returning 200 would emit a
@@ -47,7 +65,8 @@ import type {
   DenyReason,
   HandlerError,
 } from "@editorzero/audit";
-import { NotFoundError, ParentDeletedError } from "@editorzero/errors";
+import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
+import { NotFoundError, ParentDeletedError, ValidationError } from "@editorzero/errors";
 import { CapabilityId, CollectionId } from "@editorzero/ids";
 import { z } from "zod";
 
@@ -147,7 +166,108 @@ export const collectionRestore: Capability<Input, Output> = {
       }
     }
 
-    // Step 3 — restore. The `deleted_at IS NOT NULL` guard defends
+    // Step 3 — depth-cap check. Closes the cross-slice gap Codex
+    // flagged on slice 3: `collection.move` computes subtree_height
+    // against live descendants only, so a deep-tree bottom-up delete
+    // followed by a parent-move-deeper + top-down restore can push
+    // the deepest restored node past `MAX_DEPTH`. The ancestor walk
+    // mirrors `collection.move`'s walk exactly (load-bearing detail:
+    // the depth convention and strict `>=` reject rule must match
+    // `collection.create` / `collection.move` so a restore cannot
+    // produce a tree either of those ops would have rejected).
+    //
+    // Because a live collection's ancestors are always live (the
+    // `collection.delete`-refuses-with-live-descendants invariant
+    // from slice 2, combined with `collection.restore`'s parent-
+    // deleted precondition), the walk here is on an all-live chain —
+    // no `deleted_at IS NULL` filter needed in principle. Keeping
+    // the filter for defence-in-depth against future cascade-delete
+    // semantics or corrupt state.
+    let parent_depth = 0;
+    if (current.parent_id !== null) {
+      let cursor: CollectionId | null = current.parent_id;
+      let iterations = 0;
+      while (cursor !== null) {
+        iterations += 1;
+        if (iterations > COLLECTION_MAX_DEPTH) {
+          throw new ValidationError({
+            message: `collection.restore: ancestor chain exceeds the ${COLLECTION_MAX_DEPTH}-level cap (corrupt state)`,
+            issues: [
+              {
+                code: "depth_cap_exceeded",
+                message: `ancestor chain exceeds the ${COLLECTION_MAX_DEPTH}-level cap`,
+                path: ["collection_id"],
+              },
+            ],
+          });
+        }
+        const row: { parent_id: CollectionId | null } | undefined = await ctx.db
+          .selectFrom("collections")
+          .select(["parent_id"])
+          .where("id", "=", cursor)
+          .where("deleted_at", "is", null)
+          .executeTakeFirst();
+        if (row === undefined) {
+          // Shouldn't happen — step 2 verified the immediate parent
+          // is live, and ancestors of a live node are always live
+          // (see comment above). Defensive throw so a migration gap
+          // or system-handle write can't silently hide an invalid
+          // restore.
+          throw new ParentDeletedError({
+            parent_kind: "collection",
+            parent_id: cursor,
+          });
+        }
+        cursor = row.parent_id;
+      }
+      parent_depth = iterations - 1;
+    }
+
+    // Step 4 — subtree-height walk. Same BFS shape as
+    // `collection.move`'s walk. Per the slice-2 invariant
+    // (`collection.delete` refuses-with-live-descendants →
+    // `collection.create` requires a live parent → no one can
+    // re-add live children under a deleted collection while it's
+    // deleted), this should always return 0 in the normal path —
+    // kept for defence-in-depth against future cascade-delete paths
+    // or corrupt state that slipped past the write-path tx.
+    let subtree_height = 0;
+    {
+      let frontier: CollectionId[] = [input.collection_id];
+      while (frontier.length > 0) {
+        const children = await ctx.db
+          .selectFrom("collections")
+          .select(["id"])
+          .where("parent_id", "in", frontier)
+          .where("deleted_at", "is", null)
+          .execute();
+        if (children.length === 0) break;
+        subtree_height += 1;
+        if (subtree_height >= COLLECTION_MAX_DEPTH) break;
+        frontier = children.map((r) => r.id);
+      }
+    }
+
+    // Step 5 — depth-cap reject. Root restore (parent_id === null)
+    // lands at depth 0; deepest descendant = subtree_height.
+    // Non-root: deepest = parent_depth + 1 + subtree_height. Strict
+    // `>=` mirror of `collection.create` / `collection.move`.
+    const new_deepest_depth =
+      current.parent_id !== null ? parent_depth + 1 + subtree_height : subtree_height;
+    if (new_deepest_depth >= COLLECTION_MAX_DEPTH) {
+      throw new ValidationError({
+        message: `collection.restore: restored tree depth would exceed the ${COLLECTION_MAX_DEPTH}-level cap`,
+        issues: [
+          {
+            code: "depth_cap_exceeded",
+            message: `restoring this collection would place the deepest descendant at depth ${new_deepest_depth}, but collections may be at most ${COLLECTION_MAX_DEPTH - 1} levels deep. Move the parent shallower or trim the subtree before restoring.`,
+            path: ["collection_id"],
+          },
+        ],
+      });
+    }
+
+    // Step 6 — restore. The `deleted_at IS NOT NULL` guard defends
     // against a concurrent restore between step 1 and here; zero rows
     // returned → 404.
     const row = await ctx.db

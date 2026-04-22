@@ -2578,4 +2578,102 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     });
     expect(res.status).toBe(401);
   });
+
+  it("Codex cross-slice scenario: delete-deep → move-parent-deeper → restore-depth-cap refusal", async () => {
+    // The scenario Codex flagged post-slice-3:
+    //   1. Build a chain `A → B → C → D` live (depths 0..3).
+    //   2. Soft-delete D, C, B top-down (legal — each delete has
+    //      zero live descendants by then).
+    //   3. Move A under a parent at depth 4 (so A ends at depth 5).
+    //      The move's subtree walk only sees live descendants
+    //      (none), so the move passes the cap check even though
+    //      the deleted subtree's stored parent_ids would put it
+    //      past the cap when restored.
+    //   4. Restore top-down: B (depth 6, OK) → C (7, OK) →
+    //      D (would land at 8 → REFUSE, 400 `validation`).
+    //
+    // Without the restore-side cap check, D would land at depth
+    // 8 — breaking invariant 1 that every op making a collection
+    // live preserves `COLLECTION_MAX_DEPTH`.
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionDelete: true,
+      registerCollectionRestore: true,
+      registerCollectionMove: true,
+    });
+    await signUp(trunk, "xavier@example.com");
+    const signInRes = await signIn(trunk, "xavier@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    async function create(title: string, parent_id: string | null): Promise<string> {
+      const res = await trunk.request("/collections/create", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ title, parent_id }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { collection_id: string };
+      return body.collection_id;
+    }
+
+    // DEEP chain 0..4 → A nested under DEEP[4] ends at depth 5.
+    const DEEP0 = await create("Deep0", null);
+    const DEEP1 = await create("Deep1", DEEP0);
+    const DEEP2 = await create("Deep2", DEEP1);
+    const DEEP3 = await create("Deep3", DEEP2);
+    const DEEP4 = await create("Deep4", DEEP3);
+
+    // A → B → C → D live (under DEEP4 would have A at depth 5).
+    // Build them at root first (A at depth 0) then move A under
+    // DEEP4 after the subtree is soft-deleted, reproducing the
+    // exact sequence Codex described.
+    const A = await create("Subject", null); // depth 0
+    const B = await create("B", A); // depth 1
+    const C = await create("C", B); // depth 2
+    const D = await create("D", C); // depth 3
+
+    async function softDelete(id: string): Promise<void> {
+      const res = await trunk.request(`/collections/delete/${id}`, {
+        method: "POST",
+        headers: { cookie },
+      });
+      expect(res.status).toBe(200);
+    }
+    // Bottom-up delete (has_live_descendants requires).
+    await softDelete(D);
+    await softDelete(C);
+    await softDelete(B);
+
+    // Move A under DEEP4 → A at depth 5. Move's subtree walk sees
+    // only live descendants (none), so the check passes.
+    const moveRes = await trunk.request(`/collections/move/${A}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ new_parent_id: DEEP4 }),
+    });
+    expect(moveRes.status).toBe(200);
+
+    // Restore top-down. B at depth 6, C at 7 → cap-OK.
+    const restoreB = await trunk.request(`/collections/restore/${B}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(restoreB.status).toBe(200);
+    const restoreC = await trunk.request(`/collections/restore/${C}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(restoreC.status).toBe(200);
+
+    // D would land at depth 8 → 400 `validation` with
+    // `depth_cap_exceeded` issue. Without the fix, this would
+    // return 200 and leave the tree invariant broken.
+    const restoreD = await trunk.request(`/collections/restore/${D}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(restoreD.status).toBe(400);
+    const body = (await restoreD.json()) as { error: string };
+    expect(body.error).toBe("validation_failed");
+  });
 });
