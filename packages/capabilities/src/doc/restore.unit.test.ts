@@ -5,9 +5,9 @@
  * `packages/db/src/tenant.unit.test.ts`.
  */
 
-import { createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
-import { NotFoundError } from "@editorzero/errors";
-import { type CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
+import { NotFoundError, ParentDeletedError } from "@editorzero/errors";
+import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -30,8 +30,36 @@ let driver: SqliteDriver;
 
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
+  driver.exec(COLLECTIONS_DDL);
   driver.exec(DOCS_DDL);
 });
+
+const LIVE_COLLECTION = CollectionId("018f0000-0000-7000-8000-0000000000c1");
+const DELETED_COLLECTION = CollectionId("018f0000-0000-7000-8000-0000000000c2");
+const MISSING_COLLECTION = CollectionId("018f0000-0000-7000-8000-0000000000c9");
+
+async function seedCollection(params: {
+  id: CollectionId;
+  workspace_id: WorkspaceId;
+  deleted_at?: number | null;
+}) {
+  await driver
+    .scoped(params.workspace_id)
+    .insertInto("collections")
+    .values({
+      id: params.id,
+      workspace_id: params.workspace_id,
+      parent_id: null,
+      title: "Collection",
+      slug: params.id,
+      order_key: params.id,
+      created_by: ALICE,
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: params.deleted_at ?? null,
+    })
+    .execute();
+}
 
 afterEach(async () => {
   await driver.close();
@@ -200,6 +228,128 @@ describe("doc.restore", () => {
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBe(888);
     expect(row.visibility_version).toBe(0);
+  });
+
+  describe("parent-collection precondition (slice 2)", () => {
+    it("restores a soft-deleted doc whose parent collection is live", async () => {
+      await seedCollection({ id: LIVE_COLLECTION, workspace_id: WORKSPACE_A });
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Trashed",
+        collection_id: LIVE_COLLECTION,
+        deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A, () => 4_000_000);
+      const out = await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });
+      expect(out.doc_id).toBe(DOC_A2_DELETED);
+    });
+
+    it("refuses with ParentDeletedError when the parent collection is soft-deleted", async () => {
+      await seedCollection({
+        id: DELETED_COLLECTION,
+        workspace_id: WORKSPACE_A,
+        deleted_at: 500,
+      });
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Trashed",
+        collection_id: DELETED_COLLECTION,
+        deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A);
+      await expect(docRestore.handler(ctx, { doc_id: DOC_A2_DELETED })).rejects.toBeInstanceOf(
+        ParentDeletedError,
+      );
+    });
+
+    it("refuses with ParentDeletedError when the parent collection is missing (dangling)", async () => {
+      // `docs.collection_id` has no DB FK in v1 — a dangling id can
+      // arise via system-handle writes. The handler still refuses
+      // rather than silently re-parenting.
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Trashed",
+        collection_id: MISSING_COLLECTION,
+        deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A);
+      await expect(docRestore.handler(ctx, { doc_id: DOC_A2_DELETED })).rejects.toBeInstanceOf(
+        ParentDeletedError,
+      );
+    });
+
+    it("error carries the parent collection id + kind", async () => {
+      await seedCollection({
+        id: DELETED_COLLECTION,
+        workspace_id: WORKSPACE_A,
+        deleted_at: 500,
+      });
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Trashed",
+        collection_id: DELETED_COLLECTION,
+        deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A);
+      try {
+        await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });
+        throw new Error("expected ParentDeletedError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ParentDeletedError);
+        if (err instanceof ParentDeletedError) {
+          expect(err.parent_kind).toBe("collection");
+          expect(err.parent_id).toBe(DELETED_COLLECTION);
+        }
+      }
+    });
+
+    it("leaves the doc soft-deleted after refusal (no partial writes)", async () => {
+      await seedCollection({
+        id: DELETED_COLLECTION,
+        workspace_id: WORKSPACE_A,
+        deleted_at: 500,
+      });
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Trashed",
+        collection_id: DELETED_COLLECTION,
+        visibility_version: 7,
+        deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A);
+      await expect(docRestore.handler(ctx, { doc_id: DOC_A2_DELETED })).rejects.toBeInstanceOf(
+        ParentDeletedError,
+      );
+      const row = await driver
+        .scoped(WORKSPACE_A)
+        .selectFrom("docs")
+        .select(["deleted_at", "visibility_version"])
+        .where("id", "=", DOC_A2_DELETED)
+        .executeTakeFirstOrThrow();
+      expect(row.deleted_at).toBe(999);
+      expect(row.visibility_version).toBe(7);
+    });
+
+    it("has no precondition when collection_id is null (workspace-root doc)", async () => {
+      // Existing `doc.restore` behavior — workspace-root docs restore
+      // without any parent check. Regression guard: the new precondition
+      // only fires when `collection_id !== null`.
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Trashed",
+        collection_id: null,
+        deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A);
+      const out = await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });
+      expect(out.doc_id).toBe(DOC_A2_DELETED);
+    });
   });
 
   it("rejects a non-UUIDv7 doc_id at the input schema", () => {

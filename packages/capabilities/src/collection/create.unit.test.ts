@@ -11,7 +11,7 @@
 
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
 import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
-import { NotFoundError, ValidationError } from "@editorzero/errors";
+import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
 import { AgentId, CollectionId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AgentPrincipal, Principal, UserPrincipal } from "@editorzero/principal";
@@ -290,6 +290,78 @@ describe("collection.create — parent validation", () => {
     const rows = await driver.scoped(WORKSPACE_A).selectFrom("collections").selectAll().execute();
     // The pre-existing chain (n=COLLECTION_MAX_DEPTH) is there; no orphan from the rejected call.
     expect(rows.length).toBe(COLLECTION_MAX_DEPTH);
+  });
+});
+
+// ── Slug collision (slice 2) ─────────────────────────────────────────────
+
+describe("collection.create — sibling-slug pre-check", () => {
+  it("throws SlugCollisionError when a root sibling already has the derived slug", async () => {
+    const ctx = buildCtx(userPrincipal());
+    await collectionCreate.handler(ctx, { title: "Foo" });
+    await expect(collectionCreate.handler(ctx, { title: "foo" })).rejects.toBeInstanceOf(
+      SlugCollisionError,
+    );
+  });
+
+  it("throws SlugCollisionError when a nested sibling already has the derived slug", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const parent = await collectionCreate.handler(ctx, { title: "Parent" });
+    await collectionCreate.handler(ctx, {
+      title: "Child",
+      parent_id: parent.collection_id,
+    });
+    await expect(
+      collectionCreate.handler(ctx, { title: "child", parent_id: parent.collection_id }),
+    ).rejects.toBeInstanceOf(SlugCollisionError);
+  });
+
+  it("allows the same slug under a different parent (scope is sibling, not workspace)", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const p1 = await collectionCreate.handler(ctx, { title: "P1" });
+    const p2 = await collectionCreate.handler(ctx, { title: "P2" });
+    const c1 = await collectionCreate.handler(ctx, {
+      title: "Shared",
+      parent_id: p1.collection_id,
+    });
+    const c2 = await collectionCreate.handler(ctx, {
+      title: "Shared",
+      parent_id: p2.collection_id,
+    });
+    expect(c1.slug).toBe("shared");
+    expect(c2.slug).toBe("shared");
+  });
+
+  it("ignores soft-deleted siblings (slug can be reused)", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const first = await collectionCreate.handler(ctx, { title: "Once" });
+    // Soft-delete directly via the scoped handle (we don't need
+    // `collection.delete` here — this test is isolated to the create
+    // pre-check semantics).
+    await driver
+      .scoped(WORKSPACE_A)
+      .updateTable("collections")
+      .set({ deleted_at: 500 })
+      .where("id", "=", first.collection_id)
+      .execute();
+    const replacement = await collectionCreate.handler(ctx, { title: "Once" });
+    expect(replacement.slug).toBe("once");
+  });
+
+  it("error carries the derived slug + sibling scope (workspace root)", async () => {
+    const ctx = buildCtx(userPrincipal());
+    await collectionCreate.handler(ctx, { title: "Foo" });
+    try {
+      await collectionCreate.handler(ctx, { title: "Foo" });
+      throw new Error("expected SlugCollisionError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SlugCollisionError);
+      if (err instanceof SlugCollisionError) {
+        expect(err.slug).toBe("foo");
+        expect(err.parent_kind).toBe("workspace");
+        expect(err.parent_id).toBeNull();
+      }
+    }
   });
 });
 

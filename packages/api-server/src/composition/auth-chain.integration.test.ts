@@ -33,7 +33,10 @@
 import { createAuth, createBetterAuthResolver, runAuthMigrations } from "@editorzero/auth";
 import {
   collectionCreate,
+  collectionDelete,
   collectionList,
+  collectionRestore,
+  collectionUpdate,
   createRegistry,
   docCreate,
   docDelete,
@@ -101,6 +104,9 @@ async function buildStack(
     registerDocUpdate?: boolean;
     registerCollectionCreate?: boolean;
     registerCollectionList?: boolean;
+    registerCollectionUpdate?: boolean;
+    registerCollectionDelete?: boolean;
+    registerCollectionRestore?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -126,6 +132,9 @@ async function buildStack(
     ...(options.registerDocUpdate ? [registerCapability(docUpdate)] : []),
     ...(options.registerCollectionCreate ? [registerCapability(collectionCreate)] : []),
     ...(options.registerCollectionList ? [registerCapability(collectionList)] : []),
+    ...(options.registerCollectionUpdate ? [registerCapability(collectionUpdate)] : []),
+    ...(options.registerCollectionDelete ? [registerCapability(collectionDelete)] : []),
+    ...(options.registerCollectionRestore ? [registerCapability(collectionRestore)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -2124,5 +2133,187 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       body: JSON.stringify({ title: "   " }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("POST /collections/update renames a collection, persists title+slug (full stack)", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionUpdate: true,
+    });
+    await signUp(trunk, "ursula@example.com");
+    const signInRes = await signIn(trunk, "ursula@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const createRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Initial" }),
+    });
+    const created = (await createRes.json()) as { collection_id: string };
+
+    const updateRes = await trunk.request(`/collections/update/${created.collection_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Renamed" }),
+    });
+    expect(updateRes.status).toBe(200);
+    const updated = (await updateRes.json()) as { title: string; slug: string };
+    expect(updated.title).toBe("Renamed");
+    expect(updated.slug).toBe("renamed");
+  });
+
+  it("POST /collections/update returns 409 on sibling-slug collision", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionUpdate: true,
+    });
+    await signUp(trunk, "tara@example.com");
+    const signInRes = await signIn(trunk, "tara@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "First" }),
+    });
+    const secondRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Second" }),
+    });
+    const second = (await secondRes.json()) as { collection_id: string };
+
+    // Try to rename "Second" to "First" — sibling slug collision.
+    const updateRes = await trunk.request(`/collections/update/${second.collection_id}`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "First" }),
+    });
+    expect(updateRes.status).toBe(409);
+    const body = (await updateRes.json()) as { error: string };
+    expect(body.error).toBe("slug_collision");
+  });
+
+  it("POST /collections/update 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerCollectionUpdate: true });
+    const res = await trunk.request("/collections/update/018f0000-0000-7000-8000-0000000000c1", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "X" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /collections/delete soft-deletes an empty collection (full stack)", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionDelete: true,
+      registerCollectionList: true,
+    });
+    await signUp(trunk, "samir@example.com");
+    const signInRes = await signIn(trunk, "samir@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const createRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Bye" }),
+    });
+    const created = (await createRes.json()) as { collection_id: string };
+
+    const deleteRes = await trunk.request(`/collections/delete/${created.collection_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(deleteRes.status).toBe(200);
+    const deleted = (await deleteRes.json()) as { deleted_at: number };
+    expect(deleted.deleted_at).toBeGreaterThan(0);
+
+    // list should no longer surface the row
+    const listRes = await trunk.request("/collections/list", { headers: { cookie } });
+    const listBody = (await listRes.json()) as { collections: ReadonlyArray<{ id: string }> };
+    expect(listBody.collections.map((c) => c.id)).not.toContain(created.collection_id);
+  });
+
+  it("POST /collections/delete returns 409 when live descendants remain", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionDelete: true,
+    });
+    await signUp(trunk, "rhoda@example.com");
+    const signInRes = await signIn(trunk, "rhoda@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const parentRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Parent" }),
+    });
+    const parent = (await parentRes.json()) as { collection_id: string };
+    await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Child", parent_id: parent.collection_id }),
+    });
+
+    const deleteRes = await trunk.request(`/collections/delete/${parent.collection_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(deleteRes.status).toBe(409);
+    const body = (await deleteRes.json()) as { error: string };
+    expect(body.error).toBe("has_live_descendants");
+  });
+
+  it("POST /collections/restore revives a soft-deleted collection", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionDelete: true,
+      registerCollectionRestore: true,
+      registerCollectionList: true,
+    });
+    await signUp(trunk, "quinn@example.com");
+    const signInRes = await signIn(trunk, "quinn@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const createRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Back" }),
+    });
+    const created = (await createRes.json()) as { collection_id: string };
+    await trunk.request(`/collections/delete/${created.collection_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+
+    const restoreRes = await trunk.request(`/collections/restore/${created.collection_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(restoreRes.status).toBe(200);
+    const restored = (await restoreRes.json()) as { collection_id: string };
+    expect(restored.collection_id).toBe(created.collection_id);
+
+    // list should surface it again
+    const listRes = await trunk.request("/collections/list", { headers: { cookie } });
+    const listBody = (await listRes.json()) as { collections: ReadonlyArray<{ id: string }> };
+    expect(listBody.collections.map((c) => c.id)).toContain(created.collection_id);
+  });
+
+  it("POST /collections/restore 404s when the target is already live", async () => {
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionRestore: true,
+    });
+    await signUp(trunk, "priya@example.com");
+    const signInRes = await signIn(trunk, "priya@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const createRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Live" }),
+    });
+    const created = (await createRes.json()) as { collection_id: string };
+    const restoreRes = await trunk.request(`/collections/restore/${created.collection_id}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(restoreRes.status).toBe(404);
   });
 });

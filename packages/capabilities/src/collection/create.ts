@@ -34,12 +34,17 @@
  * parity. The iterative walk is the right trade at this cap.
  *
  * **Slug derivation is naive in v1** (same policy as `doc.create`):
- * kebab-case the title; `""` → `"untitled"`. The partial unique
- * indexes on `(workspace_id, parent_id, slug)` (two indexes for
- * NULL-aware uniqueness) will reject sibling-slug collisions as a
- * SQL UNIQUE violation — audited as `internal` for now. A retry-on-
- * slug loop lands here when sibling-slug collision is a real UX
- * concern; v1 treats it as "fix your title."
+ * kebab-case the title; `""` → `"untitled"`. The handler runs a
+ * sibling-slug pre-check SELECT (NULL-aware parent scope, matching
+ * the partial unique indexes' shape) and throws `SlugCollisionError`
+ * (409, `code: "slug_collision"`) on hit — typed 409 on the common
+ * path. The DB-side partial unique indexes remain the last-line
+ * guard for the race window (pre-check → INSERT with a concurrent
+ * sibling); that rare edge still audits as `internal`, but common
+ * cases get a typed response. Slice 2 added this to match
+ * `collection.update`'s slug-write path (Codex review: asymmetric
+ * error shaping between create + update would be worse than
+ * consistent).
  *
  * **`created_by` attribution** follows the same policy as
  * `doc.create` (see `resolveCreatedBy`): user principals contribute
@@ -60,7 +65,7 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
-import { NotFoundError, ValidationError } from "@editorzero/errors";
+import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
 import { CapabilityId, CollectionId, generateCollectionId, WorkspaceId } from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
 import { z } from "zod";
@@ -222,6 +227,40 @@ export const collectionCreate: Capability<Input, Output> = {
         }
         cursor = row.parent_id;
       }
+    }
+
+    // Sibling-slug pre-check. Typed 409 on the common path rather
+    // than letting the partial unique index bubble as `internal`.
+    // NULL-aware parent scope matches the two indexes the DDL
+    // defines (one for root, one for nested). The race window
+    // (this SELECT → the INSERT below) is still guarded by the
+    // indexes as the last-line enforcement — an interleaved
+    // concurrent sibling insert would re-raise as a UNIQUE
+    // violation / `internal` audit.
+    let existing: { id: CollectionId } | undefined;
+    if (parent_id === null) {
+      existing = await ctx.db
+        .selectFrom("collections")
+        .select(["id"])
+        .where("parent_id", "is", null)
+        .where("slug", "=", slug)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+    } else {
+      existing = await ctx.db
+        .selectFrom("collections")
+        .select(["id"])
+        .where("parent_id", "=", parent_id)
+        .where("slug", "=", slug)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+    }
+    if (existing !== undefined) {
+      throw new SlugCollisionError({
+        slug,
+        parent_kind: parent_id === null ? "workspace" : "collection",
+        parent_id,
+      });
     }
 
     await ctx.db

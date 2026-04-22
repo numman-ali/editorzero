@@ -26,15 +26,19 @@
  *     capability backing it.
  *
  * **Today's registry** is the full doc domain (9 capabilities) plus
- * the collection domain slice 1 (create + list). Adding a new
- * capability with `surfaces: ["cli"]` means: add the import + the
- * `registerCapability(...)` call below, then the generated command
- * tree and the parity test pick it up automatically.
+ * the collection domain slices 1+2 (create, list, update, delete,
+ * restore). Adding a new capability with `surfaces: ["cli"]` means:
+ * add the import + the `registerCapability(...)` call below, then
+ * the generated command tree and the parity test pick it up
+ * automatically.
  */
 
 import {
   collectionCreate,
+  collectionDelete,
   collectionList,
+  collectionRestore,
+  collectionUpdate,
   createRegistry,
   docCreate,
   docDelete,
@@ -50,7 +54,10 @@ import {
 
 export const cliRegistry = createRegistry([
   registerCapability(collectionCreate),
+  registerCapability(collectionDelete),
   registerCapability(collectionList),
+  registerCapability(collectionRestore),
+  registerCapability(collectionUpdate),
   registerCapability(docCreate),
   registerCapability(docDelete),
   registerCapability(docGet),

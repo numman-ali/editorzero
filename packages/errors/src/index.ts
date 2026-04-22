@@ -14,7 +14,7 @@
  * surfaces key on; `httpStatus` is the canonical HTTP mapping.
  */
 
-import type { BlockId, CapabilityId, DocId } from "@editorzero/ids";
+import type { BlockId, CapabilityId, CollectionId, DocId } from "@editorzero/ids";
 import type { SubjectKind } from "@editorzero/scopes";
 
 import type { DenyReason, HandlerError } from "./handler-error";
@@ -194,6 +194,118 @@ export class StalePreconditionError extends EditorZeroError {
     this.block_id = params.block_id;
     this.expected_hash = params.expected_hash;
     this.actual_hash = params.actual_hash;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "conflict" };
+  }
+}
+
+/**
+ * Caller tried to restore a soft-deleted subject whose parent is itself
+ * soft-deleted. Used by `collection.restore` (parent collection) and
+ * `doc.restore` (parent collection of a nested doc). Restoring into a
+ * trashed parent would leave the subject dangling under deleted scope —
+ * the handler refuses and instructs the caller to restore the parent
+ * first. Projects to `{ kind: "conflict" }` in audit (shares the fold
+ * with `ConflictError` / `StalePreconditionError`); surfaces key on the
+ * wire `code` (`parent_deleted`) for targeted client retry copy.
+ */
+export class ParentDeletedError extends EditorZeroError {
+  readonly code = "parent_deleted";
+  readonly httpStatus = 409;
+  readonly parent_kind: "collection";
+  readonly parent_id: CollectionId;
+
+  constructor(params: { message?: string; parent_kind: "collection"; parent_id: CollectionId }) {
+    super(
+      params.message ??
+        `cannot restore: parent ${params.parent_kind} ${params.parent_id} is soft-deleted; restore it first`,
+    );
+    this.parent_kind = params.parent_kind;
+    this.parent_id = params.parent_id;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "conflict" };
+  }
+}
+
+/**
+ * Caller tried to soft-delete a collection that still has live children
+ * (child collections and/or docs with `collection_id` pointing at it).
+ * Used by `collection.delete`. ADR 0017's reasoning for soft-delete is
+ * recoverable 1:1 state; cascading the delete would make restore
+ * impossible without a separate undelete-tree mechanism. Refusing
+ * keeps the UX "empty the folder first, then delete it" — the inverse
+ * pairs with `collection.restore`'s parent-deleted check. Projects to
+ * `{ kind: "conflict" }`.
+ *
+ * `descendant_counts` is a small bag the client can render without a
+ * follow-up list call — "can't delete: 3 docs and 1 subfolder still
+ * here" is a better error than a bare 409.
+ */
+export class HasLiveDescendantsError extends EditorZeroError {
+  readonly code = "has_live_descendants";
+  readonly httpStatus = 409;
+  readonly collection_id: CollectionId;
+  readonly descendant_counts: { readonly collections: number; readonly docs: number };
+
+  constructor(params: {
+    message?: string;
+    collection_id: CollectionId;
+    descendant_counts: { readonly collections: number; readonly docs: number };
+  }) {
+    super(
+      params.message ??
+        `cannot delete collection ${params.collection_id}: ` +
+          `${params.descendant_counts.collections} live child collections + ` +
+          `${params.descendant_counts.docs} live docs still here`,
+    );
+    this.collection_id = params.collection_id;
+    this.descendant_counts = params.descendant_counts;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "conflict" };
+  }
+}
+
+/**
+ * Sibling-slug uniqueness violation detected by a handler-side pre-check
+ * (before the UNIQUE index fires). Used by `collection.create` and
+ * `collection.update` so callers get a typed `slug_collision` 409 rather
+ * than the raw UNIQUE violation bubbling as an `internal` audit row. The
+ * DB-side partial unique index is still the last-line guard on a race
+ * (another writer landing between the SELECT and the INSERT/UPDATE);
+ * that rare edge still audits as `internal`, but the common path is
+ * typed. Projects to `{ kind: "conflict" }`.
+ *
+ * `parent_kind` distinguishes the two scopes the NULL-aware partial
+ * indexes enforce: workspace-root (`parent_id IS NULL`) vs nested under
+ * a collection (`parent_id IS NOT NULL`).
+ */
+export class SlugCollisionError extends EditorZeroError {
+  readonly code = "slug_collision";
+  readonly httpStatus = 409;
+  readonly slug: string;
+  readonly parent_kind: "collection" | "workspace";
+  readonly parent_id: CollectionId | null;
+
+  constructor(params: {
+    message?: string;
+    slug: string;
+    parent_kind: "collection" | "workspace";
+    parent_id: CollectionId | null;
+  }) {
+    super(
+      params.message ??
+        `slug "${params.slug}" already taken among siblings under ` +
+          `${params.parent_kind} ${params.parent_id ?? "(root)"}`,
+    );
+    this.slug = params.slug;
+    this.parent_kind = params.parent_kind;
+    this.parent_id = params.parent_id;
   }
 
   toHandlerError(): HandlerError {

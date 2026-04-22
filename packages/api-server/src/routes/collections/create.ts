@@ -13,6 +13,12 @@
  * capability surfaces this as `NotFoundError` with `subject_kind:
  * "collection"`; the global error mapper projects it to `{ error:
  * "not_found" }`.
+ *
+ * **409 response** — `SlugCollisionError` (sibling-slug collision,
+ * `code: "slug_collision"`) when the derived slug is already taken by
+ * a live sibling under the same parent. Added alongside slice 2's
+ * `collection.update` retrofit so create + update have symmetric
+ * error shaping (Codex review). Body is `{ error: "slug_collision" }`.
  */
 
 import { CapabilityId } from "@editorzero/ids";
@@ -89,6 +95,14 @@ const createRouteDef = createRoute({
       content: {
         "application/json": {
           schema: z.object({ error: z.literal("not_found") }),
+        },
+      },
+    },
+    409: {
+      description: "Sibling-slug collision — derived slug is already taken by a live sibling.",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.literal("slug_collision") }),
         },
       },
     },

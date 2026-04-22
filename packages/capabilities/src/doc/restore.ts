@@ -16,6 +16,17 @@
  * across different scopes leaves docs stuck in trash when the
  * original deleter's role is revoked.
  *
+ * **Parent-collection precondition (slice 2 of collections).** If the
+ * doc has `collection_id IS NOT NULL`, the handler refuses with
+ * `ParentDeletedError` (409, `code: "parent_deleted"`) when the parent
+ * collection is itself soft-deleted (or missing, from a system-handle
+ * write). Pairs with `collection.restore`'s symmetric check —
+ * together they preserve the invariant "every live doc has a live path
+ * to the workspace root". Callers restore the parent collection first,
+ * then the doc. Handler-side (not DB-side) because `docs.collection_id`
+ * has no DB-level FK yet (temporary integrity debt, tracked in slice
+ * 4 notes); the query-based check works regardless.
+ *
  * **Not-deleted handling.** A `deleted_at IS NULL` doc returns 404.
  * Restoring a doc that isn't trashed has no defined meaning — the
  * caller already has the state they wanted; silently returning 200
@@ -56,8 +67,8 @@ import type {
   DenyReason,
   HandlerError,
 } from "@editorzero/audit";
-import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId, DocId } from "@editorzero/ids";
+import { NotFoundError, ParentDeletedError } from "@editorzero/errors";
+import { CapabilityId, type CollectionId, DocId } from "@editorzero/ids";
 import { z } from "zod";
 
 import { projectErrorAudit } from "../audit-helpers";
@@ -127,12 +138,50 @@ export const docRestore: Capability<Input, Output> = {
   handler: async (ctx, input) => {
     const now = ctx.now();
 
-    // Single-statement UPDATE + RETURNING. The `deleted_at IS NOT NULL`
-    // WHERE gate means already-live rows return zero rows → 404. Same
-    // alias-aware `WorkspaceScopingPlugin` posture as delete — cross-
-    // workspace targets are invisible. Symmetric to `doc.delete`'s
-    // write shape modulo the inverted null check + the `deleted_at:
-    // null` assignment.
+    // Step 1 — fetch the deleted row. We need the `collection_id` to
+    // run the parent-deleted precondition before the UPDATE fires; a
+    // blind UPDATE-with-RETURNING would commit the restore before we
+    // could check the parent. Collection-domain slice 2 added this
+    // precondition alongside `collection.restore`; docs nested under
+    // a soft-deleted collection must not come back live until the
+    // parent is restored first — otherwise the tree is inconsistent.
+    const current = await ctx.db
+      .selectFrom("docs")
+      .select(["id", "collection_id"])
+      .where("id", "=", input.doc_id)
+      .where("deleted_at", "is not", null)
+      .executeTakeFirst();
+
+    if (current === undefined) {
+      throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
+    }
+
+    // Step 2 — parent-collection precondition. Only fires when
+    // `collection_id IS NOT NULL` (workspace-root docs have no parent
+    // collection to check). A missing parent row (dangling
+    // `collection_id` from a system-handle write or a future hard-
+    // delete we don't cover in v1) also refuses — the honest
+    // projection is "we can't restore this because its home is
+    // gone", not silent re-parenting.
+    if (current.collection_id !== null) {
+      const parent_id: CollectionId = current.collection_id;
+      const parent = await ctx.db
+        .selectFrom("collections")
+        .select(["id", "deleted_at"])
+        .where("id", "=", parent_id)
+        .executeTakeFirst();
+
+      if (parent === undefined || parent.deleted_at !== null) {
+        throw new ParentDeletedError({
+          parent_kind: "collection",
+          parent_id,
+        });
+      }
+    }
+
+    // Step 3 — restore. Same alias-aware `WorkspaceScopingPlugin`
+    // posture as delete; the `deleted_at IS NOT NULL` guard defends
+    // against a concurrent restore between step 1 and here.
     const row = await ctx.db
       .updateTable("docs")
       .set((eb) => ({

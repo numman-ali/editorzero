@@ -1,6 +1,9 @@
 import {
   collectionCreate,
+  collectionDelete,
   collectionList,
+  collectionRestore,
+  collectionUpdate,
   docCreate,
   docDelete,
   docGet,
@@ -132,6 +135,35 @@ describe("deriveHttpBinding", () => {
       pathTemplate: "/collections/create",
       paramName: null,
       bodyOrQueryKeys: ["parent_id", "title"],
+    });
+  });
+
+  it("collection.update → POST /collections/update/:collection_id with title body", () => {
+    // `collection_id` matches the `<domain>_id` convention — promoted
+    // to a path param, title remains in the body.
+    expect(deriveHttpBinding(registerCapability(collectionUpdate))).toEqual({
+      verb: "POST",
+      pathTemplate: "/collections/update/:collection_id",
+      paramName: "collection_id",
+      bodyOrQueryKeys: ["title"],
+    });
+  });
+
+  it("collection.delete → POST /collections/delete/:collection_id", () => {
+    expect(deriveHttpBinding(registerCapability(collectionDelete))).toEqual({
+      verb: "POST",
+      pathTemplate: "/collections/delete/:collection_id",
+      paramName: "collection_id",
+      bodyOrQueryKeys: [],
+    });
+  });
+
+  it("collection.restore → POST /collections/restore/:collection_id", () => {
+    expect(deriveHttpBinding(registerCapability(collectionRestore))).toEqual({
+      verb: "POST",
+      pathTemplate: "/collections/restore/:collection_id",
+      paramName: "collection_id",
+      bodyOrQueryKeys: [],
     });
   });
 
