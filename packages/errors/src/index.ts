@@ -14,7 +14,14 @@
  * surfaces key on; `httpStatus` is the canonical HTTP mapping.
  */
 
-import type { BlockId, CapabilityId, CollectionId, DocId } from "@editorzero/ids";
+import type {
+  BlockId,
+  CapabilityId,
+  CollectionId,
+  DocId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
 import type { SubjectKind } from "@editorzero/scopes";
 
 import type { DenyReason, HandlerError } from "./handler-error";
@@ -306,6 +313,43 @@ export class SlugCollisionError extends EditorZeroError {
     this.slug = params.slug;
     this.parent_kind = params.parent_kind;
     this.parent_id = params.parent_id;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "conflict" };
+  }
+}
+
+/**
+ * Last-owner protection violation — a role demotion or member removal
+ * would leave the workspace with zero `owner` rows. Used by
+ * `workspace.member_update_role` and `workspace.member_remove` to
+ * surface a typed 409 instead of letting the workspace enter an
+ * ownerless state (every destructive workspace-level op would then
+ * fail on role gate, including `workspace.member_add` to rescue it).
+ *
+ * Enforcement inside the write tx, not as an input-validation 400 —
+ * a plain pre-check is racy under concurrent admin action (two
+ * admins demoting the last two owners in parallel both read
+ * `count=2` and both pass). The handler re-reads inside the tx; the
+ * 409 is a transactional state conflict.
+ *
+ * Projects to `{ kind: "conflict" }` in `HandlerError`, matching the
+ * shape of `HasLiveDescendantsError` / `SlugCollisionError`.
+ */
+export class LastOwnerError extends EditorZeroError {
+  readonly code = "last_owner_protected";
+  readonly httpStatus = 409;
+  readonly workspace_id: WorkspaceId;
+  readonly user_id: UserId;
+
+  constructor(params: { message?: string; workspace_id: WorkspaceId; user_id: UserId }) {
+    super(
+      params.message ??
+        `cannot demote or remove ${params.user_id}: workspace ${params.workspace_id} would be left with zero owners`,
+    );
+    this.workspace_id = params.workspace_id;
+    this.user_id = params.user_id;
   }
 
   toHandlerError(): HandlerError {

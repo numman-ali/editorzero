@@ -44,4 +44,7 @@ export { docRestore } from "./doc/restore";
 export { docUnpublish } from "./doc/unpublish";
 export { docUpdate } from "./doc/update";
 export { workspaceGet } from "./workspace/get";
+export { workspaceMemberList } from "./workspace/member_list";
+export { workspaceMemberRemove } from "./workspace/member_remove";
+export { workspaceMemberUpdateRole } from "./workspace/member_update_role";
 export { workspaceUpdate } from "./workspace/update";

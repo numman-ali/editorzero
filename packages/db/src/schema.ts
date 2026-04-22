@@ -57,6 +57,7 @@ export const TENANT_SCOPE_COLUMNS = {
   doc_snapshots: "workspace_id",
   doc_updates: "workspace_id",
   audit_events: "workspace_id",
+  workspace_members: "workspace_id",
   workspaces: "id",
 } as const;
 
@@ -206,14 +207,12 @@ export interface DocCountersTable {
  * principal-projection time. `ROLE_SCOPES` in
  * `packages/dispatcher/src/gate.ts` maps `Role` → `Scope[]`.
  *
- * Deliberately on `SystemDatabase` but NOT on `Database` and NOT in
- * `TENANT_SCOPE_COLUMNS` — the only consumer today is the auth
- * resolver, which queries via `driver.system()` with an explicit
- * `workspace_id` filter (resolver runs *before* a tenant context
- * exists). When `workspace.list_members` / `workspace.add_member`
- * capabilities land, this interface moves to `Database` and
- * `TENANT_SCOPE_COLUMNS` in the same commit as those capability
- * declarations.
+ * Scoped on `workspace_id` via `TENANT_SCOPE_COLUMNS` so every read
+ * through `ctx.db` auto-filters to the caller's tenant. The auth
+ * resolver still reaches this table via `driver.system()` because it
+ * runs *before* a tenant context exists (the resolver is how that
+ * context gets minted); the `SystemDatabase` escape hatch remains
+ * narrow and single-purpose.
  *
  * `role` typed as `Role` so Kysely selects narrow to the four-value
  * union without a runtime check. The DDL's `CHECK (role IN (…))`
@@ -370,6 +369,7 @@ export interface Database {
   readonly doc_snapshots: DocSnapshotsTable;
   readonly doc_updates: DocUpdatesTable;
   readonly audit_events: AuditEventsTable;
+  readonly workspace_members: WorkspaceMembersTable;
   readonly workspaces: WorkspacesTable;
 }
 
@@ -392,7 +392,6 @@ export interface Database {
 export interface SystemDatabase extends Database {
   readonly doc_counters: DocCountersTable;
   readonly outbox: OutboxTable;
-  readonly workspace_members: WorkspaceMembersTable;
 }
 
 /**

@@ -237,12 +237,11 @@ export const DOC_COUNTERS_DDL = `
  * when Atlas + kysely-codegen take over schema management
  * (architecture.md §16.9).
  *
- * Read by the auth resolver via `driver.system()` with an explicit
- * `workspace_id` filter — `workspace_members` is not yet in
- * `TENANT_SCOPED_TABLES` because no capability consumes it through a
- * tenant-scoped handle today; the `workspace.list_members` /
- * `workspace.add_member` slices will add it to that list in lockstep
- * with the capability declarations.
+ * Scoped on `workspace_id` via `TENANT_SCOPE_COLUMNS` — every
+ * capability read through `ctx.db` auto-filters to the tenant. The
+ * auth resolver still reads via `driver.system()` because it runs
+ * before a tenant context exists (the resolver *mints* that context
+ * via `load-roles.ts`).
  */
 export const WORKSPACE_MEMBERS_DDL = `
   CREATE TABLE workspace_members (

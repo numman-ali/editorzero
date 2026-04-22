@@ -6,9 +6,10 @@
  * Auth resolver injects to turn a BA session into a principal with
  * the correct `roles: Role[]`. Queries `workspace_members` via
  * `driver.system()` — the resolver runs *before* a tenant context
- * exists, so the tenant-scoping plugin path is not available (and
- * `workspace_members` is not in `TENANT_SCOPED_TABLES` today for
- * the same reason; see `schema.ts`'s doc-block on the table).
+ * exists (it's how that context gets minted), so the tenant-scoping
+ * plugin path is not available here. The `workspace.member_*`
+ * capabilities read the same table through `ctx.db` with auto-
+ * scoping; this path and that path coexist by design.
  *
  * **Strict-on-missing.** Returns `null` when no active membership row
  * exists for the `(workspace_id, user_id)` pair. The resolver

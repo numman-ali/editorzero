@@ -53,6 +53,9 @@ import {
   docUpdate,
   registerCapability,
   workspaceGet,
+  workspaceMemberList,
+  workspaceMemberRemove,
+  workspaceMemberUpdateRole,
   workspaceUpdate,
 } from "@editorzero/capabilities";
 import {
@@ -117,6 +120,9 @@ async function buildStack(
     registerCollectionMove?: boolean;
     registerWorkspaceGet?: boolean;
     registerWorkspaceUpdate?: boolean;
+    registerWorkspaceMemberList?: boolean;
+    registerWorkspaceMemberRemove?: boolean;
+    registerWorkspaceMemberUpdateRole?: boolean;
     registerAuditList?: boolean;
     registerAuditGet?: boolean;
     withSync?: boolean;
@@ -151,6 +157,11 @@ async function buildStack(
     ...(options.registerCollectionMove ? [registerCapability(collectionMove)] : []),
     ...(options.registerWorkspaceGet ? [registerCapability(workspaceGet)] : []),
     ...(options.registerWorkspaceUpdate ? [registerCapability(workspaceUpdate)] : []),
+    ...(options.registerWorkspaceMemberList ? [registerCapability(workspaceMemberList)] : []),
+    ...(options.registerWorkspaceMemberRemove ? [registerCapability(workspaceMemberRemove)] : []),
+    ...(options.registerWorkspaceMemberUpdateRole
+      ? [registerCapability(workspaceMemberUpdateRole)]
+      : []),
     ...(options.registerAuditList ? [registerCapability(auditList)] : []),
     ...(options.registerAuditGet ? [registerCapability(auditGet)] : []),
   ];
@@ -2855,6 +2866,307 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       body: JSON.stringify({ slug: "hijack" }),
     });
     expect(res.status).toBe(400);
+  });
+
+  // ── workspace.member_list / member_remove / member_update_role ────────
+
+  it("GET /workspaces/member_list — owner sees self as the seeded owner (full stack)", async () => {
+    // The `user.create.after` hook seeds a single owner row on signup.
+    // member_list projects that row; the response carries `user_id` +
+    // `role` + timestamps.
+    const { trunk } = await buildStack({ registerWorkspaceMemberList: true });
+    await signUp(trunk, "mila@example.com");
+    const signInRes = await signIn(trunk, "mila@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/member_list", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      members: Array<{ user_id: string; role: string }>;
+      next_cursor: unknown;
+    };
+    expect(body.members).toHaveLength(1);
+    expect(body.members[0]?.role).toBe("owner");
+    expect(body.next_cursor).toBeNull();
+  });
+
+  it("GET /workspaces/member_list — non-admin member gets 403 (workspace:admin gate)", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberList: true });
+    await signUp(trunk, "mira@example.com", { overrideRole: "member" });
+    const signInRes = await signIn(trunk, "mira@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/member_list", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /workspaces/member_list 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberList: true });
+    const res = await trunk.request("/workspaces/member_list", { method: "GET" });
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /workspaces/member_list rejects half-a-cursor → 400 (before_created_at without before_user_id)", async () => {
+    // Route-layer refine mirrors the capability — contract parity so a
+    // generated client can't send a pair that the server would silently
+    // swap for runtime 400.
+    const { trunk } = await buildStack({ registerWorkspaceMemberList: true });
+    await signUp(trunk, "mandy@example.com");
+    const signInRes = await signIn(trunk, "mandy@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/member_list?before_created_at=100", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /workspaces/member_update_role demotes a non-last owner (full stack)", async () => {
+    // Seed a second owner via a direct DB insert so demoting the first
+    // still leaves a live owner. The bootstrap hook only mints one
+    // owner, so this is the test-side construct that can't be produced
+    // via signup alone (same pattern as `overrideRole`).
+    const { trunk } = await buildStack({
+      registerWorkspaceMemberList: true,
+      registerWorkspaceMemberUpdateRole: true,
+    });
+    await signUp(trunk, "molly@example.com");
+    const signInRes = await signIn(trunk, "molly@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    // Seed a second owner — same workspace, distinct user_id.
+    const callerId = await lookupUserIdByEmail("molly@example.com");
+    const callerWorkspace = await driver
+      .system()
+      .selectFrom("workspace_members")
+      .select("workspace_id")
+      .where("user_id", "=", callerId)
+      .where("deleted_at", "is", null)
+      .executeTakeFirstOrThrow();
+    const peerId = UserId("018f0000-0000-7000-8000-0000000000cc");
+    await driver
+      .system()
+      .insertInto("workspace_members")
+      .values({
+        workspace_id: callerWorkspace.workspace_id,
+        user_id: peerId,
+        role: "owner",
+        created_at: 100,
+        updated_at: 100,
+        deleted_at: null,
+      })
+      .execute();
+
+    const res = await trunk.request("/workspaces/member_update_role", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: peerId, role: "admin" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { user_id: string; role: string };
+    expect(body.role).toBe("admin");
+  });
+
+  it("POST /workspaces/member_update_role → 409 when demoting the only live owner", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberUpdateRole: true });
+    await signUp(trunk, "maura@example.com");
+    const signInRes = await signIn(trunk, "maura@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const callerId = await lookupUserIdByEmail("maura@example.com");
+
+    const res = await trunk.request("/workspaces/member_update_role", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: callerId, role: "admin" }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("POST /workspaces/member_update_role → 400 `role_unchanged` when re-asserting the current role", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberUpdateRole: true });
+    await signUp(trunk, "mason@example.com");
+    const signInRes = await signIn(trunk, "mason@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const callerId = await lookupUserIdByEmail("mason@example.com");
+
+    const res = await trunk.request("/workspaces/member_update_role", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: callerId, role: "owner" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /workspaces/member_update_role → 403 for a member role caller (workspace:admin gate)", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberUpdateRole: true });
+    await signUp(trunk, "marge@example.com", { overrideRole: "member" });
+    const signInRes = await signIn(trunk, "marge@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const callerId = await lookupUserIdByEmail("marge@example.com");
+
+    const res = await trunk.request("/workspaces/member_update_role", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: callerId, role: "admin" }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /workspaces/member_update_role 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberUpdateRole: true });
+    const res = await trunk.request("/workspaces/member_update_role", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        user_id: "018f0000-0000-7000-8000-0000000000b1",
+        role: "admin",
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /workspaces/member_remove soft-deletes a non-last member (full stack)", async () => {
+    // Seed a second member; owner removes them; member_list no longer
+    // projects the removed row (active-only).
+    const { trunk } = await buildStack({
+      registerWorkspaceMemberList: true,
+      registerWorkspaceMemberRemove: true,
+    });
+    await signUp(trunk, "manny@example.com");
+    const signInRes = await signIn(trunk, "manny@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const callerId = await lookupUserIdByEmail("manny@example.com");
+    const callerWorkspace = await driver
+      .system()
+      .selectFrom("workspace_members")
+      .select("workspace_id")
+      .where("user_id", "=", callerId)
+      .where("deleted_at", "is", null)
+      .executeTakeFirstOrThrow();
+    const peerId = UserId("018f0000-0000-7000-8000-0000000000dd");
+    await driver
+      .system()
+      .insertInto("workspace_members")
+      .values({
+        workspace_id: callerWorkspace.workspace_id,
+        user_id: peerId,
+        role: "member",
+        created_at: 100,
+        updated_at: 100,
+        deleted_at: null,
+      })
+      .execute();
+
+    const removeRes = await trunk.request("/workspaces/member_remove", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: peerId }),
+    });
+    expect(removeRes.status).toBe(200);
+    const removed = (await removeRes.json()) as { user_id: string; deleted_at: number };
+    expect(removed.user_id).toBe(peerId);
+    expect(typeof removed.deleted_at).toBe("number");
+
+    const listRes = await trunk.request("/workspaces/member_list", {
+      method: "GET",
+      headers: { cookie },
+    });
+    const listed = (await listRes.json()) as {
+      members: Array<{ user_id: string }>;
+    };
+    expect(listed.members.map((m) => m.user_id)).not.toContain(peerId);
+  });
+
+  it("POST /workspaces/member_remove → 409 when removing the only live owner", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberRemove: true });
+    await signUp(trunk, "mauve@example.com");
+    const signInRes = await signIn(trunk, "mauve@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const callerId = await lookupUserIdByEmail("mauve@example.com");
+
+    const res = await trunk.request("/workspaces/member_remove", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: callerId }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("POST /workspaces/member_remove → 404 on re-remove (not idempotent)", async () => {
+    // First remove succeeds; second remove of the same target 404s —
+    // the capability explicitly refuses idempotency so the caller's
+    // remove-attempt signal survives the dedup.
+    const { trunk } = await buildStack({ registerWorkspaceMemberRemove: true });
+    await signUp(trunk, "monty@example.com");
+    const signInRes = await signIn(trunk, "monty@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const callerId = await lookupUserIdByEmail("monty@example.com");
+    const callerWorkspace = await driver
+      .system()
+      .selectFrom("workspace_members")
+      .select("workspace_id")
+      .where("user_id", "=", callerId)
+      .where("deleted_at", "is", null)
+      .executeTakeFirstOrThrow();
+    const peerId = UserId("018f0000-0000-7000-8000-0000000000ee");
+    await driver
+      .system()
+      .insertInto("workspace_members")
+      .values({
+        workspace_id: callerWorkspace.workspace_id,
+        user_id: peerId,
+        role: "member",
+        created_at: 100,
+        updated_at: 100,
+        deleted_at: null,
+      })
+      .execute();
+
+    const first = await trunk.request("/workspaces/member_remove", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: peerId }),
+    });
+    expect(first.status).toBe(200);
+
+    const second = await trunk.request("/workspaces/member_remove", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: peerId }),
+    });
+    expect(second.status).toBe(404);
+  });
+
+  it("POST /workspaces/member_remove → 403 for a member role caller (workspace:admin gate)", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberRemove: true });
+    await signUp(trunk, "maggie@example.com", { overrideRole: "member" });
+    const signInRes = await signIn(trunk, "maggie@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const callerId = await lookupUserIdByEmail("maggie@example.com");
+
+    const res = await trunk.request("/workspaces/member_remove", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: callerId }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /workspaces/member_remove 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberRemove: true });
+    const res = await trunk.request("/workspaces/member_remove", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ user_id: "018f0000-0000-7000-8000-0000000000b1" }),
+    });
+    expect(res.status).toBe(401);
   });
 
   // ── audit.list / audit.get ─────────────────────────────────────────────

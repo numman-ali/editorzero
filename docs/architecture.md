@@ -793,7 +793,7 @@ See [Appendix A](#appendix-a--capability-matrix) for the exhaustive matrix. Grou
 
 | Group | Capabilities |
 |---|---|
-| **workspace** | `workspace.create`, `workspace.update`, `workspace.get`, `workspace.list`, `workspace.delete`, `workspace.restore`, `workspace.purge`, `workspace.member_add`, `workspace.member_remove`, `workspace.member_update_role` |
+| **workspace** | `workspace.create`, `workspace.update`, `workspace.get`, `workspace.list`, `workspace.delete`, `workspace.restore`, `workspace.purge`, `workspace.member_add`, `workspace.member_list`, `workspace.member_remove`, `workspace.member_update_role` |
 | **collection** | `collection.create`, `collection.update`, `collection.move`, `collection.delete`, `collection.restore`, `collection.list` |
 | **doc** | `doc.create`, `doc.get`, `doc.list`, `doc.update`, `doc.update_from_markdown`, `doc.rename`, `doc.move`, `doc.delete`, `doc.restore`, `doc.purge`, `doc.publish`, `doc.unpublish` |
 | **block** | `block.update`, `block.insert`, `block.remove`, `block.set_visibility` (doc-level wrappers also accept block ops; these are the granular forms) |
@@ -1062,7 +1062,8 @@ metadata-only set = {
   doc.move,
   collection.create, collection.update, collection.move,
   collection.delete, collection.restore,
-  workspace.update
+  workspace.update,
+  workspace.member_remove, workspace.member_update_role
 }
 ```
 
@@ -2567,6 +2568,7 @@ This matrix incorporates red-team fixes F12, F13, F15, F19, F22.
 | `workspace.restore` | workspace:admin (`humanOnly`) | H | — | ✓ | ✓ | — | ✓ | 5 | `workspace.restore` |
 | `workspace.purge` | workspace:admin + admin (`humanOnly`) | H | — | ✓ | ✓ | — | ✓ | 1 | `workspace.purge` |
 | `workspace.member_add` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `member.add` |
+| `workspace.member_list` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |
 | `workspace.member_remove` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `member.remove` |
 | `workspace.member_update_role` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `member.update_role` |
 | `collection.create` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 120 | `collection.create` |

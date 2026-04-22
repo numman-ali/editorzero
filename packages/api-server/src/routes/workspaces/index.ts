@@ -8,6 +8,9 @@
  */
 
 import { get } from "./get";
+import { memberList } from "./member_list";
+import { memberRemove } from "./member_remove";
+import { memberUpdateRole } from "./member_update_role";
 import { update } from "./update";
 
-export const workspacesRoutes = [get, update] as const;
+export const workspacesRoutes = [get, memberList, memberRemove, memberUpdateRole, update] as const;
