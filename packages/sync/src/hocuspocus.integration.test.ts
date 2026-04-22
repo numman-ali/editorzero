@@ -78,6 +78,10 @@ async function seedDocMetadata(doc_id: DocId): Promise<void> {
   // Pre-seeding the counter here would mask a regression that re-
   // introduced the pre-bootstrap assumption. Mirrors how real
   // `doc.create` will look after the re-order commit in this slice.
+  //
+  // `slug` / `order_key` are derived from `doc_id` so tests that seed
+  // multiple docs in the same workspace don't collide on the partial
+  // unique index `docs_root_slug_unique` (collections slice 1 DDL).
   await driver
     .system()
     .insertInto("docs")
@@ -86,8 +90,8 @@ async function seedDocMetadata(doc_id: DocId): Promise<void> {
       workspace_id: WORKSPACE_ID,
       collection_id: null,
       title: "test",
-      slug: "test",
-      order_key: "a",
+      slug: doc_id,
+      order_key: doc_id,
       visibility: "workspace",
       visibility_version: 0,
       created_by: USER_ID,

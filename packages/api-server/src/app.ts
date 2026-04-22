@@ -63,13 +63,14 @@
  * endpoints are documented separately via `auth.api.getOpenAPISchema(
  * )` if needed.
  *
- * **Capability-route middleware.** `/docs/*` (and every future
- * capability-domain prefix) is mounted behind `createPrincipalMiddleware`
- * + `createDispatcherMiddleware`. Principal runs first, short-circuits
- * 401 on missing/invalid session; dispatcher runs second, attaches the
- * process-scoped `Dispatcher` to `c.var` for capability handlers to
- * invoke. Public routes (`/infra/*`, `/auth/*`) do not mount this
- * chain — those paths live outside the capability domain.
+ * **Capability-route middleware.** `/docs/*` and `/collections/*`
+ * (and every future capability-domain prefix) are mounted behind
+ * `createPrincipalMiddleware` + `createDispatcherMiddleware`. Principal
+ * runs first, short-circuits 401 on missing/invalid session; dispatcher
+ * runs second, attaches the process-scoped `Dispatcher` to `c.var` for
+ * capability handlers to invoke. Public routes (`/infra/*`, `/auth/*`)
+ * do not mount this chain — those paths live outside the capability
+ * domain.
  *
  * **Middleware order is load-bearing.** Principal must run before
  * dispatcher (dispatcher's work is capability-invocation, which needs
@@ -98,6 +99,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ApiEnv } from "./env";
 import { createDispatcherMiddleware } from "./middleware/dispatcher";
 import { createPrincipalMiddleware } from "./middleware/principal";
+import { collectionsRoutes } from "./routes/collections";
 import { docsRoutes } from "./routes/docs";
 import { infraRoutes } from "./routes/infra";
 
@@ -287,6 +289,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
       resolve: (c) => resolve(c.req.raw.headers),
     });
     trunk.use("/docs/*", principalMw);
+    trunk.use("/collections/*", principalMw);
     trunk.use("/infra/whoami", principalMw);
     // `/mcp` is authenticated via the same principal chain (ADR 0026
     // commitment 1: session cookie resolves to `c.var.principal`; no
@@ -311,10 +314,12 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     }
   }
   if (dispatcher !== undefined) {
-    trunk.use("/docs/*", createDispatcherMiddleware({ dispatcher }));
+    const dispatcherMw = createDispatcherMiddleware({ dispatcher });
+    trunk.use("/docs/*", dispatcherMw);
+    trunk.use("/collections/*", dispatcherMw);
   }
 
-  return trunk.openapiRoutes([...infraRoutes, ...docsRoutes] as const);
+  return trunk.openapiRoutes([...infraRoutes, ...docsRoutes, ...collectionsRoutes] as const);
 }
 
 /**

@@ -25,6 +25,7 @@ export type { SqliteDriver, SqliteDriverOptions } from "./drivers/sqlite";
 export { createSqliteDriver } from "./drivers/sqlite";
 export {
   AUDIT_EVENTS_DDL,
+  COLLECTIONS_DDL,
   DOC_COUNTERS_DDL,
   DOC_SNAPSHOTS_DDL,
   DOC_UPDATES_DDL,
@@ -38,6 +39,7 @@ export { createOutboxWriter, type OutboxAppendInput, type OutboxWriter } from ".
 export { createQueryFaultPlugin, describeQueryNode, type QueryTag } from "./query-fault";
 export type {
   AuditEventsTable,
+  CollectionsTable,
   Database,
   DocCountersTable,
   DocSnapshotsTable,

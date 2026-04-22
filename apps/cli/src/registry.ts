@@ -25,13 +25,16 @@
  *   - No orphan subcommands: every generated subcommand has a
  *     capability backing it.
  *
- * **Today's registry** is the full doc domain (7 capabilities). Adding
- * a new capability with `surfaces: ["cli"]` means: add the import +
- * the `registerCapability(...)` call below, then the generated
- * command tree and the parity test pick it up automatically.
+ * **Today's registry** is the full doc domain (9 capabilities) plus
+ * the collection domain slice 1 (create + list). Adding a new
+ * capability with `surfaces: ["cli"]` means: add the import + the
+ * `registerCapability(...)` call below, then the generated command
+ * tree and the parity test pick it up automatically.
  */
 
 import {
+  collectionCreate,
+  collectionList,
   createRegistry,
   docCreate,
   docDelete,
@@ -46,6 +49,8 @@ import {
 } from "@editorzero/capabilities";
 
 export const cliRegistry = createRegistry([
+  registerCapability(collectionCreate),
+  registerCapability(collectionList),
   registerCapability(docCreate),
   registerCapability(docDelete),
   registerCapability(docGet),

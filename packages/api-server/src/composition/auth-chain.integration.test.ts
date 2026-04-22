@@ -32,6 +32,8 @@
 
 import { createAuth, createBetterAuthResolver, runAuthMigrations } from "@editorzero/auth";
 import {
+  collectionCreate,
+  collectionList,
   createRegistry,
   docCreate,
   docDelete,
@@ -97,6 +99,8 @@ async function buildStack(
     registerDocRestore?: boolean;
     registerDocRename?: boolean;
     registerDocUpdate?: boolean;
+    registerCollectionCreate?: boolean;
+    registerCollectionList?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -120,6 +124,8 @@ async function buildStack(
     ...(options.registerDocRestore ? [registerCapability(docRestore)] : []),
     ...(options.registerDocRename ? [registerCapability(docRename)] : []),
     ...(options.registerDocUpdate ? [registerCapability(docUpdate)] : []),
+    ...(options.registerCollectionCreate ? [registerCapability(collectionCreate)] : []),
+    ...(options.registerCollectionList ? [registerCapability(collectionList)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -2014,5 +2020,109 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       { id: "doc.create", o: "allow" },
       { id: "doc.update", o: "error" },
     ]);
+  });
+
+  // ── Collection capabilities ────────────────────────────────────────────
+
+  it("POST /collections/create mints a collection; GET /collections/list returns it (full stack)", async () => {
+    // End-to-end for the metadata-only collection path: Better Auth →
+    // principal middleware → dispatcher middleware → createApiDispatcher
+    // → collection.create handler (no `ctx.transact` — the dispatcher's
+    // SQL tx commits the `collections` INSERT + audit row together).
+    // Then GET /collections/list reads it back.
+    const { trunk } = await buildStack({
+      registerCollectionCreate: true,
+      registerCollectionList: true,
+    });
+    await signUp(trunk, "yuri@example.com");
+    const signInRes = await signIn(trunk, "yuri@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Reference" }),
+    });
+    expect(createRes.status).toBe(201);
+    const createBody = (await createRes.json()) as {
+      collection_id: string;
+      workspace_id: string;
+      parent_id: string | null;
+      title: string;
+      slug: string;
+    };
+    expect(createBody.title).toBe("Reference");
+    expect(createBody.slug).toBe("reference");
+    expect(createBody.parent_id).toBeNull();
+    expect(createBody.collection_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
+
+    const listRes = await trunk.request("/collections/list", { headers: { cookie } });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      collections: ReadonlyArray<{ id: string; title: string; parent_id: string | null }>;
+    };
+    expect(listBody.collections).toHaveLength(1);
+    expect(listBody.collections[0]?.id).toBe(createBody.collection_id);
+    expect(listBody.collections[0]?.parent_id).toBeNull();
+
+    // Audit trail: one allow per call. `collection.list` reads collapse
+    // but we only call it once here.
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(audits).toHaveLength(2);
+    expect(audits[0]).toMatchObject({ capability_id: "collection.create", outcome: "allow" });
+    expect(audits[1]).toMatchObject({ capability_id: "collection.list", outcome: "allow" });
+  });
+
+  it("POST /collections/create 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerCollectionCreate: true });
+    const res = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Reference" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /collections/list 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerCollectionList: true });
+    const res = await trunk.request("/collections/list");
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /collections/create with a non-existent parent_id returns 404", async () => {
+    const { trunk } = await buildStack({ registerCollectionCreate: true });
+    await signUp(trunk, "zoe@example.com");
+    const signInRes = await signIn(trunk, "zoe@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Orphan",
+        parent_id: "018f0000-0000-7000-8000-0000000000c9",
+      }),
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("not_found");
+  });
+
+  it("POST /collections/create with empty title returns 400 before the dispatcher runs", async () => {
+    const { trunk } = await buildStack({ registerCollectionCreate: true });
+    await signUp(trunk, "wally@example.com");
+    const signInRes = await signIn(trunk, "wally@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+    const res = await trunk.request("/collections/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "   " }),
+    });
+    expect(res.status).toBe(400);
   });
 });

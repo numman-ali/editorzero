@@ -49,6 +49,41 @@ export const DOCS_DDL = `
     deleted_at         BIGINT,
     UNIQUE (id, workspace_id)
   );
+  CREATE UNIQUE INDEX docs_root_slug_unique
+    ON docs(workspace_id, slug)
+    WHERE collection_id IS NULL AND deleted_at IS NULL;
+  CREATE UNIQUE INDEX docs_nested_slug_unique
+    ON docs(workspace_id, collection_id, slug)
+    WHERE collection_id IS NOT NULL AND deleted_at IS NULL;
+` as const;
+
+/**
+ * \`collections\` — folder-tree primitive (architecture.md §3.5).
+ * Parallel to the SQLite DDL; see \`sqlite-ddl.ts\` COLLECTIONS_DDL
+ * header for the rationale on the self-referencing composite FK and
+ * the two partial unique indexes.
+ */
+export const COLLECTIONS_DDL = `
+  CREATE TABLE collections (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    parent_id    TEXT,
+    title        TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    order_key    TEXT NOT NULL,
+    created_by   TEXT NOT NULL,
+    created_at   BIGINT NOT NULL,
+    updated_at   BIGINT NOT NULL,
+    deleted_at   BIGINT,
+    UNIQUE (id, workspace_id),
+    FOREIGN KEY (parent_id, workspace_id) REFERENCES collections(id, workspace_id)
+  );
+  CREATE UNIQUE INDEX collections_root_slug_unique
+    ON collections(workspace_id, slug)
+    WHERE parent_id IS NULL AND deleted_at IS NULL;
+  CREATE UNIQUE INDEX collections_nested_slug_unique
+    ON collections(workspace_id, parent_id, slug)
+    WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
 ` as const;
 
 export const DOC_SNAPSHOTS_DDL = `
@@ -145,6 +180,7 @@ export const OUTBOX_DDL = `
  * into it. Other orderings are free.
  */
 export const FULL_DDL = [
+  COLLECTIONS_DDL,
   DOCS_DDL,
   DOC_SNAPSHOTS_DDL,
   DOC_UPDATES_DDL,

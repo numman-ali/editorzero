@@ -220,6 +220,24 @@ export const BACKUP_COORDINATION_WINDOW_MS: number = 1 * MINUTE_MS;
 /** EDITORZERO_DR_MODE auto-clear window (§18.1 F59). */
 export const DR_MODE_AUTO_CLEAR_MS: number = 24 * HOUR_MS;
 
+// ── Collections (architecture.md §3.5) ────────────────────────────────────
+
+/**
+ * Maximum collection nesting depth. A collection at depth `N` means its
+ * ancestor chain has `N` collections (root is depth 0). Enforced by
+ * `collection.create` (rejects a non-null `parent_id` whose depth is
+ * already at the cap) and `collection.move` (rejects a move whose new
+ * depth — mover's own depth + target's depth — would exceed the cap).
+ *
+ * The 8-level soft cap is a product/UX choice, not a structural limit:
+ * the `parent_id` self-ref is structurally unbounded. Matches Notion-
+ * class UX expectations (the de-facto comparable tools all cap around
+ * 10). Kept in `packages/constants` so the number is tunable without a
+ * migration and the coherence script can enforce "no bare `8` literal
+ * outside this file" if the rule grows teeth.
+ */
+export const COLLECTION_MAX_DEPTH: number = 8;
+
 // ── Secrets (§16.12) ───────────────────────────────────────────────────────
 
 /** Better Auth secret rotation cadence (ADR 0010). */

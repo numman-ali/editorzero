@@ -1,4 +1,6 @@
 import {
+  collectionCreate,
+  collectionList,
   docCreate,
   docDelete,
   docGet,
@@ -32,7 +34,11 @@ describe("deriveHttpBinding", () => {
       verb: "POST",
       pathTemplate: "/docs/create",
       paramName: null,
-      bodyOrQueryKeys: ["title"],
+      // `collection_id` is optional but listed here — the derivation
+      // enumerates the input object's shape, not the runtime-present
+      // keys. An absent optional field simply isn't forwarded as a
+      // body key by the CLI flag generator.
+      bodyOrQueryKeys: ["collection_id", "title"],
     });
   });
 
@@ -103,6 +109,29 @@ describe("deriveHttpBinding", () => {
       pathTemplate: "/docs/update/:doc_id",
       paramName: "doc_id",
       bodyOrQueryKeys: ["ops"],
+    });
+  });
+
+  it("collection.list → GET /collections/list with no param / no body", () => {
+    // Naïve plural rule (`collection` → `collections`) is sufficient
+    // for the collection domain. Verb derives from `category: "read"`.
+    expect(deriveHttpBinding(registerCapability(collectionList))).toEqual({
+      verb: "GET",
+      pathTemplate: "/collections/list",
+      paramName: null,
+      bodyOrQueryKeys: [],
+    });
+  });
+
+  it("collection.create → POST /collections/create with body keys (no path param)", () => {
+    // `collection_id` is not in the input (the id is minted by the
+    // handler), so the derivation produces `paramName: null` and
+    // both optional/required body keys appear in sorted order.
+    expect(deriveHttpBinding(registerCapability(collectionCreate))).toEqual({
+      verb: "POST",
+      pathTemplate: "/collections/create",
+      paramName: null,
+      bodyOrQueryKeys: ["parent_id", "title"],
     });
   });
 

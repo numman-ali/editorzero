@@ -9,8 +9,8 @@
  */
 
 import type { SeedBlock } from "@editorzero/audit";
-import { createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
-import { ValidationError } from "@editorzero/errors";
+import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
+import { NotFoundError, ValidationError } from "@editorzero/errors";
 import {
   AgentId,
   BlockId,
@@ -42,6 +42,7 @@ let sync: MemorySyncService;
 
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
+  driver.exec(COLLECTIONS_DDL);
   driver.exec(DOCS_DDL);
   sync = new MemorySyncService();
 });
@@ -155,20 +156,23 @@ describe("doc.create handler", () => {
     expect(row.visibility).toBe("workspace");
   });
 
-  it("rejects caller-supplied `visibility` and `collection_id` at the input boundary (strict mode)", () => {
+  it("rejects caller-supplied `visibility` at the input boundary (strict mode)", () => {
     // `InputSchema.strict()` emits a zod `unrecognized_keys` issue
     // for any field the schema doesn't know. That's how we refuse
     // to print visibility labels the read path doesn't honour
     // (Codex F103 P1 — `"private"` today would be false privacy,
-    // `"public"` would bypass `doc:publish`) and how we refuse to
-    // store dangling `collection_id` references (F103 P2 #2 — no
-    // `collections` table yet). When the read path / collections
-    // table ship, these fields return with honest semantics.
+    // `"public"` would bypass `doc:publish`). When the read path
+    // honours visibility, `visibility` becomes accepted input.
+    //
+    // `collection_id` is accepted as of the collections-slice 1
+    // widening (see `collection.create` sibling); the live-
+    // collection check is exercised in the integration scenarios
+    // below.
     for (const bad of [
       { title: "x", visibility: "public" },
       { title: "x", visibility: "private" },
       { title: "x", visibility: "workspace" },
-      { title: "x", collection_id: "018f0000-0000-7000-8000-0000000000c1" },
+      { title: "x", stray: 1 },
     ]) {
       const result = docCreate.input.safeParse(bad);
       expect(result.success).toBe(false);
@@ -269,6 +273,93 @@ describe("doc.create handler", () => {
       ids.add(out.doc_id);
     }
     expect(ids.size).toBe(10);
+  });
+});
+
+// ── Optional collection_id ──────────────────────────────────────────────
+
+describe("doc.create — optional collection_id", () => {
+  async function seedCollection(id: typeof COLLECTION_C1, workspace_id: WorkspaceId) {
+    await driver
+      .scoped(workspace_id)
+      .insertInto("collections")
+      .values({
+        id,
+        workspace_id,
+        parent_id: null,
+        title: "C",
+        slug: "c",
+        order_key: id,
+        created_by: ALICE,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: null,
+      })
+      .execute();
+  }
+
+  it("places the new doc in a live collection when `collection_id` is supplied", async () => {
+    await seedCollection(COLLECTION_C1, WORKSPACE_A);
+    const ctx = buildCtx(userPrincipal());
+    const out = await docCreate.handler(ctx, {
+      title: "Scoped doc",
+      collection_id: COLLECTION_C1,
+    });
+    expect(out.collection_id).toBe(COLLECTION_C1);
+
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("docs")
+      .selectAll()
+      .where("id", "=", out.doc_id)
+      .executeTakeFirstOrThrow();
+    expect(row.collection_id).toBe(COLLECTION_C1);
+  });
+
+  it("accepts an explicit `collection_id: null` as workspace root (same as omission)", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const out = await docCreate.handler(ctx, { title: "Plain", collection_id: null });
+    expect(out.collection_id).toBeNull();
+  });
+
+  it("throws NotFoundError when `collection_id` does not exist in the workspace", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const err = await docCreate
+      .handler(ctx, { title: "orphan", collection_id: COLLECTION_C1 })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
+    if (err instanceof NotFoundError) {
+      expect(err.subject_kind).toBe("collection");
+      expect(err.subject_id).toBe(COLLECTION_C1);
+      expect(err.httpStatus).toBe(404);
+    }
+    const rows = await driver.scoped(WORKSPACE_A).selectFrom("docs").selectAll().execute();
+    // No orphan doc — fail-fast before INSERT.
+    expect(rows).toHaveLength(0);
+  });
+
+  it("throws NotFoundError when `collection_id` is soft-deleted", async () => {
+    await seedCollection(COLLECTION_C1, WORKSPACE_A);
+    await driver
+      .scoped(WORKSPACE_A)
+      .updateTable("collections")
+      .set({ deleted_at: 99 })
+      .where("id", "=", COLLECTION_C1)
+      .execute();
+    const ctx = buildCtx(userPrincipal());
+    await expect(
+      docCreate.handler(ctx, { title: "into trashed", collection_id: COLLECTION_C1 }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("cross-workspace isolation: a collection in workspace B is not reachable from workspace A", async () => {
+    const WORKSPACE_B = WorkspaceId("018f0000-0000-7000-8000-000000000002");
+    await seedCollection(COLLECTION_C1, WORKSPACE_B);
+    const ctx = buildCtx(userPrincipal());
+    // Same id, but the tenant plugin narrows the SELECT to workspace A.
+    await expect(
+      docCreate.handler(ctx, { title: "cross-ws", collection_id: COLLECTION_C1 }),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

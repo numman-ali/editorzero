@@ -49,6 +49,54 @@ export const DOCS_DDL = `
     deleted_at         INTEGER,
     UNIQUE (id, workspace_id)
   );
+  CREATE UNIQUE INDEX docs_root_slug_unique
+    ON docs(workspace_id, slug)
+    WHERE collection_id IS NULL AND deleted_at IS NULL;
+  CREATE UNIQUE INDEX docs_nested_slug_unique
+    ON docs(workspace_id, collection_id, slug)
+    WHERE collection_id IS NOT NULL AND deleted_at IS NULL;
+` as const;
+
+/**
+ * \`collections\` — folder-tree primitive (architecture.md §3.5).
+ *
+ * Self-referencing FK on \`(parent_id, workspace_id) REFERENCES
+ * collections(id, workspace_id)\` — same composite-FK pattern as
+ * \`doc_snapshots/doc_updates → docs\` (F99). A cousin collection in
+ * another workspace can never be the parent, even if an attacker
+ * somehow invents a matching \`parent_id\`.
+ *
+ * Slug uniqueness is per \`(workspace_id, parent_id)\` — but SQL's
+ * \`UNIQUE (workspace_id, parent_id, slug)\` treats NULL as distinct,
+ * which would let two root-level collections collide on slug. Two
+ * partial unique indexes express the intended invariant correctly:
+ * one for \`parent_id IS NULL\` (root siblings unique by slug), one
+ * for the non-null case (nested siblings unique by slug within their
+ * parent). Soft-deleted rows are excluded so a restored collection
+ * doesn't silently conflict with a replacement minted after its
+ * deletion.
+ */
+export const COLLECTIONS_DDL = `
+  CREATE TABLE collections (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    parent_id    TEXT,
+    title        TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    order_key    TEXT NOT NULL,
+    created_by   TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    deleted_at   INTEGER,
+    UNIQUE (id, workspace_id),
+    FOREIGN KEY (parent_id, workspace_id) REFERENCES collections(id, workspace_id)
+  );
+  CREATE UNIQUE INDEX collections_root_slug_unique
+    ON collections(workspace_id, slug)
+    WHERE parent_id IS NULL AND deleted_at IS NULL;
+  CREATE UNIQUE INDEX collections_nested_slug_unique
+    ON collections(workspace_id, parent_id, slug)
+    WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
 ` as const;
 
 /**
@@ -205,10 +253,13 @@ export const OUTBOX_DDL = `
 /**
  * The full DDL applied at driver bootstrap. Concatenation order
  * matters only for FK references — `docs` must come before
- * `doc_snapshots` / `doc_updates` / `doc_counters`. Other orderings
- * are free.
+ * `doc_snapshots` / `doc_updates` / `doc_counters`. `collections` is
+ * self-referential and has no FK dependency on `docs`, so either
+ * order works; listing it first alongside docs keeps the document-
+ * domain tables grouped at the top.
  */
 export const FULL_DDL = [
+  COLLECTIONS_DDL,
   DOCS_DDL,
   DOC_SNAPSHOTS_DDL,
   DOC_UPDATES_DDL,

@@ -67,6 +67,7 @@ const DROP_TABLES_SQL = `
   DROP TABLE IF EXISTS doc_snapshots;
   DROP TABLE IF EXISTS workspace_members;
   DROP TABLE IF EXISTS docs;
+  DROP TABLE IF EXISTS collections;
 `;
 
 export async function createSqliteBackend(): Promise<Backend> {

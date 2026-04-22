@@ -33,27 +33,30 @@
  * today; if we add one, a retry-on-conflict loop lands here, not in
  * the SQL layer.
  *
- * **v1 limitations.** Two input fields a v2 `doc.create` will
- * accept are intentionally absent today, for symmetric
- * "don't-promise-what-we-can't-enforce" reasons:
+ * **Optional `collection_id`.** Callers may specify a collection
+ * to place the new doc in; when absent (or explicit `null`) the
+ * doc lands at workspace root. The collection must exist in the
+ * caller's workspace and be live (not soft-deleted) — the handler
+ * SELECTs it through `ctx.db` and returns 404 otherwise. Scoping
+ * is enforced by the tenant plugin's WHERE injection; an attacker
+ * who invents a `CollectionId` that exists in another workspace
+ * gets 404, same as a freshly-minted id that exists nowhere. The
+ * doc's workspace/collection coupling is structurally guarded by
+ * `docs.collection_id`'s handler-enforced referential integrity
+ * (schema.ts header: no FK in DDL so tests can stand DOCS_DDL up
+ * in isolation; the SELECT+reject pattern substitutes).
  *
- *   - `collection_id` — no `collections` table / FK target yet in
- *     the DDL, so accepting a caller-supplied id would write a
- *     dangling reference. New docs always land at workspace root
- *     (`collection_id: null`); `doc.move` owns placement once
- *     `collections` ships with DDL + FK.
- *   - `visibility` — `doc.list` returns every non-deleted doc in
- *     the workspace regardless of `visibility` today (no per-doc
- *     visibility filter / ACL table). Accepting `"private"` would
- *     print a label the read path doesn't honour (false privacy);
- *     accepting `"public"` would bypass `doc:publish`. New docs
- *     land as `"workspace"`; `doc.publish` (scope `doc:publish`)
- *     and a future visibility-widening capability open the other
- *     states once the read path is ready.
- *
- * `InputSchema.strict()` makes either attempt a zod
- * `unrecognized_keys` issue — a 400 with a clear path reference,
- * not a silent drop.
+ * **v1 limitation — `visibility`.** `doc.list` returns every
+ * non-deleted doc in the workspace regardless of `visibility`
+ * today (no per-doc visibility filter / ACL table). Accepting
+ * `"private"` would print a label the read path doesn't honour
+ * (false privacy); accepting `"public"` would bypass `doc:publish`
+ * (members hold `doc:write` but not `doc:publish`). New docs
+ * land as `"workspace"`; `doc.publish` (scope `doc:publish`) and
+ * a future visibility-widening capability open the other states
+ * once the read path is ready. `InputSchema.strict()` makes a
+ * caller-supplied `visibility` a zod `unrecognized_keys` issue —
+ * a 400 with a clear path reference, not a silent drop.
  *
  * **Title normalisation.** `z.string().trim().min(1)` strips
  * surrounding whitespace before the non-empty check. `"   "` trims
@@ -93,7 +96,7 @@ import type {
   HandlerError,
   SeedBlock,
 } from "@editorzero/audit";
-import { ValidationError } from "@editorzero/errors";
+import { NotFoundError, ValidationError } from "@editorzero/errors";
 import {
   BlockId,
   CapabilityId,
@@ -116,47 +119,22 @@ const DEFAULT_VISIBILITY = "workspace" as const;
 
 // ── Input ────────────────────────────────────────────────────────────────
 //
-// Input is intentionally minimal: `{ title }`. Two other obvious
-// fields — `visibility` and `collection_id` — are deliberately not
-// accepted today because the surrounding machinery can't honour
-// them without regressing on stronger guarantees. Callers that try
-// to set either get a zod `unrecognized_keys` issue via
-// `InputSchema.strict()`, which surfaces as a 400 at the dispatcher
-// (not a silent drop). The rationale per-field:
-//
-//   • `visibility` — v1 ships with no per-doc visibility enforcement
-//     on the read path. `doc.list` returns every non-deleted doc in
-//     the workspace regardless of `visibility` (no ACL table yet,
-//     no per-doc-visibility filter). Accepting `"private"` or
-//     `"public"` on create would print a visibility label on the
-//     row that the read path doesn't honour — a *false privacy
-//     guarantee* for `"private"`, and a `doc:publish`-scope bypass
-//     for `"public"` (members hold `doc:write` but not
-//     `doc:publish`, so a caller could mint a public doc through
-//     `doc.create` and skip the dedicated publish permission +
-//     audit row). New docs land as `visibility: "workspace"`; when
-//     the read path honours visibility, `doc.publish` (scope
-//     `doc:publish`) opens the public path and a future
-//     `doc.set_visibility` (or widening here) opens the private
-//     path.
-//
-//   • `collection_id` — v1 has no `collections` table / FK target
-//     yet (`docs.collection_id` is a nullable column, no REFERENCES
-//     clause in `DOCS_DDL`). Accepting a caller-supplied id would
-//     write a dangling reference; validating that "the collection
-//     exists and belongs to this workspace" requires a SELECT
-//     against a table that can't exist yet. New docs always land at
-//     workspace root (`collection_id: null`); `doc.move` (future
-//     slice, once `collections` ships with DDL + FK) owns the
-//     placement transition.
-//
-// `VisibilitySchema` below is the OUTPUT-side enum — it stays
-// `{"workspace", "private"}` today so the audit effect remains
-// assignable to the wider `DocVisibility` type and so widening the
-// read-path later only requires widening the input, not rewriting
-// the output/audit contract.
+// `{ title, collection_id? }`. `visibility` is still not caller-
+// settable in v1 — see the file header for why (false-privacy /
+// publish-bypass risk without a visibility-honouring read path).
+// Callers who try to pass `visibility` get a zod `unrecognized_keys`
+// issue via `InputSchema.strict()` — a 400 with a clear path
+// reference, not a silent drop. `VisibilitySchema` stays
+// `{"workspace", "private"}` as the OUTPUT-side enum so the audit
+// effect remains assignable to the wider `DocVisibility` type and
+// so widening the read-path later only requires widening the input,
+// not rewriting the output/audit contract.
 
 const VisibilitySchema = z.enum(["workspace", "private"]);
+
+const CollectionIdInput = z
+  .uuid({ version: "v7", message: "collection_id must be a UUIDv7" })
+  .transform((s): CollectionId => CollectionId(s));
 
 const InputSchema = z
   .object({
@@ -167,6 +145,11 @@ const InputSchema = z
     // trims to `""` and fails validation instead of sneaking past
     // as a non-empty string while producing a blank heading.
     title: z.string().trim().min(1, "title must not be empty or whitespace-only"),
+    // `null` (explicit workspace root) is distinct from "missing"
+    // (also workspace root) on the wire; both coerce to `null`
+    // inside the handler. Accepting both avoids a caller-side
+    // "omit the field if it's null" dance.
+    collection_id: CollectionIdInput.nullable().optional(),
   })
   .strict();
 type Input = z.infer<typeof InputSchema>;
@@ -297,9 +280,26 @@ export const docCreate: Capability<Input, Output> = {
   handler: async (ctx, input) => {
     const doc_id = generateDocId();
     const workspace_id = ctx.tenant.workspace_id;
-    // v1 always lands docs at workspace root; `collections` table and
-    // `doc.move` ship in a later slice (see input comment).
-    const collection_id: CollectionId | null = null;
+    const collection_id: CollectionId | null = input.collection_id ?? null;
+    // Collection existence check when supplied. The tenant plugin
+    // auto-applies `workspace_id`, so a caller who invents a
+    // `CollectionId` that exists in another workspace gets 404 — the
+    // same surface as a freshly-minted id that exists nowhere. No
+    // information leak. Soft-deleted collections are treated as
+    // not-found (same rule as `doc.get`): the `deleted_at IS NULL`
+    // predicate filters them; if the caller holds `collection:
+    // restore` they use that explicit path, not this implicit one.
+    if (collection_id !== null) {
+      const row = await ctx.db
+        .selectFrom("collections")
+        .select(["id"])
+        .where("id", "=", collection_id)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+      if (row === undefined) {
+        throw new NotFoundError({ subject_kind: "collection", subject_id: collection_id });
+      }
+    }
     const title = input.title;
     const slug = slugify(title);
     // `order_key = doc_id` is a **single-replica** append guarantee.

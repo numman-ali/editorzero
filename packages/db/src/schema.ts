@@ -40,6 +40,7 @@ import type { Kysely } from "kysely";
  * the plugin.
  */
 export const TENANT_SCOPED_TABLES = [
+  "collections",
   "docs",
   "doc_snapshots",
   "doc_updates",
@@ -49,12 +50,63 @@ export const TENANT_SCOPED_TABLES = [
 export type TenantScopedTable = (typeof TENANT_SCOPED_TABLES)[number];
 
 /**
+ * `collections` — folder-tree primitive for organizing docs
+ * (architecture.md §3.5). One row per collection. `parent_id = NULL`
+ * means the collection sits at workspace root; otherwise it's a child
+ * of the referenced collection. Slug uniqueness is per `(workspace_id,
+ * parent_id)` — two siblings can't share a slug, but two cousins in
+ * different parents can. The SQL constraint is expressed as two
+ * partial unique indexes (one for `parent_id IS NULL`, one for
+ * non-null) because `UNIQUE (workspace_id, parent_id, slug)` treats
+ * NULL as distinct and would let two root-level collections collide.
+ *
+ * Soft-delete via `deleted_at` — same 30-day recovery window as docs
+ * (ADR 0017). `collection.delete` is **non-cascading** in v1: refuses
+ * when the collection has any live child (doc or child collection),
+ * returns 409. Restoring a doc or child collection into a deleted
+ * parent is also refused (409) — caller restores the parent first.
+ * This keeps the audit-effect shape lossless (the `collection.
+ * soft_delete` effect carries only the collection_id; no implicit
+ * descendant list) and the restore semantics unambiguous.
+ */
+export interface CollectionsTable {
+  readonly id: CollectionId;
+  readonly workspace_id: WorkspaceId;
+  readonly parent_id: CollectionId | null;
+  readonly title: string;
+  readonly slug: string;
+  readonly order_key: string;
+  readonly created_by: UserId;
+  readonly created_at: number;
+  readonly updated_at: number;
+  readonly deleted_at: number | null;
+}
+
+/**
  * `docs` — canonical metadata row per document (architecture.md §3.5).
  *
  * `title` is a CRDT projection rebuilt by the snapshot job; it is
  * written at `doc.create` seed time so listings / search don't have to
  * open the Y.Doc. The authoritative title lives in the document's
  * `title` block (ADR 0013 / 0018).
+ *
+ * `collection_id` places the doc in a collection (nullable — `null`
+ * means the doc sits at workspace root). The column is NOT a SQL FK
+ * to `collections(id)` today: tests instantiate `DOCS_DDL` in
+ * isolation without bringing `COLLECTIONS_DDL` along (12+ test files),
+ * so adding a FK would break unrelated test fixtures. Referential
+ * integrity is handler-enforced: `doc.create` / `doc.move` SELECT the
+ * collection row before writing, and reject with 404 if the
+ * collection is missing or soft-deleted. When Atlas takes over
+ * (architecture.md §16.9) the FK lands alongside the codegen move.
+ *
+ * Slug uniqueness is per `(workspace_id, collection_id)` — same
+ * NULL-aware partial-index pattern as collections: two sibling docs
+ * can't share a slug, but a root doc and a collection-scoped doc
+ * can (different uniqueness scopes). Expressed as two partial unique
+ * indexes (one for `collection_id IS NULL`, one for non-null).
+ * `doc.create` surfaces collision as 409 (SQL UNIQUE violation
+ * bubbles through the dispatcher's error projection).
  *
  * Timestamps are epoch-ms `number`s; SQLite and Postgres both store
  * them as `INTEGER` / `BIGINT` and Kysely maps them to `number` on
@@ -252,6 +304,7 @@ export interface OutboxTable {
  * `TENANT_SCOPED_TABLES`. Internal tables go on `SystemDatabase`.
  */
 export interface Database {
+  readonly collections: CollectionsTable;
   readonly docs: DocsTable;
   readonly doc_snapshots: DocSnapshotsTable;
   readonly doc_updates: DocUpdatesTable;
