@@ -5,11 +5,11 @@
  * `tenant-scoping.integration.test.ts` proves the WorkspaceScopingPlugin
  * instruments the compiled SQL on both dialects against the `docs` table.
  * This file extends the floor to every member of `TENANT_SCOPED_TABLES`
- * (`docs`, `doc_snapshots`, `doc_updates`, `audit_events`) — the plugin
- * is table-blind by design (it keys off list membership), so the
- * invariant we care about is not "does it work on table X" but "does it
- * actually run against table X on Postgres". `tenant.unit.test.ts` has
- * already covered each table on SQLite at the unit level.
+ * (`collections`, `docs`, `doc_snapshots`, `doc_updates`, `audit_events`)
+ * — the plugin is table-blind by design (it keys off list membership),
+ * so the invariant we care about is not "does it work on table X" but
+ * "does it actually run against table X on Postgres". `tenant.unit.test.ts`
+ * has already covered each table on SQLite at the unit level.
  *
  * Shape: one test per table × backend, each seeds a row in workspace A
  * and workspace B via the unscoped `system()` handle, then asserts the
@@ -18,7 +18,7 @@
  * `doc_updates` depend on `docs.id`; `audit_events` does not).
  */
 
-import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { CapabilityId, CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { TENANT_SCOPED_TABLES } from "../../src/schema";
@@ -35,6 +35,8 @@ const ALICE = UserId("018f0000-0000-7000-8000-0000000000a1");
 const BOB = UserId("018f0000-0000-7000-8000-0000000000b1");
 const DOC_A = DocId("018f0000-0000-7000-8000-0000000000d1");
 const DOC_B = DocId("018f0000-0000-7000-8000-0000000000d2");
+const COLL_A = CollectionId("018f0000-0000-7000-8000-0000000000c1");
+const COLL_B = CollectionId("018f0000-0000-7000-8000-0000000000c2");
 
 function seedDoc(id: DocId, workspace_id: WorkspaceId, created_by: UserId) {
   return {
@@ -92,11 +94,49 @@ describe.each(backends)("tenant-table isolation — $name", ({ setup }) => {
     // If this list grows and a test below isn't added, the assertion
     // catches the drift so the floor keeps matching the schema.
     expect([...TENANT_SCOPED_TABLES]).toEqual([
+      "collections",
       "docs",
       "doc_snapshots",
       "doc_updates",
       "audit_events",
     ]);
+  });
+
+  it("collections: workspace-A handle returns only workspace-A rows", async () => {
+    await backend.driver
+      .system()
+      .insertInto("collections")
+      .values([
+        {
+          id: COLL_A,
+          workspace_id: WORKSPACE_A,
+          parent_id: null,
+          title: "coll",
+          slug: "coll-a",
+          order_key: COLL_A,
+          created_by: ALICE,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: null,
+        },
+        {
+          id: COLL_B,
+          workspace_id: WORKSPACE_B,
+          parent_id: null,
+          title: "coll",
+          slug: "coll-b",
+          order_key: COLL_B,
+          created_by: BOB,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: null,
+        },
+      ])
+      .execute();
+
+    const a = backend.driver.scoped(WORKSPACE_A);
+    const seen = await a.selectFrom("collections").select("id").execute();
+    expect(seen.map((r) => r.id)).toEqual([COLL_A]);
   });
 
   it("docs: workspace-A handle returns only workspace-A rows", async () => {
