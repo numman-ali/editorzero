@@ -23,8 +23,18 @@
  *      decision carries fresh role intent ("re-add Alice, as admin
  *      this time").
  *   3. **No row** — fresh INSERT with `created_at = updated_at = now`,
- *      `deleted_at = null`. `workspace_id` is forced by the tenant-
- *      scoping plugin (the Kysely `ctx.db` handle is tenant-bound).
+ *      `deleted_at = null`, wrapped in `ON CONFLICT (workspace_id,
+ *      user_id) DO NOTHING RETURNING ...`. `workspace_id` is forced
+ *      by the tenant-scoping plugin (the Kysely `ctx.db` handle is
+ *      tenant-bound). The ON CONFLICT clause is a local race guard
+ *      — a plain INSERT would surface a raw `23505` (PG
+ *      unique_violation) as an untyped 500 when two admins both
+ *      pass Branch A's SELECT and race the INSERT; the global error
+ *      mapper intentionally does *not* project 23505 (pinned in
+ *      `app.unit.test.ts`), because teaching it that duplicate-key
+ *      is generically safe would hide real data-integrity bugs
+ *      elsewhere. Zero-row return from the ON CONFLICT path re-throws
+ *      `MemberAlreadyExistsError`; caller re-reads to decide.
  *
  * **FK-user-missing is not pre-checked in slice 1.** The DDL has
  * `user_id REFERENCES user(id)`; if the request carries a `user_id`
@@ -176,9 +186,21 @@ export const workspaceMemberAdd: Capability<Input, Output> = {
       };
     }
 
-    // Branch C — fresh INSERT. `workspace_id` is auto-injected by the
-    // tenant-scoping plugin; we pass it explicitly for type-checking
-    // against the Kysely `InsertObject` shape.
+    // Branch C — fresh INSERT. Uses `ON CONFLICT (workspace_id,
+    // user_id) DO NOTHING` because a plain INSERT has a PG race the
+    // route contract does not admit: two admins both pass Branch A's
+    // step-1 SELECT, one commits an INSERT, the other hits a raw
+    // `23505` (unique_violation on the composite PK) that the global
+    // error mapper intentionally does *not* project (see
+    // `app.unit.test.ts` — 23505 is pinned as NOT mapped, because
+    // teaching the mapper that duplicate-key is generically "safe"
+    // would hide real data integrity bugs elsewhere). DO NOTHING
+    // catches the PK conflict locally; zero-row return means another
+    // writer landed a row since our step-1 SELECT, so we throw
+    // `MemberAlreadyExistsError` — the caller's view of the roster
+    // is stale, re-read and decide. `workspace_id` is auto-injected
+    // by the tenant-scoping plugin; we pass it explicitly for type-
+    // checking against the Kysely `InsertObject` shape.
     const row = await ctx.db
       .insertInto("workspace_members")
       .values({
@@ -189,8 +211,24 @@ export const workspaceMemberAdd: Capability<Input, Output> = {
         updated_at: now,
         deleted_at: null,
       })
+      .onConflict((oc) => oc.columns(["workspace_id", "user_id"]).doNothing())
       .returning(["workspace_id", "user_id", "role", "created_at", "updated_at"])
-      .executeTakeFirstOrThrow();
+      .executeTakeFirst();
+
+    if (row === undefined) {
+      // PK conflict fired → another writer (fresh add or revive)
+      // landed a row on `(workspace_id, user_id)` since step 1.
+      // The edge where the racing write is a soft-delete landing
+      // between step 1 and here requires add + remove inside the
+      // same tx-race window — vanishingly rare under normal flow.
+      // `MemberAlreadyExistsError` is the right projection either
+      // way: the caller tried to add someone who is (or just was)
+      // on the roster under a PK they thought was free.
+      throw new MemberAlreadyExistsError({
+        workspace_id: ctx.tenant.workspace_id,
+        user_id: target_user_id,
+      });
+    }
 
     return {
       workspace_id: row.workspace_id,

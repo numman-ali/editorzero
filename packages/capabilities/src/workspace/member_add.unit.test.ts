@@ -226,6 +226,56 @@ describe("workspace.member_add", () => {
     expect(out.created_at).toBe(9000);
   });
 
+  it("Branch C `ON CONFLICT DO NOTHING` shape: a direct INSERT+ON CONFLICT against an existing PK yields no row", async () => {
+    // This test pins the race guard Codex's review drove in at
+    // slice follow-up: a plain INSERT would surface PG's 23505
+    // (unique_violation) as a raw 500 because the global error
+    // mapper does not project 23505 (see `app.unit.test.ts` — the
+    // 23505-NOT-mapped test is load-bearing). The capability's
+    // Branch C wraps its INSERT in `ON CONFLICT (workspace_id,
+    // user_id) DO NOTHING RETURNING ...`, turning the race into a
+    // zero-row return the handler can project to
+    // `MemberAlreadyExistsError`.
+    //
+    // Static unit tests cannot interleave between the handler's
+    // step 1 SELECT and its step 3 INSERT to reproduce the live
+    // race; instead we assert the underlying Kysely shape by
+    // firing the same `ON CONFLICT DO NOTHING RETURNING` INSERT
+    // directly against a pre-seeded row and confirming zero rows
+    // return — which is exactly the state Branch C throws
+    // `MemberAlreadyExistsError` on. End-to-end race coverage is
+    // deferred to a real-concurrency integration suite.
+    await seedMember({ user_id: BOB, role: "member", created_at: 100 });
+
+    const result = await driver
+      .system()
+      .insertInto("workspace_members")
+      .values({
+        workspace_id: WORKSPACE_A,
+        user_id: BOB,
+        role: "admin",
+        created_at: 9999,
+        updated_at: 9999,
+        deleted_at: null,
+      })
+      .onConflict((oc) => oc.columns(["workspace_id", "user_id"]).doNothing())
+      .returning(["user_id", "role"])
+      .executeTakeFirst();
+
+    expect(result).toBeUndefined();
+
+    // Pre-seeded row untouched — ON CONFLICT DO NOTHING is not an
+    // UPSERT; existing state is preserved.
+    const row = await driver
+      .system()
+      .selectFrom("workspace_members")
+      .select(["role", "created_at"])
+      .where("user_id", "=", BOB)
+      .executeTakeFirstOrThrow();
+    expect(row.role).toBe("member");
+    expect(row.created_at).toBe(100);
+  });
+
   it("composes with Layer-2 scoping: workspace-A ctx cannot revive or add into workspace-B", async () => {
     await seedMember({ workspace_id: WORKSPACE_A, user_id: ALICE, role: "owner" });
     // Bob is a soft-deleted member in workspace-B only.
