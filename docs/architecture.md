@@ -2606,6 +2606,8 @@ This matrix incorporates red-team fixes F12, F13, F15, F19, F22.
 | `permission.grant` | permission:grant | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `acl.grant` |
 | `permission.revoke` | permission:revoke | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `acl.revoke` |
 | `permission.list` | workspace:read | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |
+| `audit.list` (paginated via composite `(before_created_at, before_id)` cursor; filters on subject pair, capability_id, outcome, time range) | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read (collapsible) |
+| `audit.get` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read (collapsible) |
 | `agent.create` | agent:create | H | A | ✓ | ✓ | ✓ | ✓ | 10 | `agent.create` |
 | `agent.rename` | agent:create | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `agent.rename` |
 | `agent.revoke` | agent:revoke | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `agent.revoke` |

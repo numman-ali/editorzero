@@ -25,6 +25,8 @@ export { createRegistry, RegistryLookupError, registerCapability } from "./regis
 // barrel dependency-light and lets consumers choose which capabilities
 // to include (e.g., an admin-only surface that omits public ones).
 
+export { auditGet } from "./audit/get";
+export { auditList } from "./audit/list";
 export { collectionCreate } from "./collection/create";
 export { collectionDelete } from "./collection/delete";
 export { collectionList } from "./collection/list";

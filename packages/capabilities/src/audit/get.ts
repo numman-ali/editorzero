@@ -1,0 +1,148 @@
+/**
+ * `audit.get` — fetch a single `audit_events` row by primary key
+ * (architecture.md §3.11).
+ *
+ * Admin-only, paired with `audit.list`. Kept as a distinct capability
+ * from `audit.list --id=...` so the CLI/MCP surface reads
+ * naturally (`ez audits get <id>`, `audit.get` MCP tool) and the
+ * audit-event row's surfaces map cleanly into the ADR 0021 plural-
+ * action convention.
+ *
+ * **Subject on 404.** The `audit_events` row id is not one of the
+ * `SUBJECT_KINDS` values (widening that enum would cascade through
+ * schema + audit + tests). The NotFoundError therefore projects
+ * `subject_kind: "workspace"` with the tenant's own workspace_id —
+ * honest projection: "no audit row with this id is visible in
+ * workspace W." The requested id appears in the error message.
+ */
+
+import type { HandlerError } from "@editorzero/audit";
+import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
+import { NotFoundError } from "@editorzero/errors";
+import { CapabilityId, WorkspaceId } from "@editorzero/ids";
+import { z } from "zod";
+
+import { projectErrorAudit } from "../audit-helpers";
+import type { Capability } from "../kernel";
+
+const AUDIT_GET_ID = CapabilityId("audit.get");
+
+// ── Input ────────────────────────────────────────────────────────────────
+//
+// `audit_id` is named to match the `<domain>_id` CLI-binding
+// convention (see `apps/cli/src/generator/http-binding.ts`): input
+// field named `audit_id` auto-derives path `/audits/get/:audit_id`
+// and a positional `<audit_id>` CLI argument. The handler maps it
+// to the `id` column.
+
+const InputSchema = z
+  .object({
+    audit_id: z.uuid({ version: "v7", message: "audit_id must be a UUIDv7" }),
+  })
+  .strict();
+type Input = z.infer<typeof InputSchema>;
+
+// ── Output ───────────────────────────────────────────────────────────────
+//
+// Row shape identical to `audit.list` elements. Intentionally
+// duplicated here — keeping the schemas co-located with their
+// capabilities avoids a shared schema file becoming a
+// registry-of-effect-types.
+
+const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
+
+const EffectSchema = z.object({ kind: z.string() }).catchall(z.unknown());
+
+const OutputSchema = z.object({
+  id: z.string(),
+  workspace_id: WorkspaceIdField,
+  capability_id: z.string(),
+  category: z.enum(["mutation", "read", "auth", "admin", "system"]),
+  principal_kind: z.enum(["user", "agent"]),
+  principal_id: z.string(),
+  acting_as_user_id: z.string().nullable(),
+  session_id: z.string().nullable(),
+  token_id: z.string().nullable(),
+  subject_kind: z.string(),
+  subject_id: z.string().nullable(),
+  outcome: z.enum(["allow", "deny", "error"]),
+  deny_reason: z.string().nullable(),
+  input_hash: z.string(),
+  effect: EffectSchema,
+  duration_ms: z.number(),
+  trace_id: z.string().nullable(),
+  created_at: z.number(),
+  collapsed_count: z.number(),
+});
+type Output = z.infer<typeof OutputSchema>;
+
+// ── Capability ───────────────────────────────────────────────────────────
+
+export const auditGet: Capability<Input, Output> = {
+  id: AUDIT_GET_ID,
+  category: "read",
+  summary: "Fetch a single audit event by id; admin-only.",
+  input: InputSchema,
+  output: OutputSchema,
+  requires: ["workspace:admin"],
+  surfaces: ["api", "cli", "mcp", "ui"],
+  audit: {
+    subjectFrom: () => ({ kind: "workspace" }),
+    effectOnAllow: () => ({ kind: "audit.access_log" }),
+    effectOnDeny: (_input, reason) => ({
+      kind: "deny",
+      capability: AUDIT_GET_ID,
+      required_scopes: ["workspace:admin"],
+      reason_code: reason.kind,
+    }),
+    effectOnError: (_input, error: HandlerError) => projectErrorAudit(AUDIT_GET_ID, error),
+    collapsePolicy: {
+      collapsible: true,
+      window_ms: AUDIT_READ_COLLAPSE_WINDOW_MS,
+      // Per-id bucket: two `audit.get` calls on the same row within
+      // the window collapse; two different rows produce two rows
+      // (mirrors `doc.get`).
+      collapseKey: (input) => `audit.get:${(input as Input).audit_id}`,
+    },
+  },
+  handler: async (ctx, input) => {
+    const row = await ctx.db
+      .selectFrom("audit_events")
+      .select([
+        "id",
+        "workspace_id",
+        "capability_id",
+        "category",
+        "principal_kind",
+        "principal_id",
+        "acting_as_user_id",
+        "session_id",
+        "token_id",
+        "subject_kind",
+        "subject_id",
+        "outcome",
+        "deny_reason",
+        "input_hash",
+        "effect",
+        "duration_ms",
+        "trace_id",
+        "created_at",
+        "collapsed_count",
+      ])
+      .where("id", "=", input.audit_id)
+      .executeTakeFirst();
+
+    if (row === undefined) {
+      throw new NotFoundError({
+        subject_kind: "workspace",
+        subject_id: ctx.tenant.workspace_id,
+        message: `audit event ${input.audit_id} not found in workspace ${ctx.tenant.workspace_id}`,
+      });
+    }
+
+    return {
+      ...row,
+      effect: JSON.parse(row.effect) as { kind: string } & Record<string, unknown>,
+    };
+  },
+};

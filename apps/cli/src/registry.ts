@@ -34,6 +34,8 @@
  */
 
 import {
+  auditGet,
+  auditList,
   collectionCreate,
   collectionDelete,
   collectionList,
@@ -57,6 +59,8 @@ import {
 } from "@editorzero/capabilities";
 
 export const cliRegistry = createRegistry([
+  registerCapability(auditGet),
+  registerCapability(auditList),
   registerCapability(collectionCreate),
   registerCapability(collectionDelete),
   registerCapability(collectionList),

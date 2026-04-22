@@ -99,6 +99,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ApiEnv } from "./env";
 import { createDispatcherMiddleware } from "./middleware/dispatcher";
 import { createPrincipalMiddleware } from "./middleware/principal";
+import { auditRoutes } from "./routes/audit";
 import { collectionsRoutes } from "./routes/collections";
 import { docsRoutes } from "./routes/docs";
 import { infraRoutes } from "./routes/infra";
@@ -292,6 +293,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     trunk.use("/docs/*", principalMw);
     trunk.use("/collections/*", principalMw);
     trunk.use("/workspaces/*", principalMw);
+    trunk.use("/audits/*", principalMw);
     trunk.use("/infra/whoami", principalMw);
     // `/mcp` is authenticated via the same principal chain (ADR 0026
     // commitment 1: session cookie resolves to `c.var.principal`; no
@@ -320,6 +322,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     trunk.use("/docs/*", dispatcherMw);
     trunk.use("/collections/*", dispatcherMw);
     trunk.use("/workspaces/*", dispatcherMw);
+    trunk.use("/audits/*", dispatcherMw);
   }
 
   return trunk.openapiRoutes([
@@ -327,6 +330,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     ...docsRoutes,
     ...collectionsRoutes,
     ...workspacesRoutes,
+    ...auditRoutes,
   ] as const);
 }
 
