@@ -28,6 +28,24 @@ AGENTS.md invariant 6 (soft-deletes recoverable via first-class capability) is r
 - **MCP** — `packages/mcp-server` via `@hono/mcp` + `@modelcontextprotocol/sdk` 1.x; Streamable-HTTP only.
 - **Web UI** — `apps/app` + `apps/admin` (Next.js 16 App Router).
 
+**CLI dogfood punch list (2026-04-22, deferred behind API/capability coverage):**
+
+Findings from two dogfood subagents running the compiled `ez` binary against a real stack — convergent across both reports. Audit-surface finding already closed by the 2026-04-22 audit slice. Remaining items bucketed per Codex's read:
+
+- **Capability-level gaps** (missing from registry → affect API / CLI / MCP / UI by invariant 4):
+  - No `auth.signup` capability — signup is a Better Auth HTTP endpoint only; no first-class signup path on any surface. Backlog, not an ADR-level decision until a slice commits to designing it.
+  - `doc.create` has no content-on-create path (no `--body`, stdin, or initial-block-set input). Forces "create empty, then mutate" for any non-blank doc.
+
+- **Cross-surface contract hygiene** — principle now durable in AGENTS.md § Working rules (*"Adapter schemas mirror capability schemas"*). Concrete residual work:
+  - CLI flag parser does not yet coerce numeric/enum flags against capability zod (route layer already does; audit slice closed its share of this drift).
+  - `auth.logout` leaves the server session live — CLI's credential file clears but a preserved cookie still authenticates. Belongs at the `@editorzero/auth` package, not the CLI adapter.
+
+- **CLI-adapter UX backlog** (ez-binary only):
+  - No `EZ_BASE_URL` env var — targeting a non-default server requires editing a config file.
+  - No `--format json|toon` flag (AXI CLI spec wants machine-readable opt-in); stdout is human-default.
+  - ANSI escapes in piped help output; no `NO_COLOR` support.
+  - Binary naming drift — `ez` vs `editorzero` inconsistency across docs/scripts.
+
 **Gated on @numman decision:** Phase-4 entry gate revision (Open Question 3). Appendix C's "all entries CLOSED" rule is unsatisfiable against the current tree; rule revision + dual-backend scope answer land at phase boundary. Last formal sweep (d3a55d2, 2026-04-19): 2 CLOSED-for-content-mutations / 2 PARTIAL / 12 OPEN. Several rows have moved since — `packages/{api-server, api-client, auth, mcp-server}` + `apps/cli` all landed in P3.7; row 1 (monorepo scaffold) and row 2 (capabilities reach all four surface adapters) are both materially closer to CLOSED. A fresh sweep belongs to phase-boundary review alongside the gate-rule revision rather than a mid-phase recount. Spec source for the items themselves: `docs/architecture.md` § Appendix C.
 
 ## Open questions for @numman

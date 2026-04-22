@@ -78,6 +78,7 @@ When you invite it: brief the reviewer as a peer (context + what worries you), n
 - **Agents are users.** Every human-facing control has an agent equivalent.
 - **Determinism is a feature.** Doc-model changes preserve CRDT convergence and per-block Markdown fidelity.
 - **Single source of truth, derived elsewhere.** Capability registry → OpenAPI / MCP / contract matrix. Constants → `packages/constants`. Enumerations → `as const` arrays.
+- **Adapter schemas mirror capability schemas.** Routes, CLI flag parsers, and MCP tool schemas re-state the same zod refines at their own parse boundary. Without the mirror, generated clients / CLI help / MCP tool schemas advertise a more permissive contract than runtime enforces. Drift already caught on `doc.update`, `workspace.update`, audit routes, and CLI flag parsing — treat adapter-layer boundary parsing as a property of the capability contract, not the adapter's own concern.
 - **Verify library docs at point of use.** Before writing against a pinned dependency (Hocuspocus, BlockNote, Better Auth, Yjs, Kysely, Atlas, MCP SDK, Next.js, Hono), fetch current docs for the pinned version.
 - **Opus sub-agents only** for Claude-spawned subagents (research, planning, exploration). Spawn when fan-out beats sequential.
 - **Parallel agents share the working tree.** Don't isolate. Stage your own files by path; review the result if another agent adjusts your in-flight files.
