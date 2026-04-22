@@ -32,6 +32,8 @@
 
 import { createAuth, createBetterAuthResolver, runAuthMigrations } from "@editorzero/auth";
 import {
+  auditGet,
+  auditList,
   collectionCreate,
   collectionDelete,
   collectionList,
@@ -115,6 +117,8 @@ async function buildStack(
     registerCollectionMove?: boolean;
     registerWorkspaceGet?: boolean;
     registerWorkspaceUpdate?: boolean;
+    registerAuditList?: boolean;
+    registerAuditGet?: boolean;
     withSync?: boolean;
   } = {},
 ) {
@@ -147,6 +151,8 @@ async function buildStack(
     ...(options.registerCollectionMove ? [registerCapability(collectionMove)] : []),
     ...(options.registerWorkspaceGet ? [registerCapability(workspaceGet)] : []),
     ...(options.registerWorkspaceUpdate ? [registerCapability(workspaceUpdate)] : []),
+    ...(options.registerAuditList ? [registerCapability(auditList)] : []),
+    ...(options.registerAuditGet ? [registerCapability(auditGet)] : []),
   ];
   const registry = createRegistry(capabilities);
   // Content-mutation capabilities (doc.create) need a real
@@ -2849,5 +2855,185 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       body: JSON.stringify({ slug: "hijack" }),
     });
     expect(res.status).toBe(400);
+  });
+
+  // ── audit.list / audit.get ─────────────────────────────────────────────
+
+  it("GET /audits/list — owner sees rows for capabilities they invoked (full stack)", async () => {
+    // Drive real audit rows by invoking a registered capability
+    // first (`workspace.update`), then list audits through the API
+    // and verify at least the update's row is present.
+    const { trunk } = await buildStack({
+      registerAuditList: true,
+      registerWorkspaceUpdate: true,
+    });
+    await signUp(trunk, "audra@example.com");
+    const signInRes = await signIn(trunk, "audra@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const updateRes = await trunk.request("/workspaces/update", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Audra Co" }),
+    });
+    expect(updateRes.status).toBe(200);
+
+    const listRes = await trunk.request("/audits/list", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(listRes.status).toBe(200);
+    const body = (await listRes.json()) as {
+      events: Array<{ capability_id: string; outcome: string }>;
+      next_cursor: unknown;
+    };
+    // The update + the list itself produce audit rows. We only
+    // assert the update row landed — the list's own row ordering
+    // relative to "now" depends on `collapsePolicy` consolidation
+    // which the dispatcher owns.
+    const capabilityIds = body.events.map((e) => e.capability_id);
+    expect(capabilityIds).toContain("workspace.update");
+    expect(body.events.every((e) => e.outcome === "allow")).toBe(true);
+  });
+
+  it("GET /audits/list — non-admin member gets 403 (workspace:admin gate)", async () => {
+    const { trunk } = await buildStack({ registerAuditList: true });
+    await signUp(trunk, "abby@example.com", { overrideRole: "member" });
+    const signInRes = await signIn(trunk, "abby@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/audits/list", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /audits/list 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerAuditList: true });
+    const res = await trunk.request("/audits/list", { method: "GET" });
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /audits/list coerces query-string limit + filter + paginates via the composite cursor", async () => {
+    const { trunk } = await buildStack({
+      registerAuditList: true,
+      registerWorkspaceGet: true,
+      registerWorkspaceUpdate: true,
+    });
+    await signUp(trunk, "aron@example.com");
+    const signInRes = await signIn(trunk, "aron@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    // Generate several audit rows so pagination has something to bite.
+    for (let i = 0; i < 3; i++) {
+      const res = await trunk.request("/workspaces/update", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ name: `page-${i}` }),
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const page1Res = await trunk.request("/audits/list?limit=2&capability_id=workspace.update", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(page1Res.status).toBe(200);
+    const page1 = (await page1Res.json()) as {
+      events: Array<{ id: string; capability_id: string; created_at: number }>;
+      next_cursor: { before_created_at: number; before_id: string } | null;
+    };
+    expect(page1.events.length).toBe(2);
+    expect(page1.events.every((e) => e.capability_id === "workspace.update")).toBe(true);
+    expect(page1.next_cursor).not.toBeNull();
+
+    // Use the returned cursor verbatim — exactly the wire contract.
+    const cursor = page1.next_cursor;
+    if (cursor === null) throw new Error("expected cursor on page 1");
+    const page2Res = await trunk.request(
+      `/audits/list?limit=2&capability_id=workspace.update&before_created_at=${cursor.before_created_at}&before_id=${cursor.before_id}`,
+      { method: "GET", headers: { cookie } },
+    );
+    expect(page2Res.status).toBe(200);
+    const page2 = (await page2Res.json()) as {
+      events: Array<{ id: string }>;
+      next_cursor: unknown;
+    };
+    // Page 2 must not overlap with page 1 — the cursor pair is
+    // strictly-lesser on the composite key.
+    const page1Ids = new Set(page1.events.map((e) => e.id));
+    for (const e of page2.events) {
+      expect(page1Ids.has(e.id)).toBe(false);
+    }
+  });
+
+  it("GET /audits/list rejects a lone-half cursor → 400 (both-or-neither refine)", async () => {
+    const { trunk } = await buildStack({ registerAuditList: true });
+    await signUp(trunk, "arden@example.com");
+    const signInRes = await signIn(trunk, "arden@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/audits/list?before_created_at=1000", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /audits/get/:audit_id — owner fetches a row written by a prior capability", async () => {
+    const { trunk } = await buildStack({
+      registerAuditList: true,
+      registerAuditGet: true,
+      registerWorkspaceUpdate: true,
+    });
+    await signUp(trunk, "aria@example.com");
+    const signInRes = await signIn(trunk, "aria@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const updateRes = await trunk.request("/workspaces/update", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Aria Org" }),
+    });
+    expect(updateRes.status).toBe(200);
+
+    const listRes = await trunk.request("/audits/list?capability_id=workspace.update&limit=1", {
+      method: "GET",
+      headers: { cookie },
+    });
+    const listBody = (await listRes.json()) as { events: Array<{ id: string }> };
+    const rowId = listBody.events[0]?.id;
+    expect(rowId).toBeTruthy();
+
+    const getRes = await trunk.request(`/audits/get/${rowId}`, {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(getRes.status).toBe(200);
+    const row = (await getRes.json()) as {
+      id: string;
+      capability_id: string;
+      outcome: string;
+      effect: { kind: string };
+    };
+    expect(row.id).toBe(rowId);
+    expect(row.capability_id).toBe("workspace.update");
+    expect(row.outcome).toBe("allow");
+    expect(row.effect.kind).toBe("workspace.update");
+  });
+
+  it("GET /audits/get/:audit_id 404s on an id that does not exist in the caller's workspace", async () => {
+    const { trunk } = await buildStack({ registerAuditGet: true });
+    await signUp(trunk, "ash@example.com");
+    const signInRes = await signIn(trunk, "ash@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    // Well-formed UUIDv7, but nothing with this id exists.
+    const res = await trunk.request("/audits/get/0199ffff-ffff-7fff-bfff-ffffffffffff", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(404);
   });
 });
