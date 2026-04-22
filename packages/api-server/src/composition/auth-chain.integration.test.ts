@@ -2981,6 +2981,24 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /audits/list rejects a backwards since/until range → 400 (time-range refine)", async () => {
+    // Pins that the route-layer refine catches `since > until` at the
+    // edge (vs. falling through to the dispatcher). Without the route
+    // mirror, the generated-client contract would advertise these as
+    // independently-optional and the drift would surface as a
+    // dispatcher-layer 400 that the OpenAPI doc doesn't describe.
+    const { trunk } = await buildStack({ registerAuditList: true });
+    await signUp(trunk, "aurora@example.com");
+    const signInRes = await signIn(trunk, "aurora@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/audits/list?since=2000&until=1000", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("GET /audits/get/:audit_id — owner fetches a row written by a prior capability", async () => {
     const { trunk } = await buildStack({
       registerAuditList: true,
@@ -3035,5 +3053,22 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       headers: { cookie },
     });
     expect(res.status).toBe(404);
+  });
+
+  it("GET /audits/get/:audit_id rejects a malformed audit_id → 400 (route-layer UUIDv7)", async () => {
+    // Pins that the route narrows `audit_id` to UUIDv7 at the edge;
+    // without this, non-UUID strings would reach the capability zod
+    // parse and the generated client would advertise an overly-
+    // permissive type.
+    const { trunk } = await buildStack({ registerAuditGet: true });
+    await signUp(trunk, "august@example.com");
+    const signInRes = await signIn(trunk, "august@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/audits/get/not-a-uuid", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(400);
   });
 });

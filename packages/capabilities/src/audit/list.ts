@@ -33,11 +33,15 @@
  * `capability_id` or subject; a principal-centric investigation
  * surface gets its own capability when the use case lands.
  *
- * **Audit — read-collapsible, workspace-scoped bucket.** Identical
- * `audit.list` calls within `AUDIT_READ_COLLAPSE_WINDOW_MS` fold to
- * one row (ADR 0009 §9.3). The collapse key is constant; the
- * dispatcher's input-hash dedup separates distinct filter calls
- * within a bucket without per-filter `collapseKey` arithmetic.
+ * **Audit — declares the standard read-collapse policy.** The
+ * capability advertises `collapsible: true` with `window_ms =
+ * AUDIT_READ_COLLAPSE_WINDOW_MS` and a constant bucket key. Backend
+ * collapse is deferred at the writer layer (`packages/db/src/audit-
+ * writer.ts` — `collapsed_count` is always 1 today); until the
+ * dispatcher threads `collapsePolicy` through `AuditWriteInput` and
+ * the writer performs a keyed UPDATE-or-INSERT, repeated
+ * `audit.list` calls still emit one row per call. The policy here
+ * is the shape the writer will honour when that slice lands.
  *
  * **Effect shape at the wire.** Each row's `effect` column is stored
  * as TEXT-JSON of a discriminated `AuditEffect | AuditDeny |

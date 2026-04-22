@@ -11,11 +11,13 @@
  * **Cursor shape.** `before_created_at` + `before_id` are surfaced
  * as two explicit query keys rather than an opaque blob — the
  * CLI renders the next-page args at a glance (`ez audits list
- * --before-created-at=<n> --before-id=<uuid>`). Pair is enforced
- * both-or-neither at the capability zod; the route is permissive
- * and relies on the dispatcher's zod parse to surface a 400 for a
- * lone-half cursor (the route uses `.strict()` only to reject
- * unknown keys; the semantic pair refine lives on the capability).
+ * --before-created-at=<n> --before-id=<uuid>`). The three semantic
+ * refines (cursor pair both-or-neither, subject pair both-or-
+ * neither, `since <= until`) are mirrored at the route layer so
+ * the OpenAPI / generated-client contract matches runtime —
+ * without the mirror, callers would see these as independently-
+ * optional fields while the capability would throw 400 at zod
+ * parse. Same class of drift Codex flagged on `doc.update`.
  *
  * **Scope.** `workspace:admin` — the capability refuses other
  * callers at the dispatcher gate. The route declares 403 so the
@@ -45,6 +47,18 @@ const AuditListQuery = z
     outcome: z.enum(["allow", "deny", "error"]).optional(),
     since: z.coerce.number().int().optional(),
     until: z.coerce.number().int().optional(),
+  })
+  .refine(
+    (v) =>
+      (v.before_created_at === undefined && v.before_id === undefined) ||
+      (v.before_created_at !== undefined && v.before_id !== undefined),
+    { message: "before_created_at and before_id must be provided together" },
+  )
+  .refine((v) => v.subject_id === undefined || v.subject_kind !== undefined, {
+    message: "subject_id requires subject_kind",
+  })
+  .refine((v) => v.since === undefined || v.until === undefined || v.since <= v.until, {
+    message: "since must be less than or equal to until",
   })
   .openapi("AuditListQuery");
 

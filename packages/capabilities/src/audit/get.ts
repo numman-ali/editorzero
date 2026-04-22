@@ -99,9 +99,12 @@ export const auditGet: Capability<Input, Output> = {
     collapsePolicy: {
       collapsible: true,
       window_ms: AUDIT_READ_COLLAPSE_WINDOW_MS,
-      // Per-id bucket: two `audit.get` calls on the same row within
-      // the window collapse; two different rows produce two rows
-      // (mirrors `doc.get`).
+      // Per-id bucket (mirrors `doc.get`): the policy declares that
+      // two `audit.get` calls on the same row within the window
+      // collapse, two different rows do not. Backend collapse is
+      // deferred at the writer (`packages/db/src/audit-writer.ts` —
+      // `collapsed_count` is always 1 today); this key is the shape
+      // the writer will honour when the collapse slice lands.
       collapseKey: (input) => `audit.get:${(input as Input).audit_id}`,
     },
   },

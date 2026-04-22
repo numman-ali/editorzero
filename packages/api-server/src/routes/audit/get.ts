@@ -19,9 +19,16 @@ import type { ApiEnv } from "../../env";
 
 const AUDIT_GET_ID = CapabilityId("audit.get");
 
+// Route-layer UUIDv7 narrowing mirrors the capability's input schema so
+// the OpenAPI / `hc<AppType>` contract matches runtime behaviour. Without
+// it, generated clients would treat any string as valid while the
+// capability would throw at zod parse — the same class of route/capability
+// drift Codex flagged on `doc.update`.
 const AuditGetParams = z
   .object({
-    audit_id: z.string().openapi({ description: "UUIDv7 of the audit event." }),
+    audit_id: z
+      .uuid({ version: "v7", message: "audit_id must be a UUIDv7" })
+      .openapi({ description: "UUIDv7 of the audit event." }),
   })
   .openapi("AuditGetParams");
 
