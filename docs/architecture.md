@@ -1061,7 +1061,8 @@ metadata-only set = {
   doc.delete, doc.restore,
   doc.move,
   collection.create, collection.update, collection.move,
-  collection.delete, collection.restore
+  collection.delete, collection.restore,
+  workspace.update
 }
 ```
 

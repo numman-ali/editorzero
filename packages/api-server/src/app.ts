@@ -102,6 +102,7 @@ import { createPrincipalMiddleware } from "./middleware/principal";
 import { collectionsRoutes } from "./routes/collections";
 import { docsRoutes } from "./routes/docs";
 import { infraRoutes } from "./routes/infra";
+import { workspacesRoutes } from "./routes/workspaces";
 
 export interface CreateApiAppOptions {
   /**
@@ -290,6 +291,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     });
     trunk.use("/docs/*", principalMw);
     trunk.use("/collections/*", principalMw);
+    trunk.use("/workspaces/*", principalMw);
     trunk.use("/infra/whoami", principalMw);
     // `/mcp` is authenticated via the same principal chain (ADR 0026
     // commitment 1: session cookie resolves to `c.var.principal`; no
@@ -317,9 +319,15 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     const dispatcherMw = createDispatcherMiddleware({ dispatcher });
     trunk.use("/docs/*", dispatcherMw);
     trunk.use("/collections/*", dispatcherMw);
+    trunk.use("/workspaces/*", dispatcherMw);
   }
 
-  return trunk.openapiRoutes([...infraRoutes, ...docsRoutes, ...collectionsRoutes] as const);
+  return trunk.openapiRoutes([
+    ...infraRoutes,
+    ...docsRoutes,
+    ...collectionsRoutes,
+    ...workspacesRoutes,
+  ] as const);
 }
 
 /**

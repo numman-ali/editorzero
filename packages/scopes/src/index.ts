@@ -131,6 +131,7 @@ export const METADATA_ONLY_CAPABILITIES = [
   "collection.move",
   "collection.delete",
   "collection.restore",
+  "workspace.update",
 ] as const;
 
 export type MetadataOnlyCapabilityId = (typeof METADATA_ONLY_CAPABILITIES)[number];

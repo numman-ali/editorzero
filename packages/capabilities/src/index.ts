@@ -41,3 +41,5 @@ export { docRename } from "./doc/rename";
 export { docRestore } from "./doc/restore";
 export { docUnpublish } from "./doc/unpublish";
 export { docUpdate } from "./doc/update";
+export { workspaceGet } from "./workspace/get";
+export { workspaceUpdate } from "./workspace/update";
