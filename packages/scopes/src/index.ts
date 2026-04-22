@@ -132,6 +132,7 @@ export const METADATA_ONLY_CAPABILITIES = [
   "collection.delete",
   "collection.restore",
   "workspace.update",
+  "workspace.member_add",
   "workspace.member_remove",
   "workspace.member_update_role",
 ] as const;

@@ -53,6 +53,7 @@ import {
   docUpdate,
   registerCapability,
   workspaceGet,
+  workspaceMemberAdd,
   workspaceMemberList,
   workspaceMemberRemove,
   workspaceMemberUpdateRole,
@@ -120,6 +121,7 @@ async function buildStack(
     registerCollectionMove?: boolean;
     registerWorkspaceGet?: boolean;
     registerWorkspaceUpdate?: boolean;
+    registerWorkspaceMemberAdd?: boolean;
     registerWorkspaceMemberList?: boolean;
     registerWorkspaceMemberRemove?: boolean;
     registerWorkspaceMemberUpdateRole?: boolean;
@@ -157,6 +159,7 @@ async function buildStack(
     ...(options.registerCollectionMove ? [registerCapability(collectionMove)] : []),
     ...(options.registerWorkspaceGet ? [registerCapability(workspaceGet)] : []),
     ...(options.registerWorkspaceUpdate ? [registerCapability(workspaceUpdate)] : []),
+    ...(options.registerWorkspaceMemberAdd ? [registerCapability(workspaceMemberAdd)] : []),
     ...(options.registerWorkspaceMemberList ? [registerCapability(workspaceMemberList)] : []),
     ...(options.registerWorkspaceMemberRemove ? [registerCapability(workspaceMemberRemove)] : []),
     ...(options.registerWorkspaceMemberUpdateRole
@@ -3173,6 +3176,177 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ user_id: "018f0000-0000-7000-8000-0000000000b1" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  // ── workspace.member_add ───────────────────────────────────────────────
+
+  it("POST /workspaces/member_add inserts a fresh member (full stack)", async () => {
+    // Two signups: admin@ owns workspace-A; target@ owns workspace-B.
+    // admin@ adds target@ as `"member"` to workspace-A. target@ ends up
+    // with two membership rows (one per workspace) — this is the
+    // expected multi-workspace shape per ADR 0024.
+    const { trunk } = await buildStack({
+      registerWorkspaceMemberAdd: true,
+      registerWorkspaceMemberList: true,
+    });
+    await signUp(trunk, "admin-add@example.com");
+    await signUp(trunk, "target-add@example.com");
+    const targetId = await lookupUserIdByEmail("target-add@example.com");
+    const signInRes = await signIn(trunk, "admin-add@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const addRes = await trunk.request("/workspaces/member_add", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: targetId, role: "member" }),
+    });
+    expect(addRes.status).toBe(200);
+    const addBody = (await addRes.json()) as {
+      user_id: string;
+      role: string;
+      created_at: number;
+      updated_at: number;
+    };
+    expect(addBody.user_id).toBe(targetId);
+    expect(addBody.role).toBe("member");
+    expect(addBody.created_at).toBe(addBody.updated_at); // fresh insert
+
+    // Roster now shows two rows (admin@ as owner, target@ as member).
+    const listRes = await trunk.request("/workspaces/member_list", {
+      method: "GET",
+      headers: { cookie },
+    });
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      members: Array<{ user_id: string; role: string }>;
+    };
+    const userIds = listBody.members.map((m) => m.user_id);
+    expect(userIds).toContain(targetId);
+    expect(listBody.members.find((m) => m.user_id === targetId)?.role).toBe("member");
+  });
+
+  it("POST /workspaces/member_add revives a soft-deleted member (preserves created_at, may change role)", async () => {
+    // Admin@ adds target@ as member → removes target@ → re-adds as admin.
+    // The re-add goes through the revive branch (ADR 0024 §5): the
+    // composite PK means INSERT would collide; handler does UPDATE
+    // clearing deleted_at + setting new role. created_at preserved,
+    // updated_at bumped.
+    const { trunk } = await buildStack({
+      registerWorkspaceMemberAdd: true,
+      registerWorkspaceMemberRemove: true,
+    });
+    await signUp(trunk, "admin-revive@example.com");
+    await signUp(trunk, "target-revive@example.com");
+    const targetId = await lookupUserIdByEmail("target-revive@example.com");
+    const signInRes = await signIn(trunk, "admin-revive@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    // Step 1 — add as member.
+    const addRes1 = await trunk.request("/workspaces/member_add", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: targetId, role: "member" }),
+    });
+    expect(addRes1.status).toBe(200);
+    const created_at_initial = ((await addRes1.json()) as { created_at: number }).created_at;
+
+    // Step 2 — remove.
+    const removeRes = await trunk.request("/workspaces/member_remove", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: targetId }),
+    });
+    expect(removeRes.status).toBe(200);
+
+    // Step 3 — re-add, this time as admin.
+    const addRes2 = await trunk.request("/workspaces/member_add", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: targetId, role: "admin" }),
+    });
+    expect(addRes2.status).toBe(200);
+    const addBody2 = (await addRes2.json()) as {
+      user_id: string;
+      role: string;
+      created_at: number;
+      updated_at: number;
+    };
+    expect(addBody2.user_id).toBe(targetId);
+    expect(addBody2.role).toBe("admin"); // role changed across revive
+    expect(addBody2.created_at).toBe(created_at_initial); // preserved
+    expect(addBody2.updated_at).toBeGreaterThanOrEqual(created_at_initial);
+  });
+
+  it("POST /workspaces/member_add → 409 `member_already_exists` on re-add of a live member", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberAdd: true });
+    await signUp(trunk, "admin-dup@example.com");
+    await signUp(trunk, "target-dup@example.com");
+    const targetId = await lookupUserIdByEmail("target-dup@example.com");
+    const signInRes = await signIn(trunk, "admin-dup@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    // First add succeeds.
+    const first = await trunk.request("/workspaces/member_add", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: targetId, role: "member" }),
+    });
+    expect(first.status).toBe(200);
+
+    // Second add on the same live target → 409, body pins the code.
+    const second = await trunk.request("/workspaces/member_add", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: targetId, role: "admin" }),
+    });
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ error: "member_already_exists" });
+  });
+
+  it("POST /workspaces/member_add → 403 for a member role caller (workspace:admin gate)", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberAdd: true });
+    await signUp(trunk, "malloy@example.com", { overrideRole: "member" });
+    await signUp(trunk, "melinda@example.com");
+    const targetId = await lookupUserIdByEmail("melinda@example.com");
+    const signInRes = await signIn(trunk, "malloy@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/member_add", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ user_id: targetId, role: "member" }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /workspaces/member_add rejects unknown role → 400", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberAdd: true });
+    await signUp(trunk, "amber@example.com");
+    const signInRes = await signIn(trunk, "amber@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const res = await trunk.request("/workspaces/member_add", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        user_id: "018f0000-0000-7000-8000-0000000000b1",
+        role: "superuser",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /workspaces/member_add 401s without a session cookie", async () => {
+    const { trunk } = await buildStack({ registerWorkspaceMemberAdd: true });
+    const res = await trunk.request("/workspaces/member_add", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        user_id: "018f0000-0000-7000-8000-0000000000b1",
+        role: "member",
+      }),
     });
     expect(res.status).toBe(401);
   });

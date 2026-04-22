@@ -358,6 +358,43 @@ export class LastOwnerError extends EditorZeroError {
 }
 
 /**
+ * `workspace.member_add` target already has a *live* membership row
+ * (i.e. `deleted_at IS NULL`) in the caller's workspace. Distinct from
+ * the revive-in-place path (ADR 0024 §5), which handles
+ * `deleted_at IS NOT NULL` as an UPDATE and is *not* an error.
+ *
+ * Separate code from generic `conflict` so callers can distinguish
+ * "you tried to add someone who's already a member" (idempotency-adjacent
+ * — caller is probably out of sync with the current member list) from
+ * "a concurrent write lost the serialization race" (caller should
+ * backoff + retry). Same distinction `SlugCollisionError` draws for
+ * sibling-slug uniqueness; this class mirrors its shape.
+ *
+ * Projects to `{ kind: "conflict" }` in `HandlerError` — the audit
+ * layer folds "write-refused-by-state" variants into one kind; surfaces
+ * disambiguate on the wire `code`.
+ */
+export class MemberAlreadyExistsError extends EditorZeroError {
+  readonly code = "member_already_exists";
+  readonly httpStatus = 409;
+  readonly workspace_id: WorkspaceId;
+  readonly user_id: UserId;
+
+  constructor(params: { message?: string; workspace_id: WorkspaceId; user_id: UserId }) {
+    super(
+      params.message ??
+        `user ${params.user_id} is already a member of workspace ${params.workspace_id}`,
+    );
+    this.workspace_id = params.workspace_id;
+    this.user_id = params.user_id;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "conflict" };
+  }
+}
+
+/**
  * Attachment quota exceeded, Yjs update > 256 KB, maintenance_work_mem
  * too small, etc.
  */

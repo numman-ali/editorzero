@@ -1063,7 +1063,7 @@ metadata-only set = {
   collection.create, collection.update, collection.move,
   collection.delete, collection.restore,
   workspace.update,
-  workspace.member_remove, workspace.member_update_role
+  workspace.member_add, workspace.member_remove, workspace.member_update_role
 }
 ```
 
