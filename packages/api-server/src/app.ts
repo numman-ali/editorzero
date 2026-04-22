@@ -180,6 +180,21 @@ export interface CreateApiAppOptions {
   readonly mcpServerInfo?: { readonly name: string; readonly version: string };
 }
 
+/**
+ * Detect Postgres retryable-serialization failures (`40001`
+ * serialization_failure, `40P01` deadlock_detected). `pg` exposes the
+ * SQLSTATE on the thrown error's `.code` property as a 5-char string.
+ * Used by the global error mapper to project the "loser of a
+ * SERIALIZABLE race" as a typed 409 conflict rather than a 500. See
+ * ADR 0023 §3 + `drivers/postgres.ts` header; bounded retry inside the
+ * driver is deferred.
+ */
+function isPgRetryableError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null || !("code" in err)) return false;
+  const code = (err as { code: unknown }).code;
+  return code === "40001" || code === "40P01";
+}
+
 export function createApiApp(options: CreateApiAppOptions = {}) {
   const { auth, loadRoles, dispatcher, registry, mcpServerInfo } = options;
 
@@ -264,15 +279,30 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
   // **Error mapper** — every `EditorZeroError` subclass carries its
   // HTTP status + code literal (`packages/errors/src/index.ts`);
   // dispatch-path throws surface here when a capability handler (or
-  // the dispatcher itself) raises. Plain non-typed errors fall through
-  // to Hono's default 500. Narrow projection: status from
+  // the dispatcher itself) raises. Narrow projection: status from
   // `err.httpStatus`, body `{ error: err.code }` — same shape every
   // route's zod error response already documents for 400/401/403.
   // Principal-middleware 401s are returned via `c.json(...)` directly
   // (not thrown), so this mapper doesn't touch them.
+  //
+  // **PG retryable-serialization failures → 409 conflict.** Under
+  // Postgres SERIALIZABLE (ADR 0023 §3), `withSystemTx` can abort with
+  // `40001` (serialization_failure) or `40P01` (deadlock_detected) —
+  // the loser of a concurrent-mutation race. These bubble out of the
+  // write-path tx as raw `pg` errors (not `EditorZeroError` subclasses;
+  // bounded retry inside the driver is deferred per `drivers/postgres.ts`
+  // header). The mapper projects them to a typed 409 `conflict` so the
+  // surface contract holds — the invariant being protected has held,
+  // the loser just needs to retry. SQLite (BEGIN IMMEDIATE single-writer)
+  // never produces these codes so this branch is PG-only in practice.
+  //
+  // Plain non-typed errors fall through to Hono's default 500.
   trunk.onError((err, c) => {
     if (err instanceof EditorZeroError) {
       return c.json({ error: err.code }, err.httpStatus as ContentfulStatusCode);
+    }
+    if (isPgRetryableError(err)) {
+      return c.json({ error: "conflict" }, 409);
     }
     throw err;
   });

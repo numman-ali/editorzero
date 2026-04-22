@@ -227,4 +227,90 @@ describe("api-server trunk composition", () => {
       /registry.+without.+auth/i,
     );
   });
+
+  // ── Global error mapper (trunk.onError) ────────────────────────────────
+  //
+  // The mapper is the lone surface-boundary that turns thrown errors
+  // into structured HTTP responses. Three branches:
+  //   1. `EditorZeroError` subclass → `{ error: err.code }` with the
+  //      subclass's declared `httpStatus`.
+  //   2. PG retryable-serialization error (`.code === "40001" | "40P01"`)
+  //      → `{ error: "conflict" }` with 409. Surfaces the loser of a
+  //      SERIALIZABLE race as a typed conflict rather than a raw 500
+  //      (ADR 0023 §3; bounded retry deferred).
+  //   3. Anything else → rethrown (Hono default → 500).
+  //
+  // These tests drive errors through the trunk by having a fake auth
+  // handler throw — `/auth/*` is attached before routes but after
+  // `trunk.onError`, so a throw here exercises the same mapper path
+  // any capability handler would hit.
+
+  const makeFaultyAuth = (err: unknown): Auth =>
+    makeFakeAuth(async () => {
+      throw err;
+    });
+  const fakeLoadRoles: LoadRoles = async () => null;
+
+  function buildTrunkWithFaultyAuth(err: unknown) {
+    return createApiApp({
+      auth: makeFaultyAuth(err),
+      loadRoles: fakeLoadRoles,
+      dispatcher: fakeDispatcher,
+    });
+  }
+
+  it("global mapper projects PG 40001 (serialization_failure) to 409 `conflict`", async () => {
+    const pgError = Object.assign(new Error("SSI abort"), { code: "40001" });
+    const trunk = buildTrunkWithFaultyAuth(pgError);
+    const res = await trunk.request("/auth/sign-in/email", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "conflict" });
+  });
+
+  it("global mapper projects PG 40P01 (deadlock_detected) to 409 `conflict`", async () => {
+    const pgError = Object.assign(new Error("deadlock"), { code: "40P01" });
+    const trunk = buildTrunkWithFaultyAuth(pgError);
+    const res = await trunk.request("/auth/sign-in/email", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "conflict" });
+  });
+
+  it("global mapper does not swallow unrelated PG-shaped errors (e.g. unique_violation `23505`)", async () => {
+    // Only retryable-serialization codes map to 409; other pg codes
+    // (e.g. 23505 unique_violation) belong to the throwing layer's own
+    // error family and should either be projected through EditorZeroError
+    // (e.g. SlugCollisionError) or rethrow. The mapper must not silently
+    // turn every PG error into a 409 — that would hide real capability-
+    // side bugs. In this test harness the rethrow propagates past
+    // `trunk.request(...)` (no outer HTTP server catching it to 500); in
+    // production Node/Hono's default handler converts it to a 500 for the
+    // caller. Either way, the mapper is NOT the thing that sends 409.
+    const pgError = Object.assign(new Error("unique violation"), { code: "23505" });
+    const trunk = buildTrunkWithFaultyAuth(pgError);
+    await expect(trunk.request("/auth/sign-in/email", { method: "POST" })).rejects.toThrow(
+      /unique violation/,
+    );
+  });
+
+  it("global mapper projects EditorZeroError subclasses using `code` + `httpStatus`", async () => {
+    // Sanity-pin the typed branch — the one the rest of the app depends
+    // on for every 400/401/403/404/409/413 response shape.
+    const { ConflictError } = await import("@editorzero/errors");
+    const trunk = buildTrunkWithFaultyAuth(
+      new ConflictError({ message: "synthetic", retry_after_ms: null }),
+    );
+    const res = await trunk.request("/auth/sign-in/email", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "conflict" });
+  });
+
+  it("global mapper rethrows bare (non-typed, non-PG) errors to the default handler", async () => {
+    // Surface-contract: random uncategorized errors are NOT silently
+    // projected to a successful response. Same harness caveat as the
+    // unrelated-pg test above — in production the rethrow becomes a 500.
+    const trunk = buildTrunkWithFaultyAuth(new Error("unclassified boom"));
+    await expect(trunk.request("/auth/sign-in/email", { method: "POST" })).rejects.toThrow(
+      /unclassified boom/,
+    );
+  });
 });

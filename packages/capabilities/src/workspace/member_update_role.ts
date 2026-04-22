@@ -12,11 +12,25 @@
  * **Last-owner protection.** If the update would demote the last
  * `owner` row (i.e. `to_role !== "owner"` AND the target currently
  * holds the only live `owner` row), the handler throws
- * `LastOwnerError` (typed 409). The check runs inside the dispatcher
- * write-path tx (`ctx.db` is tx-bound for metadata-only capabilities),
- * so the COUNT + UPDATE pair are atomic — a concurrent admin
- * demoting the other owner cannot slip through between the check and
- * the write. A plain pre-check outside the tx would be racy.
+ * `LastOwnerError` (typed 409 with code `last_owner_protected`). The
+ * check runs inside the dispatcher write-path tx (`ctx.db` is tx-bound
+ * for metadata-only capabilities), so the COUNT + UPDATE pair are
+ * atomic against the target row.
+ *
+ * The invariant holds in both dialects, but the on-wire projection
+ * differs:
+ *   - SQLite (BEGIN IMMEDIATE, single-writer): a concurrent admin
+ *     demoting the other owner is serialized; the second tx sees the
+ *     already-committed state and raises `LastOwnerError` → 409
+ *     `last_owner_protected`.
+ *   - Postgres (SERIALIZABLE, SSI): two admins demoting the last two
+ *     owners in parallel can both pass the in-tx check against their
+ *     own snapshot; one commit succeeds, the other aborts with 40001
+ *     (serialization_failure). The global error mapper projects 40001
+ *     / 40P01 to 409 `conflict` — same invariant family, transient.
+ *     Bounded retry inside the driver is deferred (ADR 0023 §3).
+ *
+ * A plain pre-check outside the tx would be racy in either dialect.
  *
  * **No-op rejection.** If the target already has `to_role`, returning
  * a success would pollute the audit log with meaningless entries. The

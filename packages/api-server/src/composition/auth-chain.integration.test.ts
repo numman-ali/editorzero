@@ -2974,7 +2974,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     expect(body.role).toBe("admin");
   });
 
-  it("POST /workspaces/member_update_role → 409 when demoting the only live owner", async () => {
+  it("POST /workspaces/member_update_role → 409 `last_owner_protected` when demoting the only live owner", async () => {
     const { trunk } = await buildStack({ registerWorkspaceMemberUpdateRole: true });
     await signUp(trunk, "maura@example.com");
     const signInRes = await signIn(trunk, "maura@example.com");
@@ -2987,6 +2987,13 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       body: JSON.stringify({ user_id: callerId, role: "admin" }),
     });
     expect(res.status).toBe(409);
+    // Body shape: `{ error: "last_owner_protected" }`. The global error
+    // mapper returns `{ error: err.code }`; `LastOwnerError.code =
+    // "last_owner_protected"`. The 409-family also covers PG SERIALIZABLE
+    // race losers as `{ error: "conflict" }` (see app.ts mapper) — this
+    // test pins the static-state branch; the PG branch is unit-tested
+    // in `app.unit.test.ts`.
+    expect(await res.json()).toEqual({ error: "last_owner_protected" });
   });
 
   it("POST /workspaces/member_update_role → 400 `role_unchanged` when re-asserting the current role", async () => {
@@ -3084,7 +3091,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     expect(listed.members.map((m) => m.user_id)).not.toContain(peerId);
   });
 
-  it("POST /workspaces/member_remove → 409 when removing the only live owner", async () => {
+  it("POST /workspaces/member_remove → 409 `last_owner_protected` when removing the only live owner", async () => {
     const { trunk } = await buildStack({ registerWorkspaceMemberRemove: true });
     await signUp(trunk, "mauve@example.com");
     const signInRes = await signIn(trunk, "mauve@example.com");
@@ -3097,6 +3104,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
       body: JSON.stringify({ user_id: callerId }),
     });
     expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "last_owner_protected" });
   });
 
   it("POST /workspaces/member_remove → 404 on re-remove (not idempotent)", async () => {

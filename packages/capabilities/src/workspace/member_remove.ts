@@ -12,9 +12,14 @@
  *
  * **Last-owner protection.** If the target is currently an `owner`
  * and is the only live `owner` row, removal throws `LastOwnerError`
- * (typed 409). Same rationale + mechanics as
- * `workspace.member_update_role`: the check runs inside the write
- * tx so COUNT + UPDATE are atomic against concurrent admin action.
+ * (typed 409 with code `last_owner_protected`). Same rationale +
+ * mechanics as `workspace.member_update_role`: the check runs inside
+ * the write tx so COUNT + UPDATE are atomic against the target row.
+ * The invariant holds in both dialects; on PG a lost SERIALIZABLE
+ * race surfaces as 409 `conflict` via the global error mapper (40001
+ * / 40P01 projection) rather than `last_owner_protected`. See the
+ * `member_update_role` header for the full dialect-projection
+ * breakdown.
  *
  * **Self-removal is allowed.** The caller can `member_remove` their
  * own user_id (voluntary leave). The last-owner guard naturally

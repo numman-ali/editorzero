@@ -102,10 +102,12 @@ const memberUpdateRoleRouteDef = createRoute({
     },
     409: {
       description:
-        "Demote blocked — target is the only live owner; last-owner invariant would be broken.",
+        "Demote blocked — `last_owner_protected` when the target is the only live owner; `conflict` when a PG serializable race loses at commit (same invariant family, transient).",
       content: {
         "application/json": {
-          schema: z.object({ error: z.literal("conflict") }),
+          schema: z.object({
+            error: z.union([z.literal("last_owner_protected"), z.literal("conflict")]),
+          }),
         },
       },
     },
