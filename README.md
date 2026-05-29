@@ -9,12 +9,12 @@
 
 One capability layer. Four surfaces: API · CLI · MCP · Web UI. Full parity, enforced.
 
-> 🧪 **A real production experiment in complex agentic engineering.** Every line of code, every ADR, every architectural decision is driven end-to-end by Anthropic's new Opus 4.7 model.
+> 🧪 **A real production experiment in complex agentic engineering.** Every line of code, every ADR, every architectural decision is driven end-to-end by Anthropic's frontier Opus model (currently Opus 4.8, 1M-context).
 
 [![Status](https://img.shields.io/badge/status-Phase%203%20%C2%B7%20WIP-orange.svg)](docs/continuation.md)
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-22%20LTS-3fb950.svg)](package.json)
-[![Built with Opus 4.7](https://img.shields.io/badge/built%20with-Claude%20Opus%204.7-8b5cf6.svg)](https://www.anthropic.com)
+[![Built with Opus 4.8](https://img.shields.io/badge/built%20with-Claude%20Opus%204.8-8b5cf6.svg)](https://www.anthropic.com)
 
 [Status](#-status) · [What It Is](#-what-is-editorzero) · [Experiment](#-the-experiment) · [Invariants](#️-hard-invariants) · [Parity](#-four-surface-parity) · [Roadmap](#️-roadmap) · [Contributing](#-contributing)
 
@@ -24,14 +24,14 @@ One capability layer. Four surfaces: API · CLI · MCP · Web UI. Full parity, e
 
 ## 🚧 Status
 
-**Work in progress. No runnable artifact yet.** The platform is currently in **Phase 3 — verification harness + first slice**.
+**Work in progress.** The compiled `ez` CLI is the first runnable artifact (verified end-to-end); the Web UI is not yet built. The platform is currently in **Phase 3 — verification harness + feature slices**.
 
 | Phase | What | State |
 |---|---|---|
 | **0** · Orient | Brief, invariants, working assumptions | ✅ Closed |
-| **1** · Research + ADRs | 20 ADRs, cross-model red-team | ✅ Closed |
+| **1** · Research + ADRs | 20 ADRs (0001–0020), cross-model red-team | ✅ Closed |
 | **2** · Architecture | End-to-end design, 3 red-team passes (including cross-model) | ✅ Closed |
-| **3** · Verification harness + first slice | Types / lint / unit / property / contract / e2e — "create doc, read doc" | 🏗 In progress |
+| **3** · Verification harness + feature slices | 24 capabilities across doc / collection / workspace / audit; API + CLI + MCP adapters live; full test lanes | 🏗 In progress |
 | **4** · Feature slices | Full capability surface across all four adapters | — |
 | **5** · Hardening + launch | Security pass, load tests, runbook, threat model | — |
 
@@ -45,7 +45,7 @@ editorzero is an **open-source, self-hostable, Markdown-first documentation and 
 
 - **Agent-first, not agent-retrofitted.** Every layer (auth, identity, attribution, audit, quotas, recoverability) treats agents as distinct principals with their own tokens, rate limits, and trace identities.
 - **Four-surface parity as a hard constraint.** API, CLI, MCP server, and Web UI are adapters over a single capability layer. Contract tests enforce the matrix; unchecked type-compatible cells fail the build.
-- **Markdown round-trip determinism.** The CRDT document model maps losslessly to a canonical Markdown AST. Property tests prove `md → crdt → md` is a fixed point.
+- **Markdown round-trip determinism.** Each block type round-trips to Markdown under its declared fidelity tier; property tests enforce per-block fidelity (ADR 0013).
 - **Deployable with one command.** SQLite for single-node self-hosts; Postgres for production (target: 500–1,000 users per instance, design headroom for 10,000).
 
 Editor quality targeted at **Linear docs, Notion, Craft**.
@@ -56,7 +56,7 @@ Editor quality targeted at **Linear docs, Notion, Craft**.
 
 editorzero is a **real production experiment in complex agentic engineering.**
 
-Every line of code, every ADR, every architectural decision, every red-team pass is **authored end-to-end by Anthropic's new Opus 4.7 (1M-context)** under @numman's review at phase boundaries. It is not a demo, not a toy, not assistant-polished human scaffolding — it's a live attempt to see how far a single frontier model can carry a multi-surface, CRDT-backed, audit-complete, self-hostable platform from Phase 0 orientation through production hardening.
+Every line of code, every ADR, every architectural decision, every red-team pass is **authored end-to-end by Anthropic's Opus models (4.6 → 4.8, 1M-context)** under @numman's review at phase boundaries. It is not a demo, not a toy, not assistant-polished human scaffolding — it's a live attempt to see how far a single frontier model can carry a multi-surface, CRDT-backed, audit-complete, self-hostable platform from Phase 0 orientation through production hardening.
 
 What's being stress-tested:
 
@@ -76,7 +76,7 @@ Five reframings shape the architecture. Each one rules out a whole class of shor
 
 1. **Agent-first is the whole architecture, not a feature.** Retrofitting identity, quotas, and attribution later is how "agent support" becomes a toy.
 2. **Four-surface parity is the center-of-gravity constraint.** If any surface has bespoke mutation logic, we've lost. Contract tests generated from the capability registry enforce the matrix.
-3. **Markdown round-trip determinism is the hard test.** Editors that model their DOM as "whatever looks right in the browser" fail here. The CRDT must map losslessly to a canonical Markdown AST.
+3. **Markdown round-trip determinism is the hard test.** Editors that model their DOM as "whatever looks right in the browser" fail here. Each block type must round-trip to Markdown under its declared fidelity tier (ADR 0013).
 4. **Humans + agents editing simultaneously = CRDT convergence AND editor correctness.** Programmatic edits concurrent with keystrokes cannot flicker, lose cursor state, or corrupt the CRDT.
 5. **Taste is table stakes for docs.** Slash commands, table UX, drag-and-drop, paste handling, collab cursors, and hierarchy navigation are where users decide whether to stay.
 
@@ -103,20 +103,17 @@ Property tests enforce these from Phase 3 onward. A build that violates one does
 
 One capability layer. Every surface is a generated adapter over it.
 
-| Capability | API | CLI | MCP | Web UI |
+| Capability group | API | CLI | MCP | Web UI |
 |---|:---:|:---:|:---:|:---:|
-| `doc.list` | 🟡 | 🟡 | 🟡 | 🟡 |
-| `doc.create` | — | — | — | — |
-| `doc.read` | — | — | — | — |
-| `doc.rename` | — | — | — | — |
-| `doc.publish` / `unpublish` | — | — | — | — |
-| `doc.move` | — | — | — | — |
-| `block.set_visibility` | — | — | — | — |
-| `collection.*` | — | — | — | — |
-| `agent.token.rotate` | — | — | — | — |
-| *… full matrix in [`docs/architecture.md`](docs/architecture.md)* | | | | |
+| `doc.*` — list, create, get, update, rename, move, delete, restore, publish, unpublish | ✅ | ✅ | ✅ | — |
+| `collection.*` — create, list, update, move, delete, restore | ✅ | ✅ | ✅ | — |
+| `workspace.*` — get, update, member_add, member_list, member_remove, member_update_role | ✅ | ✅ | ✅ | — |
+| `audit.*` — list, get | ✅ | ✅ | ✅ | — |
+| *… 24 capabilities total; per-capability matrix in [`docs/architecture.md`](docs/architecture.md)* | | | | |
 
-**Legend:** 🟡 kernel landed, adapters pending · ✅ landed + contract-tested · — not yet implemented
+**Legend:** ✅ landed + adapter-wired · 🟡 kernel landed, adapter pending · — surface declared on the capability, app not built yet
+
+> The Web UI is the one surface without an app yet — `apps/` holds only the CLI. Every capability *declares* the `ui` surface (so the contract matrix tracks it); the Web UI adapter lands with the surface-architecture ADR now being (re)designed.
 
 Contract tests generated from the capability registry enforce the matrix. Unchecked type-compatible cells fail the build.
 
@@ -153,7 +150,7 @@ See the phase table in [Status](#-status). Detailed ordering and current sub-sli
 | [`AGENTS.md`](AGENTS.md) | Canonical working practices, invariants, verification stack, gotchas |
 | [`docs/continuation.md`](docs/continuation.md) | Rolling work state — current phase, focus, open questions |
 | [`docs/brief.md`](docs/brief.md) | Phase 0 framing — reframings, invariants, assumptions |
-| [`docs/adr/`](docs/adr/) | One file per architectural decision (0001–0020) + red-team disposition docs |
+| [`docs/adr/`](docs/adr/) | One file per architectural decision (0001–0026) + red-team disposition docs |
 | [`docs/architecture.md`](docs/architecture.md) | Phase 2 end-to-end system design |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contributor onboarding + DCO instructions |
 | [`SECURITY.md`](SECURITY.md) | Security reporting |
@@ -172,17 +169,19 @@ See the phase table in [Status](#-status). Detailed ordering and current sub-sli
 | Database | Postgres (prod) + SQLite (self-host) via Kysely | [0007](docs/adr/0007-database-strategy.md) |
 | Search | Postgres FTS + pgvector / sqlite-vec | [0008](docs/adr/0008-search.md) |
 | MCP SDK | Official `@modelcontextprotocol/sdk` 1.x | [0009](docs/adr/0009-mcp-sdk-and-capability-design.md) |
-| SSO | Better Auth | [0010](docs/adr/0010-sso.md) |
+| Auth spine | Better Auth (credentials + sessions; SSO / OAuth / MCP / API-key / agent-auth) | [0010](docs/adr/0010-sso.md) |
 | Custom domains / TLS | Caddy + ACME | [0011](docs/adr/0011-custom-domains-tls.md) |
 | Deploy artifact | `docker compose` + single container | [0012](docs/adr/0012-deploy-artifact.md) |
 | Block model | Per-block Markdown fidelity tiers | [0013](docs/adr/0013-block-model.md) |
 | Job queue | pg-boss (prod) / in-process (SQLite) | [0014](docs/adr/0014-job-queue.md) |
-| Permissions | Capability-layer enforcement, `AccessPath.selector` reserved | [0015](docs/adr/0015-permission-enforcement.md) |
+| Permissions | Capability-layer enforcement, `AccessPath.markdown_anchor` reserved | [0015](docs/adr/0015-permission-enforcement.md) |
 | Principal model | Polymorphic (`kind ∈ {user, agent}`) | [0016](docs/adr/0016-principal-model.md) |
 | Soft-delete | First-class recoverable capability | [0017](docs/adr/0017-soft-delete-recovery.md) |
 | Write path | Single `ctx.transact(doc_id, fn)` into the CRDT | [0018](docs/adr/0018-unified-write-path.md) |
 | Observability | OpenTelemetry traces, metrics, logs | [0019](docs/adr/0019-observability.md) |
 | Git mirror | Optional read-only git export | [0020](docs/adr/0020-git-mirror-export.md) |
+
+*Phase 2–3 additions — ADRs [0021](docs/adr/0021-surface-transport-topology.md) (surface topology), [0022](docs/adr/0022-agent-editing-constraints.md) (agent editing), [0023](docs/adr/0023-postgres-driver-substrate.md) (Postgres driver), [0024](docs/adr/0024-workspace-membership-shape.md) (workspace membership), [0025](docs/adr/0025-cli-auth-bootstrap-credential-store.md) (CLI auth), [0026](docs/adr/0026-mcp-auth-bootstrap-session-cookie.md) (MCP auth) — see the [ADR index](docs/adr/README.md).*
 
 </details>
 
@@ -221,6 +220,6 @@ License rationale and alternatives considered: [ADR 0001](docs/adr/0001-license.
 
 <div align="center">
 
-<sub>A production experiment in agentic engineering · Driven end-to-end by Anthropic's Opus 4.7</sub>
+<sub>A production experiment in agentic engineering · Driven end-to-end by Anthropic's Opus 4.8</sub>
 
 </div>

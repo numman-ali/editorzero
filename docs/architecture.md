@@ -2,7 +2,7 @@
 
 **Status:** Draft (pre-red-team)
 **Date:** 2026-04-17
-**Inputs:** ADRs 0001–0020, [`docs/brief.md`](brief.md), red-team + refresh trails.
+**Inputs (Phase-2 snapshot):** ADRs 0001–0020 — later decisions 0021–0026 land as additive Phase-3 slices, cited inline. [`docs/brief.md`](brief.md), red-team + refresh trails.
 **Reader:** someone who has read [`AGENTS.md`](../AGENTS.md) and [`docs/brief.md`](brief.md) — this file does **not** re-argue decisions; rationale lives in the ADRs.
 
 ---
@@ -218,7 +218,7 @@ Role → default permissions mapping lives in code (`ROLE_SCOPES` in `packages/d
 
 **Ownership (ADR 0024).** Membership is editorzero-owned, not Better Auth-owned. BA stores credentials (`user`, `session`, `account`, `verification` tables) and mints `workspaceId` on `user.create.before`; editorzero owns the `(workspace_id, user_id) → role` join and the ADR 0017 soft-delete cascade. The resolver reads role from `workspace_members` via the `LoadRoles` callable injected at composition time — strict-on-missing: a valid session without a membership row → null → 401.
 
-**Signup bootstrap.** A companion `user.create.after` hook in `@editorzero/auth`'s `createAuth` inserts the `workspace_members` row as `role: "owner"` post-commit (BA fires `after` hooks via `queueAfterTransactionHook` after the user-insert tx commits). The signing-up user owns the workspace they just auto-minted, so `"owner"` is the structurally correct role. The insert uses `onConflict doNothing` on the `(workspace_id, user_id)` PK for retry-safety. If the `after` hook fails, BA's `signUpEmail` throws and signup fails loud — better than a silent-401 on first request. Production never hits strict-on-missing today; the resolver's null branch exists for future partial-hook-failure, ADR 0017 cascade, and migration-gap scenarios.
+**Signup bootstrap.** A companion `user.create.after` hook in `@editorzero/auth`'s `createAuth` seeds **both** anchor rows post-commit (BA fires `after` hooks via `queueAfterTransactionHook` after the user-insert tx commits): first the `workspaces` row for the auto-minted workspace, then the `workspace_members` row as `role: "owner"`. The `workspaces` row must land first — the auto-appended tenant-scope predicate joins `workspaces.id`, so a scoped handle reads empty until that row exists. The signing-up user owns the workspace they just minted, so `"owner"` is the structurally correct role. Both inserts use `onConflict doNothing` (on `workspaces.id` / on the `(workspace_id, user_id)` PK) for retry-safety. If the `after` hook fails, BA's `signUpEmail` throws and signup fails loud — better than a silent-401 on first request. Production never hits strict-on-missing today; the resolver's null branch exists for future partial-hook-failure, ADR 0017 cascade, and migration-gap scenarios.
 
 **Revive-in-place on re-add.** The composite PK `(workspace_id, user_id)` forces UPDATE semantics when a soft-deleted member is re-added: clearing `deleted_at`, bumping `updated_at`, and overwriting `role` on the same row. INSERT would violate the PK; a caller that re-adds a removed member gets the same row revived, not a history of adds/removes. Historical add/remove timeline lives in the audit log (`audit_events` rows for `workspace_members.add` / `.remove`), not on the membership row itself.
 

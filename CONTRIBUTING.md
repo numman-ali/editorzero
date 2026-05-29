@@ -3,7 +3,7 @@
 Thanks for your interest in editorzero — an open-source, self-hostable AI-native documentation platform where humans and AI agents are peer co-editors.
 
 ## Project status
-editorzero is in Phase 1 (architecture and planning). Architectural Decision Records live in [`docs/adr/`](docs/adr/); the Phase 0 brief is at [`docs/brief.md`](docs/brief.md). No feature code has shipped yet. If you're excited about the direction, the most valuable contributions right now are ADR reviews, threat-model red-teaming, and prior-art pointers.
+editorzero is in **Phase 3 (verification harness + feature slices)**. 24 capabilities have shipped end-to-end across `doc.*`, `collection.*`, `workspace.*`, and `audit.*`, reachable today via the API, CLI, and MCP adapters (the Web UI surface is being designed). Architectural Decision Records (0001–0026) live in [`docs/adr/`](docs/adr/); the rolling work state is in [`docs/continuation.md`](docs/continuation.md); the Phase 0 brief is at [`docs/brief.md`](docs/brief.md). High-value contributions right now: ADR reviews, threat-model red-teaming, and prior-art pointers — the codebase is solo-author + agent while the architecture settles.
 
 ## Developer Certificate of Origin (DCO)
 
@@ -25,15 +25,18 @@ DCO sign-off means you attest that:
 
 You also understand that the project and contribution are public, and that a record of the contribution (including all personal information you submit with it) is maintained indefinitely and may be redistributed.
 
-PRs without DCO sign-off will be asked to amend and re-push.
+Commits without DCO sign-off don't land — the pre-commit gate enforces `Signed-off-by`. (Once the PR flow opens to external contributors, the same rule applies: unsigned PRs are asked to amend and re-push.)
 
 ## Workflow
 
+The project is **solo-author + agent** today, so the current flow is **direct-push-to-`main`** (no PRs; a bad commit is fix-forward; `main` is never force-pushed). The PR-based steps below apply once multiple external humans contribute.
+
 1. **Propose before you build.** Non-trivial changes begin with an ADR in `docs/adr/`. The ADR template is in [`docs/adr/README.md`](docs/adr/README.md). Small bug fixes do not need an ADR; feature work does.
-2. **Branch per slice.** Feature branches are named `slice/NNNN-short-slug` matching the ADR ID or slice number.
-3. **Verification stack.** Every PR must pass, in order: types → lint → unit → property → integration → contract → e2e → smoke deploy → observability check. See [`AGENTS.md`](AGENTS.md) for the full list. "I'll fix it in the next commit" is not acceptable.
-4. **Commits are terse and imperative.** Context, decision, consequence. No filler.
-5. **PRs reference the ADRs they implement** and include test evidence.
+2. **Verification stack.** Every change passes, in order: types → lint → unit → property → integration → contract → e2e → smoke deploy → observability check, locally via pre-commit / pre-push hooks. See [`AGENTS.md`](AGENTS.md) for the full list. "I'll fix it in the next commit" is not acceptable — the hook doesn't let it land.
+3. **Commits are terse and imperative.** Context, decision, consequence. No filler.
+4. **Reference the ADRs you implement** in the commit body, with test evidence.
+
+*External contributors:* once the PR flow opens up, branch per slice (`slice/NNNN-short-slug`), and PRs carry the same verification + DCO requirements.
 
 ## Reporting bugs
 

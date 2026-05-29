@@ -1,6 +1,6 @@
 # ADR 0026 — MCP first-slice: transitional cookie auth + deliberately stateless
 
-**Status:** Proposed
+**Status:** Accepted (landed 2026-04-21)
 **Date:** 2026-04-20
 **Deciders:** @numman
 

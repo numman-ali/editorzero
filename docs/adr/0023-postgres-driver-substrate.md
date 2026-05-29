@@ -1,8 +1,10 @@
 # ADR 0023 — Postgres driver substrate: `pg` + testcontainers + dual-backend conformance
 
-**Status:** Proposed
+**Status:** Accepted (landed 2026-04-19)
 **Date:** 2026-04-19
 **Deciders:** @numman
+
+**Implementation note (2026-05-29 canonicalisation).** §4 proposed renaming the DDL export `FULL_DDL` → `POSTGRES_FULL_DDL` / `SQLITE_FULL_DDL`. The code kept `FULL_DDL` in both driver files and disambiguates at the import site instead (`FULL_DDL as POSTGRES_FULL_DDL`). Substance unchanged.
 
 ## Context
 

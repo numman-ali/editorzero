@@ -1,6 +1,6 @@
 # ADR 0025 — CLI auth bootstrap + credential-store seam
 
-**Status:** Proposed
+**Status:** Accepted (landed 2026-04-20)
 **Date:** 2026-04-20
 **Deciders:** @numman
 

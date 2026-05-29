@@ -30,7 +30,7 @@ What becomes easier. What becomes harder.
 
 ## Index
 
-All ADRs are **Accepted (v2, post-refresh)** as of 2026-04-17 unless noted. The red-team and refresh trails are linked at the bottom.
+All ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 boundary (2026-04-17); 0021–0026 landed as additive Phase-3 slices and are Accepted-and-implemented. The red-team and refresh trails are linked at the bottom.
 
 | # | Title | Status |
 |---|---|---|
@@ -56,15 +56,15 @@ All ADRs are **Accepted (v2, post-refresh)** as of 2026-04-17 unless noted. The 
 | [0020](0020-git-mirror-export.md) | **Git-mirror export (opt-in) + S3-versioning archive** | **Accepted (new)** |
 | [0021](0021-surface-transport-topology.md) | **Surface transport topology: Hono app as trunk, typed RPC for all surfaces** | **Accepted (new, 2026-04-18)** |
 | [0022](0022-agent-editing-constraints.md) | **Agent-editing constraints on block capabilities** (precondition hash, reserved selectors, deferred ergonomic wrappers) | **Accepted (new, 2026-04-18)** |
-| [0023](0023-postgres-driver-substrate.md) | **Postgres driver substrate: `pg` + testcontainers + dual-backend conformance** | **Proposed (new, 2026-04-19)** |
-| [0024](0024-workspace-membership-shape.md) | **Workspace membership shape: custom `workspace_members` table; Better Auth for credentials only** | **Proposed (new, 2026-04-20)** |
-| [0025](0025-cli-auth-bootstrap-credential-store.md) | **CLI auth bootstrap: email+password → session cookie (transitional); `AuthCredentialStore` seam; `/infra/whoami`** | **Proposed (new, 2026-04-20)** |
-| [0026](0026-mcp-auth-bootstrap-session-cookie.md) | **MCP first-slice: transitional cookie auth + deliberately stateless** | **Proposed (new, 2026-04-20)** |
+| [0023](0023-postgres-driver-substrate.md) | **Postgres driver substrate: `pg` + testcontainers + dual-backend conformance** | **Accepted (new, 2026-04-19)** |
+| [0024](0024-workspace-membership-shape.md) | **Workspace membership shape: custom `workspace_members` table; Better Auth for credentials only** | **Accepted (new, 2026-04-20)** |
+| [0025](0025-cli-auth-bootstrap-credential-store.md) | **CLI auth bootstrap: email+password → session cookie (transitional); `AuthCredentialStore` seam; `/infra/whoami`** | **Accepted (new, 2026-04-20)** |
+| [0026](0026-mcp-auth-bootstrap-session-cookie.md) | **MCP first-slice: transitional cookie auth + deliberately stateless** | **Accepted (new, 2026-04-20)** |
 
 ## Review trails
 
 - [`red-team-phase-1.md`](red-team-phase-1.md) — Phase 1 v1 red-team: 25 findings, 22 accepted, 3 partially accepted or rebutted with reasoning.
 - [`red-team-phase-2.md`](red-team-phase-2.md) — Phase 2 pass-2: F31–F53 (all applied).
 - [`red-team-phase-3.md`](red-team-phase-3.md) — Phase 2 pass-3 (cross-model Opus + Codex): F54–F84 (all applied).
-- [`red-team-phase-4.md`](red-team-phase-4.md) — Phase 3 first pass against landed code (Codex): F85–F97 (3 BLOCKER, 4 HIGH, 1 MEDIUM, 1 LOW, 4 UNUSUAL-GOOD). **In progress.**
+- [`red-team-phase-4.md`](red-team-phase-4.md) — Phase 3 first pass against landed code (Codex): F85–F97 (3 BLOCKER, 4 HIGH, 1 MEDIUM, 1 LOW, 4 UNUSUAL-GOOD). All applied 2026-04-18.
 - [`refresh-research-phase-1.md`](refresh-research-phase-1.md) — Phase 1 v2 refresh: 8 Opus sub-agent memos; substantive changes to ADRs 0002/0004/0005/0006/0007/0008/0009/0010/0012/0013/0016/0018; new ADR 0020.

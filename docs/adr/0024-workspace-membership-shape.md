@@ -1,6 +1,6 @@
 # ADR 0024 — Workspace membership shape: custom `workspace_members` table; Better Auth for credentials only
 
-**Status:** Proposed
+**Status:** Accepted (landed 2026-04-20; member CRUD 2026-04-22)
 **Date:** 2026-04-20
 **Deciders:** @numman
 
@@ -298,6 +298,17 @@ listing all principals in a workspace uniformly), that's a
 follow-up ADR — either widening `workspace_members` with a
 polymorphic principal column, or a sibling `workspace_agents`
 table.
+
+### 8. Member CRUD capability surface (landed 2026-04-22)
+
+The capabilities §5 anticipated shipped as a quartet. **Note the registry uses noun-first IDs** — `workspace.member_add` / `member_list` / `member_remove` / `member_update_role` — not the verb-second spellings (`add_member`, `update_member_role`, `invite_member`) this ADR's prose used while they were still future work. All four are `workspace:admin`; the three mutators are metadata-only.
+
+- **`member_add`** — three-branch on `(workspace_id, user_id)`: live row → 409 `MemberAlreadyExistsError` (code `member_already_exists`; role changes go through `member_update_role`); soft-deleted → revive-in-place (§5); no row → INSERT `… ON CONFLICT (workspace_id, user_id) DO NOTHING RETURNING` → zero-row re-throws the 409 (keeps the conflict projection in-handler; the global mapper deliberately does **not** project raw `23505`, so duplicate-key-is-safe never masks a real integrity bug). No last-owner guard — add only grows the set. Slice-1 is `user_id`-direct (no email/invite — §6).
+- **`member_update_role`** — 404 missing/soft-deleted; 400 `role_unchanged` no-op; **409 `LastOwnerError`** (code `last_owner_protected`) if it would demote the only live owner. COUNT+UPDATE atomic in the write-path tx.
+- **`member_remove`** — soft-delete (§5 `deleted_at`), **not** idempotent (re-remove → 404, preserving the "already gone" signal); self-removal allowed (the last-owner guard blocks the dangerous case — an owner cannot leave until another owner exists).
+- **`member_list`** — paginated by composite `(created_at, user_id)` cursor (both-or-neither refine), active-only in slice 1, `role` filter, read-collapsible.
+
+The last-owner invariant holds on SQLite via single-writer `BEGIN IMMEDIATE`; on Postgres SERIALIZABLE two concurrent demotions can both pass their snapshots — the loser aborts `40001`, which the global error mapper projects to 409 `conflict` (bounded retry deferred).
 
 ## Consequences
 
