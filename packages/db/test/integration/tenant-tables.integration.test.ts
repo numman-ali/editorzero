@@ -4,8 +4,10 @@
  *
  * `tenant-scoping.integration.test.ts` proves the WorkspaceScopingPlugin
  * instruments the compiled SQL on both dialects against the `docs` table.
- * This file extends the floor to every member of `TENANT_SCOPED_TABLES`
- * (`collections`, `docs`, `doc_snapshots`, `doc_updates`, `audit_events`)
+ * This file extends the floor to every member of `TENANT_SCOPE_COLUMNS`
+ * (`collections`, `docs`, `doc_snapshots`, `doc_updates`, `audit_events`,
+ * `workspace_members`; `workspaces` is self-scoped on `id` and covered by
+ * the dedicated WorkspaceScopingPlugin self-scope suite)
  * — the plugin is table-blind by design (it keys off list membership),
  * so the invariant we care about is not "does it work on table X" but
  * "does it actually run against table X on Postgres". `tenant.unit.test.ts`
@@ -94,7 +96,15 @@ describe.each(backends)("tenant-table isolation — $name", ({ setup }) => {
     // If this map grows and a test below isn't added, the assertion
     // catches the drift so the floor keeps matching the schema.
     expect(Object.keys(TENANT_SCOPE_COLUMNS).sort()).toEqual(
-      ["audit_events", "collections", "doc_snapshots", "doc_updates", "docs", "workspaces"].sort(),
+      [
+        "audit_events",
+        "collections",
+        "doc_snapshots",
+        "doc_updates",
+        "docs",
+        "workspace_members",
+        "workspaces",
+      ].sort(),
     );
   });
 
@@ -263,5 +273,34 @@ describe.each(backends)("tenant-table isolation — $name", ({ setup }) => {
     const a = backend.driver.scoped(WORKSPACE_A);
     const seen = await a.selectFrom("audit_events").select("id").execute();
     expect(seen.map((r) => r.id)).toEqual(["aud-a"]);
+  });
+
+  it("workspace_members: workspace-A handle returns only workspace-A rows", async () => {
+    await backend.driver
+      .system()
+      .insertInto("workspace_members")
+      .values([
+        {
+          workspace_id: WORKSPACE_A,
+          user_id: ALICE,
+          role: "owner",
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: null,
+        },
+        {
+          workspace_id: WORKSPACE_B,
+          user_id: BOB,
+          role: "owner",
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: null,
+        },
+      ])
+      .execute();
+
+    const a = backend.driver.scoped(WORKSPACE_A);
+    const seen = await a.selectFrom("workspace_members").select("user_id").execute();
+    expect(seen.map((r) => r.user_id)).toEqual([ALICE]);
   });
 });
