@@ -24,13 +24,13 @@
 import type { AppType } from "@editorzero/api-server";
 import { hc } from "hono/client";
 
+import type { ApiClient } from "./client-type";
+
 export interface HttpClientOptions {
   readonly baseUrl: string;
   readonly auth?: () => Promise<Record<string, string>> | Record<string, string>;
   readonly fetch?: typeof fetch;
 }
-
-export type ApiClient = ReturnType<typeof hc<AppType>>;
 
 export function createHttpClient(options: HttpClientOptions): ApiClient {
   const { baseUrl, auth, fetch: fetchImpl } = options;

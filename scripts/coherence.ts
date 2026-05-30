@@ -156,6 +156,18 @@ function* findMatches(
   }
 }
 
+/**
+ * Replace `//` and block-comment bodies with spaces, preserving newlines
+ * so reported line numbers stay accurate. Approximate — it does not parse
+ * string literals — which is sufficient for scanning TypeScript *type*
+ * expressions that never legitimately live inside a string in the files
+ * the type-expression checks target. Without it, a check that bans a type
+ * pattern would false-positive on prose/JSDoc that names the antipattern.
+ */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, " "));
+}
+
 async function listMarkdown(dir: string): Promise<string[]> {
   const out: string[] = [];
   const { readdir } = await import("node:fs/promises");
@@ -927,6 +939,42 @@ function normaliseConstraint(line: string): string {
     .trim();
 }
 
+// ── Check 8 — api-client materialized client type (no lazy hc alias) ───────
+//
+// ADR 0028 (the materialized precompile): `@editorzero/api-client` must source its typed-RPC
+// client shape from the materialized `const`-inferred seam in
+// `client-type.ts` (the `ApiClient` whose `declare const _client` expands to
+// the fully-resolved route tree in declaration emit), never from a lazy
+// `ReturnType<typeof hc<AppType>>` alias. tsc preserves that alias unexpanded
+// in `.d.ts`, so every consumer re-instantiates the entire route tree
+// (`Client<>` / `PathToChain` / `UnionToIntersection`) in its own program —
+// the type-checking cost the precompile exists to remove. This bans the lazy
+// form anywhere under `packages/api-client/src/**` so the seam cannot
+// silently regress to a per-consumer instantiation.
+
+async function checkApiClientMaterializedType(report: Report): Promise<void> {
+  const srcDir = join(ROOT, "packages", "api-client", "src");
+  if (!(await pathExists(srcDir))) return;
+
+  const files = await listTypeScriptFiles(srcDir);
+  const lazyAliasRe = /ReturnType<\s*typeof\s+hc\b/g;
+  for (const file of files) {
+    const src = stripComments(await readFile(file, "utf8"));
+    for (const { match, line } of findMatches(src, lazyAliasRe)) {
+      report.add({
+        severity: "error",
+        file,
+        line,
+        message:
+          `api-client precompile drift: \`${match[0].trim()}…\` — the typed-RPC client shape must ` +
+          `come from the materialized \`const\`-inferred seam in client-type.ts (\`ApiClient\`), not ` +
+          `the lazy \`ReturnType<typeof hc<…>>\` alias. tsc preserves that alias unexpanded in emit, ` +
+          `forcing every consumer to re-instantiate the whole route tree (ADR 0028).`,
+      });
+    }
+  }
+}
+
 // ── Entrypoint ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -938,6 +986,7 @@ async function main(): Promise<void> {
     checkNoRawKyselyOutsideDb(report),
     checkAppendixACoherence(report),
     checkDdlParity(report),
+    checkApiClientMaterializedType(report),
   ]);
   report.print();
   if (report.errorCount > 0) {

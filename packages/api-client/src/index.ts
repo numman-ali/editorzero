@@ -14,5 +14,6 @@
  * choice, not an API change.
  */
 
-export { type ApiClient, createHttpClient, type HttpClientOptions } from "./http-client";
+export type { ApiClient } from "./client-type";
+export { createHttpClient, type HttpClientOptions } from "./http-client";
 export { createServerClient, type ServerClient, type ServerClientOptions } from "./server-client";

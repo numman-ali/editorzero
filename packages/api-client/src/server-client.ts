@@ -36,6 +36,8 @@ import type { AppType } from "@editorzero/api-server";
 import type { Hono } from "hono";
 import { hc } from "hono/client";
 
+import type { ApiClient } from "./client-type";
+
 const DEFAULT_FORWARDED_HEADERS = ["cookie", "authorization"] as const;
 
 export interface ServerClientOptions {
@@ -47,7 +49,14 @@ export interface ServerClientOptions {
 
 type HonoRequestFn = Pick<Hono, "request">["request"];
 
-export type ServerClient = ReturnType<typeof hc<AppType>>;
+/**
+ * The server-client and http-client typed surfaces are identical — both
+ * are the materialized `hc<AppType>` shape. `ServerClient` stays a named
+ * export (callers reference it) but is now an alias of the single
+ * materialized {@link ApiClient}, so there is one resolved client type in
+ * this package, not two (ADR 0028, the materialized precompile).
+ */
+export type ServerClient = ApiClient;
 
 export function createServerClient(options: ServerClientOptions): ServerClient {
   const { app, forwardHeaders, additionalHeaders } = options;
