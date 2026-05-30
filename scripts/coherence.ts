@@ -119,6 +119,27 @@ async function readIfExists(p: string): Promise<string | null> {
   return readFile(p, "utf8");
 }
 
+/**
+ * Read the architecture spec, which now lives as a folder of section
+ * files (`docs/architecture/NN-*.md`, split 2026-05-30). Concatenates
+ * them (sorted) so the heading / §6.5 / Appendix A parsers below see one
+ * continuous document — section NUMBERS are preserved across the split,
+ * so every `§N.M` citation still resolves and the Appendix A table is
+ * still locatable. Falls back to the legacy single `docs/architecture.md`
+ * if the folder is absent.
+ */
+async function readArchitectureSource(): Promise<string | null> {
+  const dir = join(ROOT, "docs", "architecture");
+  if (await pathExists(dir)) {
+    const files = (await listMarkdown(dir)).sort();
+    if (files.length > 0) {
+      const parts = await Promise.all(files.map((f) => readFile(f, "utf8")));
+      return parts.join("\n\n");
+    }
+  }
+  return readIfExists(join(ROOT, "docs", "architecture.md"));
+}
+
 function* findMatches(
   source: string,
   pattern: RegExp,
@@ -213,15 +234,16 @@ async function checkAdrReferences(report: Report): Promise<void> {
 // heading in architecture.md.
 
 async function checkArchitectureSectionRefs(report: Report): Promise<void> {
-  const archPath = join(ROOT, "docs", "architecture.md");
-  const src = await readIfExists(archPath);
+  const src = await readArchitectureSource();
   if (!src) {
     report.add({
       severity: "warn",
-      message: "docs/architecture.md not found — skipping section ref check",
+      message: "docs/architecture(.md|/) not found — skipping section ref check",
     });
     return;
   }
+  const archDir = join(ROOT, "docs", "architecture");
+  const archPath = join(ROOT, "docs", "architecture.md");
 
   // Parse headings: `## 6. Section` (period), `### 6.4 Something` (space),
   // `#### 6.4.1 …`, `### 6.5a Addendum`. We only care about the leading
@@ -243,7 +265,7 @@ async function checkArchitectureSectionRefs(report: Report): Promise<void> {
 
   for (const file of mdFiles) {
     if (!(await pathExists(file))) continue;
-    if (file === archPath) continue; // self-references parsed above
+    if (file === archPath || file.startsWith(`${archDir}/`)) continue; // architecture spec parsed above
     const content = await readFile(file, "utf8");
     for (const { match, line } of findMatches(content, sectionRefRe)) {
       const id = match[1];
@@ -284,9 +306,9 @@ async function checkMetadataOnlyCapabilities(report: Report): Promise<void> {
     return;
   }
 
-  // architecture.md §6.5 contains a `metadata-only set = { … }` code block.
-  const archPath = join(ROOT, "docs", "architecture.md");
-  const archSrc = await readIfExists(archPath);
+  // architecture §6.5 contains a `metadata-only set = { … }` code block.
+  const archPath = join(ROOT, "docs", "architecture");
+  const archSrc = await readArchitectureSource();
   if (archSrc) {
     const docList = parseMetadataOnlyFromArchitecture(archSrc);
     if (docList === null) {
@@ -450,12 +472,12 @@ interface AppendixRow {
 }
 
 async function checkAppendixACoherence(report: Report): Promise<void> {
-  const archPath = join(ROOT, "docs", "architecture.md");
-  const archSrc = await readIfExists(archPath);
+  const archPath = join(ROOT, "docs", "architecture");
+  const archSrc = await readArchitectureSource();
   if (!archSrc) {
     report.add({
       severity: "warn",
-      message: "docs/architecture.md not found — skipping Appendix A coherence checks",
+      message: "docs/architecture(.md|/) not found — skipping Appendix A coherence checks",
     });
     return;
   }

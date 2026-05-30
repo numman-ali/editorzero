@@ -109,7 +109,7 @@ One capability layer. Every surface is a generated adapter over it.
 | `collection.*` — create, list, update, move, delete, restore | ✅ | ✅ | ✅ | — |
 | `workspace.*` — get, update, member_add, member_list, member_remove, member_update_role | ✅ | ✅ | ✅ | — |
 | `audit.*` — list, get | ✅ | ✅ | ✅ | — |
-| *… 24 capabilities total; per-capability matrix in [`docs/architecture.md`](docs/architecture.md)* | | | | |
+| *… 24 capabilities total; per-capability matrix in [`docs/architecture/`](docs/architecture/)* | | | | |
 
 **Legend:** ✅ landed + adapter-wired · 🟡 kernel landed, adapter pending · — surface declared on the capability, app not built yet
 
@@ -151,7 +151,7 @@ See the phase table in [Status](#-status). Detailed ordering and current sub-sli
 | [`docs/continuation.md`](docs/continuation.md) | Rolling work state — current phase, focus, open questions |
 | [`docs/brief.md`](docs/brief.md) | Phase 0 framing — reframings, invariants, assumptions |
 | [`docs/adr/`](docs/adr/) | One file per architectural decision (0001–0026) + red-team disposition docs |
-| [`docs/architecture.md`](docs/architecture.md) | Phase 2 end-to-end system design |
+| [`docs/architecture/`](docs/architecture/) | Phase 2 end-to-end system design |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contributor onboarding + DCO instructions |
 | [`SECURITY.md`](SECURITY.md) | Security reporting |
 | [`CHANGELOG.md`](CHANGELOG.md) | Per-release notes |

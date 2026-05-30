@@ -6,7 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 ## [Unreleased]
 
 ### Added
-- **Phases 0–2** — Phase 0 brief + invariants; 26 ADRs (0001–0026); the Phase 2 end-to-end architecture (`docs/architecture.md`), hardened across four red-team passes (F1–F97).
+- **Phases 0–2** — Phase 0 brief + invariants; 26 ADRs (0001–0026); the Phase 2 end-to-end architecture (`docs/architecture/`), hardened across four red-team passes (F1–F97).
 - **Capability kernel + registry** — `@editorzero/capabilities` with 24 capabilities across `doc.*`, `collection.*`, `workspace.*`, and `audit.*`; branded IDs, scopes, and the dispatcher permission gate.
 - **Storage** — dual SQLite + Postgres drivers via Kysely, with a dual-backend conformance harness (ADR 0023).
 - **Auth** — Better Auth spine (credentials + sessions) with editorzero-owned `workspace_members` and a role-resolving principal layer (ADR 0024).

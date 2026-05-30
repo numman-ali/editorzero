@@ -56,7 +56,7 @@ I will propose answers in the relevant ADRs; Nomi overrides any of them there.
 
 ## Self-critique (red-team pass)
 
-- *"Full parity" is easy to say, hard to enforce.* Making it concrete: a capability matrix in `docs/architecture.md` with per-surface coverage, enforced by contract tests. Unchecked cell = CI fails.
+- *"Full parity" is easy to say, hard to enforce.* Making it concrete: a capability matrix in `docs/architecture/` with per-surface coverage, enforced by contract tests. Unchecked cell = CI fails.
 - *Invariant list is silent on performance and cost.* Intentional for Phase 0; these are Phase 3 harness concerns.
 - *Conflation of "blocks" with "Markdown AST nodes."* This is a real architectural fork: Notion-style block model (blocks are first-class, Markdown is a serialization format) vs. CommonMark-style (Markdown AST is the model). Promote to its own ADR in Phase 1.
 - *Background workers not addressed.* Webhooks, notification fanout, embedding generation, search indexing — a job queue is needed. Quietly assumed; call it out in Phase 2 architecture.

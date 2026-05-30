@@ -126,7 +126,7 @@ Fast lane at pre-commit; slow lane at pre-push. Concrete wiring in `lefthook.yml
 |---|---|
 | [`docs/continuation.md`](docs/continuation.md) | **Rolling work state. Read first.** |
 | [`docs/brief.md`](docs/brief.md) | Phase 0 framing, five reframings, invariants. |
-| [`docs/architecture.md`](docs/architecture.md) | System design (Phase 2 output). |
+| [`docs/architecture/`](docs/architecture/) | System design (Phase 2 output). |
 | [`docs/adr/`](docs/adr/) | One file per architectural decision; see `README.md` for index. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Per-release notes. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | External-contributor onboarding, DCO instructions. |

@@ -4,7 +4,7 @@ What's happening now + what's next. `AGENTS.md` is the stable companion.
 
 ## Current phase
 
-**Phase 3 — verification harness + first slices.** Phase 2 closed 2026-04-18 after three red-team passes (F1–F84). Architecture in `docs/architecture.md`. ADRs 0001–0033 Accepted (0004 + 0005 superseded by the Web UI cluster, 2026-05-30).
+**Phase 3 — verification harness + first slices.** Phase 2 closed 2026-04-18 after three red-team passes (F1–F84). Architecture in `docs/architecture/` (split from a monolith into one file per top-level section on 2026-05-30 for maintainability; `README.md` is the index, and section numbers are stable so `§N.M` citations resolve unchanged). ADRs 0001–0033 Accepted (0004 + 0005 superseded by the Web UI cluster, 2026-05-30).
 
 > **Resumed 2026-05-29** after a ~5-week pause. Authoring model upgraded Opus 4.7 → **Opus 4.8 (1M context)**. The from-scratch **Web UI surface-architecture decision is settled** — ADR cluster **0027–0033, Accepted 2026-05-30** (superseding 0004 + 0005). Immediate focus shifts to **implementation** of the Web UI surface (see *What's next*).
 
@@ -48,7 +48,7 @@ Three of the four surfaces are **landed** — the Hono API trunk (`packages/api-
   - `auth.logout` leaves the server session live — belongs at `@editorzero/auth`, not the CLI adapter.
 - **CLI-adapter UX backlog** (`ez` only): no `EZ_BASE_URL` env var; no `--format json|toon` flag; ANSI escapes in piped help / no `NO_COLOR`; `ez` vs `editorzero` naming drift.
 
-**Gated on @numman decision:** Phase-4 entry gate revision (Open Question 3) — Appendix C's "all entries CLOSED" rule is unsatisfiable against the current tree; rule revision + dual-backend scope answer land at the phase boundary. Last formal sweep (d3a55d2, 2026-04-19) predates the workspace/audit/membership slices; a fresh sweep belongs to phase-boundary review. Spec source: `docs/architecture.md` § Appendix C.
+**Gated on @numman decision:** Phase-4 entry gate revision (Open Question 3) — Appendix C's "all entries CLOSED" rule is unsatisfiable against the current tree; rule revision + dual-backend scope answer land at the phase boundary. Last formal sweep (d3a55d2, 2026-04-19) predates the workspace/audit/membership slices; a fresh sweep belongs to phase-boundary review. Spec source: `docs/architecture/appendix-c-phase-3-entry-checklist.md` (§ Appendix C).
 
 ## Open questions for @numman
 
