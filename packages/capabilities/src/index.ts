@@ -2,6 +2,7 @@
  * Capability kernel — public barrel (architecture.md §4, §16.4).
  */
 
+export { createDefaultRegistry } from "./default-registry";
 export type {
   AgentAllowance,
   AnyCapability,
