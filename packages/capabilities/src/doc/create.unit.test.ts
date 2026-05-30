@@ -10,7 +10,7 @@
 
 import type { SeedBlock } from "@editorzero/audit";
 import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
-import { NotFoundError, ValidationError } from "@editorzero/errors";
+import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
 import {
   AgentId,
   BlockId,
@@ -360,6 +360,101 @@ describe("doc.create — optional collection_id", () => {
     await expect(
       docCreate.handler(ctx, { title: "cross-ws", collection_id: COLLECTION_C1 }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// ── Slug collision ─────────────────────────────────────────────────────────
+
+describe("doc.create — slug collision", () => {
+  // Local collection seeder (the sibling `seedCollection` lives in another
+  // describe scope). Each gets a distinct slug so two roots never collide.
+  async function seedCollection(id: CollectionId) {
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("collections")
+      .values({
+        id,
+        workspace_id: WORKSPACE_A,
+        parent_id: null,
+        title: "C",
+        slug: `c-${id.slice(-4)}`,
+        order_key: id,
+        created_by: ALICE,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: null,
+      })
+      .execute();
+  }
+
+  it("throws SlugCollisionError when a root sibling already holds the derived slug", async () => {
+    const ctx = buildCtx(userPrincipal());
+    await docCreate.handler(ctx, { title: "Foo" });
+    // "foo" slugifies to the same "foo" — collides with the first at root.
+    const err = await docCreate.handler(ctx, { title: "foo" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SlugCollisionError);
+    if (err instanceof SlugCollisionError) {
+      expect(err.httpStatus).toBe(409);
+      expect(err.code).toBe("slug_collision");
+      expect(err.slug).toBe("foo");
+      expect(err.parent_kind).toBe("workspace");
+      expect(err.parent_id).toBeNull();
+    }
+    // Fail-fast before the INSERT — no second row landed.
+    const rows = await driver.scoped(WORKSPACE_A).selectFrom("docs").selectAll().execute();
+    expect(rows).toHaveLength(1);
+  });
+
+  it("throws SlugCollisionError when a collection-nested sibling holds the derived slug", async () => {
+    await seedCollection(COLLECTION_C1);
+    const ctx = buildCtx(userPrincipal());
+    await docCreate.handler(ctx, { title: "Note", collection_id: COLLECTION_C1 });
+    const err = await docCreate
+      .handler(ctx, { title: "note", collection_id: COLLECTION_C1 })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SlugCollisionError);
+    if (err instanceof SlugCollisionError) {
+      expect(err.parent_kind).toBe("collection");
+      expect(err.parent_id).toBe(COLLECTION_C1);
+    }
+  });
+
+  it("allows the same slug at workspace root and inside a collection (NULL-aware scope)", async () => {
+    await seedCollection(COLLECTION_C1);
+    const ctx = buildCtx(userPrincipal());
+    const root = await docCreate.handler(ctx, { title: "Shared" });
+    const nested = await docCreate.handler(ctx, { title: "Shared", collection_id: COLLECTION_C1 });
+    expect(root.slug).toBe("shared");
+    expect(nested.slug).toBe("shared");
+    expect(root.collection_id).toBeNull();
+    expect(nested.collection_id).toBe(COLLECTION_C1);
+  });
+
+  it("allows the same slug under two different collections (scope is sibling, not workspace)", async () => {
+    const C2 = CollectionId("018f0000-0000-7000-8000-0000000000c2");
+    await seedCollection(COLLECTION_C1);
+    await seedCollection(C2);
+    const ctx = buildCtx(userPrincipal());
+    const a = await docCreate.handler(ctx, { title: "Dup", collection_id: COLLECTION_C1 });
+    const b = await docCreate.handler(ctx, { title: "Dup", collection_id: C2 });
+    expect(a.slug).toBe("dup");
+    expect(b.slug).toBe("dup");
+  });
+
+  it("ignores soft-deleted siblings — the slug can be reused", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const first = await docCreate.handler(ctx, { title: "Recyclable" });
+    await driver
+      .scoped(WORKSPACE_A)
+      .updateTable("docs")
+      .set({ deleted_at: 99 })
+      .where("id", "=", first.doc_id)
+      .execute();
+    // The pre-check SELECT filters `deleted_at IS NULL`, matching the
+    // partial index — a trashed sibling no longer reserves the slug.
+    const second = await docCreate.handler(ctx, { title: "Recyclable" });
+    expect(second.slug).toBe("recyclable");
+    expect(second.doc_id).not.toBe(first.doc_id);
   });
 });
 

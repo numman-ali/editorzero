@@ -27,11 +27,18 @@
  * editor-bundle wrapper for `doc.update`'s BlockNoteEditor path) will
  * drop the cast without rewriting the handler body.
  *
- * Slug derivation is intentionally naive in v1 (kebab-case of title,
- * empty → "untitled"). Collision handling is a future concern — the
- * `docs` table has no uniqueness constraint on `(workspace_id, slug)`
- * today; if we add one, a retry-on-conflict loop lands here, not in
- * the SQL layer.
+ * Slug derivation is naive in v1 (kebab-case of title; empty →
+ * "untitled"). The handler runs a sibling-slug pre-check SELECT
+ * (NULL-aware `collection_id` scope, matching the `docs_root_slug_unique`
+ * / `docs_nested_slug_unique` partial indexes the collections slice
+ * added) and throws `SlugCollisionError` (409, `code: "slug_collision"`)
+ * on hit — a typed 409 on the common path rather than a raw DB UNIQUE
+ * violation the dispatcher would project to `internal` (500). The
+ * partial unique indexes remain the last-line guard for the race window
+ * (pre-check → INSERT with a concurrent sibling); that rare edge still
+ * audits as `internal`, but common cases get a typed response. Mirrors
+ * `collection.create`'s slug-collision shaping so the two create paths
+ * stay symmetric.
  *
  * **Optional `collection_id`.** Callers may specify a collection
  * to place the new doc in; when absent (or explicit `null`) the
@@ -96,8 +103,14 @@ import type {
   HandlerError,
   SeedBlock,
 } from "@editorzero/audit";
-import { NotFoundError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, type CollectionId, generateBlockId, generateDocId } from "@editorzero/ids";
+import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
+import {
+  CapabilityId,
+  type CollectionId,
+  type DocId,
+  generateBlockId,
+  generateDocId,
+} from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
 import {
   type DocCreateInput,
@@ -251,6 +264,44 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
     const visibility = DEFAULT_VISIBILITY;
     const now = ctx.now();
     const created_by = resolveCreatedBy(ctx.principal);
+
+    // Sibling-slug pre-check. Typed 409 on the common path rather than
+    // letting the partial unique index (`docs_root_slug_unique` /
+    // `docs_nested_slug_unique`) bubble as a raw UNIQUE violation — which
+    // the dispatcher projects to `internal` (500). NULL-aware
+    // `collection_id` scope matches the two indexes the DDL defines (one
+    // for workspace-root docs, one for collection-nested). The tenant
+    // plugin auto-applies `workspace_id`, so the SELECT predicate mirrors
+    // each index's partial predicate exactly. The race window (this
+    // SELECT → the INSERT below) stays guarded by the indexes as the
+    // last-line enforcement; an interleaved concurrent sibling still
+    // re-raises as a UNIQUE violation / `internal` audit. Mirrors
+    // `collection.create`'s slug-collision shaping.
+    let slugClash: { id: DocId } | undefined;
+    if (collection_id === null) {
+      slugClash = await ctx.db
+        .selectFrom("docs")
+        .select(["id"])
+        .where("collection_id", "is", null)
+        .where("slug", "=", slug)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+    } else {
+      slugClash = await ctx.db
+        .selectFrom("docs")
+        .select(["id"])
+        .where("collection_id", "=", collection_id)
+        .where("slug", "=", slug)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+    }
+    if (slugClash !== undefined) {
+      throw new SlugCollisionError({
+        slug,
+        parent_kind: collection_id === null ? "workspace" : "collection",
+        parent_id: collection_id,
+      });
+    }
 
     // Order-of-writes: INSERT the docs row FIRST, then seed the CRDT.
     //

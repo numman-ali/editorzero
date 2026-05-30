@@ -57,6 +57,16 @@
  * (reads go through `GET /docs/get/:doc_id`), so a `Location` would
  * mislead; the response body carries `doc_id` for follow-ups.
  *
+ * **404 response** when the optional `collection_id` names a collection
+ * that does not exist or is soft-deleted — the capability surfaces a
+ * `NotFoundError { subject_kind: "collection" }`; `errorResponse` projects
+ * it to `{ error: "not_found" }`.
+ *
+ * **409 response** — `SlugCollisionError` (`code: "slug_collision"`) when
+ * the title-derived slug is already taken by a live sibling in the same
+ * scope (workspace root, or the target collection). Body is
+ * `{ error: "slug_collision" }`.
+ *
  * **Audit + permission + write-path tx live inside the dispatcher.** The
  * handler only dispatches; `ctx.transact` binding, the permission gate,
  * and the single write-path SQL tx (ADR 0018 §6.4) are the dispatcher's.
@@ -94,6 +104,14 @@ export const create = new Hono<ApiEnv>().post(
         403: {
           description: "Permission denied — caller lacks `doc:write`.",
           content: jsonContent(errEnvelope("permission_denied")),
+        },
+        404: {
+          description: "The referenced `collection_id` does not exist or is soft-deleted.",
+          content: jsonContent(errEnvelope("not_found")),
+        },
+        409: {
+          description: "Sibling-slug collision — derived slug is already taken by a live sibling.",
+          content: jsonContent(errEnvelope("slug_collision")),
         },
       },
     }),

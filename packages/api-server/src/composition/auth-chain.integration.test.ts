@@ -677,6 +677,59 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(audits).toHaveLength(0);
   });
 
+  it("POST /docs/create twice with the same title → 409 slug_collision + error audit", async () => {
+    // Full-stack SlugCollisionError path. The first create mints a doc at
+    // workspace root with slug "dup-title"; the second derives the same
+    // slug. The handler's sibling-slug pre-check SELECT (NULL-aware
+    // `collection_id IS NULL`, matching the `docs_root_slug_unique`
+    // partial index) finds the live sibling and throws SlugCollisionError
+    // BEFORE the INSERT — so the raw DB UNIQUE violation never surfaces as
+    // an `internal` 500. `errorResponse` maps it to `{ error: "slug_collision" }`
+    // at 409. Pins the route's 409 arm honest against runtime behaviour
+    // (cf. the doc.update stale-precondition 409 test) and proves the
+    // original gap — raw unique-violation leak — is closed end-to-end.
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      withSync: true,
+    });
+    await signUp(trunk, "ivan@example.com");
+    const signInRes = await signIn(trunk, "ivan@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const first = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Dup Title" }),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Dup Title" }),
+    });
+    expect(second.status).toBe(409);
+    const body = (await second.json()) as { error: string };
+    expect(body.error).toBe("slug_collision");
+
+    // Only one docs row landed — the pre-check fail-fast prevented the
+    // second INSERT, so no partial state and no orphan.
+    const rows = await driver.system().selectFrom("docs").select(["id"]).execute();
+    expect(rows).toHaveLength(1);
+
+    // Audit trail: create #1 allow, create #2 error.
+    const slugAudits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select(["capability_id", "outcome"])
+      .orderBy("created_at")
+      .execute();
+    expect(slugAudits.map((a) => ({ id: a.capability_id, o: a.outcome }))).toEqual([
+      { id: "doc.create", o: "allow" },
+      { id: "doc.create", o: "error" },
+    ]);
+  });
+
   it("POST /docs/create → GET /docs/get/:doc_id returns the freshly-minted doc with seed blocks", async () => {
     // End-to-end read-path test. Create mints the doc + seeds
     // blocks via ctx.transact on the write path; the resulting
