@@ -12,10 +12,10 @@
  * `surfaces` array contains `"cli"`, assert that
  * `deriveHttpBinding(cap)` produces a `{verb, path}` pair that the
  * trunk actually exposes. The trunk's OpenAPI document is the
- * canonical registered-routes surface — generating it goes through
- * the same `openapiRoutes([...] as const)` tuple the real server
- * serves, so any drift between what the CLI calls and what the
- * server accepts blows up this test.
+ * canonical registered-routes surface — `openApiDocument(app)` walks
+ * the same trunk (composed via `.route(prefix, subApp)` mounts) the
+ * real server serves, so any drift between what the CLI calls and what
+ * the server accepts blows up this test.
  *
  * Path normalization:
  *   - OpenAPI emits path params as `{name}`; the CLI derives
@@ -34,7 +34,7 @@
 
 import { PassThrough } from "node:stream";
 
-import { app } from "@editorzero/api-server";
+import { app, openApiDocument } from "@editorzero/api-server";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AuthCredentialStore } from "../credential-store";
@@ -47,11 +47,8 @@ interface RouteKey {
   readonly path: string;
 }
 
-function normalizedServerRoutes(): ReadonlySet<string> {
-  const doc = app.getOpenAPIDocument({
-    openapi: "3.1.0",
-    info: { title: "editorzero api", version: "0.0.0" },
-  });
+async function normalizedServerRoutes(): Promise<ReadonlySet<string>> {
+  const doc = await openApiDocument(app);
   const routes = new Set<string>();
   for (const [rawPath, methods] of Object.entries(doc.paths ?? {})) {
     if (methods === undefined || methods === null) continue;
@@ -68,8 +65,8 @@ function routeKeyStr(r: RouteKey): string {
 }
 
 describe("CLI ↔ server route parity", () => {
-  it("every CLI capability's derived binding points at a real registered route on the trunk", () => {
-    const serverRoutes = normalizedServerRoutes();
+  it("every CLI capability's derived binding points at a real registered route on the trunk", async () => {
+    const serverRoutes = await normalizedServerRoutes();
     const cliCaps = cliRegistry.list().filter((c) => c.surfaces.includes("cli"));
     expect(cliCaps.length).toBeGreaterThan(0);
     for (const cap of cliCaps) {

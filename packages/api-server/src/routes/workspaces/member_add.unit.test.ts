@@ -8,7 +8,7 @@
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -26,7 +26,7 @@ const TEST_PRINCIPAL: UserPrincipal = {
 const TARGET_ID = "018f0000-0000-7000-8000-0000000000b1";
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
@@ -37,7 +37,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([memberAdd] as const);
+  app.route("/workspaces", memberAdd);
   return app;
 }
 
@@ -82,6 +82,7 @@ describe("POST /workspaces/member_add", () => {
       body: JSON.stringify({ user_id: TARGET_ID, role: "bogus" }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 

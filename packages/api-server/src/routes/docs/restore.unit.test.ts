@@ -1,17 +1,23 @@
 /**
- * Minimal-app test for `POST /docs/restore/:doc_id`. Mirror of
- * `routes/docs/delete.unit.test.ts`.
+ * Minimal-app test for `POST /docs/restore/:doc_id` (ADR 0021 §Per-route
+ * test posture; ADR 0029 code-first shape). Mirror of
+ * `routes/docs/delete.unit.test.ts`. Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/docs` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
  *
- * Same contract as the delete sibling — dispatches the capability
- * with the path-param `doc_id`, principal-derived access, returns the
- * handler output through `c.json` at 200. Restore's output schema is
- * narrower (no `deleted_at` field); otherwise identical envelope.
+ * Same contract as the delete sibling — dispatches the capability with
+ * the path-param `doc_id`, principal-derived access, returns the handler
+ * output through `c.json` at 200. Restore's output schema is narrower
+ * (no `deleted_at` field); otherwise identical envelope. A malformed
+ * doc_id is rejected by the `"param"` validator + hook with the
+ * `{ error: "validation_failed" }` envelope at 400, before the dispatcher
+ * runs.
  */
 
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -34,7 +40,7 @@ interface FixtureOutput {
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
@@ -45,7 +51,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([restore] as const);
+  app.route("/docs", restore);
   return app;
 }
 
@@ -83,6 +89,7 @@ describe("POST /docs/restore/:doc_id", () => {
 
     const res = await app.request("/docs/restore/not-a-uuid", { method: "POST" });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
@@ -96,6 +103,7 @@ describe("POST /docs/restore/:doc_id", () => {
     const v4 = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
     const res = await app.request(`/docs/restore/${v4}`, { method: "POST" });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 });

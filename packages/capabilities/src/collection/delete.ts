@@ -56,46 +56,28 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { HasLiveDescendantsError, NotFoundError } from "@editorzero/errors";
-import { CapabilityId, CollectionId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type CollectionDeleteInput,
+  CollectionDeleteInputSchema,
+  type CollectionDeleteOutput,
+  CollectionDeleteOutputSchema,
+} from "@editorzero/schemas/collection/delete";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const COLLECTION_DELETE_ID = CapabilityId("collection.delete");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const CollectionIdInput = z
-  .uuid({ version: "v7", message: "collection_id must be a UUIDv7" })
-  .transform((s): CollectionId => CollectionId(s));
-
-const InputSchema = z
-  .object({
-    collection_id: CollectionIdInput,
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const CollectionIdField = z.string().transform((s): CollectionId => CollectionId(s));
-
-const OutputSchema = z.object({
-  collection_id: CollectionIdField,
-  deleted_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
-
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const collectionDelete: Capability<Input, Output> = {
+export const collectionDelete: Capability<CollectionDeleteInput, CollectionDeleteOutput> = {
   id: COLLECTION_DELETE_ID,
   category: "mutation",
   summary:
     "Soft-delete a collection; refuses if live descendants remain. Reversible via collection.restore.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: CollectionDeleteInputSchema,
+  output: CollectionDeleteOutputSchema,
   requires: ["doc:delete"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

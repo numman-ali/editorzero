@@ -1,123 +1,110 @@
 /**
- * `GET /audits/get/:audit_id` — audit.get surface (invariant 4).
+ * `GET /audits/get/:audit_id` — fetch a single audit-event row (audit.get
+ * surface; invariant 4). Admin-only (`workspace:admin`); the row shape is
+ * identical to an element of `audit.list`'s response.
  *
- * Fetches a single audit-event row. `:audit_id` is a UUIDv7; the
- * capability refuses anything else at zod parse (regex-narrow before
- * lookup). Mirrors the `docs.get/:doc_id` path-param shape and the
- * `<domain>_id` convention the CLI-binding derivation expects
- * (`apps/cli/src/generator/http-binding.ts`).
+ * **Code-first shape (ADR 0029).** Like the `docs/create` golden, this is
+ * a self-contained `Hono<ApiEnv>` sub-app built from chained handlers via
+ * `factory.createHandlers(...)`:
  *
- * **Scope.** `workspace:admin`. Row shape identical to an element
- * of `audit.list`'s response.
+ *   1. `describeRoute({ ... })` — OpenAPI metadata only (per-status
+ *      response schemas). Documents the contract; does not feed `hc`.
+ *   2. `validator("param", AuditGetInputSchema, hook)` — Standard-Schema
+ *      validation of the path param. The capability's input *is* the
+ *      single-id object (`{ audit_id }`), so the shared input schema is
+ *      reused verbatim as the param validator (PATTERN P2 — no separate
+ *      param schema). The hook projects a parse failure to the
+ *      `{ error: "validation_failed" }` envelope at 400 (a cross-cutting
+ *      middleware return, intentionally not an `hc` arm — see `lib/errors.ts`).
+ *   3. The handler — reads `c.var.principal` + `c.var.dispatcher`,
+ *      dispatches `audit.get`, and returns the dispatcher's output through
+ *      `c.json`. The dispatcher *throws* `EditorZeroError` subclasses; the
+ *      handler catches and maps them with `errorResponse(c, err)` to
+ *      explicit, literal-typed `c.json` returns — those explicit returns
+ *      are what `hc<AppType>` reads to infer the error arm (ADR 0029 §4).
+ *
+ * **No type casts (`as`).** `c.var.principal` stays `Principal` — the
+ * `user | agent` union; the handler only reads `workspace_id` (present on
+ * both arms) and forwards `principal` to the dispatcher. `dispatch`
+ * returns `Promise<unknown>`; rather than *assert* a type with `as`, the
+ * handler *parses* that `unknown` through the capability's shared response
+ * schema (`AuditGetOutputSchema.parse`) — the honest `unknown`→typed
+ * narrowing, and a runtime guard that the dispatcher output still
+ * satisfies the published contract.
+ *
+ * **Request + response schemas — reused, not re-declared (ADR 0034).**
+ * `AuditGetInputSchema` / `AuditGetOutputSchema` from
+ * `@editorzero/schemas/audit/get` are the single source the capability
+ * also consumes (the output side is the shared `AuditRowSchema`, so
+ * `audit.get` and `audit.list` cannot drift on the row shape). No wire
+ * copy is re-declared here — the whole point of this migration.
+ *
+ * The route mounts at a path **relative** to its domain (`/get/:audit_id`);
+ * the `audits` domain mounts at `/audits` on the trunk, so the external
+ * path is `/audits/get/:audit_id`.
+ *
+ * **Audit + permission live inside the dispatcher.** The handler only
+ * dispatches; the `workspace:admin` permission gate and the audit entry
+ * are the dispatcher's.
  */
 
 import { CapabilityId } from "@editorzero/ids";
-import type { UserPrincipal } from "@editorzero/principal";
-import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import { AuditGetInputSchema, AuditGetOutputSchema } from "@editorzero/schemas/audit/get";
+import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { errorResponse } from "../../lib/errors";
+import { describeRoute, errEnvelope, factory, jsonContent, validator } from "../../lib/openapi";
 
 const AUDIT_GET_ID = CapabilityId("audit.get");
 
-// Route-layer UUIDv7 narrowing mirrors the capability's input schema so
-// the OpenAPI / `hc<AppType>` contract matches runtime behaviour. Without
-// it, generated clients would treat any string as valid while the
-// capability would throw at zod parse — the same class of route/capability
-// drift Codex flagged on `doc.update`.
-const AuditGetParams = z
-  .object({
-    audit_id: z
-      .uuid({ version: "v7", message: "audit_id must be a UUIDv7" })
-      .openapi({ description: "UUIDv7 of the audit event." }),
-  })
-  .openapi("AuditGetParams");
-
-const AuditGetResponse = z
-  .object({
-    id: z.string(),
-    workspace_id: z.string(),
-    capability_id: z.string(),
-    category: z.enum(["mutation", "read", "auth", "admin", "system"]),
-    principal_kind: z.enum(["user", "agent"]),
-    principal_id: z.string(),
-    acting_as_user_id: z.string().nullable(),
-    session_id: z.string().nullable(),
-    token_id: z.string().nullable(),
-    subject_kind: z.string(),
-    subject_id: z.string().nullable(),
-    outcome: z.enum(["allow", "deny", "error"]),
-    deny_reason: z.string().nullable(),
-    input_hash: z.string(),
-    effect: z.object({ kind: z.string() }).catchall(z.unknown()),
-    duration_ms: z.number(),
-    trace_id: z.string().nullable(),
-    created_at: z.number(),
-    collapsed_count: z.number(),
-  })
-  .openapi("AuditGetResponse");
-
-const getRouteDef = createRoute({
-  method: "get",
-  path: "/audits/get/:audit_id",
-  tags: ["audit"],
-  summary: "Fetch a single audit event by id; admin-only.",
-  request: {
-    params: AuditGetParams,
-  },
-  responses: {
-    200: {
-      description: "The audit event row.",
-      content: { "application/json": { schema: AuditGetResponse } },
-    },
-    400: {
-      description: "Validation error — audit_id is not a UUIDv7.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("validation") }),
+export const get = new Hono<ApiEnv>().get(
+  "/get/:audit_id",
+  ...factory.createHandlers(
+    describeRoute({
+      tags: ["audit"],
+      summary: "Fetch a single audit event by id; admin-only.",
+      responses: {
+        200: {
+          description: "The audit event row.",
+          content: jsonContent(AuditGetOutputSchema),
+        },
+        400: {
+          description: "Validation error — audit_id is not a UUIDv7.",
+          content: jsonContent(errEnvelope("validation_failed")),
+        },
+        401: {
+          description: "Unauthenticated.",
+          content: jsonContent(errEnvelope("unauthenticated")),
+        },
+        403: {
+          description: "Permission denied — caller lacks `workspace:admin`.",
+          content: jsonContent(errEnvelope("permission_denied")),
+        },
+        404: {
+          description: "No audit event with the given id in the caller's workspace.",
+          content: jsonContent(errEnvelope("not_found")),
         },
       },
+    }),
+    validator("param", AuditGetInputSchema, (result, c) =>
+      result.success ? undefined : c.json({ error: "validation_failed" } as const, 400),
+    ),
+    async (c) => {
+      const principal = c.var.principal;
+      const input = c.req.valid("param");
+      try {
+        const result = await c.var.dispatcher.dispatch({
+          capability_id: AUDIT_GET_ID,
+          input,
+          principal,
+          access: { workspace_id: principal.workspace_id },
+          trace_id: null,
+        });
+        return c.json(AuditGetOutputSchema.parse(result), 200);
+      } catch (err) {
+        return errorResponse(c, err);
+      }
     },
-    401: {
-      description: "Unauthenticated.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("unauthenticated") }),
-        },
-      },
-    },
-    403: {
-      description: "Permission denied — caller lacks `workspace:admin`.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("permission_denied") }),
-        },
-      },
-    },
-    404: {
-      description: "No audit event with the given id in the caller's workspace.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("not_found") }),
-        },
-      },
-    },
-  },
-});
-
-export const get = defineOpenAPIRoute<typeof getRouteDef, ApiEnv, true>({
-  route: getRouteDef,
-  handler: async (c) => {
-    const principal = c.var.principal as UserPrincipal;
-    const dispatcher = c.var.dispatcher;
-    const { audit_id } = c.req.valid("param");
-    const result = await dispatcher.dispatch({
-      capability_id: AUDIT_GET_ID,
-      input: { audit_id },
-      principal,
-      access: { workspace_id: principal.workspace_id },
-      trace_id: null,
-    });
-    return c.json(result as z.infer<typeof AuditGetResponse>, 200);
-  },
-  addRoute: true,
-});
+  ),
+);

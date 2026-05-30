@@ -2,7 +2,7 @@
  * `ApiEnv` — the single Hono `Env` shared across the whole trunk.
  *
  * Route modules type against this env (or a subset assignable to it);
- * they do **not** invent their own. Reason: `OpenAPIHono.route()`
+ * they do **not** invent their own. Reason: `Hono.route()`
  * preserves Schema in its return type but does not merge sub-app
  * `Env` back into the parent, so per-route-module envs fragment the
  * `c.var` surface at composition time (the middleware that set

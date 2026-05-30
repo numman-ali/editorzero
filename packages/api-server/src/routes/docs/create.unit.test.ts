@@ -1,30 +1,28 @@
 /**
  * Minimal-app test for `POST /docs/create` (ADR 0021 §Per-route test
- * posture). Same shape as `routes/docs/list/index.unit.test.ts`:
- * mounts only this route on a fresh `OpenAPIHono<ApiEnv>` + a fixture
+ * posture; ADR 0029 code-first shape). Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/docs` on a fresh trunk + a fixture
  * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
  *
  * **What this test owns.** The route's own contract:
  *   1. It dispatches `doc.create` with `capability_id: "doc.create"`,
- *      the principal off `c.var`, and an `access.workspace_id`
- *      derived from the principal.
+ *      the principal off `c.var`, and an `access.workspace_id` derived
+ *      from the principal.
  *   2. It forwards the parsed body as `input` to the dispatcher.
- *   3. It returns the dispatcher's output through `c.json` with
- *      status 201.
- *   4. Invalid body (empty title) → 400 without invoking the
- *      dispatcher (zod validation happens before the handler).
+ *   3. It returns the dispatcher's output through `c.json` with 201.
+ *   4. Invalid body (empty title / unknown key) → 400 without invoking
+ *      the dispatcher (the validator + hook reject before the handler).
  *
  * **What this test does NOT own.** The dispatcher's write-path
- * (`ctx.transact`, `doc_updates` persistence, rollback) — that's
+ * (`ctx.transact`, persistence, rollback) — that's
  * `composition/createApiDispatcher.integration.test.ts`. The full
- * request-auth-cookie roundtrip — that's
- * `composition/auth-chain.integration.test.ts`.
+ * request-auth-cookie roundtrip — `composition/auth-chain.integration.test.ts`.
  */
 
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -56,10 +54,10 @@ interface FixtureOutput {
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
-    // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route; see list/index.unit.test.ts.
+    // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
     deps: {} as any,
   } as Dispatcher;
   app.use("*", async (c, next) => {
@@ -67,7 +65,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([create] as const);
+  app.route("/docs", create);
   return app;
 }
 
@@ -123,6 +121,7 @@ describe("POST /docs/create", () => {
       body: JSON.stringify({ title: "   " }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 

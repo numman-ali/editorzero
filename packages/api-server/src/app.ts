@@ -12,52 +12,63 @@
  * (e.g., `{ auth, loadRoles }` without `dispatcher`, or `{ dispatcher }`
  * without `auth`) are rejected at composition time — see the guards
  * on `CreateApiAppOptions` below. `AppType` (typed from the default
- * `app`) is stable across both shapes because the routes registered
- * via `openapiRoutes([...] as const)` are the same in both — only the
+ * `app`) is stable across both shapes because the routes mounted via
+ * the `.route(prefix, subApp)` chain are the same in both — only the
  * middleware attached to `/docs/*` differs. `hc<AppType>` bindings do
  * not need to know whether auth is wired.
  *
- * **Composition primitive.** Routes live one-per-file under
- * `src/routes/<domain>/<capability>.ts` (co-located unit test at
- * `<capability>.unit.test.ts`) as `defineOpenAPIRoute({ route, handler })`
- * exports. Each domain aggregates its routes into a readonly tuple in
- * `src/routes/<domain>/index.ts` (the only `index.ts` per domain). The
- * trunk spreads every domain tuple into a single literal at the
- * `openapiRoutes(...)` call site. This is the
- * `@hono/zod-openapi@1.3.0` "Modular Organization" pattern.
+ * **Composition primitive (ADR 0029, code-first).** Routes live one-
+ * per-file under `src/routes/<domain>/<capability>.ts` (co-located
+ * unit test at `<capability>.unit.test.ts`), each exporting a self-
+ * contained `Hono<ApiEnv>` sub-app built from
+ * `factory.createHandlers(describeRoute, validator, handler)`. Each
+ * domain composes its routes into one sub-app in
+ * `src/routes/<domain>/index.ts` (the only `index.ts` per domain) via a
+ * chained `.route("/", subApp)` chain; the trunk then mounts each
+ * domain sub-app at its prefix with `.route("/<domain>", <domain>)`.
+ * OpenAPI metadata rides on each route's `describeRoute` middleware and
+ * is read statically by `generateSpecs(app)` (no central route
+ * registry).
  *
- * **Why the spread must be at the call site, not assigned to a
- * variable first.** `openapiRoutes` types the tuple via a `const
- * Inputs extends readonly {...}[]` generic; `SchemaFromRoutes` then
- * recurses `[infer Head, ...infer Tail]`. The `const` modifier
- * preserves literal tuple types on inference *from the argument
- * expression*. Assigning the spread to `const routes = [...a, ...b]`
- * without a trailing `as const` widens to `Array<...>`, and the
- * subsequent `openapiRoutes(routes)` loses the per-element Schema
- * merge — which means `hc<AppType>` RPC typing silently collapses to
- * `unknown`. Keep the spread inline.
+ * **Why the `.route()` chain must stay contiguous.** Base Hono's
+ * `.route(path, subApp)` merges the sub-app's RPC `Schema` into the
+ * parent app's return type, and a fluent chain accumulates the union
+ * across every mount. `hc<AppType>` reads that accumulated `Schema` to
+ * reconstruct `client.docs.create.$post` etc. Breaking the chain —
+ * assigning an intermediate to a `const` and re-mounting it, or looping
+ * `for (const r of routes) trunk.route(...)` — drops the per-mount
+ * `Schema` accumulation and collapses `hc<AppType>` RPC typing to
+ * `unknown`. Keep the mounts a single contiguous `.route(...).route(
+ * ...)` expression at both levels (domain index and trunk). (The prior
+ * `@hono/zod-openapi` design used an `openapiRoutes([...] as const)`
+ * tuple specifically *because* `OpenAPIHono.route()` did not merge the
+ * OpenAPI registry across sub-apps; the code-first `hono-openapi`
+ * substrate has no such limitation, so ADR 0029 reverses that choice
+ * back to idiomatic `.route()` composition.)
  *
- * **Path == folder path.** `routes/infra/health/` exposes
- * `/infra/health`. Every route's path mirrors its folder path so the
- * filesystem is self-documenting: finding the handler for a URL is a
- * matter of reading the path off the URL and navigating the tree.
+ * **Path == folder path.** `routes/infra/health.ts` exposes
+ * `/infra/health` (the route mounts the relative `/health`; the trunk
+ * adds the `/infra` prefix). Every route's path mirrors its folder path
+ * so the filesystem is self-documenting: finding the handler for a URL
+ * is a matter of reading the path off the URL and navigating the tree.
  * Non-capability endpoints (health, readiness, version) live under
  * `infra/` precisely so they're visibly not capability endpoints.
  *
  * **Env discipline.** One `ApiEnv` lives on the trunk; route modules
- * type against it (or a subset assignable to it). `OpenAPIHono.route(
- * )` does not merge sub-app `Env` into the parent return type, so
- * per-module envs fragment the `c.var` surface at composition time.
- * `hc<AppType>` extracts Schema, not `Env` — so the `Env` contract is
- * purely server-internal.
+ * type against it (or a subset assignable to it). `Hono.route()` merges
+ * sub-app `Schema` into the parent return type but *not* `Env`, so
+ * per-module envs would fragment the `c.var` surface — every sub-app
+ * here is `new Hono<ApiEnv>()`, so there is one env and no
+ * fragmentation. `hc<AppType>` extracts Schema, not `Env` — so the
+ * `Env` contract is purely server-internal.
  *
  * **Better Auth mount.** `app.on(["POST","GET"], "/auth/*", c =>
  * auth.handler(c.req.raw))` is the Better Auth 1.6.5 Hono-integration
  * shape. `basePath: "/auth"` on `createAuth(...)` keeps the paths in
  * lockstep — Better Auth's client-side routes (`/sign-in/email`,
  * `/sign-up/email`, `/get-session`, ...) compose under `/auth/*`. The
- * mount is on the non-typed `.on()` method rather than `openapiRoutes
- * ([...] as const)` because Better Auth owns its own request/response
+ * mount is on the non-typed `.on()` method rather than a typed
+ * `.route()` mount because Better Auth owns its own request/response
  * contract (not our zod-validated capability shape); exposing it
  * through OpenAPI would conflate the two contract systems. Auth
  * endpoints are documented separately via `auth.api.getOpenAPISchema(
@@ -78,11 +89,13 @@
  * `c.var.principal` / `c.var.dispatcher`. Hono preserves `app.use(...)`
  * registration order within a path prefix.
  *
- * **Future state.** Domain tuples become codegen-emitted from the
- * capability registry; the trunk spread pattern is unchanged. This is
- * why the "Modular Organization" tuple-spread pattern was chosen over
- * `.route(prefix, subApp)` chaining or `createFactory()`-based sub-
- * apps. See ADR 0021 for the full rationale.
+ * **Future state.** The per-capability route modules + domain sub-apps
+ * become codegen-emitted from the capability registry (one `Hono` sub-
+ * app per capability, one chained domain index per domain); the trunk's
+ * `.route()` mount chain is unchanged. The `createFactory<ApiEnv>()` +
+ * `.route()` composition (ADR 0029) is what makes each route module a
+ * standalone, individually-testable, codegen-friendly unit. See ADR
+ * 0021 (transport topology) and ADR 0029 (code-first package shape).
  */
 
 import type { Auth } from "@editorzero/auth";
@@ -93,17 +106,17 @@ import type { Dispatcher } from "@editorzero/dispatcher";
 import { EditorZeroError } from "@editorzero/errors";
 import { createMcpHandler } from "@editorzero/mcp-server";
 import { ensureDomGlobals } from "@editorzero/sync";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 import type { ApiEnv } from "./env";
 import { createDispatcherMiddleware } from "./middleware/dispatcher";
 import { createPrincipalMiddleware } from "./middleware/principal";
-import { auditRoutes } from "./routes/audit";
-import { collectionsRoutes } from "./routes/collections";
-import { docsRoutes } from "./routes/docs";
-import { infraRoutes } from "./routes/infra";
-import { workspacesRoutes } from "./routes/workspaces";
+import { audit } from "./routes/audit";
+import { collections } from "./routes/collections";
+import { docs } from "./routes/docs";
+import { infra } from "./routes/infra";
+import { workspaces } from "./routes/workspaces";
 
 export interface CreateApiAppOptions {
   /**
@@ -274,7 +287,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     ensureDomGlobals();
   }
 
-  const trunk = new OpenAPIHono<ApiEnv>();
+  const trunk = new Hono<ApiEnv>();
 
   // **Error mapper** — every `EditorZeroError` subclass carries its
   // HTTP status + code literal (`packages/errors/src/index.ts`);
@@ -355,13 +368,19 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     trunk.use("/audits/*", dispatcherMw);
   }
 
-  return trunk.openapiRoutes([
-    ...infraRoutes,
-    ...docsRoutes,
-    ...collectionsRoutes,
-    ...workspacesRoutes,
-    ...auditRoutes,
-  ] as const);
+  // Mount each domain sub-app at its prefix. The fluent `.route()`
+  // chain is load-bearing for `hc<AppType>`: base Hono's `.route()`
+  // merges each sub-app's RPC `Schema` into the return type, and the
+  // chain accumulates the union across all five domains. Keep it a
+  // single contiguous expression — an intermediate `const` re-mount is
+  // the shape most prone to widening the inferred schema to `unknown`.
+  // `audit` mounts at the plural `/audits` prefix (dir is singular).
+  return trunk
+    .route("/infra", infra)
+    .route("/docs", docs)
+    .route("/collections", collections)
+    .route("/workspaces", workspaces)
+    .route("/audits", audit);
 }
 
 /**

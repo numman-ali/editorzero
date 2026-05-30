@@ -142,7 +142,12 @@ describe("doc.get", () => {
       visibility: "workspace",
     });
     expect(out.blocks).toHaveLength(2);
-    const [first, second] = out.blocks;
+    // `DocGetOutput.blocks` is `unknown[]` (the schema keeps the BlockNote
+    // block union out of the schemas leaf — ADR 0034; `@editorzero/sync`
+    // owns the runtime block contract). The handler still returns the
+    // real `LooseBlock[]`; narrow locally to read `type` off each element
+    // without widening the schema.
+    const [first, second] = out.blocks as Array<{ type?: string }>;
     expect(first?.type).toBe("heading");
     expect(second?.type).toBe("paragraph");
   });

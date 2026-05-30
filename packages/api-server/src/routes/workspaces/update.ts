@@ -1,132 +1,101 @@
 /**
- * `POST /workspaces/update` — workspace.update surface (invariant 4).
+ * `POST /workspaces/update` — mutate the caller's workspace metadata
+ * (invariant 4). Code-first shape (ADR 0029); see `docs/create.ts` for
+ * the golden walkthrough of the `factory.createHandlers(describeRoute,
+ * validator, handler)` chain and why the handler narrows the dispatcher's
+ * `unknown` output via `.parse` rather than an `as` cast.
  *
  * Metadata-only mutation. Updates `name`, `trash_retention_days`, or
  * `settings` (any subset — at least one required). Scope
  * `workspace:admin`; members / guests get 403.
  *
- * Path follows the repo-wide `<plural>/<action>` convention (see
- * `workspace.get` route header and `apps/cli/src/generator/http-
- * binding.ts`); the parity test ensures the derived binding matches.
+ * Path follows the repo-wide `<plural>/<action>` convention; the `docs`
+ * domain mounts at `/docs`, this one at `/workspaces`, so the external
+ * path is `/workspaces/update` and `hc<AppType>` reconstructs
+ * `client.workspaces.update.$post`.
  *
- * **Status — 200 OK** (update, not create). Echoes the post-state of
- * the mutable fields plus `workspace_id` so callers don't need a
- * follow-up `GET /workspaces/get`.
+ * **Request + response schemas — reused, not re-declared (ADR 0034).**
+ * `WorkspaceUpdateInputSchema` / `WorkspaceUpdateOutputSchema` from
+ * `@editorzero/schemas/workspace/update` are the single source the
+ * capability also consumes. The input schema's `.strict()` rejects a
+ * stray `{ slug: ... }` (slug is bootstrap-derived, not mutable here),
+ * and its `.refine(at-least-one)` rejects the no-op `{}` patch — both
+ * surface as the validator's 400 before the handler runs. No wire copy
+ * drifts from the capability because there is no copy.
  *
- * **No slug.** `slug` is derived at bootstrap and is not part of this
- * surface (see `workspace.update` capability header). A request body
- * with `{ slug: ... }` is rejected by the strict schema as a 400.
+ * **Status — 200 OK** (update, not create). Echoes the post-state of the
+ * mutable fields plus `workspace_id` so callers don't need a follow-up
+ * `GET /workspaces/get`.
  *
- * **No-op rejection.** The underlying capability refuses an empty
- * `{}` input at the zod boundary — surfaces here as 400.
+ * **Audit + permission + write-path tx live inside the dispatcher.** The
+ * handler only dispatches; the permission gate and the single write-path
+ * SQL tx (the audit row lands in the same tx) are the dispatcher's. The
+ * only error arm the handler maps from a *thrown* `EditorZeroError` is
+ * 404 (`NotFoundError` — workspace soft-deleted or bootstrap gap); 401 is
+ * the principal middleware's, 403 the gate's, 400 the validator's.
  */
 
 import { CapabilityId } from "@editorzero/ids";
-import type { UserPrincipal } from "@editorzero/principal";
-import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import {
+  WorkspaceUpdateInputSchema,
+  WorkspaceUpdateOutputSchema,
+} from "@editorzero/schemas/workspace/update";
+import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { errorResponse } from "../../lib/errors";
+import { describeRoute, errEnvelope, factory, jsonContent, validator } from "../../lib/openapi";
 
 const WORKSPACE_UPDATE_ID = CapabilityId("workspace.update");
 
-// At-least-one-field refine mirrors the capability's input boundary so
-// the OpenAPI / `hc<AppType>` contract matches runtime behaviour. Without
-// it, generated clients would treat `{}` as valid while the capability
-// would throw at zod parse — the exact kind of route/capability drift
-// Codex flagged on `doc.update`'s follow-on fix.
-const UpdateRequest = z
-  .object({
-    name: z.string().trim().min(1, "name must not be empty or whitespace-only").optional(),
-    trash_retention_days: z
-      .number()
-      .int("trash_retention_days must be an integer")
-      .min(7, "trash_retention_days must be at least 7")
-      .max(365, "trash_retention_days must be at most 365")
-      .optional(),
-    settings: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict()
-  .refine(
-    (v) => v.name !== undefined || v.trash_retention_days !== undefined || v.settings !== undefined,
-    { message: "at least one of name, trash_retention_days, settings must be provided" },
-  )
-  .openapi("WorkspaceUpdateRequest");
-
-const UpdateResponse = z
-  .object({
-    workspace_id: z.string(),
-    name: z.string(),
-    trash_retention_days: z.number(),
-    settings: z.record(z.string(), z.unknown()),
-  })
-  .openapi("WorkspaceUpdateResponse");
-
-const updateRouteDef = createRoute({
-  method: "post",
-  path: "/workspaces/update",
-  tags: ["workspaces"],
-  summary: "Update the caller's workspace (name, trash_retention_days, settings).",
-  request: {
-    body: {
-      content: { "application/json": { schema: UpdateRequest } },
-      required: true,
-    },
-  },
-  responses: {
-    200: {
-      description: "Updated — post-patch metadata.",
-      content: { "application/json": { schema: UpdateResponse } },
-    },
-    400: {
-      description:
-        "Validation error — empty patch, invalid retention bound, or unknown body key (e.g. slug).",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("validation") }),
+export const update = new Hono<ApiEnv>().post(
+  "/update",
+  ...factory.createHandlers(
+    describeRoute({
+      tags: ["workspaces"],
+      summary: "Update the caller's workspace (name, trash_retention_days, settings).",
+      responses: {
+        200: {
+          description: "Updated — post-patch metadata.",
+          content: jsonContent(WorkspaceUpdateOutputSchema),
+        },
+        400: {
+          description:
+            "Validation error — empty patch, invalid retention bound, or unknown body key (e.g. slug).",
+          content: jsonContent(errEnvelope("validation_failed")),
+        },
+        401: {
+          description: "Unauthenticated.",
+          content: jsonContent(errEnvelope("unauthenticated")),
+        },
+        403: {
+          description: "Permission denied — caller lacks `workspace:admin`.",
+          content: jsonContent(errEnvelope("permission_denied")),
+        },
+        404: {
+          description: "Workspace is soft-deleted or missing (bootstrap gap).",
+          content: jsonContent(errEnvelope("not_found")),
         },
       },
+    }),
+    validator("json", WorkspaceUpdateInputSchema, (result, c) =>
+      result.success ? undefined : c.json({ error: "validation_failed" } as const, 400),
+    ),
+    async (c) => {
+      const principal = c.var.principal;
+      const input = c.req.valid("json");
+      try {
+        const result = await c.var.dispatcher.dispatch({
+          capability_id: WORKSPACE_UPDATE_ID,
+          input,
+          principal,
+          access: { workspace_id: principal.workspace_id },
+          trace_id: null,
+        });
+        return c.json(WorkspaceUpdateOutputSchema.parse(result), 200);
+      } catch (err) {
+        return errorResponse(c, err);
+      }
     },
-    401: {
-      description: "Unauthenticated.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("unauthenticated") }),
-        },
-      },
-    },
-    403: {
-      description: "Permission denied — caller lacks `workspace:admin`.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("permission_denied") }),
-        },
-      },
-    },
-    404: {
-      description: "Workspace is soft-deleted or missing (bootstrap gap).",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("not_found") }),
-        },
-      },
-    },
-  },
-});
-
-export const update = defineOpenAPIRoute<typeof updateRouteDef, ApiEnv, true>({
-  route: updateRouteDef,
-  handler: async (c) => {
-    const principal = c.var.principal as UserPrincipal;
-    const dispatcher = c.var.dispatcher;
-    const body = c.req.valid("json");
-    const result = await dispatcher.dispatch({
-      capability_id: WORKSPACE_UPDATE_ID,
-      input: body,
-      principal,
-      access: { workspace_id: principal.workspace_id },
-      trace_id: null,
-    });
-    return c.json(result as z.infer<typeof UpdateResponse>, 200);
-  },
-  addRoute: true,
-});
+  ),
+);

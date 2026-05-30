@@ -58,105 +58,37 @@
 
 import type { HandlerError } from "@editorzero/audit";
 import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
-import { CapabilityId, WorkspaceId } from "@editorzero/ids";
-import { SUBJECT_KINDS } from "@editorzero/scopes";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type AuditListInput,
+  AuditListInputSchema,
+  type AuditListOutput,
+  AuditListOutputSchema,
+} from "@editorzero/schemas/audit/list";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const AUDIT_LIST_ID = CapabilityId("audit.list");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Three refines layered on the strict object:
-//   1. cursor pair is both-or-neither (`before_created_at` without
-//      `before_id` is a page boundary with no tiebreak, which defeats
-//      the whole point of the composite cursor);
-//   2. `subject_id` requires `subject_kind` (the (subject_kind,
-//      subject_id, created_at) index only narrows correctly when both
-//      are set);
-//   3. `since <= until` when both are present (a backwards time
-//      range always returns zero rows — catch at the boundary to
-//      distinguish operator intent from a typo).
-//
-// `limit` defaults to 50; max is 200 to cap a single response's row
-// count. Callers that need larger scans paginate.
-
-const InputSchema = z
-  .object({
-    limit: z.number().int().min(1).max(200).default(50),
-    before_created_at: z.number().int().optional(),
-    before_id: z.string().optional(),
-    subject_kind: z.enum(SUBJECT_KINDS).optional(),
-    subject_id: z.string().optional(),
-    capability_id: z.string().optional(),
-    outcome: z.enum(["allow", "deny", "error"]).optional(),
-    since: z.number().int().optional(),
-    until: z.number().int().optional(),
-  })
-  .strict()
-  .refine(
-    (v) =>
-      (v.before_created_at === undefined && v.before_id === undefined) ||
-      (v.before_created_at !== undefined && v.before_id !== undefined),
-    { message: "before_created_at and before_id must be provided together" },
-  )
-  .refine((v) => v.subject_id === undefined || v.subject_kind !== undefined, {
-    message: "subject_id requires subject_kind",
-  })
-  .refine((v) => v.since === undefined || v.until === undefined || v.since <= v.until, {
-    message: "since must be less than or equal to until",
-  });
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-
-const EffectSchema = z.object({ kind: z.string() }).catchall(z.unknown());
-
-const AuditRowSchema = z.object({
-  id: z.string(),
-  workspace_id: WorkspaceIdField,
-  capability_id: z.string(),
-  category: z.enum(["mutation", "read", "auth", "admin", "system"]),
-  principal_kind: z.enum(["user", "agent"]),
-  principal_id: z.string(),
-  acting_as_user_id: z.string().nullable(),
-  session_id: z.string().nullable(),
-  token_id: z.string().nullable(),
-  subject_kind: z.string(),
-  subject_id: z.string().nullable(),
-  outcome: z.enum(["allow", "deny", "error"]),
-  deny_reason: z.string().nullable(),
-  input_hash: z.string(),
-  effect: EffectSchema,
-  duration_ms: z.number(),
-  trace_id: z.string().nullable(),
-  created_at: z.number(),
-  collapsed_count: z.number(),
-});
-
-const CursorSchema = z.object({
-  before_created_at: z.number(),
-  before_id: z.string(),
-});
-
-const OutputSchema = z.object({
-  events: z.array(AuditRowSchema),
-  next_cursor: CursorSchema.nullable(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `AuditListInputSchema` / `AuditListOutputSchema` are the single source
+// (ADR 0034), reused verbatim by the API route's `validator` / `resolver`.
+// The input's three refines (cursor both-or-neither, `subject_id` requires
+// `subject_kind`, `since <= until`), the numeric-field `z.coerce.number()`
+// query-string handling, and the shared `AuditRowSchema` reuse for the
+// response are documented at the schema definition in
+// `@editorzero/schemas/audit/list`.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const auditList: Capability<Input, Output> = {
+export const auditList: Capability<AuditListInput, AuditListOutput> = {
   id: AUDIT_LIST_ID,
   category: "read",
   summary: "List audit events in the workspace; paginated, admin-only.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: AuditListInputSchema,
+  output: AuditListOutputSchema,
   requires: ["workspace:admin"],
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {

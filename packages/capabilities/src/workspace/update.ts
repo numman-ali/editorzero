@@ -57,71 +57,40 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId, WorkspaceId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type WorkspaceUpdateInput,
+  WorkspaceUpdateInputSchema,
+  type WorkspaceUpdateOutput,
+  WorkspaceUpdateOutputSchema,
+} from "@editorzero/schemas/workspace/update";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const WORKSPACE_UPDATE_ID = CapabilityId("workspace.update");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Every field is optional. The `.refine` guard after the base shape
-// requires at least one to be present — reject the no-op patch at the
-// boundary (see header "No-op rejection"). `strict()` rejects unknown
-// keys BEFORE the refine runs, so a caller passing `{ slug: ... }`
-// gets `unrecognized_keys`, not a "no-op" message.
-
-const InputSchema = z
-  .object({
-    name: z.string().trim().min(1, "name must not be empty or whitespace-only").optional(),
-    trash_retention_days: z
-      .number()
-      .int("trash_retention_days must be an integer")
-      .min(7, "trash_retention_days must be at least 7")
-      .max(365, "trash_retention_days must be at most 365")
-      .optional(),
-    // `record<string, unknown>` keeps the shape free-form at this
-    // boundary. A settings schema (theme enum, feature flags, ...)
-    // belongs in a capability that understands those fields.
-    settings: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict()
-  .refine(
-    (v) => v.name !== undefined || v.trash_retention_days !== undefined || v.settings !== undefined,
-    { message: "at least one of name, trash_retention_days, settings must be provided" },
-  );
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Echoes the post-state of the three mutable fields + `workspace_id`
-// (the dispatched tenant — surfaces the subject so clients chain
-// without re-reading). `updated_at` is NOT present — the `workspaces`
-// table deliberately has no `updated_at` column (architecture.md §3.2;
-// the audit log is the mutation history). Callers that need an "as
-// of" timestamp read the audit row's `created_at`.
-
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-
-const OutputSchema = z.object({
-  workspace_id: WorkspaceIdField,
-  name: z.string(),
-  trash_retention_days: z.number(),
-  settings: z.record(z.string(), z.unknown()),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `WorkspaceUpdateInputSchema` / `WorkspaceUpdateOutputSchema` are the single
+// source (ADR 0034), defined in `@editorzero/schemas/workspace/update` and
+// reused verbatim by the API route's `validator` / `resolver`. The capability
+// semantics that shape them — every input field optional with a
+// `.refine(at-least-one)` no-op rejection, `.strict()` rejecting unknown keys,
+// `trash_retention_days` bounded to [7, 365] per ADR 0017, `settings` left a
+// permissive `record<string, unknown>`, and `updated_at` deliberately absent
+// from the output — are documented in the file header above and at the schema
+// definition.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const workspaceUpdate: Capability<Input, Output> = {
+export const workspaceUpdate: Capability<WorkspaceUpdateInput, WorkspaceUpdateOutput> = {
   id: WORKSPACE_UPDATE_ID,
   category: "mutation",
   summary:
     "Update workspace metadata (name, trash_retention_days, settings); metadata-only, admin-gated.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: WorkspaceUpdateInputSchema,
+  output: WorkspaceUpdateOutputSchema,
   requires: ["workspace:admin"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

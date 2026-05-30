@@ -66,54 +66,41 @@
 
 import type { AuditEffect, HandlerError } from "@editorzero/audit";
 import { MemberAlreadyExistsError } from "@editorzero/errors";
-import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
-import { ROLES } from "@editorzero/scopes";
-import { z } from "zod";
+import { CapabilityId, UserId } from "@editorzero/ids";
+import {
+  type WorkspaceMemberAddInput,
+  WorkspaceMemberAddInputSchema,
+  type WorkspaceMemberAddOutput,
+  WorkspaceMemberAddOutputSchema,
+} from "@editorzero/schemas/workspace/member_add";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const WORKSPACE_MEMBER_ADD_ID = CapabilityId("workspace.member_add");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const InputSchema = z
-  .object({
-    user_id: z.string().min(1, "user_id must not be empty"),
-    role: z.enum(ROLES),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const UserIdField = z.string().transform((s): UserId => UserId(s));
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-
-const OutputSchema = z.object({
-  workspace_id: WorkspaceIdField,
-  user_id: UserIdField,
-  role: z.enum(ROLES),
-  created_at: z.number(),
-  updated_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// ── Wire + internal contract ───────────────────────────────────────────────
+//
+// `WorkspaceMemberAddInputSchema` / `WorkspaceMemberAddOutputSchema` are the
+// single source (ADR 0034), reused verbatim by the API route's `validator` /
+// `resolver` so the wire contract has exactly one definition. See
+// `@editorzero/schemas/workspace/member_add` for the schema definitions.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const workspaceMemberAdd: Capability<Input, Output> = {
+export const workspaceMemberAdd: Capability<WorkspaceMemberAddInput, WorkspaceMemberAddOutput> = {
   id: WORKSPACE_MEMBER_ADD_ID,
   category: "mutation",
   summary: "Add or revive a workspace member; metadata-only, admin-only.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: WorkspaceMemberAddInputSchema,
+  output: WorkspaceMemberAddOutputSchema,
   requires: ["workspace:admin"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({
       kind: "user",
-      id: UserId((input as Input).user_id),
+      id: UserId((input as WorkspaceMemberAddInput).user_id),
     }),
     effectOnAllow: (_input, output): AuditEffect => ({
       kind: "member.add",

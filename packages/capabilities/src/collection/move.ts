@@ -66,62 +66,39 @@ import type {
 } from "@editorzero/audit";
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
 import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, CollectionId, uuidV7 } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId, type CollectionId, uuidV7 } from "@editorzero/ids";
+import {
+  type CollectionMoveInput,
+  CollectionMoveInputSchema,
+  type CollectionMoveOutput,
+  CollectionMoveOutputSchema,
+} from "@editorzero/schemas/collection/move";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const COLLECTION_MOVE_ID = CapabilityId("collection.move");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const CollectionIdInput = z
-  .uuid({ version: "v7", message: "collection_id must be a UUIDv7" })
-  .transform((s): CollectionId => CollectionId(s));
-
-const NewParentIdInput = z
-  .uuid({ version: "v7", message: "new_parent_id must be a UUIDv7" })
-  .transform((s): CollectionId => CollectionId(s));
-
-const InputSchema = z
-  .object({
-    collection_id: CollectionIdInput,
-    // `null` (explicit workspace root) must be distinct from "missing"
-    // on the wire so the caller can unambiguously request root-parent.
-    // `.optional()` is rejected — move is an explicit operation, and
-    // "omit to default to current parent" would make the common mistake
-    // (forgetting the field) a silent no-op.
-    new_parent_id: NewParentIdInput.nullable(),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const CollectionIdField = z.string().transform((s): CollectionId => CollectionId(s));
-const NullableCollectionIdField = z
-  .string()
-  .nullable()
-  .transform((s): CollectionId | null => (s === null ? null : CollectionId(s)));
-
-const OutputSchema = z.object({
-  collection_id: CollectionIdField,
-  new_parent_id: NullableCollectionIdField,
-  new_order_key: z.string(),
-  updated_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// ── Wire + internal contract ───────────────────────────────────────────────
+//
+// `CollectionMoveInputSchema` / `CollectionMoveOutputSchema` are the single
+// source (ADR 0034), reused verbatim by the API route's `validator` /
+// `resolver` so the wire contract has exactly one definition. The
+// capability semantics that shape these (`.strict()` rejecting unknown
+// keys, `new_parent_id` being `.nullable()` but not `.optional()` so an
+// omitted field is a 400 rather than a silent no-op) are documented in the
+// file header above and at the schema definition in
+// `@editorzero/schemas/collection/move`.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const collectionMove: Capability<Input, Output> = {
+export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutput> = {
   id: COLLECTION_MOVE_ID,
   category: "mutation",
   summary:
     "Re-parent a collection within the workspace; cycle-free + depth-cap-preserving + target-scope slug check.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: CollectionMoveInputSchema,
+  output: CollectionMoveOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

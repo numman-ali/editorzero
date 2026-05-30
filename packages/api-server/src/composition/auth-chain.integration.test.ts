@@ -320,9 +320,9 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     // Mount the probe BEFORE the first request — Hono's SmartRouter
     // lazily builds its match tree on first request, and once built it
     // refuses further `.use()` / `.get()` calls. Real capability routes
-    // compose through `openapiRoutes([...] as const)` at factory time,
-    // so they land before any request too. This test uses the same
-    // mount-early discipline.
+    // compose through the trunk's `.route(prefix, subApp)` mount chain at
+    // factory time, so they land before any request too. This test uses
+    // the same mount-early discipline.
     const resolve = createBetterAuthResolver({ auth, loadRoles });
     trunk.use(
       "/probe",

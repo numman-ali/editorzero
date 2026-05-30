@@ -7,125 +7,115 @@
  * cycle walk, no subtree-height check. Target existence + target-scope
  * slug uniqueness are the two preconditions.
  *
- * **Status — 200 OK**.
+ * **Code-first shape (ADR 0029) — pattern P3 (path param + JSON body).**
+ * The capability input merges a path-param `doc_id` with a JSON-body
+ * `new_collection_id`. Rather than re-declare two wire schemas, both
+ * validators are *derived from the one shared capability schema*
+ * (`DocMoveInputSchema`, ADR 0034) via `.pick()` — which preserves each
+ * field's `.transform()` and the parent's `.strict()`:
+ *   - `ParamSchema = DocMoveInputSchema.pick({ doc_id: true })`
+ *   - `BodySchema  = DocMoveInputSchema.pick({ new_collection_id: true })`
+ * Two `validator(...)` middlewares parse the two request locations; the
+ * handler re-merges `c.req.valid("param")` + `c.req.valid("json")` into
+ * the single capability input. Both validators share the hook that
+ * projects a parse failure to `{ error: "validation_failed" }` at 400 —
+ * the runtime wire shape (this 400, like the principal middleware's 401,
+ * is a cross-cutting middleware return, intentionally not an `hc` arm;
+ * see `lib/errors.ts`).
  *
- * **400** — malformed body (`new_collection_id` not UUIDv7 or missing).
+ * **No type casts (`as`)** beyond the hook's literal `as const`.
+ * `c.var.principal` stays the `Principal` union (capability routes serve
+ * agent principals too, invariant 8); the handler reads only
+ * `workspace_id` (present on both arms). `dispatch` returns
+ * `Promise<unknown>`; the handler *parses* that through
+ * `DocMoveOutputSchema` rather than asserting a type — the honest
+ * `unknown`→branded narrowing, and a runtime guard that dispatcher output
+ * still satisfies the published contract (drift → ZodError → 500, not a
+ * silent lie). The dispatcher *throws* `EditorZeroError` subclasses; the
+ * handler catches and maps them with `errorResponse(c, err)` to explicit,
+ * literal-typed `c.json` returns — those returns are what `hc<AppType>`
+ * reads to infer the error arm (ADR 0029 §4).
  *
- * **404** — doc missing/soft-deleted, or target collection
- * missing/soft-deleted (cross-workspace targets surface as 404 via the
- * tenant scoping plugin; no existence leakage across boundaries).
+ * The route mounts at a path **relative** to its domain (`/move/:doc_id`);
+ * the `docs` domain mounts at `/docs` on the trunk, so the external path
+ * is `/docs/move/:doc_id`.
  *
- * **409** — `SlugCollisionError` when the moved doc's slug clashes with
- * a live sibling doc in the target scope (root: `collection_id IS NULL`;
- * nested: same `collection_id`). Body: `{ error: "slug_collision" }`.
+ * **Status — 200 OK** (metadata mutation, no resource minted).
+ * **400** — malformed body (`new_collection_id` not UUIDv7 or missing) or
+ * malformed path param. **404** — doc or target collection missing/
+ * soft-deleted (cross-workspace targets surface as 404 via tenant scoping;
+ * no existence leakage). **409 `slug_collision`** — the moved doc's slug
+ * clashes with a live sibling in the target scope.
  */
 
 import { CapabilityId } from "@editorzero/ids";
-import type { UserPrincipal } from "@editorzero/principal";
-import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import { DocMoveInputSchema, DocMoveOutputSchema } from "@editorzero/schemas/doc/move";
+import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { errorResponse } from "../../lib/errors";
+import { describeRoute, errEnvelope, factory, jsonContent, validator } from "../../lib/openapi";
 
 const DOC_MOVE_ID = CapabilityId("doc.move");
 
-const MoveParams = z
-  .object({
-    doc_id: z.uuid({ version: "v7", message: "doc_id must be a UUIDv7" }),
-  })
-  .openapi("DocMoveParams");
+const ParamSchema = DocMoveInputSchema.pick({ doc_id: true });
+const BodySchema = DocMoveInputSchema.pick({ new_collection_id: true });
 
-const MoveRequest = z
-  .object({
-    new_collection_id: z.string().uuid().nullable(),
-  })
-  .strict()
-  .openapi("DocMoveRequest");
-
-const MoveResponse = z
-  .object({
-    doc_id: z.string(),
-    new_collection_id: z.string().nullable(),
-    new_order_key: z.string(),
-    updated_at: z.number(),
-  })
-  .openapi("DocMoveResponse");
-
-const moveRouteDef = createRoute({
-  method: "post",
-  path: "/docs/move/{doc_id}",
-  tags: ["docs"],
-  summary: "Re-parent a doc under a different collection (or to the workspace root).",
-  request: {
-    params: MoveParams,
-    body: {
-      content: { "application/json": { schema: MoveRequest } },
-      required: true,
-    },
-  },
-  responses: {
-    200: {
-      description: "Moved — post-move metadata.",
-      content: { "application/json": { schema: MoveResponse } },
-    },
-    400: {
-      description: "Validation error (malformed body).",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("validation") }),
+export const move = new Hono<ApiEnv>().post(
+  "/move/:doc_id",
+  ...factory.createHandlers(
+    describeRoute({
+      tags: ["docs"],
+      summary: "Re-parent a doc under a different collection (or to the workspace root).",
+      responses: {
+        200: {
+          description: "Moved — post-move metadata.",
+          content: jsonContent(DocMoveOutputSchema),
+        },
+        400: {
+          description: "Validation error (malformed body or path param).",
+          content: jsonContent(errEnvelope("validation_failed")),
+        },
+        401: {
+          description: "Unauthenticated.",
+          content: jsonContent(errEnvelope("unauthenticated")),
+        },
+        403: {
+          description: "Permission denied — caller lacks `doc:write`.",
+          content: jsonContent(errEnvelope("permission_denied")),
+        },
+        404: {
+          description: "Doc or target collection does not exist or is soft-deleted.",
+          content: jsonContent(errEnvelope("not_found")),
+        },
+        409: {
+          description:
+            "Sibling-slug collision — moved doc's slug is already taken by a live sibling in the target collection scope.",
+          content: jsonContent(errEnvelope("slug_collision")),
         },
       },
+    }),
+    validator("param", ParamSchema, (result, c) =>
+      result.success ? undefined : c.json({ error: "validation_failed" } as const, 400),
+    ),
+    validator("json", BodySchema, (result, c) =>
+      result.success ? undefined : c.json({ error: "validation_failed" } as const, 400),
+    ),
+    async (c) => {
+      const principal = c.var.principal;
+      const input = { ...c.req.valid("param"), ...c.req.valid("json") };
+      try {
+        const result = await c.var.dispatcher.dispatch({
+          capability_id: DOC_MOVE_ID,
+          input,
+          principal,
+          access: { workspace_id: principal.workspace_id },
+          trace_id: null,
+        });
+        return c.json(DocMoveOutputSchema.parse(result), 200);
+      } catch (err) {
+        return errorResponse(c, err);
+      }
     },
-    401: {
-      description: "Unauthenticated.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("unauthenticated") }),
-        },
-      },
-    },
-    403: {
-      description: "Permission denied — caller lacks `doc:write`.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("permission_denied") }),
-        },
-      },
-    },
-    404: {
-      description: "Doc or target collection does not exist or is soft-deleted.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("not_found") }),
-        },
-      },
-    },
-    409: {
-      description:
-        "Sibling-slug collision — moved doc's slug is already taken by a live sibling in the target collection scope.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("slug_collision") }),
-        },
-      },
-    },
-  },
-});
-
-export const move = defineOpenAPIRoute<typeof moveRouteDef, ApiEnv, true>({
-  route: moveRouteDef,
-  handler: async (c) => {
-    const principal = c.var.principal as UserPrincipal;
-    const dispatcher = c.var.dispatcher;
-    const { doc_id } = c.req.valid("param");
-    const body = c.req.valid("json");
-    const result = await dispatcher.dispatch({
-      capability_id: DOC_MOVE_ID,
-      input: { doc_id, ...body },
-      principal,
-      access: { workspace_id: principal.workspace_id },
-      trace_id: null,
-    });
-    return c.json(result as z.infer<typeof MoveResponse>, 200);
-  },
-  addRoute: true,
-});
+  ),
+);

@@ -48,60 +48,38 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError, SlugCollisionError } from "@editorzero/errors";
-import { CapabilityId, CollectionId, DocId, uuidV7 } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId, type DocId, uuidV7 } from "@editorzero/ids";
+import {
+  type DocMoveInput,
+  DocMoveInputSchema,
+  type DocMoveOutput,
+  DocMoveOutputSchema,
+} from "@editorzero/schemas/doc/move";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_MOVE_ID = CapabilityId("doc.move");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const DocIdInput = z
-  .uuid({ version: "v7", message: "doc_id must be a UUIDv7" })
-  .transform((s): DocId => DocId(s));
-
-const NewCollectionIdInput = z
-  .uuid({ version: "v7", message: "new_collection_id must be a UUIDv7" })
-  .transform((s): CollectionId => CollectionId(s));
-
-const InputSchema = z
-  .object({
-    doc_id: DocIdInput,
-    // `null` (explicit workspace root) must be distinct from "missing"
-    // on the wire. `.optional()` rejected for the same reason
-    // `collection.move` rejects it — move is explicit.
-    new_collection_id: NewCollectionIdInput.nullable(),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-const NullableCollectionIdField = z
-  .string()
-  .nullable()
-  .transform((s): CollectionId | null => (s === null ? null : CollectionId(s)));
-
-const OutputSchema = z.object({
-  doc_id: DocIdField,
-  new_collection_id: NullableCollectionIdField,
-  new_order_key: z.string(),
-  updated_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// ── Wire + internal contract ───────────────────────────────────────────────
+//
+// `DocMoveInputSchema` / `DocMoveOutputSchema` are the single source
+// (ADR 0034), defined in `@editorzero/schemas/doc/move` and reused
+// verbatim by the API route's `validator` / `resolver`. `z.input` is
+// the wire shape (plain strings); each field's `.transform()` narrows
+// to the branded internal shape — `DocMoveInput` / `DocMoveOutput`.
+// `new_collection_id` is `.nullable()` (not `.optional()`): a move is
+// explicit, so `null` (workspace root) is distinct from "missing".
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docMove: Capability<Input, Output> = {
+export const docMove: Capability<DocMoveInput, DocMoveOutput> = {
   id: DOC_MOVE_ID,
   category: "mutation",
   summary:
     "Re-parent a doc under a different collection (or to the workspace root); metadata-only.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocMoveInputSchema,
+  output: DocMoveOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

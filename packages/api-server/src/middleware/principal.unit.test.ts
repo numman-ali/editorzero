@@ -15,7 +15,7 @@
 
 import { UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../env";
@@ -31,7 +31,7 @@ const TEST_USER: UserPrincipal = {
 };
 
 function buildProbeApp(resolver: PrincipalResolver) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   app.use("*", createPrincipalMiddleware({ resolve: resolver }));
   app.get("/probe", (c) => {
     const principal = c.var.principal;
@@ -62,7 +62,7 @@ describe("createPrincipalMiddleware", () => {
 
   it("returns 401 without calling next() when resolver returns null", async () => {
     let nextWasCalled = false;
-    const app = new OpenAPIHono<ApiEnv>();
+    const app = new Hono<ApiEnv>();
     app.use("*", createPrincipalMiddleware({ resolve: () => null }));
     app.get("/probe", (c) => {
       nextWasCalled = true;
@@ -76,7 +76,7 @@ describe("createPrincipalMiddleware", () => {
   });
 
   it("rethrows resolver errors so the global error handler can project them", async () => {
-    const app = new OpenAPIHono<ApiEnv>();
+    const app = new Hono<ApiEnv>();
     app.use(
       "*",
       createPrincipalMiddleware({

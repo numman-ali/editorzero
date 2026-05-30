@@ -1,32 +1,23 @@
 /**
- * `infra` domain aggregator.
+ * `infra` domain sub-app.
  *
- * Collects every `defineOpenAPIRoute` product under
- * `routes/infra/<capability>.ts` into a single readonly tuple so the
- * trunk (`src/app.ts`) can spread domain tuples into one
- * `openapiRoutes([...infraRoutes, ...docsRoutes, ...] as const)` call.
- * Per-route unit tests live co-located at `<capability>.unit.test.ts`;
- * this `index.ts` is the only one per domain — it is the grouping
- * aggregator, not a route itself.
+ * Composes the infrastructure routes (`health` — public liveness;
+ * `whoami` — auth-gated principal orientation, ADR 0025) into one
+ * `Hono<ApiEnv>` via a chained `.route("/", subApp)` chain. The trunk
+ * mounts it with `trunk.route("/infra", infra)`, so `/health` becomes
+ * `/infra/health`. Non-capability endpoints live under `infra/`
+ * precisely so they are visibly not capability endpoints.
  *
- * **Why the tuple is `as const` here.** `openapiRoutes`'s generic is
- * `<const Inputs extends readonly {...}[]>(inputs: Inputs) => ...` and
- * its `SchemaFromRoutes<Inputs, BasePath>` recurses
- * `[infer Head, ...infer Tail]` — tuple-shaped inference. For the
- * Schema merge (and therefore `hc<AppType>` RPC typing) to survive the
- * spread at the trunk, every intermediate aggregation must preserve
- * tuple element types. `as const` on this line does that; TypeScript
- * preserves element types through `[...tupleA, ...tupleB] as const`
- * spreads into a literal at the call site.
- *
- * **Adding a route.** Create `routes/infra/<name>.ts` that exports a
- * `defineOpenAPIRoute({..., addRoute: true })` value and its sibling
- * `<name>.unit.test.ts`; add the import here and append the
- * identifier to the tuple. The trunk needs no change — it consumes
- * `infraRoutes` as a black-box tuple.
+ * Mirrors the `routes/docs/` sub-app — see that header for the chained-
+ * `.route()` RPC-schema-merge rationale (ADR 0029). `/infra/health`
+ * mounts no principal middleware (public probe); `/infra/whoami` is
+ * gated by the trunk's exact-path principal mount.
  */
 
+import { Hono } from "hono";
+
+import type { ApiEnv } from "../../env";
 import { health } from "./health";
 import { whoami } from "./whoami";
 
-export const infraRoutes = [health, whoami] as const;
+export const infra = new Hono<ApiEnv>().route("/", health).route("/", whoami);

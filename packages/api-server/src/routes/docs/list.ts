@@ -1,127 +1,101 @@
 /**
- * `GET /docs/list` — first capability route (ADR 0021 / invariant 4).
+ * `GET /docs/list` — list all non-deleted docs in the caller's workspace.
  *
- * The minimal shape every capability route shares:
+ * **Code-first route shape (ADR 0029); empty-input variant.** Like the
+ * golden `create` route, this is a self-contained `Hono<ApiEnv>` sub-app
+ * built from chained handlers via `factory.createHandlers(...)`. It
+ * differs in one axis: `doc.list` takes **no request input** in v1, so
+ * there is no `validator(...)` arm — the capability input is the empty
+ * object `{}`, minted by the handler rather than parsed from the request:
  *
- *   1. zod input + output schemas declared on the route (OpenAPI doc
- *      generation + `hc<AppType>` RPC typing both derive from these).
- *   2. Handler reads `c.var.principal` + `c.var.dispatcher` and
- *      dispatches the capability. The principal + dispatcher are
- *      attached to `c.var` by the trunk's `/docs/*`-scoped middleware
- *      chain (`createApiApp` wires `createPrincipalMiddleware` +
- *      `createDispatcherMiddleware` for this prefix).
- *   3. Capability output is returned as-is through `c.json`. The
- *      capability's zod output schema has already validated the shape
- *      inside the dispatcher, so no further coercion is needed here.
+ *   1. `describeRoute({ ... })` — OpenAPI metadata only (summary, tags,
+ *      per-status response schemas). Documents the contract; does not
+ *      feed `hc`.
+ *   2. The handler — reads `c.var.principal` + `c.var.dispatcher`,
+ *      dispatches `doc.list` with `input: {}`, and returns the
+ *      dispatcher's output through `c.json`. The dispatcher *throws*
+ *      `EditorZeroError` subclasses; the handler catches and maps them
+ *      with `errorResponse(c, err)` to explicit, literal-typed `c.json`
+ *      returns — those explicit returns are what `hc<AppType>` reads to
+ *      infer the error arm (ADR 0029 §4). There is no 400 arm here: with
+ *      no request body to validate, the only client-visible errors are
+ *      the cross-cutting 401 (principal middleware) and the dispatcher's
+ *      403.
  *
- * **Why the response schema duplicates the capability output shape.**
- * The capability's `OutputSchema` uses `z.string().transform((s):
- * DocId => DocId(s))` for branded IDs. On the wire, branded strings
- * serialize as plain strings — the OpenAPI contract should say
- * `string`, not "string with a brand". A local response schema makes
- * the API contract explicit + avoids coupling the public OpenAPI
- * surface to the capability's internal transform semantics. Registry-
- * driven codegen (future) will emit both the capability schemas and
- * the route schemas from a single source; that seam replaces this
- * duplication.
+ * **No type casts (`as`).** `c.var.principal` stays `Principal` — the
+ * `user | agent` union. Capability routes serve agent principals too
+ * (invariant 8); the handler only reads `workspace_id` (present on both
+ * arms) and forwards `principal` to the dispatcher (which accepts the
+ * union). `dispatch` returns `Promise<unknown>`; rather than *assert* a
+ * type with `as`, the handler *parses* that `unknown` through the
+ * capability's shared response schema (`DocListOutputSchema.parse`) — the
+ * honest `unknown`→typed narrowing, and a runtime guard that the
+ * dispatcher output still satisfies the published contract (a drift
+ * surfaces as a ZodError → 500, not a silent lie).
  *
- * **Middleware is NOT declared on the route.** The trunk factory
- * (`createApiApp`) mounts `createPrincipalMiddleware` +
- * `createDispatcherMiddleware` on the `/docs/*` path prefix (Hono's
- * `app.use("/docs/*", ...)`). Per-route `route.middleware` would
- * require the route file to reference concrete middleware instances,
- * which can only be bound at composition-root time — so either every
- * route becomes a factory accepting deps or middleware lives at the
- * trunk's prefix seam. The prefix seam is simpler and preserves the
- * "route is a pure const export" convention. `hc<AppType>` typing is
- * unaffected either way (middleware narrows Env, not Schema).
+ * The route mounts at a path **relative** to its domain (`/list`); the
+ * `docs` domain mounts at `/docs` on the trunk, so the external path is
+ * `/docs/list`. `hc<AppType>` reconstructs `client.docs.list.$get`.
  *
- * **Audit + permission gate live inside the dispatcher**, not here.
- * The route handler does not re-check permissions or write audit
- * rows — invariant 5. A capability that reaches this handler has
- * already passed the gate and will have its `allow` / `error` /
- * `deny` row written by the dispatcher after the handler returns.
+ * **Response schema — reused, not re-declared (ADR 0034).**
+ * `DocListOutputSchema` from `@editorzero/schemas/doc/list` is the single
+ * source the capability also consumes. Its `*OutputSchema` transforms
+ * re-brand IDs, but `resolver` / `describeRoute` generate the OpenAPI
+ * response from the *input* side, so the spec stays wire-shaped (branded
+ * IDs invisible to external clients). No wire copy drifts from the
+ * capability because there is no copy — the migration's whole point.
+ *
+ * **Audit + permission gate live inside the dispatcher**, not here
+ * (invariant 5). A capability that reaches this handler has already
+ * passed the gate; the dispatcher writes its audit row after dispatch.
  */
 
 import { CapabilityId } from "@editorzero/ids";
-import type { UserPrincipal } from "@editorzero/principal";
-import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import { DocListOutputSchema } from "@editorzero/schemas/doc/list";
+import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { errorResponse } from "../../lib/errors";
+import { describeRoute, errEnvelope, factory, jsonContent } from "../../lib/openapi";
 
 const DOC_LIST_ID = CapabilityId("doc.list");
 
-// Response body — mirrors the `docList` capability's output shape at
-// the wire level (branded IDs serialize as strings). Declared here so
-// the OpenAPI doc + RPC client types stay owned by the route, not
-// imported from the capability (see file header §"Why the response
-// schema duplicates the capability output shape").
-const DocSummary = z
-  .object({
-    id: z.string(),
-    title: z.string(),
-    slug: z.string(),
-    collection_id: z.string().nullable(),
-    visibility: z.enum(["workspace", "public", "private"]),
-    created_at: z.number(),
-    updated_at: z.number(),
-  })
-  .openapi("DocSummary");
-
-const DocListResponse = z
-  .object({
-    docs: z.array(DocSummary),
-  })
-  .openapi("DocListResponse");
-
-const listRoute = createRoute({
-  method: "get",
-  path: "/docs/list",
-  tags: ["docs"],
-  summary: "List all non-deleted docs in the caller's workspace.",
-  responses: {
-    200: {
-      description: "Docs list.",
-      content: { "application/json": { schema: DocListResponse } },
-    },
-    401: {
-      description: "Unauthenticated.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("unauthenticated") }),
+export const list = new Hono<ApiEnv>().get(
+  "/list",
+  ...factory.createHandlers(
+    describeRoute({
+      tags: ["docs"],
+      summary: "List all non-deleted docs in the caller's workspace.",
+      responses: {
+        200: {
+          description: "Docs list.",
+          content: jsonContent(DocListOutputSchema),
+        },
+        401: {
+          description: "Unauthenticated.",
+          content: jsonContent(errEnvelope("unauthenticated")),
+        },
+        403: {
+          description: "Permission denied.",
+          content: jsonContent(errEnvelope("permission_denied")),
         },
       },
+    }),
+    async (c) => {
+      const principal = c.var.principal;
+      const input = {};
+      try {
+        const result = await c.var.dispatcher.dispatch({
+          capability_id: DOC_LIST_ID,
+          input,
+          principal,
+          access: { workspace_id: principal.workspace_id },
+          trace_id: null,
+        });
+        return c.json(DocListOutputSchema.parse(result), 200);
+      } catch (err) {
+        return errorResponse(c, err);
+      }
     },
-    403: {
-      description: "Permission denied.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("permission_denied") }),
-        },
-      },
-    },
-  },
-});
-
-export const list = defineOpenAPIRoute<typeof listRoute, ApiEnv, true>({
-  route: listRoute,
-  handler: async (c) => {
-    // `c.var.principal` is attached by `createPrincipalMiddleware` and
-    // guaranteed non-null by the time the handler runs (middleware
-    // 401s otherwise). Narrow to UserPrincipal for tenant access —
-    // agent principals also carry `workspace_id` but via a different
-    // discriminant; when agent-routes land this narrow becomes a
-    // principal-kind branch.
-    const principal = c.var.principal as UserPrincipal;
-    const dispatcher = c.var.dispatcher;
-    const result = await dispatcher.dispatch({
-      capability_id: DOC_LIST_ID,
-      input: {},
-      principal,
-      access: { workspace_id: principal.workspace_id },
-      trace_id: null,
-    });
-    return c.json(result as z.infer<typeof DocListResponse>, 200);
-  },
-  addRoute: true,
-});
+  ),
+);

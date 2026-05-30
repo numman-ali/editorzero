@@ -29,54 +29,38 @@
 import type { HandlerError } from "@editorzero/audit";
 import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
 import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type WorkspaceGetInput,
+  WorkspaceGetInputSchema,
+  type WorkspaceGetOutput,
+  WorkspaceGetOutputSchema,
+} from "@editorzero/schemas/workspace/get";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const WORKSPACE_GET_ID = CapabilityId("workspace.get");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// No fields: the principal's `workspace_id` already scopes `ctx.db`. A
-// strict empty object rejects smuggled keys (e.g. a client trying to
-// pass an `AccessPath.workspace_id` on a capability that has no
-// AccessPath surface).
-
-const InputSchema = z.object({}).strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// `settings` is stored as a TEXT JSON blob in the DB; the handler parses
-// it before returning. `z.record(z.string(), z.unknown())` keeps the
-// output schema permissive about the exact settings shape (a settings
-// schema belongs in a settings-aware capability, not here) while still
-// excluding unparseable garbage.
-
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-const UserIdField = z.string().transform((s): UserId => UserId(s));
-
-const OutputSchema = z.object({
-  workspace_id: WorkspaceIdField,
-  slug: z.string(),
-  name: z.string(),
-  trash_retention_days: z.number(),
-  created_by: UserIdField,
-  created_at: z.number(),
-  settings: z.record(z.string(), z.unknown()),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `WorkspaceGetInputSchema` / `WorkspaceGetOutputSchema` are the single
+// source (ADR 0034), defined in `@editorzero/schemas/workspace/get` and
+// reused verbatim by the API route's `validator` / `resolver`. Input is a
+// strict empty object (the principal's `workspace_id` scopes `ctx.db`);
+// the output's branded-ID fields narrow `string` → brand on the
+// `z.output` side. The capability semantics that shape these — `settings`
+// kept permissive, `diagnostic_salt` / `deleted_at` excluded — are
+// documented in the file header above and at the schema definition.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const workspaceGet: Capability<Input, Output> = {
+export const workspaceGet: Capability<WorkspaceGetInput, WorkspaceGetOutput> = {
   id: WORKSPACE_GET_ID,
   category: "read",
   summary: "Read the caller's workspace metadata (id, slug, name, retention, settings).",
-  input: InputSchema,
-  output: OutputSchema,
+  input: WorkspaceGetInputSchema,
+  output: WorkspaceGetOutputSchema,
   requires: ["workspace:read"],
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {

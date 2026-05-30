@@ -1,18 +1,18 @@
 /**
- * Minimal-app test for `GET /collections/list` (ADR 0021 §Per-route
- * test posture). Mirrors `routes/docs/list.unit.test.ts` — mounts
- * only this route on a fresh `OpenAPIHono<ApiEnv>` + a fixture
- * middleware chain that seeds `c.var.principal` + `c.var.dispatcher`.
+ * Minimal-app test for `GET /collections/list` (ADR 0021 §Per-route test
+ * posture; ADR 0029 code-first shape). Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/collections` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
  *
- * Owns: the route's own contract (dispatches `collection.list` with
- * principal-derived access; returns dispatcher output as 200 JSON).
- * Does not own: dispatcher wiring or auth-cookie roundtrip.
+ * Owns: the route's own contract (dispatches `collection.list` with the
+ * empty input + principal-derived access; returns dispatcher output as
+ * 200 JSON). Does not own: dispatcher wiring or auth-cookie roundtrip.
  */
 
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -39,7 +39,7 @@ interface FixtureOutput {
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
@@ -50,7 +50,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([list] as const);
+  app.route("/collections", list);
   return app;
 }
 

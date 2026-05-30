@@ -1,14 +1,16 @@
 /**
- * Minimal-app test for `POST /docs/delete/:doc_id`. Mirrors
- * `routes/docs/{publish,unpublish}.unit.test.ts`.
+ * Minimal-app test for `POST /docs/delete/:doc_id` (ADR 0021 §Per-route
+ * test posture; ADR 0029 code-first shape). Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/docs` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
  *
  * **What this test owns.**
  *   1. Dispatches `doc.delete` with the capability id, principal from
  *      `c.var`, and principal-derived `access.workspace_id`.
  *   2. Forwards path-param `doc_id` as `input.doc_id`.
  *   3. Returns the dispatcher's output through `c.json` with status 200.
- *   4. Invalid path param (non-UUID v7) → 400 without invoking the
- *      dispatcher (zod validation happens before the handler).
+ *   4. Invalid path param (non-UUID v7) → 400 (the validator + hook reject
+ *      before the handler runs, emitting `{ error: "validation_failed" }`).
  *
  * **What this test does NOT own.** Metadata-only write-path tx
  * (dispatcher integration tests) and full auth-cookie roundtrip
@@ -18,7 +20,7 @@
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -42,7 +44,7 @@ interface FixtureOutput {
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
@@ -53,7 +55,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([del] as const);
+  app.route("/docs", del);
   return app;
 }
 
@@ -92,13 +94,14 @@ describe("POST /docs/delete/:doc_id", () => {
 
     const res = await app.request("/docs/delete/not-a-uuid", { method: "POST" });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
   it("UUID-v4 doc_id (wrong version) → 400 before the dispatcher runs", async () => {
     // Same version-narrowing regression guard as publish/unpublish/get:
-    // a well-formed v4 UUID must still fail because the route's
-    // `z.uuid({ version: "v7" })` constraint forbids it.
+    // a well-formed v4 UUID must still fail because the shared
+    // `DocDeleteInputSchema` (z.uuid({ version: "v7" })) forbids it.
     let dispatchCalled = false;
     const app = buildApp(async () => {
       dispatchCalled = true;

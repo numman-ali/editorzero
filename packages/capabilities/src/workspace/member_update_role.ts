@@ -45,53 +45,46 @@
 
 import type { AuditEffect, HandlerError } from "@editorzero/audit";
 import { LastOwnerError, NotFoundError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
-import { ROLES } from "@editorzero/scopes";
-import { z } from "zod";
+import { CapabilityId, UserId } from "@editorzero/ids";
+import {
+  type WorkspaceMemberUpdateRoleInput,
+  WorkspaceMemberUpdateRoleInputSchema,
+  type WorkspaceMemberUpdateRoleOutput,
+  WorkspaceMemberUpdateRoleOutputSchema,
+} from "@editorzero/schemas/workspace/member_update_role";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const WORKSPACE_MEMBER_UPDATE_ROLE_ID = CapabilityId("workspace.member_update_role");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const InputSchema = z
-  .object({
-    user_id: z.string().min(1, "user_id must not be empty"),
-    role: z.enum(ROLES),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const UserIdField = z.string().transform((s): UserId => UserId(s));
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-
-const OutputSchema = z.object({
-  workspace_id: WorkspaceIdField,
-  user_id: UserIdField,
-  role: z.enum(ROLES),
-  updated_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// ── Wire + internal contract ───────────────────────────────────────────────
+//
+// `WorkspaceMemberUpdateRoleInputSchema` / `…OutputSchema` are the single
+// source (ADR 0034), reused verbatim by the API route's `validator` /
+// `resolver`. The capability semantics that shape these (`.strict()`
+// rejecting unknown keys, the shared `ROLES` enum, `user_id` kept a plain
+// non-empty string on input so the handler brands it) are documented at the
+// schema definition in `@editorzero/schemas/workspace/member_update_role`.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const workspaceMemberUpdateRole: Capability<Input, Output> = {
+export const workspaceMemberUpdateRole: Capability<
+  WorkspaceMemberUpdateRoleInput,
+  WorkspaceMemberUpdateRoleOutput
+> = {
   id: WORKSPACE_MEMBER_UPDATE_ROLE_ID,
   category: "mutation",
   summary: "Change a workspace member's role; metadata-only, admin-only.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: WorkspaceMemberUpdateRoleInputSchema,
+  output: WorkspaceMemberUpdateRoleOutputSchema,
   requires: ["workspace:admin"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({
       kind: "user",
-      id: UserId((input as Input).user_id),
+      id: UserId((input as WorkspaceMemberUpdateRoleInput).user_id),
     }),
     effectOnAllow: (_input, output): AuditEffect => ({
       kind: "member.update_role",

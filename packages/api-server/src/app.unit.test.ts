@@ -5,24 +5,27 @@
  * invariant that would break independently of any single route's logic:
  *
  *   1. The trunk's typed-RPC surface (`testClient(app)`) actually
- *      routes through the composed app. Any regression in `app.ts`
- *      (e.g., assignment-then-spread widening the tuple, or a
- *      reintroduced `.route('/', sub)` chain that collapses merge)
- *      fails this with a compile-time error on `client.infra.health.
- *      $get`.
+ *      routes through the composed app. Any regression in `app.ts` or a
+ *      domain index that breaks the fluent `.route()` chain (e.g.,
+ *      assigning an intermediate mount to a `const` and re-mounting it,
+ *      or a `for (const r of routes) trunk.route(...)` loop) drops the
+ *      per-mount Schema accumulation and fails this with a compile-time
+ *      error on `client.infra.health.$get`.
  *   2. `hc<AppType>` bound to `app.request.bind(app)` dispatches
  *      server-side with no TCP hop. This is the pattern ADR 0021
  *      names for Server Actions / RSC and server-to-server capability
  *      composition — proving it here means the next slice doesn't
  *      have to re-discover the header-forwarding + fetch-binding
  *      shape.
- *   3. The mounted path matches the generated OpenAPI doc path. If a
- *      future slice introduces prefix-mounting (e.g., `.route('/v1',
- *      subApp)`) without updating the `createRoute({ path })` value
- *      on the route, the trunk would serve `/v1/infra/health` but
- *      the doc would advertise `/infra/health` — a silent divergence
- *      contract tests could miss. Asserting both against the same
- *      literal here is the cheapest guard.
+ *   3. The generated OpenAPI doc exposes each route at its
+ *      prefix-mounted path. `generateSpecs(app)` statically walks the
+ *      trunk's routes — including those merged through the two-level
+ *      `.route(prefix, subApp)` mounts — and emits each at the path the
+ *      mount actually serves (it reads the live `route.path`, so served
+ *      path and doc path cannot drift by construction). This guards that
+ *      the prefix is in fact applied in the spec: a regression that
+ *      mounted a domain at the wrong prefix, or dropped a route from a
+ *      domain index, surfaces here as a missing path.
  *   4. `createApiApp({ auth })` mounts the Better Auth handler on
  *      `/auth/*`. We only assert the mount boundary here — that a
  *      hand-crafted fake-auth instance receives calls intended for
@@ -46,6 +49,7 @@ import { testClient } from "hono/testing";
 import { describe, expect, it } from "vitest";
 
 import { type AppType, app, createApiApp } from "./index";
+import { openApiDocument } from "./lib/openapi";
 
 function unreachable(message: string): never {
   throw new Error(message);
@@ -91,26 +95,29 @@ describe("api-server trunk composition", () => {
     expect(res.status).toBe(200);
   });
 
-  it("OpenAPI doc exposes the mounted path at exactly the folder-mirrored path", () => {
-    // Guards the filesystem-as-routing-table invariant: if the mounted
-    // path and generated-doc path ever diverge (e.g., a future prefix
-    // mount that forgets to update `createRoute({ path })`), this fails
-    // loud here instead of showing up as a downstream contract drift.
-    const doc = app.getOpenAPIDocument({
-      openapi: "3.1.0",
-      info: { title: "editorzero api", version: "0.0.0" },
-    });
+  it("OpenAPI doc exposes the mounted paths at exactly the folder-mirrored paths", async () => {
+    // Code-first spec (ADR 0029): `openApiDocument(app)` statically
+    // walks the trunk's routes (`generateSpecs` under the hood) and
+    // emits each at its prefix-mounted path.
+    const doc = await openApiDocument(app);
+    // `/infra/health` — single-level mount (trunk → `/infra` → `/health`).
     expect(doc.paths?.[MOUNTED_PATH]?.get).toBeDefined();
-    // biome-ignore lint/complexity/useLiteralKeys: tsconfig's noPropertyAccessFromIndexSignature (TS4111) forbids dot access on OpenAPI's `components.schemas` index signature.
-    expect(doc.components?.schemas?.["HealthResponse"]).toBeDefined();
-    // `/infra/whoami` (ADR 0025) is composed into the same infraRoutes
-    // tuple — so the trunk's OpenAPI doc must expose it at exactly the
-    // folder-mirrored path. The runtime behaviour (auth-gated) is
-    // exercised in `auth-chain.integration.test.ts`; this assertion
-    // guards the path-mirror invariant only.
+    // `/infra/whoami` (ADR 0025) shares the same `infra` domain sub-app —
+    // so the doc must expose it at exactly the folder-mirrored path. The
+    // runtime behaviour (auth-gated) is exercised in
+    // `auth-chain.integration.test.ts`; this guards the path-mirror only.
     expect(doc.paths?.["/infra/whoami"]?.get).toBeDefined();
-    // biome-ignore lint/complexity/useLiteralKeys: same TS4111 reason as above.
-    expect(doc.components?.schemas?.["WhoamiResponse"]).toBeDefined();
+    // `/docs/create` — a capability route reached through the *two-level*
+    // mount (trunk → `/docs` → route's `/create`). Proves nested
+    // `.route()` composition surfaces in the spec with the prefix
+    // applied, not just the trunk-direct `infra` domain.
+    expect(doc.paths?.["/docs/create"]?.post).toBeDefined();
+    // Response schemas inline into each operation — hono-openapi 1.3.0
+    // does not extract named `components.schemas` from `.meta({ id })`
+    // (see `lib/openapi.ts` + ADR 0029 §6). Assert the operation's 200
+    // response is present (schema attached) rather than a named-component
+    // `$ref` that the code-first substrate never emits.
+    expect(doc.paths?.[MOUNTED_PATH]?.get?.responses?.["200"]).toBeDefined();
   });
 
   it("createApiApp({ auth, loadRoles, dispatcher }) routes POST /auth/* to auth.handler", async () => {

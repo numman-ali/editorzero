@@ -74,55 +74,39 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId, DocId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type DocDeleteInput,
+  DocDeleteInputSchema,
+  type DocDeleteOutput,
+  DocDeleteOutputSchema,
+} from "@editorzero/schemas/doc/delete";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_DELETE_ID = CapabilityId("doc.delete");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Same shape as `doc.get` / `doc.publish` / `doc.unpublish`: a single
-// `doc_id` validated as a UUIDv7 with the brand applied via
-// `.transform(DocId)`. Regex-first so the brand runs on already-
-// validated input.
-
-const DocIdInput = z
-  .uuid({ version: "v7", message: "doc_id must be a UUIDv7" })
-  .transform((s): DocId => DocId(s));
-
-const InputSchema = z
-  .object({
-    doc_id: DocIdInput,
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Returns `deleted_at` so the caller can confirm the recovery-window
-// anchor point without a follow-up `doc.get`. `doc_id` echoes the
-// input id for client convenience.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-
-const OutputSchema = z.object({
-  doc_id: DocIdField,
-  deleted_at: z.number(),
-  visibility_version: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `DocDeleteInputSchema` / `DocDeleteOutputSchema` are the single source
+// (ADR 0034), reused verbatim by the API route's `validator` / `resolver`
+// so the wire contract has exactly one definition. Input is the same
+// single-`doc_id` shape as `doc.get` / `doc.publish` / `doc.unpublish`
+// (UUIDv7-validated, `.transform()`-branded, `.strict()`); the output
+// echoes `doc_id` and returns `deleted_at` (recovery-window anchor) +
+// `visibility_version` (public-route cache-invalidation signal). See the
+// schema definition in `@editorzero/schemas/doc/delete` and the header
+// above for the semantics that shape these.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docDelete: Capability<Input, Output> = {
+export const docDelete: Capability<DocDeleteInput, DocDeleteOutput> = {
   id: DOC_DELETE_ID,
   category: "mutation",
   summary: "Soft-delete a doc; reversible via doc.restore within the recovery window.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocDeleteInputSchema,
+  output: DocDeleteOutputSchema,
   requires: ["doc:delete"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

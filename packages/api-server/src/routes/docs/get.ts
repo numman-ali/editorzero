@@ -2,156 +2,125 @@
  * `GET /docs/get/:doc_id` — read a single doc's metadata + block-array
  * projection (first read-path route that exercises `ctx.transact`).
  *
- * Same three-part route shape as `routes/docs/{list,create}`:
+ * **Code-first route shape (ADR 0029).** Mirrors the golden
+ * `routes/docs/create`: a self-contained `Hono<ApiEnv>` sub-app built
+ * from `factory.createHandlers(...)` over three chained handlers:
  *
- *   1. zod input (path param) + output schemas declared on the route.
- *   2. Handler reads `c.var.principal` + `c.var.dispatcher`, dispatches
- *      `doc.get`, returns the dispatcher's output as-is through
- *      `c.json` with status 200.
- *   3. No permission / audit logic here — the dispatcher owns both.
+ *   1. `describeRoute({ ... })` — OpenAPI metadata only (summary, tags,
+ *      per-status response schemas). Documents the contract; does not
+ *      feed `hc`.
+ *   2. `validator("param", DocGetInputSchema, hook)` — Standard-Schema
+ *      path-param validation. The capability input *is* the single-id
+ *      object `{ doc_id }`, so the route reuses the capability's own
+ *      `DocGetInputSchema` directly as the param validator (PATTERN P2)
+ *      rather than re-declaring a wire copy (ADR 0034). The hook
+ *      projects a parse failure to the `{ error: "validation_failed" }`
+ *      envelope at 400 — the runtime wire shape; this 400, like the
+ *      principal middleware's 401, is a cross-cutting middleware return,
+ *      intentionally not an `hc` arm (see `lib/errors.ts`).
+ *   3. The handler — reads `c.var.principal` + `c.var.dispatcher`,
+ *      dispatches `doc.get`, and returns the dispatcher's output through
+ *      `c.json` with 200. The dispatcher *throws* `EditorZeroError`
+ *      subclasses; the handler catches and maps them with
+ *      `errorResponse(c, err)` to explicit, literal-typed `c.json`
+ *      returns — those explicit returns are what `hc<AppType>` reads to
+ *      infer the error arm (ADR 0029 §4).
  *
- * **Why this route validates `doc_id` on the path, not in a body.**
- * GET requests don't carry bodies in standard HTTP; the doc id lives
- * in the URL. zod's `z.string().uuid()` runs on the path param, and
- * the capability's own `InputSchema` re-validates `{ doc_id }` with
- * `z.uuid({ version: "v7" })` before the handler runs. Two-layer
- * parse is intentional — the route schema powers OpenAPI + `hc` RPC
- * typing, the capability schema is the authoritative boundary for
- * the dispatcher.
+ * **No type casts (`as`).** `c.var.principal` stays `Principal` — the
+ * `user | agent` union; the handler only reads `workspace_id` (present
+ * on both arms) and forwards `principal` to the dispatcher. `dispatch`
+ * returns `Promise<unknown>`; rather than *assert* a type with `as`, the
+ * handler *parses* that `unknown` through `DocGetOutputSchema.parse` —
+ * the honest narrowing, and a runtime guard that the dispatcher output
+ * still satisfies the published contract (drift surfaces as a ZodError →
+ * 500, not a silent lie).
  *
- * **Response body is `doc.get`'s output shape flattened to wire form.**
- * Branded IDs serialise as plain strings (same pattern as `list`).
- * The `blocks` field is `z.array(z.unknown())` here — BlockNote's
- * full polymorphic block union would mirror the entire block-type
- * registry into this schema, which the capability already declined
- * to do (see `doc/get.ts` § "Output"). Registry-driven codegen is
- * the eventual single source of truth for both; today the API
- * contract advertises "array of opaque JSON" and lets the
- * capability's own `readBlocks` guarantee correctness.
+ * **Reused, not re-declared (ADR 0034).** `DocGetInputSchema` /
+ * `DocGetOutputSchema` from `@editorzero/schemas/doc/get` are the single
+ * source the capability also consumes. `DocGetInputSchema`'s `doc_id`
+ * transform encodes the wire↔branded shape change in one place:
+ * `validator("param", DocGetInputSchema)` types the `hc` param as the
+ * wire shape (plain UUIDv7 string) while `c.req.valid("param")` hands
+ * the handler the branded shape; `resolver` / `describeRoute` generate
+ * the OpenAPI param + response from the *input* side, so the spec stays
+ * wire-shaped. No wire copy drifts from the capability because there is
+ * no copy.
  *
  * **Status codes.**
  *   200 — happy path. Doc exists, blocks projected.
- *   400 — malformed doc_id (not a v7 UUID). Surfaced by the route's
- *         zod validator before the dispatcher runs.
- *   401 — unauthenticated. Middleware chain at the trunk's `/docs/*`
- *         prefix rejects before this handler is reached.
- *   403 — permission denied (caller lacks `doc:read`). Dispatcher
- *         emits deny-audit row.
+ *   400 — malformed doc_id (not a v7 UUID). Surfaced by the validator
+ *         hook before the dispatcher runs.
+ *   401 — unauthenticated. Middleware chain at the trunk rejects before
+ *         this handler is reached (declaration only).
+ *   403 — permission denied (caller lacks `doc:read`).
  *   404 — doc missing or soft-deleted. Capability throws
- *         `NotFoundError`; dispatcher projects as error-audit; the
- *         framework's error mapper returns 404.
+ *         `NotFoundError`; `errorResponse` maps it to 404.
  *   500 — doc row exists but Y.Doc is empty (inconsistent state).
- *         Capability throws `InternalError`; dispatcher projects
- *         as error-audit; framework returns 500.
+ *         Capability throws `InternalError`; not a typed client arm —
+ *         the trunk's `onError` owns it (so it is not declared here).
  *
- * The route doesn't enumerate every error branch in its zod response
- * map — middleware / error-mapper ownership of 401/403/404/500
- * message shape is established by `routes/docs/{list,create}` and
- * stays consistent. This route only documents the ones a schema-
- * typed RPC client cares about for happy-path typing.
+ * **Audit + permission + read-path tx live inside the dispatcher.** The
+ * handler only dispatches; the permission gate and the `ctx.transact`
+ * binding are the dispatcher's.
  */
 
 import { CapabilityId } from "@editorzero/ids";
-import type { UserPrincipal } from "@editorzero/principal";
-import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import { DocGetInputSchema, DocGetOutputSchema } from "@editorzero/schemas/doc/get";
+import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { errorResponse } from "../../lib/errors";
+import { describeRoute, errEnvelope, factory, jsonContent, validator } from "../../lib/openapi";
 
 const DOC_GET_ID = CapabilityId("doc.get");
 
-// Path parameter schema — 400s on non-UUIDv7 strings. `z.uuid` with
-// `version: "v7"` matches what the capability's InputSchema does; the
-// brand narrowing (`DocId`) happens inside the capability's own parse.
-const GetParams = z
-  .object({
-    doc_id: z.uuid({ version: "v7", message: "doc_id must be a UUIDv7" }),
-  })
-  .openapi("DocGetParams");
-
-// Response schema — mirrors `doc.get` OutputSchema at wire level:
-// branded IDs are strings, `blocks` is opaque (see file header).
-const DocMeta = z
-  .object({
-    id: z.string(),
-    workspace_id: z.string(),
-    title: z.string(),
-    slug: z.string(),
-    collection_id: z.string().nullable(),
-    visibility: z.enum(["workspace", "public", "private"]),
-    created_at: z.number(),
-    updated_at: z.number(),
-  })
-  .openapi("DocGetMeta");
-
-const GetResponse = z
-  .object({
-    doc: DocMeta,
-    blocks: z.array(z.unknown()),
-  })
-  .openapi("DocGetResponse");
-
-const getRouteDef = createRoute({
-  method: "get",
-  path: "/docs/get/:doc_id",
-  tags: ["docs"],
-  summary: "Read a single doc's metadata and block-array projection.",
-  request: {
-    params: GetParams,
-  },
-  responses: {
-    200: {
-      description: "Doc metadata + blocks from the live Y.Doc.",
-      content: { "application/json": { schema: GetResponse } },
-    },
-    400: {
-      description: "Validation error (malformed doc_id).",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("validation") }),
+export const get = new Hono<ApiEnv>().get(
+  "/get/:doc_id",
+  ...factory.createHandlers(
+    describeRoute({
+      tags: ["docs"],
+      summary: "Read a single doc's metadata and block-array projection.",
+      responses: {
+        200: {
+          description: "Doc metadata + blocks from the live Y.Doc.",
+          content: jsonContent(DocGetOutputSchema),
+        },
+        400: {
+          description: "Validation error (malformed doc_id).",
+          content: jsonContent(errEnvelope("validation_failed")),
+        },
+        401: {
+          description: "Unauthenticated.",
+          content: jsonContent(errEnvelope("unauthenticated")),
+        },
+        403: {
+          description: "Permission denied — caller lacks `doc:read`.",
+          content: jsonContent(errEnvelope("permission_denied")),
+        },
+        404: {
+          description: "Doc not found (or soft-deleted).",
+          content: jsonContent(errEnvelope("not_found")),
         },
       },
+    }),
+    validator("param", DocGetInputSchema, (result, c) =>
+      result.success ? undefined : c.json({ error: "validation_failed" } as const, 400),
+    ),
+    async (c) => {
+      const principal = c.var.principal;
+      const input = c.req.valid("param");
+      try {
+        const result = await c.var.dispatcher.dispatch({
+          capability_id: DOC_GET_ID,
+          input,
+          principal,
+          access: { workspace_id: principal.workspace_id },
+          trace_id: null,
+        });
+        return c.json(DocGetOutputSchema.parse(result), 200);
+      } catch (err) {
+        return errorResponse(c, err);
+      }
     },
-    401: {
-      description: "Unauthenticated.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("unauthenticated") }),
-        },
-      },
-    },
-    403: {
-      description: "Permission denied — caller lacks `doc:read`.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("permission_denied") }),
-        },
-      },
-    },
-    404: {
-      description: "Doc not found (or soft-deleted).",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("not_found") }),
-        },
-      },
-    },
-  },
-});
-
-export const get = defineOpenAPIRoute<typeof getRouteDef, ApiEnv, true>({
-  route: getRouteDef,
-  handler: async (c) => {
-    const principal = c.var.principal as UserPrincipal;
-    const dispatcher = c.var.dispatcher;
-    const { doc_id } = c.req.valid("param");
-    const result = await dispatcher.dispatch({
-      capability_id: DOC_GET_ID,
-      input: { doc_id },
-      principal,
-      access: { workspace_id: principal.workspace_id },
-      trace_id: null,
-    });
-    return c.json(result as z.infer<typeof GetResponse>, 200);
-  },
-  addRoute: true,
-});
+  ),
+);

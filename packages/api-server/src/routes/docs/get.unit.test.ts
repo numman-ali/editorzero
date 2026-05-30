@@ -1,8 +1,8 @@
 /**
  * Minimal-app test for `GET /docs/get/:doc_id` (ADR 0021 §Per-route
- * test posture). Mirrors `routes/docs/{list,create}.unit.test.ts`:
- * mounts only this route on a fresh `OpenAPIHono<ApiEnv>` + a fixture
- * middleware chain that seeds `c.var.principal` + `c.var.dispatcher`.
+ * test posture; ADR 0029 code-first shape). Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/docs` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
  *
  * **What this test owns.** The route's own contract:
  *   1. It dispatches `doc.get` with `capability_id: "doc.get"`,
@@ -13,7 +13,7 @@
  *   3. It returns the dispatcher's output through `c.json` with
  *      status 200.
  *   4. Invalid path param (non-UUID v7) → 400 without invoking the
- *      dispatcher (zod validation happens before the handler).
+ *      dispatcher (the validator + hook reject before the handler).
  *
  * **What this test does NOT own.** The `ctx.transact` → `sync.read`
  * wiring (covered by `composition/createApiDispatcher.integration
@@ -25,7 +25,7 @@
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -57,10 +57,10 @@ interface FixtureOutput {
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
-    // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route; see list/index.unit.test.ts.
+    // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
     deps: {} as any,
   } as Dispatcher;
   app.use("*", async (c, next) => {
@@ -68,7 +68,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([get] as const);
+  app.route("/docs", get);
   return app;
 }
 
@@ -96,7 +96,7 @@ describe("GET /docs/get/:doc_id", () => {
       return output;
     });
 
-    const res = await app.request(`/docs/get/${VALID_DOC_ID}`);
+    const res = await app.request(`/docs/get/${VALID_DOC_ID}`, { method: "GET" });
     expect(res.status).toBe(200);
     const body = (await res.json()) as FixtureOutput;
     expect(body).toEqual(output);
@@ -116,17 +116,18 @@ describe("GET /docs/get/:doc_id", () => {
       throw new Error("dispatcher must not run on invalid param");
     });
 
-    const res = await app.request("/docs/get/not-a-uuid");
+    const res = await app.request("/docs/get/not-a-uuid", { method: "GET" });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
   it("UUID-v4 doc_id (wrong version) → 400 before the dispatcher runs", async () => {
-    // `z.uuid({ version: "v7" })` accepts only v7; a well-formed v4
-    // must still fail. Regression guard on the version narrowing —
-    // without it, the route would accept any uuid shape and let the
-    // capability's stricter parse produce an inscrutable 500 instead
-    // of the clean 400 the API contract promises.
+    // `DocIdInputSchema` accepts only UUIDv7; a well-formed v4 must
+    // still fail. Regression guard on the version narrowing — without
+    // it, the route would accept any uuid shape and let the capability's
+    // stricter parse produce an inscrutable 500 instead of the clean 400
+    // the API contract promises.
     let dispatchCalled = false;
     const app = buildApp(async () => {
       dispatchCalled = true;
@@ -134,8 +135,9 @@ describe("GET /docs/get/:doc_id", () => {
     });
 
     const v4 = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
-    const res = await app.request(`/docs/get/${v4}`);
+    const res = await app.request(`/docs/get/${v4}`, { method: "GET" });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 });

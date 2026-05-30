@@ -1,8 +1,9 @@
 /**
  * Minimal-app test for `POST /docs/update/:doc_id` (ADR 0021 §Per-route
- * test posture). Mirror of `rename.unit.test.ts`: mounts only this
- * route on a fresh `OpenAPIHono<ApiEnv>` with a fixture middleware
- * chain that seeds `c.var.principal` + `c.var.dispatcher`.
+ * test posture; ADR 0029 code-first shape). Mirrors the golden
+ * `create.unit.test.ts` / `rename.unit.test.ts`: mounts only this
+ * route's `Hono<ApiEnv>` sub-app at `/docs` on a fresh trunk + a
+ * fixture middleware that seeds `c.var.principal` + `c.var.dispatcher`.
  *
  * **What this test owns.**
  *   1. Dispatches `doc.update` with `capability_id: "doc.update"`, the
@@ -24,7 +25,7 @@
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -63,7 +64,7 @@ interface FixtureOutput {
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route; see rename.unit.test.ts.
@@ -74,7 +75,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([update] as const);
+  app.route("/docs", update);
   return app;
 }
 

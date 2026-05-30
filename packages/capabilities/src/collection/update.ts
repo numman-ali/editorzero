@@ -42,41 +42,30 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError, SlugCollisionError } from "@editorzero/errors";
-import { CapabilityId, CollectionId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId, type CollectionId } from "@editorzero/ids";
+import {
+  type CollectionUpdateInput,
+  CollectionUpdateInputSchema,
+  type CollectionUpdateOutput,
+  CollectionUpdateOutputSchema,
+} from "@editorzero/schemas/collection/update";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const COLLECTION_UPDATE_ID = CapabilityId("collection.update");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const CollectionIdInput = z
-  .uuid({ version: "v7", message: "collection_id must be a UUIDv7" })
-  .transform((s): CollectionId => CollectionId(s));
-
-const InputSchema = z
-  .object({
-    collection_id: CollectionIdInput,
-    // Same `.trim().min(1)` posture as `collection.create` + `doc.rename`:
-    // closes the "visually blank title" hole (`"   "` trims to `""`).
-    title: z.string().trim().min(1, "title must not be empty or whitespace-only"),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const CollectionIdField = z.string().transform((s): CollectionId => CollectionId(s));
-
-const OutputSchema = z.object({
-  collection_id: CollectionIdField,
-  title: z.string(),
-  slug: z.string(),
-  updated_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// ── Wire + internal contract ───────────────────────────────────────────────
+//
+// `CollectionUpdateInputSchema` / `CollectionUpdateOutputSchema` are the
+// single source (ADR 0034), reused verbatim by the API route's `validator`
+// / `resolver`. `z.input` is the wire shape (plain strings); each field's
+// `.transform()` narrows to the branded internal shape
+// (`CollectionUpdateInput` / `CollectionUpdateOutput`). The shapes that
+// drive these (`.strict()` rejecting unknown keys, the trim-then-`min(1)`
+// title rule, `slug` tracking `title`) are documented in the file header
+// above and at the schema definition in
+// `@editorzero/schemas/collection/update`.
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -97,12 +86,12 @@ function slugify(title: string): string {
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const collectionUpdate: Capability<Input, Output> = {
+export const collectionUpdate: Capability<CollectionUpdateInput, CollectionUpdateOutput> = {
   id: COLLECTION_UPDATE_ID,
   category: "mutation",
   summary: "Rename a collection (title → slug); metadata-only (no CRDT touch).",
-  input: InputSchema,
-  output: OutputSchema,
+  input: CollectionUpdateInputSchema,
+  output: CollectionUpdateOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

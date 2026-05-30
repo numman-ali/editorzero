@@ -67,54 +67,31 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId, DocId } from "@editorzero/ids";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type DocRenameInput,
+  DocRenameInputSchema,
+  type DocRenameOutput,
+  DocRenameOutputSchema,
+} from "@editorzero/schemas/doc/rename";
 import { setDocTitle } from "@editorzero/sync";
 import type * as Y from "yjs";
-import { z } from "zod";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_RENAME_ID = CapabilityId("doc.rename");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Same `doc_id` + `title` shape as `doc.create`'s title validator. The
-// UUIDv7 regex + branded transform mirrors `doc.publish` so a malformed
-// id surfaces as a zod `invalid_format` issue (400 via the dispatcher's
-// validation audit) before the handler runs.
-
-const DocIdInput = z
-  .uuid({ version: "v7", message: "doc_id must be a UUIDv7" })
-  .transform((s): DocId => DocId(s));
-
-const InputSchema = z
-  .object({
-    doc_id: DocIdInput,
-    // Same `.trim().min(1)` posture as `doc.create`'s title field —
-    // closes the "visually blank title" hole a plain `min(1)` would
-    // leave open ("   " trims to "" and fails validation instead of
-    // sneaking past).
-    title: z.string().trim().min(1, "title must not be empty or whitespace-only"),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Returns the post-rename projection so callers don't need a follow-up
-// `doc.get`. Includes `updated_at` because row-side stale checks (e.g.,
-// UI list refresh) key on it.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-
-const OutputSchema = z.object({
-  doc_id: DocIdField,
-  title: z.string(),
-  slug: z.string(),
-  updated_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `DocRenameInputSchema` / `DocRenameOutputSchema` are the single source
+// (ADR 0034), reused verbatim by the API route's `validator` / `resolver`.
+// The `doc_id` + `title` shape mirrors `doc.create`'s title validator; a
+// malformed id surfaces as a zod issue (400 via the dispatcher's validation
+// audit) before the handler runs. The output returns the post-rename
+// projection (incl. `updated_at`, which row-side stale checks key on) so
+// callers don't need a follow-up `doc.get`. Definitions + rationale live in
+// `@editorzero/schemas/doc/rename`.
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -136,12 +113,12 @@ function slugify(title: string): string {
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docRename: Capability<Input, Output> = {
+export const docRename: Capability<DocRenameInput, DocRenameOutput> = {
   id: DOC_RENAME_ID,
   category: "mutation",
   summary: "Rename a doc — updates the title-block heading + the docs.title bridge.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocRenameInputSchema,
+  output: DocRenameOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

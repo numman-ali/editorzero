@@ -67,6 +67,7 @@ Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 b
 | [0031](0031-editor-substrate.md) | **Editor substrate: bootstrap on BlockNote, eject to Tiptap v3 + owned block layer (clean-start)** | **Accepted (new, 2026-05-30; supersedes 0004)** |
 | [0032](0032-version-history-track-changes.md) | **Version history + track-changes: build ourselves on Yjs snapshots + prosemirror-changeset** | **Accepted (new, 2026-05-30)** |
 | [0033](0033-web-ui-testing-rpc-contract.md) | **Web UI testing strategy + typed RPC error contract** | **Accepted (new, 2026-05-30)** |
+| [0034](0034-schemas-ssot-package.md) | **`@editorzero/schemas`: single-source wire+internal contracts reused by capabilities and surfaces** | **Accepted (new, 2026-05-30; refines 0029)** |
 
 ## Review trails
 

@@ -10,8 +10,9 @@
  *
  * Why it posts to `/auth/sign-in/email` directly (not via `hc<AppType>`):
  * Better Auth's routes are mounted on the trunk via `.on("/auth/*",
- * handler)` — outside the typed `openapiRoutes` tuple. `hc<AppType>`
- * can't reach them. A raw fetch against a known BA endpoint is the
+ * handler)` — outside the typed `.route()` capability mounts.
+ * `hc<AppType>` can't reach them. A raw fetch against a known BA
+ * endpoint is the
  * contract we consume. This ADR's transitional bootstrap explicitly
  * depends on those routes being live (`/auth/sign-in/email`,
  * `/auth/sign-out`), both of which ship today.

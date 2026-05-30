@@ -1,160 +1,117 @@
 /**
- * `GET /audits/list` — audit.list surface (invariant 4).
+ * `GET /audits/list` — list audit events in the caller's workspace
+ * (invariant 4); paginated, admin-only.
  *
- * First capability route with a query-string schema. Filters +
- * pagination cursor live on the URL; the capability handler sees a
- * fully-typed input (numbers, enums) via `z.coerce.*` at the route
- * layer. On-the-wire URL encoding stays canonical: callers send
- * `?limit=50&since=1700000000&subject_kind=doc&subject_id=<uuid>`;
- * the route schema coerces to the shape the capability expects.
+ * **Code-first route shape (ADR 0029); mirrors the `docs/create` golden.**
+ * A self-contained `Hono<ApiEnv>` sub-app built from three chained
+ * handlers via `factory.createHandlers(...)`:
  *
- * **Cursor shape.** `before_created_at` + `before_id` are surfaced
- * as two explicit query keys rather than an opaque blob — the
- * CLI renders the next-page args at a glance (`ez audits list
- * --before-created-at=<n> --before-id=<uuid>`). The three semantic
- * refines (cursor pair both-or-neither, subject pair both-or-
- * neither, `since <= until`) are mirrored at the route layer so
- * the OpenAPI / generated-client contract matches runtime —
- * without the mirror, callers would see these as independently-
- * optional fields while the capability would throw 400 at zod
- * parse. Same class of drift Codex flagged on `doc.update`.
+ *   1. `describeRoute({ ... })` — OpenAPI metadata only (summary, tags,
+ *      per-status response schemas). Documents the contract; does not
+ *      feed `hc`.
+ *   2. `validator("query", AuditListInputSchema, hook)` — Standard-Schema
+ *      request validation. This is the first query-string route: filters
+ *      and the pagination cursor live on the URL as strings, and the
+ *      shared input schema's `z.coerce.*` fields parse them at the route
+ *      boundary so the handler (and dispatcher) see the numeric/enum shape
+ *      the capability declares. The hook projects any parse failure — a
+ *      malformed cursor pair, a `subject_id` without `subject_kind`, a
+ *      backwards `since`/`until` range, or an unknown filter key (the
+ *      schema is `.strict()`) — to the `{ error: "validation_failed" }`
+ *      envelope at 400 (a cross-cutting middleware return, intentionally
+ *      not an `hc` arm — see `lib/errors.ts`).
+ *   3. The handler — reads `c.var.principal` + `c.var.dispatcher`,
+ *      dispatches `audit.list`, and returns the dispatcher's output
+ *      through `c.json`. The dispatcher *throws* `EditorZeroError`
+ *      subclasses; the handler catches and maps them with
+ *      `errorResponse(c, err)` (e.g. the `workspace:admin` gate's
+ *      `PermissionDeniedError` → 403) to explicit, literal-typed `c.json`
+ *      returns — those explicit returns are what `hc<AppType>` reads to
+ *      infer the error arm (ADR 0029 §4).
  *
- * **Scope.** `workspace:admin` — the capability refuses other
- * callers at the dispatcher gate. The route declares 403 so the
- * OpenAPI doc carries the contract.
+ * **No type casts (`as`).** `c.var.principal` stays `Principal` — the
+ * `user | agent` union; the handler only reads `workspace_id` (present on
+ * both arms) and forwards `principal` to the dispatcher. `dispatch`
+ * returns `Promise<unknown>`; rather than *assert* a type, the handler
+ * *parses* that `unknown` through `AuditListOutputSchema.parse` — the
+ * honest `unknown`→typed narrowing, and a runtime guard that the
+ * dispatcher output still satisfies the published contract (a drift
+ * surfaces as a ZodError → 500, not a silent lie).
+ *
+ * The route mounts at a path **relative** to its domain (`/list`); the
+ * `audit` domain mounts at `/audits` on the trunk, so the external path
+ * is `/audits/list`. `hc<AppType>` reconstructs `client.audits.list.$get`.
+ *
+ * **Request + response schemas — reused, not re-declared (ADR 0034).**
+ * `AuditListInputSchema` / `AuditListOutputSchema` from
+ * `@editorzero/schemas/audit/list` are the single source the capability
+ * also consumes — including the three semantic refines (cursor-pair
+ * both-or-neither, subject-pair both-or-neither, `since <= until`) and the
+ * `.strict()` boundary. There is no wire copy to drift from the capability
+ * because there is no copy: the cursor's `before_created_at`/`before_id`
+ * are surfaced as two explicit query keys (the CLI renders the next-page
+ * args at a glance), and `resolver`/`describeRoute` generate the OpenAPI
+ * from the schema directly, so the spec matches runtime.
+ *
+ * **Audit + permission live inside the dispatcher.** The handler only
+ * dispatches; the `workspace:admin` permission gate is the dispatcher's
+ * (the route declares 403 so the OpenAPI doc carries the contract).
  */
 
 import { CapabilityId } from "@editorzero/ids";
-import type { UserPrincipal } from "@editorzero/principal";
-import { SUBJECT_KINDS } from "@editorzero/scopes";
-import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import { AuditListInputSchema, AuditListOutputSchema } from "@editorzero/schemas/audit/list";
+import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { errorResponse } from "../../lib/errors";
+import { describeRoute, errEnvelope, factory, jsonContent, validator } from "../../lib/openapi";
 
 const AUDIT_LIST_ID = CapabilityId("audit.list");
 
-const AuditListQuery = z
-  .object({
-    // All query-string values arrive as strings; `z.coerce.*` parses
-    // at the route boundary so the dispatcher's zod parse sees the
-    // numeric/enum shape the capability declares.
-    limit: z.coerce.number().int().min(1).max(200).default(50),
-    before_created_at: z.coerce.number().int().optional(),
-    before_id: z.string().optional(),
-    subject_kind: z.enum(SUBJECT_KINDS).optional(),
-    subject_id: z.string().optional(),
-    capability_id: z.string().optional(),
-    outcome: z.enum(["allow", "deny", "error"]).optional(),
-    since: z.coerce.number().int().optional(),
-    until: z.coerce.number().int().optional(),
-  })
-  .refine(
-    (v) =>
-      (v.before_created_at === undefined && v.before_id === undefined) ||
-      (v.before_created_at !== undefined && v.before_id !== undefined),
-    { message: "before_created_at and before_id must be provided together" },
-  )
-  .refine((v) => v.subject_id === undefined || v.subject_kind !== undefined, {
-    message: "subject_id requires subject_kind",
-  })
-  .refine((v) => v.since === undefined || v.until === undefined || v.since <= v.until, {
-    message: "since must be less than or equal to until",
-  })
-  .openapi("AuditListQuery");
-
-const AuditRow = z
-  .object({
-    id: z.string(),
-    workspace_id: z.string(),
-    capability_id: z.string(),
-    category: z.enum(["mutation", "read", "auth", "admin", "system"]),
-    principal_kind: z.enum(["user", "agent"]),
-    principal_id: z.string(),
-    acting_as_user_id: z.string().nullable(),
-    session_id: z.string().nullable(),
-    token_id: z.string().nullable(),
-    subject_kind: z.string(),
-    subject_id: z.string().nullable(),
-    outcome: z.enum(["allow", "deny", "error"]),
-    deny_reason: z.string().nullable(),
-    input_hash: z.string(),
-    effect: z.object({ kind: z.string() }).catchall(z.unknown()),
-    duration_ms: z.number(),
-    trace_id: z.string().nullable(),
-    created_at: z.number(),
-    collapsed_count: z.number(),
-  })
-  .openapi("AuditRow");
-
-const AuditCursor = z
-  .object({
-    before_created_at: z.number(),
-    before_id: z.string(),
-  })
-  .openapi("AuditCursor");
-
-const AuditListResponse = z
-  .object({
-    events: z.array(AuditRow),
-    next_cursor: AuditCursor.nullable(),
-  })
-  .openapi("AuditListResponse");
-
-const listRouteDef = createRoute({
-  method: "get",
-  path: "/audits/list",
-  tags: ["audit"],
-  summary: "List audit events in the caller's workspace; paginated, admin-only.",
-  request: {
-    query: AuditListQuery,
-  },
-  responses: {
-    200: {
-      description: "Page of audit events with an optional next-page cursor.",
-      content: { "application/json": { schema: AuditListResponse } },
-    },
-    400: {
-      description:
-        "Validation error — invalid cursor pair, mismatched subject filter, or backwards time range.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("validation") }),
+export const list = new Hono<ApiEnv>().get(
+  "/list",
+  ...factory.createHandlers(
+    describeRoute({
+      tags: ["audit"],
+      summary: "List audit events in the caller's workspace; paginated, admin-only.",
+      responses: {
+        200: {
+          description: "Page of audit events with an optional next-page cursor.",
+          content: jsonContent(AuditListOutputSchema),
+        },
+        400: {
+          description:
+            "Validation error — invalid cursor pair, mismatched subject filter, backwards time range, or unknown filter key.",
+          content: jsonContent(errEnvelope("validation_failed")),
+        },
+        401: {
+          description: "Unauthenticated.",
+          content: jsonContent(errEnvelope("unauthenticated")),
+        },
+        403: {
+          description: "Permission denied — caller lacks `workspace:admin`.",
+          content: jsonContent(errEnvelope("permission_denied")),
         },
       },
+    }),
+    validator("query", AuditListInputSchema, (result, c) =>
+      result.success ? undefined : c.json({ error: "validation_failed" } as const, 400),
+    ),
+    async (c) => {
+      const principal = c.var.principal;
+      const input = c.req.valid("query");
+      try {
+        const result = await c.var.dispatcher.dispatch({
+          capability_id: AUDIT_LIST_ID,
+          input,
+          principal,
+          access: { workspace_id: principal.workspace_id },
+          trace_id: null,
+        });
+        return c.json(AuditListOutputSchema.parse(result), 200);
+      } catch (err) {
+        return errorResponse(c, err);
+      }
     },
-    401: {
-      description: "Unauthenticated.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("unauthenticated") }),
-        },
-      },
-    },
-    403: {
-      description: "Permission denied — caller lacks `workspace:admin`.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("permission_denied") }),
-        },
-      },
-    },
-  },
-});
-
-export const list = defineOpenAPIRoute<typeof listRouteDef, ApiEnv, true>({
-  route: listRouteDef,
-  handler: async (c) => {
-    const principal = c.var.principal as UserPrincipal;
-    const dispatcher = c.var.dispatcher;
-    const query = c.req.valid("query");
-    const result = await dispatcher.dispatch({
-      capability_id: AUDIT_LIST_ID,
-      input: query,
-      principal,
-      access: { workspace_id: principal.workspace_id },
-      trace_id: null,
-    });
-    return c.json(result as z.infer<typeof AuditListResponse>, 200);
-  },
-  addRoute: true,
-});
+  ),
+);

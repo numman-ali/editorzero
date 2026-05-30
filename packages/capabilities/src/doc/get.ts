@@ -59,88 +59,43 @@
 import type { HandlerError } from "@editorzero/audit";
 import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
 import { InternalError, NotFoundError } from "@editorzero/errors";
-import { CapabilityId, CollectionId, DocId, WorkspaceId } from "@editorzero/ids";
-import { type LooseBlock, readBlocks } from "@editorzero/sync";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type DocGetInput,
+  DocGetInputSchema,
+  type DocGetOutput,
+  DocGetOutputSchema,
+} from "@editorzero/schemas/doc/get";
+import { readBlocks } from "@editorzero/sync";
 import type * as Y from "yjs";
-import { z } from "zod";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_GET_ID = CapabilityId("doc.get");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// `z.uuid({ version: "v7" })` narrows the input shape BEFORE the
-// `.transform(DocId)` brand-application runs. zod 4 does NOT convert
-// exceptions thrown inside `.transform()` into safeParse failures
-// (they bubble as uncaught errors); an unvalidated transform that
-// called `DocId("not-a-uuid")` would crash the dispatcher. The
-// regex-first shape lets `DocId()` run on already-validated input,
-// so its `assertUuid` / `isUuidV7` checks are no-ops at runtime —
-// the brand is applied, no throw path.
-
-const DocIdInput = z
-  .uuid({ version: "v7", message: "doc_id must be a UUIDv7" })
-  .transform((s): DocId => DocId(s));
-
-const InputSchema = z
-  .object({
-    doc_id: DocIdInput,
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Two projections, one row:
-//   • `doc` — metadata identical to a `doc.list` row (same fields,
-//     same branded-id transforms). Callers navigating the list →
-//     detail transition never see a shape drift between the two.
-//   • `blocks` — BlockNote block array from the live Y.Doc (§5).
-//     The concrete `LooseBlock` shape is BlockNote's — a rich,
-//     polymorphic union over every registered block type. Expressing
-//     that in zod would mirror the entire block-type registry here;
-//     we instead use `z.custom<LooseBlock>()` (no-op runtime
-//     validation, typed as `LooseBlock`) and let `@editorzero/sync`
-//     own the runtime contract. The dispatcher's output-parse pass
-//     is effectively a pass-through for this field; correctness is
-//     guaranteed by `readBlocks` itself, not the boundary schema.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-const CollectionIdField = z
-  .string()
-  .nullable()
-  .transform((s): CollectionId | null => (s === null ? null : CollectionId(s)));
-
-const DocMetaSchema = z.object({
-  id: DocIdField,
-  workspace_id: WorkspaceIdField,
-  title: z.string(),
-  slug: z.string(),
-  collection_id: CollectionIdField,
-  visibility: z.enum(["workspace", "public", "private"]),
-  created_at: z.number(),
-  updated_at: z.number(),
-});
-
-const BlockField = z.custom<LooseBlock>();
-
-const OutputSchema = z.object({
-  doc: DocMetaSchema,
-  blocks: z.array(BlockField),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `DocGetInputSchema` / `DocGetOutputSchema` are the single source
+// (ADR 0034), defined in `@editorzero/schemas/doc/get` and reused
+// verbatim by the API route. `z.input` is the wire shape (plain
+// strings); each branded-ID field's `.transform()` narrows to the
+// branded internal shape — `DocGetInput` / `DocGetOutput`. The
+// `doc_id` UUIDv7 rail runs BEFORE the `DocId` brand applies (so a
+// malformed value is a clean zod 400, never an uncaught `DocId()`
+// throw); the `blocks` field is `z.array(z.unknown())` because the
+// BlockNote block union is owned by `@editorzero/sync`'s `readBlocks`,
+// not mirrored into the schemas leaf — the dispatcher's output-parse
+// is a structural pass-through for that field.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docGet: Capability<Input, Output> = {
+export const docGet: Capability<DocGetInput, DocGetOutput> = {
   id: DOC_GET_ID,
   category: "read",
   summary: "Read a single doc's metadata and real-time block-array projection from the Y.Doc.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocGetInputSchema,
+  output: DocGetOutputSchema,
   requires: ["doc:read"],
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
@@ -164,10 +119,10 @@ export const docGet: Capability<Input, Output> = {
       // `CollapsePolicy.collapseKey` is typed as `(input: unknown) =>
       // string` because the type lives in `@editorzero/audit` and
       // cannot see the per-capability `I`. The dispatcher only calls
-      // it with a runtime-validated input of shape `Input`, so the
-      // cast here is exactly as safe as the zod parse that ran ahead
-      // of it.
-      collapseKey: (input) => `doc.get:${(input as Input).doc_id}`,
+      // it with a runtime-validated input of shape `DocGetInput`, so
+      // the cast here is exactly as safe as the zod parse that ran
+      // ahead of it.
+      collapseKey: (input) => `doc.get:${(input as DocGetInput).doc_id}`,
     },
   },
   handler: async (ctx, input) => {

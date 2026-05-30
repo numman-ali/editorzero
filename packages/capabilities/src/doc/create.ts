@@ -97,19 +97,16 @@ import type {
   SeedBlock,
 } from "@editorzero/audit";
 import { NotFoundError, ValidationError } from "@editorzero/errors";
-import {
-  BlockId,
-  CapabilityId,
-  CollectionId,
-  DocId,
-  generateBlockId,
-  generateDocId,
-  WorkspaceId,
-} from "@editorzero/ids";
+import { CapabilityId, type CollectionId, generateBlockId, generateDocId } from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
+import {
+  type DocCreateInput,
+  DocCreateInputSchema,
+  type DocCreateOutput,
+  DocCreateOutputSchema,
+} from "@editorzero/schemas/doc/create";
 import { type LoosePartialBlock, seedBlocks } from "@editorzero/sync";
 import type * as Y from "yjs";
-import { z } from "zod";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
@@ -117,83 +114,18 @@ import type { Capability } from "../kernel";
 const DOC_CREATE_ID = CapabilityId("doc.create");
 const DEFAULT_VISIBILITY = "workspace" as const;
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// `{ title, collection_id? }`. `visibility` is still not caller-
-// settable in v1 — see the file header for why (false-privacy /
-// publish-bypass risk without a visibility-honouring read path).
-// Callers who try to pass `visibility` get a zod `unrecognized_keys`
-// issue via `InputSchema.strict()` — a 400 with a clear path
-// reference, not a silent drop. `VisibilitySchema` stays
-// `{"workspace", "private"}` as the OUTPUT-side enum so the audit
-// effect remains assignable to the wider `DocVisibility` type and
-// so widening the read-path later only requires widening the input,
-// not rewriting the output/audit contract.
-
-const VisibilitySchema = z.enum(["workspace", "private"]);
-
-const CollectionIdInput = z
-  .uuid({ version: "v7", message: "collection_id must be a UUIDv7" })
-  .transform((s): CollectionId => CollectionId(s));
-
-const InputSchema = z
-  .object({
-    // `.trim()` first so a title like `"  Hello  "` stores as
-    // `"Hello"` — leading/trailing whitespace is meaningless and
-    // would otherwise render as visually indented. `.min(1)` after
-    // the trim closes the "whitespace-only title" hole: `"   "`
-    // trims to `""` and fails validation instead of sneaking past
-    // as a non-empty string while producing a blank heading.
-    title: z.string().trim().min(1, "title must not be empty or whitespace-only"),
-    // `null` (explicit workspace root) is distinct from "missing"
-    // (also workspace root) on the wire; both coerce to `null`
-    // inside the handler. Accepting both avoids a caller-side
-    // "omit the field if it's null" dance.
-    collection_id: CollectionIdInput.nullable().optional(),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// `workspace_id` is redundant with `ctx.tenant.workspace_id` but lives
-// on the output because `audit.effectOnAllow` has no ctx access — the
-// `doc.create` audit kind requires it. Callers that don't want it can
-// ignore it; the cost of an extra 36-char field on the response is
-// cheaper than a separate audit-context plumbing.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-const NullableCollectionIdField = z
-  .string()
-  .nullable()
-  .transform((s): CollectionId | null => (s === null ? null : CollectionId(s)));
-
-// `seed_blocks` — the pre-minted block IDs + shape the handler passed
-// into `seedBlocks`. Lives on the output so `effectOnAllow` can project
-// it into the audit effect (same pattern as `workspace_id` above: the
-// audit projection has no ctx access, so handler-derived data lands on
-// output). Agent callers get an ergonomic byproduct — they can apply a
-// follow-up `doc.update` against these IDs without a refetch.
-const BlockIdField = z.string().transform((s): BlockId => BlockId(s));
-const SeedBlockSchema = z.object({
-  id: BlockIdField,
-  type: z.string(),
-  props: z.record(z.string(), z.unknown()).optional(),
-  content: z.unknown().optional(),
-});
-
-const OutputSchema = z.object({
-  doc_id: DocIdField,
-  workspace_id: WorkspaceIdField,
-  collection_id: NullableCollectionIdField,
-  title: z.string(),
-  slug: z.string(),
-  order_key: z.string(),
-  visibility: VisibilitySchema,
-  seed_blocks: z.array(SeedBlockSchema),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `docCreateInputSchema` / `docCreateOutputSchema` are the single source
+// (ADR 0034), reused verbatim by the API route's `validator` / `resolver`
+// so the wire contract has exactly one definition. `InferInput` is the
+// wire shape (plain strings); each field's `.transform()` narrows to the
+// branded internal shape — `DocCreateInput` / `DocCreateOutput`. The
+// capability semantics that shape these (visibility not caller-settable,
+// `.strict()` rejecting unknown keys, the trim-then-`min(1)` title rule,
+// `seed_blocks` carried on the output so `effectOnAllow` can project it
+// without ctx access) are documented in the file header above and at the
+// schema definition in `@editorzero/schemas/doc/create`.
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -245,12 +177,12 @@ function resolveCreatedBy(principal: Principal) {
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docCreate: Capability<Input, Output> = {
+export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
   id: DOC_CREATE_ID,
   category: "mutation",
   summary: "Create a new document in the caller's workspace; seeds the Y.Doc with a title block.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocCreateInputSchema,
+  output: DocCreateOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

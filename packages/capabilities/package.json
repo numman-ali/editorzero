@@ -25,6 +25,7 @@
     "@editorzero/ids": "workspace:*",
     "@editorzero/observability": "workspace:*",
     "@editorzero/principal": "workspace:*",
+    "@editorzero/schemas": "workspace:*",
     "@editorzero/scopes": "workspace:*",
     "@editorzero/sync": "workspace:*",
     "yjs": "catalog:",

@@ -34,50 +34,37 @@
 
 import type { AuditEffect, HandlerError } from "@editorzero/audit";
 import { LastOwnerError, NotFoundError } from "@editorzero/errors";
-import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId, UserId } from "@editorzero/ids";
+import {
+  type WorkspaceMemberRemoveInput,
+  WorkspaceMemberRemoveInputSchema,
+  type WorkspaceMemberRemoveOutput,
+  WorkspaceMemberRemoveOutputSchema,
+} from "@editorzero/schemas/workspace/member_remove";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const WORKSPACE_MEMBER_REMOVE_ID = CapabilityId("workspace.member_remove");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const InputSchema = z
-  .object({
-    user_id: z.string().min(1, "user_id must not be empty"),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const UserIdField = z.string().transform((s): UserId => UserId(s));
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-
-const OutputSchema = z.object({
-  workspace_id: WorkspaceIdField,
-  user_id: UserIdField,
-  deleted_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
-
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const workspaceMemberRemove: Capability<Input, Output> = {
+export const workspaceMemberRemove: Capability<
+  WorkspaceMemberRemoveInput,
+  WorkspaceMemberRemoveOutput
+> = {
   id: WORKSPACE_MEMBER_REMOVE_ID,
   category: "mutation",
   summary: "Remove a member from the workspace; metadata-only, admin-only.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: WorkspaceMemberRemoveInputSchema,
+  output: WorkspaceMemberRemoveOutputSchema,
   requires: ["workspace:admin"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({
       kind: "user",
-      id: UserId((input as Input).user_id),
+      id: UserId(input.user_id),
     }),
     effectOnAllow: (_input, output): AuditEffect => ({
       kind: "member.remove",

@@ -61,54 +61,37 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId, DocId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type DocUnpublishInput,
+  DocUnpublishInputSchema,
+  type DocUnpublishOutput,
+  DocUnpublishOutputSchema,
+} from "@editorzero/schemas/doc/unpublish";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_UNPUBLISH_ID = CapabilityId("doc.unpublish");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Mirror of `doc.publish` and `doc.get` input: single `doc_id` validated
-// as a UUIDv7 with the brand applied via `.transform(DocId)`. Regex-
-// first so the brand runs on already-validated input.
-
-const DocIdInput = z
-  .uuid({ version: "v7", message: "doc_id must be a UUIDv7" })
-  .transform((s): DocId => DocId(s));
-
-const InputSchema = z
-  .object({
-    doc_id: DocIdInput,
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Returns the post-update projection so callers don't need a follow-up
-// `doc.get`. `visibility` is a literal `"workspace"` (not the wider
-// enum) — the capability only lands on that state.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-
-const OutputSchema = z.object({
-  doc_id: DocIdField,
-  visibility: z.literal("workspace"),
-  visibility_version: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `DocUnpublishInputSchema` / `DocUnpublishOutputSchema` are the single
+// source (ADR 0034), reused verbatim by the API route's `validator` /
+// `resolver`. Input is a single `doc_id` validated as a UUIDv7 then
+// branded via `.transform(DocId)`; output returns the post-update
+// projection (`visibility` pinned to the literal `"workspace"`) so
+// callers don't need a follow-up `doc.get`. See
+// `@editorzero/schemas/doc/unpublish` for the definitions.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docUnpublish: Capability<Input, Output> = {
+export const docUnpublish: Capability<DocUnpublishInput, DocUnpublishOutput> = {
   id: DOC_UNPUBLISH_ID,
   category: "mutation",
   summary: "Set a doc's visibility back to workspace (inverse of doc.publish).",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocUnpublishInputSchema,
+  output: DocUnpublishOutputSchema,
   requires: ["doc:publish"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

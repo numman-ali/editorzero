@@ -67,45 +67,28 @@ import type {
 } from "@editorzero/audit";
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
 import { NotFoundError, ParentDeletedError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, CollectionId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId, type CollectionId } from "@editorzero/ids";
+import {
+  type CollectionRestoreInput,
+  CollectionRestoreInputSchema,
+  type CollectionRestoreOutput,
+  CollectionRestoreOutputSchema,
+} from "@editorzero/schemas/collection/restore";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const COLLECTION_RESTORE_ID = CapabilityId("collection.restore");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const CollectionIdInput = z
-  .uuid({ version: "v7", message: "collection_id must be a UUIDv7" })
-  .transform((s): CollectionId => CollectionId(s));
-
-const InputSchema = z
-  .object({
-    collection_id: CollectionIdInput,
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const CollectionIdField = z.string().transform((s): CollectionId => CollectionId(s));
-
-const OutputSchema = z.object({
-  collection_id: CollectionIdField,
-});
-type Output = z.infer<typeof OutputSchema>;
-
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const collectionRestore: Capability<Input, Output> = {
+export const collectionRestore: Capability<CollectionRestoreInput, CollectionRestoreOutput> = {
   id: COLLECTION_RESTORE_ID,
   category: "mutation",
   summary:
     "Restore a soft-deleted collection; refuses if the parent collection is itself soft-deleted.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: CollectionRestoreInputSchema,
+  output: CollectionRestoreOutputSchema,
   requires: ["doc:delete"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

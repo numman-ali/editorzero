@@ -1,10 +1,10 @@
 /**
- * Per-route unit test for `/infra/whoami`. Mounts only this route on a
- * fresh trunk with `openapiRoutes([whoami] as const)` + a fake
- * principal-middleware that injects a canned `Principal` onto `c.var`.
- * The real principal middleware's behaviour is exercised in
- * `middleware/principal.unit.test.ts`; the resolver's behaviour in
- * `@editorzero/auth`'s integration test; the full chain in
+ * Per-route unit test for `/infra/whoami` (ADR 0029 code-first shape).
+ * Mounts only this route's `Hono<ApiEnv>` sub-app at `/infra` on a fresh
+ * trunk with a fake principal-middleware that injects a canned
+ * `Principal` onto `c.var`. The real principal middleware's behaviour is
+ * exercised in `middleware/principal.unit.test.ts`; the resolver's
+ * behaviour in `@editorzero/auth`'s integration test; the full chain in
  * `composition/auth-chain.integration.test.ts`. This file pins only the
  * handler's projection shape (user vs agent branch, null token/session
  * fields, optional `acting_as`).
@@ -13,20 +13,19 @@
 import { AgentId, SessionId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
 import type { Scope } from "@editorzero/scopes";
-import { OpenAPIHono } from "@hono/zod-openapi";
-import { testClient } from "hono/testing";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
 import { whoami } from "./whoami";
 
 function mountWithPrincipal(principal: Principal) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   app.use("/infra/whoami", async (c, next) => {
     c.set("principal", principal);
     await next();
   });
-  return app.openapiRoutes([whoami] as const);
+  return app.route("/infra", whoami);
 }
 
 const USER_ID = UserId("018f0000-0000-7000-8000-0000000000a1");
@@ -45,8 +44,7 @@ describe("GET /infra/whoami", () => {
       session_id: SESSION_ID,
       token_id: null,
     });
-    const client = testClient(app);
-    const res = await client.infra.whoami.$get();
+    const res = await app.request("/infra/whoami", { method: "GET" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({
@@ -70,8 +68,7 @@ describe("GET /infra/whoami", () => {
       session_id: null,
       token_id: TOKEN_ID,
     });
-    const client = testClient(app);
-    const res = await client.infra.whoami.$get();
+    const res = await app.request("/infra/whoami", { method: "GET" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({
@@ -94,8 +91,7 @@ describe("GET /infra/whoami", () => {
       token_id: TOKEN_ID,
       token_kind: "api-key",
     });
-    const client = testClient(app);
-    const res = await client.infra.whoami.$get();
+    const res = await app.request("/infra/whoami", { method: "GET" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({
@@ -124,8 +120,7 @@ describe("GET /infra/whoami", () => {
       token_kind: "agent-auth",
       acting_as: USER_ID,
     });
-    const client = testClient(app);
-    const res = await client.infra.whoami.$get();
+    const res = await app.request("/infra/whoami", { method: "GET" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({

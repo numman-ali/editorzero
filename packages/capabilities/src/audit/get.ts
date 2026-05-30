@@ -19,71 +19,39 @@
 import type { HandlerError } from "@editorzero/audit";
 import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
 import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId, WorkspaceId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type AuditGetInput,
+  AuditGetInputSchema,
+  type AuditGetOutput,
+  AuditGetOutputSchema,
+} from "@editorzero/schemas/audit/get";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const AUDIT_GET_ID = CapabilityId("audit.get");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// `audit_id` is named to match the `<domain>_id` CLI-binding
-// convention (see `apps/cli/src/generator/http-binding.ts`): input
-// field named `audit_id` auto-derives path `/audits/get/:audit_id`
-// and a positional `<audit_id>` CLI argument. The handler maps it
-// to the `id` column.
-
-const InputSchema = z
-  .object({
-    audit_id: z.uuid({ version: "v7", message: "audit_id must be a UUIDv7" }),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Row shape identical to `audit.list` elements. Intentionally
-// duplicated here — keeping the schemas co-located with their
-// capabilities avoids a shared schema file becoming a
-// registry-of-effect-types.
-
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-
-const EffectSchema = z.object({ kind: z.string() }).catchall(z.unknown());
-
-const OutputSchema = z.object({
-  id: z.string(),
-  workspace_id: WorkspaceIdField,
-  capability_id: z.string(),
-  category: z.enum(["mutation", "read", "auth", "admin", "system"]),
-  principal_kind: z.enum(["user", "agent"]),
-  principal_id: z.string(),
-  acting_as_user_id: z.string().nullable(),
-  session_id: z.string().nullable(),
-  token_id: z.string().nullable(),
-  subject_kind: z.string(),
-  subject_id: z.string().nullable(),
-  outcome: z.enum(["allow", "deny", "error"]),
-  deny_reason: z.string().nullable(),
-  input_hash: z.string(),
-  effect: EffectSchema,
-  duration_ms: z.number(),
-  trace_id: z.string().nullable(),
-  created_at: z.number(),
-  collapsed_count: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `AuditGetInputSchema` / `AuditGetOutputSchema` are the single source
+// (ADR 0034), reused verbatim by the API route. `audit_id` is named to
+// match the `<domain>_id` CLI-binding convention (see
+// `apps/cli/src/generator/http-binding.ts`): input field named `audit_id`
+// auto-derives path `/audits/get/:audit_id` and a positional `<audit_id>`
+// CLI argument. The handler maps it to the `id` column. The output is the
+// shared `AuditRowSchema` (identical to `audit.list` elements), defined
+// once in `@editorzero/schemas/shared/audit` so the two surfaces cannot
+// drift on the row shape.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const auditGet: Capability<Input, Output> = {
+export const auditGet: Capability<AuditGetInput, AuditGetOutput> = {
   id: AUDIT_GET_ID,
   category: "read",
   summary: "Fetch a single audit event by id; admin-only.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: AuditGetInputSchema,
+  output: AuditGetOutputSchema,
   requires: ["workspace:admin"],
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
@@ -105,7 +73,7 @@ export const auditGet: Capability<Input, Output> = {
       // deferred at the writer (`packages/db/src/audit-writer.ts` —
       // `collapsed_count` is always 1 today); this key is the shape
       // the writer will honour when the collapse slice lands.
-      collapseKey: (input) => `audit.get:${(input as Input).audit_id}`,
+      collapseKey: (input) => `audit.get:${(input as AuditGetInput).audit_id}`,
     },
   },
   handler: async (ctx, input) => {

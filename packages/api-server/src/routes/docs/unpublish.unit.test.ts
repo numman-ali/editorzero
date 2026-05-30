@@ -1,9 +1,8 @@
 /**
  * Minimal-app test for `POST /docs/unpublish/:doc_id` (ADR 0021
- * §Per-route test posture). Mirrors
- * `routes/docs/{list,create,get,publish}.unit.test.ts`: mounts only this
- * route on a fresh `OpenAPIHono<ApiEnv>` + a fixture middleware chain
- * that seeds `c.var.principal` + `c.var.dispatcher`.
+ * §Per-route test posture; ADR 0029 code-first shape). Mounts only this
+ * route's `Hono<ApiEnv>` sub-app at `/docs` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
  *
  * **What this test owns.** The route's own contract:
  *   1. It dispatches `doc.unpublish` with `capability_id: "doc.unpublish"`,
@@ -14,7 +13,7 @@
  *   3. It returns the dispatcher's output through `c.json` with status
  *      200 (same as publish — unpublish mutates, doesn't create).
  *   4. Invalid path param (non-UUID v7) → 400 without invoking the
- *      dispatcher (zod validation happens before the handler).
+ *      dispatcher (the validator + hook reject before the handler).
  *
  * **What this test does NOT own.** The metadata-only write-path tx
  * (covered by the dispatcher's integration tests + the capability's
@@ -25,7 +24,7 @@
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -49,7 +48,7 @@ interface FixtureOutput {
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route; see list.unit.test.ts.
@@ -60,7 +59,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([unpublish] as const);
+  app.route("/docs", unpublish);
   return app;
 }
 
@@ -99,14 +98,15 @@ describe("POST /docs/unpublish/:doc_id", () => {
 
     const res = await app.request("/docs/unpublish/not-a-uuid", { method: "POST" });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
   it("UUID-v4 doc_id (wrong version) → 400 before the dispatcher runs", async () => {
-    // `z.uuid({ version: "v7" })` accepts only v7; a well-formed v4
-    // must still fail. Mirror of the publish/get regression guard —
-    // without it the route accepts any uuid and lets the capability's
-    // stricter parse produce an inscrutable 500.
+    // `DocIdInputSchema` accepts only v7; a well-formed v4 must still
+    // fail. Mirror of the publish/get regression guard — without it the
+    // route accepts any uuid and lets the capability's stricter parse
+    // produce an inscrutable 500.
     let dispatchCalled = false;
     const app = buildApp(async () => {
       dispatchCalled = true;

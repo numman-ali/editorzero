@@ -108,10 +108,19 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError, StalePreconditionError } from "@editorzero/errors";
-import { BlockId, CapabilityId, DocId, generateBlockId } from "@editorzero/ids";
+import { BlockId, CapabilityId, type DocId, generateBlockId } from "@editorzero/ids";
+import {
+  type DocUpdateInput,
+  DocUpdateInputSchema,
+  type DocUpdateOutput,
+  DocUpdateOutputSchema,
+  type InsertOpInputSchema,
+  type RemoveOpInputSchema,
+  type UpdateOpInputSchema,
+} from "@editorzero/schemas/doc/update";
 import { type LoosePartialBlock, withLiveEditor } from "@editorzero/sync";
 import type * as Y from "yjs";
-import { z } from "zod";
+import type { z } from "zod";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
@@ -119,160 +128,22 @@ import type { Capability } from "../kernel";
 const DOC_UPDATE_ID = CapabilityId("doc.update");
 const DEFAULT_BLOCK_VISIBILITY: BlockVisibility = "default";
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Discriminated union on `op`. Strict object at every level — unknown
-// keys anywhere in the op tree produce `unrecognized_keys` at the
-// dispatcher's validation audit row.
+// The input / output schemas (and the per-op schemas the appliers re-derive
+// their types from) are the single source (ADR 0034), reused verbatim by the
+// API route's `validator` / `resolver` so the wire contract has exactly one
+// definition. They live in `@editorzero/schemas/doc/update`; the capability
+// semantics that shape them (the discriminated `op` union with the deferred
+// `move` / `set_visibility` cases rejected at the schema, `.strict()` at every
+// level, the non-empty-patch refinement, the `expect_prior_content_hash`
+// precondition format, the block-visibility enum distinct from doc-visibility)
+// are documented in the file header above and at the schema definitions.
 
-const DocIdInput = z
-  .uuid({ version: "v7", message: "doc_id must be a UUIDv7" })
-  .transform((s): DocId => DocId(s));
-
-const BlockIdInput = z
-  .uuid({ version: "v7", message: "block_id must be a UUIDv7" })
-  .transform((s): BlockId => BlockId(s));
-
-/** Hex-encoded sha256 — 64 lowercase hex chars. Matches `stableHash` output. */
-const Sha256HexInput = z.string().regex(/^[0-9a-f]{64}$/, {
-  message: "expect_prior_content_hash must be a 64-char lowercase hex sha256 digest",
-});
-
-// For `insert`: block is a `PartialBlock` shape. BlockNote accepts
-// minimum `{ type }` + optional `props` + optional `content`. We don't
-// constrain the inner shape tightly (BlockNote's own type tree is the
-// runtime validator); keeping `content` + `props` as `unknown` keeps the
-// zod layer honest rather than half-validating a type system we don't
-// own. `id` is deliberately not accepted on input — the handler mints
-// the `BlockId` via `generateBlockId()` so invariant 3a (audit replay
-// records every block id) holds regardless of caller behaviour.
-const InsertBlockInput = z
-  .object({
-    type: z.string().min(1, "block.type is required"),
-    props: z.record(z.string(), z.unknown()).optional(),
-    content: z.unknown().optional(),
-  })
-  .strict();
-
-// `UpdatePatchInput` must carry at least one of `type` / `props` /
-// `content` — an empty patch is a semantic no-op that we don't want to
-// accept as a mutation. BlockNote's `updateBlock` does not early-return
-// on an empty patch: the call flows through `updateBlockTr` into
-// ProseMirror's `setNodeMarkup`, which always emits a `ReplaceAroundStep`
-// on success. That would produce a `doc_updates` write + bump
-// `docs.updated_at` for a change that expresses nothing, which pollutes
-// the audit log and the rate-limit budget. Reject at the schema level
-// so the dispatcher's pre-validation audit row carries the reason.
-const UpdatePatchInput = z
-  .object({
-    type: z.string().min(1).optional(),
-    props: z.record(z.string(), z.unknown()).optional(),
-    content: z.unknown().optional(),
-  })
-  .strict()
-  .refine(
-    (patch) => patch.type !== undefined || patch.props !== undefined || patch.content !== undefined,
-    { message: "patch must contain at least one of `type`, `props`, or `content`" },
-  );
-
-const InsertOpInput = z
-  .object({
-    op: z.literal("insert"),
-    block: InsertBlockInput,
-    // `null` = insert at the top (placement "before" against block 0).
-    // A caller-supplied `after_block_id` that doesn't exist in the doc
-    // throws `NotFoundError{subject_kind: "block"}` at handler time —
-    // can't be caught at schema level without a cross-row reference.
-    after_block_id: BlockIdInput.nullable(),
-  })
-  .strict();
-
-const UpdateOpInput = z
-  .object({
-    op: z.literal("update"),
-    block_id: BlockIdInput,
-    patch: UpdatePatchInput,
-    expect_prior_content_hash: Sha256HexInput.optional(),
-  })
-  .strict();
-
-const RemoveOpInput = z
-  .object({
-    op: z.literal("remove"),
-    block_id: BlockIdInput,
-    expect_prior_content_hash: Sha256HexInput.optional(),
-  })
-  .strict();
-
-const OpInput = z.discriminatedUnion("op", [InsertOpInput, UpdateOpInput, RemoveOpInput]);
-
-const InputSchema = z
-  .object({
-    doc_id: DocIdInput,
-    ops: z.array(OpInput).min(1, "ops must contain at least one op"),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Echoes the applied ops in post-state form. Per-op shape mirrors the
-// `doc.update_batch` audit effect variant; the handler projects 1:1 into
-// `effectOnAllow` without a remap. Returning the applied shape (not
-// just a success flag) lets callers chain follow-up calls without a
-// re-fetch — especially agents, which benefit from the inserted block's
-// minted `id` round-tripping on the same response.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-const BlockIdField = z.string().transform((s): BlockId => BlockId(s));
-
-const BlockPostStateOutput = z.object({
-  id: BlockIdField,
-  doc_id: DocIdField,
-  type: z.string(),
-  parent_block_id: BlockIdField.nullable(),
-  order_key: z.string(),
-  content_json: z.unknown(),
-  visibility: z.enum(["default", "internal", "public"]),
-});
-
-const AppliedInsertOutput = z
-  .object({
-    op: z.literal("insert"),
-    block: BlockPostStateOutput,
-    after_block_id: BlockIdField.nullable(),
-    parent_block_id: BlockIdField.nullable(),
-  })
-  .strict();
-
-const AppliedUpdateOutput = z
-  .object({
-    op: z.literal("update"),
-    block_id: BlockIdField,
-    post: BlockPostStateOutput,
-  })
-  .strict();
-
-const AppliedRemoveOutput = z
-  .object({
-    op: z.literal("remove"),
-    block_id: BlockIdField,
-    preimage: BlockPostStateOutput,
-  })
-  .strict();
-
-const AppliedOpOutput = z.discriminatedUnion("op", [
-  AppliedInsertOutput,
-  AppliedUpdateOutput,
-  AppliedRemoveOutput,
-]);
-
-const OutputSchema = z.object({
-  doc_id: DocIdField,
-  applied_ops: z.array(AppliedOpOutput),
-  updated_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `Input` / `Output` keep their short local names so the handler + applier
+// bodies read unchanged; both alias the branded `z.output` projections.
+type Input = DocUpdateInput;
+type Output = DocUpdateOutput;
 
 // ── Hash helpers (ADR 0022) ──────────────────────────────────────────────
 
@@ -349,8 +220,8 @@ export const docUpdate: Capability<Input, Output> = {
   id: DOC_UPDATE_ID,
   category: "mutation",
   summary: "Apply a batch of block mutations (insert / update / remove) to a doc's CRDT content.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocUpdateInputSchema,
+  output: DocUpdateOutputSchema,
   requires: ["doc:write", "block:write"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],
@@ -452,9 +323,9 @@ type LiveEditorLike = {
   readonly removeBlocks: (blocks: LiveBlockLike[]) => void;
 };
 
-type InsertOp = z.infer<typeof InsertOpInput>;
-type UpdateOp = z.infer<typeof UpdateOpInput>;
-type RemoveOp = z.infer<typeof RemoveOpInput>;
+type InsertOp = z.output<typeof InsertOpInputSchema>;
+type UpdateOp = z.output<typeof UpdateOpInputSchema>;
+type RemoveOp = z.output<typeof RemoveOpInputSchema>;
 
 function applyInsert(
   liveEd: LiveEditorLike,

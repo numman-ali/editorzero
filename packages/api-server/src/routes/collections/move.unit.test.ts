@@ -1,14 +1,21 @@
 /**
- * Minimal-app test for `POST /collections/move`. Owns the route's
- * contract (dispatches `collection.move`, returns 200 JSON, param+body
- * validation); capability-side semantics (cycle, depth, slug) live in
- * the capability's unit test.
+ * Minimal-app test for `POST /collections/move` (ADR 0029 code-first
+ * shape). Owns the route's contract (dispatches `collection.move`,
+ * returns 200 JSON, param+body validation); capability-side semantics
+ * (cycle, depth, slug) live in the capability's unit test.
+ *
+ * Mounts only this route's `Hono<ApiEnv>` sub-app at `/collections` on a
+ * fresh trunk + a fixture middleware seeding `c.var.principal` +
+ * `c.var.dispatcher`. The route's validators apply each field's
+ * `.transform()` (wire string → branded `CollectionId`); the brand is a
+ * compile-time cast (the runtime value is the same string), so the
+ * captured-input `toEqual` assertions against plain strings still hold.
  */
 
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -27,7 +34,7 @@ const TARGET_ID = "018f0000-0000-7000-8000-0000000000c1";
 const NEW_PARENT_ID = "018f0000-0000-7000-8000-0000000000c2";
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
@@ -38,7 +45,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([move] as const);
+  app.route("/collections", move);
   return app;
 }
 
@@ -109,6 +116,7 @@ describe("POST /collections/move", () => {
       body: JSON.stringify({ new_parent_id: null }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
@@ -124,6 +132,7 @@ describe("POST /collections/move", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
@@ -139,6 +148,7 @@ describe("POST /collections/move", () => {
       body: JSON.stringify({ new_parent_id: null, stray: 1 }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 });

@@ -1,14 +1,19 @@
 /**
- * Minimal-app test for `POST /collections/restore`. Owns the route's
- * contract (dispatches `collection.restore`, returns 200 JSON, body
- * validation); parent-deleted refusal semantics live in the
- * capability's unit test.
+ * Minimal-app test for `POST /collections/restore` (ADR 0021 §Per-route
+ * test posture; ADR 0029 code-first shape). Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/collections` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
+ *
+ * Owns the route's contract (dispatches `collection.restore` with the
+ * parsed path param + principal-derived access, returns 200 JSON,
+ * malformed-id → 400 before the dispatcher runs); parent-deleted refusal
+ * semantics live in the capability's unit test.
  */
 
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -26,7 +31,7 @@ const TEST_PRINCIPAL: UserPrincipal = {
 const TARGET_ID = "018f0000-0000-7000-8000-0000000000c1";
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
@@ -37,7 +42,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([restore] as const);
+  app.route("/collections", restore);
   return app;
 }
 
@@ -71,6 +76,7 @@ describe("POST /collections/restore", () => {
       method: "POST",
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 });

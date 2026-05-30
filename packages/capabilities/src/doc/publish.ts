@@ -62,58 +62,39 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId, DocId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type DocPublishInput,
+  DocPublishInputSchema,
+  type DocPublishOutput,
+  DocPublishOutputSchema,
+} from "@editorzero/schemas/doc/publish";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_PUBLISH_ID = CapabilityId("doc.publish");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Same shape as `doc.get`: a single `doc_id` as a validated UUIDv7 with
-// the brand applied via `.transform(DocId)`. Regex-first so the brand
-// runs on already-validated input — `DocId()` would otherwise throw
-// inside `.transform()` on malformed input, which zod 4 doesn't convert
-// to a safeParse failure.
-
-const DocIdInput = z
-  .uuid({ version: "v7", message: "doc_id must be a UUIDv7" })
-  .transform((s): DocId => DocId(s));
-
-const InputSchema = z
-  .object({
-    doc_id: DocIdInput,
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Returns the post-update projection so callers don't need a follow-up
-// `doc.get` to observe the new state. `visibility` is a literal
-// `"public"` (not the wider enum) because the capability's entire
-// purpose is to land on that state.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-
-const OutputSchema = z.object({
-  doc_id: DocIdField,
-  visibility: z.literal("public"),
-  visibility_version: z.number(),
-  published_at: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `DocPublishInputSchema` / `DocPublishOutputSchema` are the single source
+// (ADR 0034), reused verbatim by the API route's `validator` / `resolver`
+// so the wire contract has exactly one definition. The input is the same
+// single-`doc_id` shape as `doc.get` (validated UUIDv7, branded via
+// `.transform`); the output returns the post-update projection — with
+// `visibility` pinned to the literal `"public"` (not the wider enum)
+// because the capability's entire purpose is to land on that state — so
+// callers don't need a follow-up `doc.get`. Definitions + rationale live
+// at `@editorzero/schemas/doc/publish`.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docPublish: Capability<Input, Output> = {
+export const docPublish: Capability<DocPublishInput, DocPublishOutput> = {
   id: DOC_PUBLISH_ID,
   category: "mutation",
   summary: "Set a doc's visibility to public.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocPublishInputSchema,
+  output: DocPublishOutputSchema,
   requires: ["doc:publish"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

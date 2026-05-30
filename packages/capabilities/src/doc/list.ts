@@ -9,67 +9,50 @@
  * sub-slice will add cursor-based paging behind the same input
  * schema (a field becomes non-optional; no breaking shape change).
  *
- * Output IDs are re-branded inside the zod schema via
- * `z.string().transform(...)`. The DocId / CollectionId factories
- * are idempotent on valid input, so this is a no-op at runtime on
- * rows the db already wrote — it exists so that
- * `z.infer<typeof OutputSchema>` preserves the brand, which means
- * callers (API adapter / CLI / MCP) receive typed IDs instead of
- * plain strings without a cast at the boundary.
+ * Output IDs are re-branded inside the zod schema (the shared
+ * `*OutputSchema` transforms in `@editorzero/schemas`). The DocId /
+ * CollectionId factories are idempotent on valid input, so this is a
+ * no-op at runtime on rows the db already wrote — it exists so that
+ * `z.output<typeof DocListOutputSchema>` preserves the brand, which
+ * means callers (API adapter / CLI / MCP) receive typed IDs instead of
+ * plain strings without a cast at the boundary. The wire + internal
+ * contract lives in `@editorzero/schemas/doc/list` (ADR 0034).
  */
 
 import type { HandlerError } from "@editorzero/audit";
 import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
-import { CapabilityId, CollectionId, DocId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type DocListInput,
+  DocListInputSchema,
+  type DocListOutput,
+  DocListOutputSchema,
+} from "@editorzero/schemas/doc/list";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_LIST_ID = CapabilityId("doc.list");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const InputSchema = z.object({}).strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Fields chosen for the "list view" use case: enough to render a
-// navigable document list (id, title, visibility, collection,
-// timestamps). Internal columns (`order_key`, `visibility_version`,
-// `deleted_at`, `workspace_id`) are intentionally omitted — the
-// scope is implicit; the ordering is applied inside the handler.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-const CollectionIdField = z
-  .string()
-  .nullable()
-  .transform((s): CollectionId | null => (s === null ? null : CollectionId(s)));
-
-const DocSummarySchema = z.object({
-  id: DocIdField,
-  title: z.string(),
-  slug: z.string(),
-  collection_id: CollectionIdField,
-  visibility: z.enum(["workspace", "public", "private"]),
-  created_at: z.number(),
-  updated_at: z.number(),
-});
-
-const OutputSchema = z.object({
-  docs: z.array(DocSummarySchema),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `DocListInputSchema` / `DocListOutputSchema` are the single source
+// (ADR 0034), defined in `@editorzero/schemas/doc/list` and reused
+// verbatim by the API route's `validator` / `resolver`. The input is
+// empty (`.strict()` rejects unknown keys); the output IDs are
+// re-branded via the shared `*OutputSchema` transforms so consumers
+// receive typed IDs without a cast at the boundary. Field-selection
+// rationale (list-view columns; internal columns omitted) lives at the
+// schema definition.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docList: Capability<Input, Output> = {
+export const docList: Capability<DocListInput, DocListOutput> = {
   id: DOC_LIST_ID,
   category: "read",
   summary: "List all non-deleted docs in the workspace, ordered by order_key.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocListInputSchema,
+  output: DocListOutputSchema,
   requires: ["doc:read"],
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {

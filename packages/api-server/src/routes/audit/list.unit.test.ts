@@ -1,14 +1,19 @@
 /**
- * Minimal-app test for `GET /audits/list`. Owns the route's contract
- * (query-string coercion, dispatch with the coerced input, 200 JSON
- * echo). Capability semantics (filter ordering, composite cursor,
- * tenant scoping) live in the capability unit test.
+ * Minimal-app test for `GET /audits/list` (ADR 0021 §Per-route test
+ * posture; ADR 0029 code-first shape). Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/audits` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
+ *
+ * Owns the route's contract (query-string coercion via the shared input
+ * schema, dispatch with the coerced input, 200 JSON echo). Capability
+ * semantics (filter ordering, composite cursor, tenant scoping) live in
+ * the capability unit test.
  */
 
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -24,7 +29,7 @@ const TEST_PRINCIPAL: UserPrincipal = {
 };
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
@@ -35,7 +40,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([list] as const);
+  app.route("/audits", list);
   return app;
 }
 
@@ -116,5 +121,19 @@ describe("GET /audits/list", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual(output);
+  });
+
+  it("invalid query (backwards time range) → 400 before the dispatcher runs", async () => {
+    let dispatchCalled = false;
+    const app = buildApp(async () => {
+      dispatchCalled = true;
+      throw new Error("dispatcher must not run on invalid query");
+    });
+
+    const res = await app.request("/audits/list?since=200&until=100");
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
+    expect(dispatchCalled).toBe(false);
   });
 });

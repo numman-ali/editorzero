@@ -23,55 +23,37 @@
 
 import type { HandlerError } from "@editorzero/audit";
 import { AUDIT_READ_COLLAPSE_WINDOW_MS } from "@editorzero/constants";
-import { CapabilityId, CollectionId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId } from "@editorzero/ids";
+import {
+  type CollectionListInput,
+  CollectionListInputSchema,
+  type CollectionListOutput,
+  CollectionListOutputSchema,
+} from "@editorzero/schemas/collection/list";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const COLLECTION_LIST_ID = CapabilityId("collection.list");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const InputSchema = z.object({}).strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Same "list-view ergonomics" shape as `doc.list`: enough to render a
-// nav tree (id, title, slug, parent_id, timestamps). Internal columns
-// (`order_key`, `created_by`, `deleted_at`, `workspace_id`) are
-// intentionally omitted — the scope is implicit and ordering is
-// applied inside the handler.
-
-const CollectionIdField = z.string().transform((s): CollectionId => CollectionId(s));
-const NullableCollectionIdField = z
-  .string()
-  .nullable()
-  .transform((s): CollectionId | null => (s === null ? null : CollectionId(s)));
-
-const CollectionSummarySchema = z.object({
-  id: CollectionIdField,
-  title: z.string(),
-  slug: z.string(),
-  parent_id: NullableCollectionIdField,
-  created_at: z.number(),
-  updated_at: z.number(),
-});
-
-const OutputSchema = z.object({
-  collections: z.array(CollectionSummarySchema),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `CollectionListInputSchema` / `CollectionListOutputSchema` are the single
+// source (ADR 0034), reused verbatim by the API route's `validator` /
+// `resolver`. Input is the empty object (`.strict()` rejects unknown keys);
+// the output is the "list-view ergonomics" shape shared with `doc.list`
+// (id, title, slug, parent_id, timestamps). Internal columns (`order_key`,
+// `created_by`, `deleted_at`, `workspace_id`) are intentionally omitted —
+// the scope is implicit and ordering is applied inside the handler.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const collectionList: Capability<Input, Output> = {
+export const collectionList: Capability<CollectionListInput, CollectionListOutput> = {
   id: COLLECTION_LIST_ID,
   category: "read",
   summary: "List all non-deleted collections in the workspace, ordered by order_key.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: CollectionListInputSchema,
+  output: CollectionListOutputSchema,
   requires: ["doc:read"],
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {

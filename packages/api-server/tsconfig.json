@@ -17,6 +17,7 @@
     { "path": "../mcp-server" },
     { "path": "../observability" },
     { "path": "../principal" },
+    { "path": "../schemas" },
     { "path": "../scopes" },
     { "path": "../sync" }
   ]

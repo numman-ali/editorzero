@@ -66,53 +66,31 @@ import type {
 } from "@editorzero/audit";
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
 import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, CollectionId, generateCollectionId, WorkspaceId } from "@editorzero/ids";
+import { CapabilityId, type CollectionId, generateCollectionId } from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
-import { z } from "zod";
+import {
+  type CollectionCreateInput,
+  CollectionCreateInputSchema,
+  type CollectionCreateOutput,
+  CollectionCreateOutputSchema,
+} from "@editorzero/schemas/collection/create";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const COLLECTION_CREATE_ID = CapabilityId("collection.create");
 
-// ── Input ────────────────────────────────────────────────────────────────
-
-const ParentIdInput = z
-  .uuid({ version: "v7", message: "parent_id must be a UUIDv7" })
-  .transform((s): CollectionId => CollectionId(s));
-
-const InputSchema = z
-  .object({
-    // `.trim()` strips surrounding whitespace before the non-empty
-    // check; `"   "` trims to `""` and fails validation (same pattern
-    // as `doc.create`).
-    title: z.string().trim().min(1, "title must not be empty or whitespace-only"),
-    // `null` (explicit root) is distinct from "missing" (also root) on
-    // the wire; both coerce to `null` on the DB side. Accepting both
-    // avoids a caller-side "omit the field if it's null" dance.
-    parent_id: ParentIdInput.nullable().optional(),
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-
-const CollectionIdField = z.string().transform((s): CollectionId => CollectionId(s));
-const WorkspaceIdField = z.string().transform((s): WorkspaceId => WorkspaceId(s));
-const NullableCollectionIdField = z
-  .string()
-  .nullable()
-  .transform((s): CollectionId | null => (s === null ? null : CollectionId(s)));
-
-const OutputSchema = z.object({
-  collection_id: CollectionIdField,
-  workspace_id: WorkspaceIdField,
-  parent_id: NullableCollectionIdField,
-  title: z.string(),
-  slug: z.string(),
-  order_key: z.string(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// ── Wire + internal contract ───────────────────────────────────────────────
+//
+// `CollectionCreateInputSchema` / `CollectionCreateOutputSchema` are the
+// single source (ADR 0034), imported from `@editorzero/schemas/collection/
+// create` and reused verbatim by the API route's `validator` / `resolver`
+// so the wire contract has exactly one definition. `z.input` is the wire
+// shape (plain strings); each field's `.transform()` narrows to the branded
+// internal shape — `CollectionCreateInput` / `CollectionCreateOutput`. The
+// capability semantics that shape these (`.strict()` rejecting unknown keys,
+// the trim-then-`min(1)` title rule, `parent_id` null-or-omitted) are
+// documented in the file header above and at the schema definition.
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -147,13 +125,13 @@ function resolveCreatedBy(principal: Principal) {
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const collectionCreate: Capability<Input, Output> = {
+export const collectionCreate: Capability<CollectionCreateInput, CollectionCreateOutput> = {
   id: COLLECTION_CREATE_ID,
   category: "mutation",
   summary:
     "Create a new collection (folder) in the caller's workspace; roots at workspace level when `parent_id` is null.",
-  input: InputSchema,
-  output: OutputSchema,
+  input: CollectionCreateInputSchema,
+  output: CollectionCreateOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

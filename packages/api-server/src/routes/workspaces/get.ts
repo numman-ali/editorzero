@@ -1,98 +1,112 @@
 /**
- * `GET /workspaces/get` — workspace.get surface (invariant 4).
+ * `GET /workspaces/get` — read the caller's workspace metadata (slug,
+ * name, retention, settings).
  *
- * Returns the caller's workspace metadata (slug, name, retention,
- * settings). The principal already carries `workspace_id`; no path
- * param is required. The `/get` suffix matches the repo-wide
- * `<plural>/<action>` convention (F87 — `apps/cli` derives HTTP
- * bindings from the capability id via this rule; parity test
- * `apps/cli/src/generator/parity.unit.test.ts` asserts the CLI's
- * derived binding matches a registered route). Today's convention
- * outranks readability; future multi-workspace capabilities will
- * take `workspace_id` as a path param (`/workspaces/get/:workspace_id`)
- * naturally under the same rule.
+ * **Code-first shape (ADR 0029), P0EMPTY variant.** Like the golden
+ * `docs/create`, this is a self-contained `Hono<ApiEnv>` sub-app built
+ * from chained handlers via `factory.createHandlers(...)`. It differs in
+ * one way: `workspace.get` takes **no request input** — the principal
+ * already carries `workspace_id`, so its capability input is the empty
+ * object. There is **no `validator`** in the chain (no body / param /
+ * query to parse, hence no 400 `validation_failed` arm), and the handler
+ * synthesises `const input = {}` itself rather than reading
+ * `c.req.valid(...)`.
  *
- * Same three-part shape as the `/collections/list` sibling:
+ *   1. `describeRoute({ ... })` — OpenAPI metadata only (summary, tags,
+ *      per-status response schemas). Documents the contract; does not
+ *      feed `hc`.
+ *   2. The handler — reads `c.var.principal` + `c.var.dispatcher`,
+ *      dispatches `workspace.get` with the empty input, and returns the
+ *      dispatcher's output through `c.json` at 200. The dispatcher
+ *      *throws* `EditorZeroError` subclasses; the handler catches and maps
+ *      them with `errorResponse(c, err)` to explicit, literal-typed
+ *      `c.json` returns — those explicit returns are what `hc<AppType>`
+ *      reads to infer the error arm (ADR 0029 §4). Beyond the cross-cutting
+ *      401 (principal middleware) and the dispatcher's 403, the one
+ *      capability-specific arm is 404: the workspace can be soft-deleted or
+ *      missing (a bootstrap gap).
  *
- *   1. zod schemas pinned on the route for OpenAPI + `hc<AppType>`.
- *   2. Handler reads `c.var.principal` + `c.var.dispatcher` from the
- *      `/workspaces/*` middleware chain (see `app.ts`).
- *   3. Capability output returns as-is at 200.
+ * **No type casts (`as`).** `c.var.principal` stays `Principal` — the
+ * `user | agent` union. Capability routes serve agent principals too
+ * (invariant 8); the handler only reads `workspace_id` (present on both
+ * arms) and forwards `principal` to the dispatcher. `dispatch` returns
+ * `Promise<unknown>`; rather than *assert* a type with `as`, the handler
+ * *parses* that `unknown` through the capability's shared response schema
+ * (`WorkspaceGetOutputSchema.parse`) — the honest `unknown`→typed
+ * narrowing, and a runtime guard that the dispatcher output still
+ * satisfies the published contract (a drift surfaces as a ZodError → 500,
+ * not a silent lie).
+ *
+ * The route mounts at a path **relative** to its domain (`/get`); the
+ * `workspaces` domain mounts at `/workspaces` on the trunk, so the
+ * external path is `/workspaces/get`. `hc<AppType>` reconstructs
+ * `client.workspaces.get.$get`. The `/get` suffix matches the repo-wide
+ * `<plural>/<action>` convention (`apps/cli` derives HTTP bindings from
+ * the capability id via this rule).
+ *
+ * **Response schema — reused, not re-declared (ADR 0034).**
+ * `WorkspaceGetOutputSchema` from `@editorzero/schemas/workspace/get` is
+ * the single source the capability also consumes. `resolver` /
+ * `describeRoute` generate the OpenAPI response from it (wire-shaped:
+ * branded IDs serialize as plain strings, brands invisible to external
+ * clients). No wire copy drifts from the capability because there is no
+ * copy — the migration's whole point.
+ *
+ * **Audit + permission gate live inside the dispatcher**, not here
+ * (invariant 5). A capability that reaches this handler has already passed
+ * the gate.
  */
 
 import { CapabilityId } from "@editorzero/ids";
-import type { UserPrincipal } from "@editorzero/principal";
-import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import { WorkspaceGetOutputSchema } from "@editorzero/schemas/workspace/get";
+import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { errorResponse } from "../../lib/errors";
+import { describeRoute, errEnvelope, factory, jsonContent } from "../../lib/openapi";
 
 const WORKSPACE_GET_ID = CapabilityId("workspace.get");
 
-const WorkspaceResponse = z
-  .object({
-    workspace_id: z.string(),
-    slug: z.string(),
-    name: z.string(),
-    trash_retention_days: z.number(),
-    created_by: z.string(),
-    created_at: z.number(),
-    // `settings` is a free-form key/unknown map on this surface — a
-    // settings-shape schema will live in a settings-aware route when
-    // that capability lands.
-    settings: z.record(z.string(), z.unknown()),
-  })
-  .openapi("WorkspaceResponse");
-
-const getRouteDef = createRoute({
-  method: "get",
-  path: "/workspaces/get",
-  tags: ["workspaces"],
-  summary: "Read the caller's workspace metadata.",
-  responses: {
-    200: {
-      description: "The caller's workspace.",
-      content: { "application/json": { schema: WorkspaceResponse } },
-    },
-    401: {
-      description: "Unauthenticated.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("unauthenticated") }),
+export const get = new Hono<ApiEnv>().get(
+  "/get",
+  ...factory.createHandlers(
+    describeRoute({
+      tags: ["workspaces"],
+      summary: "Read the caller's workspace metadata.",
+      responses: {
+        200: {
+          description: "The caller's workspace.",
+          content: jsonContent(WorkspaceGetOutputSchema),
+        },
+        401: {
+          description: "Unauthenticated.",
+          content: jsonContent(errEnvelope("unauthenticated")),
+        },
+        403: {
+          description: "Permission denied — caller lacks `workspace:read`.",
+          content: jsonContent(errEnvelope("permission_denied")),
+        },
+        404: {
+          description: "Workspace is soft-deleted or missing (bootstrap gap).",
+          content: jsonContent(errEnvelope("not_found")),
         },
       },
+    }),
+    async (c) => {
+      const principal = c.var.principal;
+      const input = {};
+      try {
+        const result = await c.var.dispatcher.dispatch({
+          capability_id: WORKSPACE_GET_ID,
+          input,
+          principal,
+          access: { workspace_id: principal.workspace_id },
+          trace_id: null,
+        });
+        return c.json(WorkspaceGetOutputSchema.parse(result), 200);
+      } catch (err) {
+        return errorResponse(c, err);
+      }
     },
-    403: {
-      description: "Permission denied — caller lacks `workspace:read`.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("permission_denied") }),
-        },
-      },
-    },
-    404: {
-      description: "Workspace is soft-deleted or missing (bootstrap gap).",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("not_found") }),
-        },
-      },
-    },
-  },
-});
-
-export const get = defineOpenAPIRoute<typeof getRouteDef, ApiEnv, true>({
-  route: getRouteDef,
-  handler: async (c) => {
-    const principal = c.var.principal as UserPrincipal;
-    const dispatcher = c.var.dispatcher;
-    const result = await dispatcher.dispatch({
-      capability_id: WORKSPACE_GET_ID,
-      input: {},
-      principal,
-      access: { workspace_id: principal.workspace_id },
-      trace_id: null,
-    });
-    return c.json(result as z.infer<typeof WorkspaceResponse>, 200);
-  },
-  addRoute: true,
-});
+  ),
+);

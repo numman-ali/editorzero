@@ -8,7 +8,7 @@
  */
 
 import type { Dispatcher } from "@editorzero/dispatcher";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../env";
@@ -22,7 +22,7 @@ describe("createDispatcherMiddleware", () => {
       deps: {},
     } as unknown as Dispatcher;
 
-    const app = new OpenAPIHono<ApiEnv>();
+    const app = new Hono<ApiEnv>();
     app.use("*", createDispatcherMiddleware({ dispatcher: stubDispatcher }));
     app.get("/probe", (c) => {
       captured = c.var.dispatcher;

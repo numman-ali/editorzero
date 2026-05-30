@@ -68,54 +68,36 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError, ParentDeletedError } from "@editorzero/errors";
-import { CapabilityId, type CollectionId, DocId } from "@editorzero/ids";
-import { z } from "zod";
+import { CapabilityId, type CollectionId } from "@editorzero/ids";
+import {
+  type DocRestoreInput,
+  DocRestoreInputSchema,
+  type DocRestoreOutput,
+  DocRestoreOutputSchema,
+} from "@editorzero/schemas/doc/restore";
 
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_RESTORE_ID = CapabilityId("doc.restore");
 
-// ── Input ────────────────────────────────────────────────────────────────
+// ── Wire + internal contract ───────────────────────────────────────────────
 //
-// Mirror of `doc.delete` input: single `doc_id` validated as UUIDv7
-// with the brand applied via `.transform(DocId)`. Regex-first so the
-// brand runs on already-validated input.
-
-const DocIdInput = z
-  .uuid({ version: "v7", message: "doc_id must be a UUIDv7" })
-  .transform((s): DocId => DocId(s));
-
-const InputSchema = z
-  .object({
-    doc_id: DocIdInput,
-  })
-  .strict();
-type Input = z.infer<typeof InputSchema>;
-
-// ── Output ───────────────────────────────────────────────────────────────
-//
-// Returns `visibility_version` so the caller can swap their cached
-// public-route key. No `restored_at` field — the post-state is
-// "not deleted" and callers re-reading via `doc.get` already see
-// the fresh `updated_at`; the audit row owns the event timestamp.
-
-const DocIdField = z.string().transform((s): DocId => DocId(s));
-
-const OutputSchema = z.object({
-  doc_id: DocIdField,
-  visibility_version: z.number(),
-});
-type Output = z.infer<typeof OutputSchema>;
+// `DocRestoreInputSchema` / `DocRestoreOutputSchema` are the single source
+// (ADR 0034), reused verbatim by the API route's `validator` / `resolver`.
+// Input is the `doc.delete` mirror (single UUIDv7 `doc_id`, `.strict()`);
+// output carries `visibility_version` so the caller can swap their cached
+// public-route key after a restore. The schema rationale lives in the file
+// header above and at the definition in `@editorzero/schemas/doc/restore`.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
-export const docRestore: Capability<Input, Output> = {
+export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
   id: DOC_RESTORE_ID,
   category: "mutation",
   summary: "Restore a soft-deleted doc to its live state (inverse of doc.delete).",
-  input: InputSchema,
-  output: OutputSchema,
+  input: DocRestoreInputSchema,
+  output: DocRestoreOutputSchema,
   requires: ["doc:delete"],
   agentAllowed: {},
   surfaces: ["api", "cli", "mcp", "ui"],

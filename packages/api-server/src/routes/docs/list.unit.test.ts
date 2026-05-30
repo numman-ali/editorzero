@@ -1,16 +1,17 @@
 /**
- * Minimal-app test for `GET /docs/list` (ADR 0021 §Per-route test posture).
- *
- * Mounts only this route on a fresh `OpenAPIHono<ApiEnv>` + a fixture
- * middleware chain that seeds `c.var.principal` + `c.var.dispatcher`.
- * Exercises the route's full input→dispatch→response pipeline without
- * pulling in the trunk, Better Auth, or a real `createApiDispatcher`.
+ * Minimal-app test for `GET /docs/list` (ADR 0021 §Per-route test
+ * posture; ADR 0029 code-first shape). Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/docs` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`.
+ * Exercises the route's full dispatch→response pipeline without pulling
+ * in the trunk, Better Auth, or a real `createApiDispatcher`.
  *
  * **What this test owns.** The route's own contract:
  *   1. It dispatches `doc.list` with `capability_id: "doc.list"`, the
  *      principal off `c.var`, and an `access.workspace_id` derived from
  *      the principal.
- *   2. It returns the dispatcher's output through `c.json` with status
+ *   2. It forwards the empty capability input `{}` to the dispatcher.
+ *   3. It returns the dispatcher's output through `c.json` with status
  *      200.
  *
  * **What this test does NOT own.** The dispatcher's pipeline (parse →
@@ -23,7 +24,7 @@
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -51,7 +52,7 @@ interface FixtureOutput {
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route; a full mock would over-commit to the shape.
@@ -62,7 +63,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([list] as const);
+  app.route("/docs", list);
   return app;
 }
 
@@ -87,7 +88,7 @@ describe("GET /docs/list", () => {
       return output;
     });
 
-    const res = await app.request("/docs/list");
+    const res = await app.request("/docs/list", { method: "GET" });
     expect(res.status).toBe(200);
     const body = (await res.json()) as FixtureOutput;
     expect(body).toEqual(output);
@@ -102,7 +103,7 @@ describe("GET /docs/list", () => {
 
   it("empty docs list is a valid response (new workspace)", async () => {
     const app = buildApp(async () => ({ docs: [] }));
-    const res = await app.request("/docs/list");
+    const res = await app.request("/docs/list", { method: "GET" });
     expect(res.status).toBe(200);
     const body = (await res.json()) as FixtureOutput;
     expect(body.docs).toHaveLength(0);

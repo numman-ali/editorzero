@@ -1,15 +1,17 @@
 /**
- * Minimal-app test for `POST /workspaces/member_remove`. Owns the
- * route-layer contract (dispatches `workspace.member_remove`, 200
- * JSON, zod body, strict keys); capability-side semantics
- * (last-owner invariant, 404-on-re-remove, Layer-2 scoping) live in
- * the capability's unit test.
+ * Minimal-app test for `POST /workspaces/member_remove` (ADR 0021 §Per-route
+ * test posture; ADR 0029 code-first shape). Mounts only this route's
+ * `Hono<ApiEnv>` sub-app at `/workspaces` on a fresh trunk + a fixture
+ * middleware that seeds `c.var.principal` + `c.var.dispatcher`. Owns the
+ * route-layer contract (dispatches `workspace.member_remove`, 200 JSON,
+ * zod body, strict keys); capability-side semantics (last-owner invariant,
+ * 404-on-re-remove, Layer-2 scoping) live in the capability's unit test.
  */
 
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
 import type { ApiEnv } from "../../env";
@@ -27,7 +29,7 @@ const TEST_PRINCIPAL: UserPrincipal = {
 const TARGET_ID = "018f0000-0000-7000-8000-0000000000b1";
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
-  const app = new OpenAPIHono<ApiEnv>();
+  const app = new Hono<ApiEnv>();
   const fakeDispatcher = {
     dispatch,
     // biome-ignore lint/suspicious/noExplicitAny: `deps` is not read by the route.
@@ -38,7 +40,7 @@ function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>
     c.set("dispatcher", fakeDispatcher);
     await next();
   });
-  app.openapiRoutes([memberRemove] as const);
+  app.route("/workspaces", memberRemove);
   return app;
 }
 
@@ -81,6 +83,7 @@ describe("POST /workspaces/member_remove", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
@@ -96,6 +99,7 @@ describe("POST /workspaces/member_remove", () => {
       body: JSON.stringify({ user_id: "" }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
@@ -111,6 +115,7 @@ describe("POST /workspaces/member_remove", () => {
       body: JSON.stringify({ user_id: TARGET_ID, workspace_id: "hijack" }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 });

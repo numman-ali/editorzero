@@ -1,135 +1,115 @@
 /**
  * `POST /docs/publish/:doc_id` — flip a doc's visibility to public.
  *
- * Fourth capability route (after `doc.list`, `doc.create`, `doc.get`);
- * first metadata-only mutation route. Mutates the `docs` row in the
- * dispatcher's write-path tx without touching the Y.Doc — `ctx.transact`
- * is never called, so no `doc_updates` row is produced. Follows the
- * same three-part route shape as the rest of the `docs/*` slice.
+ * Code-first route shape (ADR 0029) — mirrors the golden `create.ts`:
+ * a self-contained `Hono<ApiEnv>` sub-app built from three chained
+ * handlers via `factory.createHandlers(...)`:
  *
- * **Why POST.** The capability changes server state, which rules out
- * GET. PUT would also fit ("replace the visibility state") but the
- * path doesn't target a single-field subresource (`/docs/<id>/visibility`);
- * POST on a capability-style path is the convention the slice started
- * with (`POST /docs/create`). Future visibility-widening capabilities
- * (e.g. `doc.unpublish`, a future `doc.set_visibility`) ride the same
- * verb on their own capability paths.
+ *   1. `describeRoute({ ... })` — OpenAPI metadata only. Documents the
+ *      contract; does not feed `hc`.
+ *   2. `validator("param", DocPublishInputSchema, hook)` — Standard-Schema
+ *      path-param validation. The capability's input IS the single-id
+ *      object (`{ doc_id }`), so the shared `DocPublishInputSchema` is
+ *      reused verbatim as the param validator (PATTERN P2 — no separate
+ *      path schema to drift). The hook projects a parse failure to the
+ *      `{ error: "validation_failed" }` envelope at 400 (a cross-cutting
+ *      middleware return, intentionally not an `hc` arm — see `lib/errors.ts`).
+ *   3. The handler — reads `c.var.principal` + `c.var.dispatcher`,
+ *      dispatches `doc.publish` with the param-derived `input`, and
+ *      returns the dispatcher's output through `c.json` at 200. The
+ *      dispatcher *throws* `EditorZeroError` subclasses; the handler
+ *      catches and maps them with `errorResponse(c, err)` — those
+ *      explicit `c.json` returns are what `hc<AppType>` reads to infer
+ *      the error arms (ADR 0029 §4).
+ *
+ * **No type casts (`as`).** `c.var.principal` stays `Principal` (no
+ * `UserPrincipal` assertion); the handler only reads `workspace_id`
+ * (present on both arms) and forwards the union to the dispatcher.
+ * `dispatch` returns `Promise<unknown>`; the handler *parses* it through
+ * `DocPublishOutputSchema.parse` rather than asserting — the honest
+ * `unknown`→typed narrowing, and a runtime guard that the dispatcher
+ * output still satisfies the published contract.
+ *
+ * **Request + response schemas — reused, not re-declared (ADR 0034).**
+ * `DocPublishInputSchema` / `DocPublishOutputSchema` from
+ * `@editorzero/schemas/doc/publish` are the single source the capability
+ * also consumes. `validator("param", DocPublishInputSchema)` types the
+ * `hc` request as the wire shape (plain UUIDv7 string) while
+ * `c.req.valid("param")` hands the handler the branded shape; `resolver`
+ * / `describeRoute` generate the OpenAPI from the *input* side, so the
+ * spec stays wire-shaped. No wire copy drifts because there is no copy.
+ *
+ * **Status code — 200 OK.** Publish mutates an existing doc's metadata
+ * (visibility → public, `visibility_version` bumped); it does not create
+ * a resource, so 200 rather than 201.
  *
  * **No request body.** The capability's only input is the path-param
- * `doc_id`; there's nothing to put in the body. An empty POST with
- * `Content-Length: 0` is the expected shape. A future
- * `doc.set_visibility` that widens to arbitrary visibility states
- * would move the target state into the body.
+ * `doc_id`; an empty POST is the expected shape.
  *
- * **Status codes.**
- *   200 — flipped (or re-asserted): `visibility="public"`,
- *         `visibility_version` bumped by 1. Body carries the
- *         post-state projection.
- *   400 — malformed doc_id (not a v7 UUID).
- *   401 — unauthenticated (middleware-rejected before handler).
- *   403 — permission denied; caller lacks `doc:publish`.
- *   404 — doc missing or soft-deleted (publish is visibility, not
- *         resurrection — callers with `doc:delete` use `doc.restore`
- *         first).
- *
- * **Audit + write-path tx live inside the dispatcher.** The dispatcher
- * opens one `BEGIN IMMEDIATE`, runs the handler's SELECT+UPDATE against
- * `ctx.db`, writes `audit_events(allow)` + `outbox(audit.appended)` in
- * the same tx, and commits atomically. The route handler itself only
- * dispatches.
+ * **Audit + permission + write-path tx live inside the dispatcher.** The
+ * dispatcher opens one `BEGIN IMMEDIATE`, runs SELECT+UPDATE on the `docs`
+ * row (no `ctx.transact`, so no `doc_updates`), writes the audit rows in
+ * the same tx, and commits atomically. The handler only dispatches.
  */
 
 import { CapabilityId } from "@editorzero/ids";
-import type { UserPrincipal } from "@editorzero/principal";
-import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import { DocPublishInputSchema, DocPublishOutputSchema } from "@editorzero/schemas/doc/publish";
+import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { errorResponse } from "../../lib/errors";
+import { describeRoute, errEnvelope, factory, jsonContent, validator } from "../../lib/openapi";
 
 const DOC_PUBLISH_ID = CapabilityId("doc.publish");
 
-// Path parameter schema — 400s on non-UUIDv7 strings. Same shape as
-// `doc/get`'s path schema; the capability's InputSchema re-validates
-// and applies the `DocId` brand at the dispatcher boundary.
-const PublishParams = z
-  .object({
-    doc_id: z.uuid({ version: "v7", message: "doc_id must be a UUIDv7" }),
-  })
-  .openapi("DocPublishParams");
-
-// Response schema — mirrors `doc.publish`'s OutputSchema at wire level.
-// Branded IDs serialise as plain strings. `visibility` is a literal
-// `"public"` because the capability only lands on that state.
-const PublishResponse = z
-  .object({
-    doc_id: z.string(),
-    visibility: z.literal("public"),
-    visibility_version: z.number(),
-    published_at: z.number(),
-  })
-  .openapi("DocPublishResponse");
-
-const publishRouteDef = createRoute({
-  method: "post",
-  path: "/docs/publish/:doc_id",
-  tags: ["docs"],
-  summary: "Set a doc's visibility to public.",
-  request: {
-    params: PublishParams,
-  },
-  responses: {
-    200: {
-      description: "Doc visibility flipped (or re-asserted) to public; visibility_version bumped.",
-      content: { "application/json": { schema: PublishResponse } },
-    },
-    400: {
-      description: "Validation error (malformed doc_id).",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("validation") }),
+export const publish = new Hono<ApiEnv>().post(
+  "/publish/:doc_id",
+  ...factory.createHandlers(
+    describeRoute({
+      tags: ["docs"],
+      summary: "Set a doc's visibility to public.",
+      responses: {
+        200: {
+          description:
+            "Doc visibility flipped (or re-asserted) to public; visibility_version bumped.",
+          content: jsonContent(DocPublishOutputSchema),
+        },
+        400: {
+          description: "Validation error (malformed doc_id).",
+          content: jsonContent(errEnvelope("validation_failed")),
+        },
+        401: {
+          description: "Unauthenticated.",
+          content: jsonContent(errEnvelope("unauthenticated")),
+        },
+        403: {
+          description: "Permission denied — caller lacks `doc:publish`.",
+          content: jsonContent(errEnvelope("permission_denied")),
+        },
+        404: {
+          description: "Doc not found (or soft-deleted).",
+          content: jsonContent(errEnvelope("not_found")),
         },
       },
+    }),
+    validator("param", DocPublishInputSchema, (result, c) =>
+      result.success ? undefined : c.json({ error: "validation_failed" } as const, 400),
+    ),
+    async (c) => {
+      const principal = c.var.principal;
+      const input = c.req.valid("param");
+      try {
+        const result = await c.var.dispatcher.dispatch({
+          capability_id: DOC_PUBLISH_ID,
+          input,
+          principal,
+          access: { workspace_id: principal.workspace_id },
+          trace_id: null,
+        });
+        return c.json(DocPublishOutputSchema.parse(result), 200);
+      } catch (err) {
+        return errorResponse(c, err);
+      }
     },
-    401: {
-      description: "Unauthenticated.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("unauthenticated") }),
-        },
-      },
-    },
-    403: {
-      description: "Permission denied — caller lacks `doc:publish`.",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("permission_denied") }),
-        },
-      },
-    },
-    404: {
-      description: "Doc not found (or soft-deleted).",
-      content: {
-        "application/json": {
-          schema: z.object({ error: z.literal("not_found") }),
-        },
-      },
-    },
-  },
-});
-
-export const publish = defineOpenAPIRoute<typeof publishRouteDef, ApiEnv, true>({
-  route: publishRouteDef,
-  handler: async (c) => {
-    const principal = c.var.principal as UserPrincipal;
-    const dispatcher = c.var.dispatcher;
-    const { doc_id } = c.req.valid("param");
-    const result = await dispatcher.dispatch({
-      capability_id: DOC_PUBLISH_ID,
-      input: { doc_id },
-      principal,
-      access: { workspace_id: principal.workspace_id },
-      trace_id: null,
-    });
-    return c.json(result as z.infer<typeof PublishResponse>, 200);
-  },
-  addRoute: true,
-});
+  ),
+);
