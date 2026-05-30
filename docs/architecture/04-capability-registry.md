@@ -49,7 +49,7 @@ Rule-of-thumb for new capabilities:
 - **Power-user reads / mutations agents may use:** add `extraScopes` on top (e.g., `agent:create` for capabilities that create other agents).
 - **Destructive or operator-scope:** `humanOnly: true` — surfaces still expose to API/CLI for ops tooling, but **not** to MCP (§15.1: MCP adapter filters `humanOnly` capabilities out).
 
-- Schemas are **zod v4 StandardSchema-compatible** so the MCP SDK (v1 stable accepts zod v4), Hono's `@hono/zod-openapi`, and our CLI commander parser all consume the same object. Swapping to Valibot or ArkType later is a codemod, not a rewrite.
+- Schemas are **zod v4 StandardSchema-compatible** so the MCP SDK (v1 stable accepts zod v4), Hono's `hono-openapi` validator (ADR 0029), and our CLI commander parser all consume the same object. Swapping to Valibot or ArkType later is a codemod, not a rewrite.
 - The full `CapabilityContext` — the only thing a handler can touch — is spec'd in [§16.4](16-engineering-primitives-for-agentic-workflows.md#164-capabilitycontext--the-primitive-every-handler-consumes).
 
 ### 4.2 Canonical capability set (MVP)

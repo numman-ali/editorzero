@@ -23,7 +23,7 @@ The **engineering discipline** below is what keeps velocity high with a solo aut
 Operationalized throughout this doc:
 
 - **Layered responsibilities** (§16): capability → dispatcher → service → repository → infrastructure. Each layer imports only downward. Enforced by architecture lint; an agent cannot accidentally reach through.
-- **One zod schema per capability → every consumer.** HTTP route (`@hono/zod-openapi`), OpenAPI, MCP tool schema, CLI parser, UI form validation, audit `input_hash`, contract tests — all read the same object. Hand-writing a second schema is forbidden.
+- **One zod schema per capability → every consumer.** HTTP route (`hono-openapi` validator, ADR 0029), OpenAPI, MCP tool schema, CLI parser, UI form validation, audit `input_hash`, contract tests — all read the same object. Hand-writing a second schema is forbidden.
 - **Registry as the source of truth.** Surface adapters, contract-test matrix, OpenAPI, MCP tool list, permission matrix, rate-limit config, audit shape — all derived from `packages/capabilities`. Hand-written glue that could be generated is the anti-pattern.
 - **Typed primitives over stringly-typed anything.** Branded IDs (`WorkspaceId`, `DocId`, `BlockId`, `CapabilityId`, `SessionId`, `TokenId`, `AgentId`, `UserId`), string-literal unions (`Scope`, `CapabilityCategory`, `FidelityTier`, `QueueName`), discriminated unions (`Principal`, `AuditEffect`, `JobPayload`, `Block`). A misused identifier is a compile error, not a test failure.
 - **Type-level guarantees over runtime guards.** `TenantScopedDb` makes an un-tenanted query a build-time error. `ctx.transact` is the only way to reach a Y.Doc — no raw Hocuspocus in handlers. A capability handler that skips audit can't compile (the context requires one).

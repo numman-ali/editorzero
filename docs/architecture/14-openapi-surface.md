@@ -8,8 +8,9 @@ Per Nomi's directive + ADR 0009: OpenAPI is **generated at runtime** from the ca
 packages/api-server/src/openapi.ts
   → iterate capabilities
   → for each capability where surface includes HTTP:
-      create a route using @hono/zod-openapi's createRoute with
-        method, path, security (scopes), request schema, response schemas
+      emit a hono/factory route (code-first; ADR 0029) via hono-openapi's
+        describeRoute + validator — method, path, security (scopes),
+        request schema, response schemas
   → expose:
       GET /api/v1/openapi.json   (live generated spec)
       GET /api/v1/docs           (Scalar / Rapidoc viewer)

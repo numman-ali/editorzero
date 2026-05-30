@@ -7,7 +7,7 @@ Invariant #4 is the **target parity contract**, not current-tree status: as of P
 ### 5.1 HTTP API (Hono)
 
 - Mounted under `/api/v1/*` and `/mcp` (via `@better-auth/mcp`'s `mcpAuthHono`).
-- Route generator iterates the registry; per capability emits a `createRoute`/`openapi`-style handler via `@hono/zod-openapi`.
+- Route generator iterates the registry; per capability emits a `hono/factory` handler wired with `hono-openapi` `describeRoute` + `validator` (code-first; [ADR 0029](../adr/0029-api-package-shape.md)).
 - Auth middleware: Better Auth resolves credential → `Principal`; sets `TenantContext` in `AsyncLocalStorage`.
 - Dispatcher middleware: looks up capability, validates input via zod, checks `requires` against `Principal.scopes` (and workspace role), enforces `rateLimit`, calls handler, validates output, writes audit, emits OTel span.
 

@@ -460,7 +460,7 @@ An agent can guess the path for any file type given the thing they want. No surp
 |---|---|---|---|---|---|
 | Kysely DB types | Atlas `schema/*.sql` | `kysely-codegen` | `packages/db/src/generated/` | `pnpm codegen` | yes |
 | Capability registry barrel | `capabilities/src/**/*.ts` | small bun script | `packages/capabilities/src/registry.ts` | build + watch | yes |
-| OpenAPI spec | Capability zod schemas | `@hono/zod-openapi` at runtime; snapshot via `pnpm openapi:snapshot` | `packages/api-server/openapi.snapshot.json` | CI on change | yes (snapshot); runtime otherwise |
+| OpenAPI spec | Capability zod schemas | `hono-openapi` at runtime (code-first; ADR 0029); snapshot via `pnpm openapi:snapshot` | `packages/api-server/openapi.snapshot.json` | CI on change | yes (snapshot); runtime otherwise |
 | MCP tool list | Capability registry | `packages/mcp-server/src/create-mcp-handler.ts` (registry → tool loop at handler-factory time) | runtime | runtime | n/a |
 | CLI command tree | Capability registry | `apps/cli/src/registry.ts` + `apps/cli/src/generator/` | runtime + frozen in `bun build --compile` | build | n/a (baked into binary) |
 | Contract-test matrix | Capability registry | `packages/contract-tests/src/generate.ts` | `packages/contract-tests/generated/` | `pnpm test:contract` | yes |
@@ -481,7 +481,7 @@ Pins live in `package.json` + a `packages/pins/pins.json` registry used by CI to
 | `@better-auth/mcp` | latest ≥1.6.5 | `withMcpAuth` / `mcpAuthHono` | ADR 0009/0010 |
 | `@better-auth/api-key` | latest ≥1.6.5 | `referenceId` + `permissions` | ADR 0016 |
 | `@better-auth/agent-auth` | `^1.5.6` **unstable** through 2026-H2 | Wrap behind Principal abstraction | ADR 0016 |
-| `@hono/zod-openapi` | latest compatible with zod v4 | Generator for OpenAPI spec | §14 |
+| `hono-openapi` (+ `@hono/standard-validator`) | pinned EXACT — ADR 0029 §7 fence (migration from `@hono/zod-openapi` pending) | Code-first route substrate + OpenAPI generator | ADR 0029 / §14 |
 | `zod` | `^4` (StandardSchema-compatible) | Single schema across all surfaces | §4 / §16 |
 | `hono` | latest LTS | Router under `/api` + `/mcp` | ADR 0002 |
 | `@hocuspocus/server` | `3.4.4` (min) | Durability boundary notes apply | ADR 0006 |

@@ -76,7 +76,7 @@ A codegen step emits `packages/sdk/` from the capability registry with two drive
    - Candidates to evaluate: TOON, JSON, JSONL, YAML-compact. Interim default during development: **JSON on stdout** (`--json` is a no-op in agent mode, `--pretty` reformats for TTY). Final choice committed in a small follow-up ADR or an amendment here once evals run.
    - Until the eval runs, all AXI commitments that reference TOON are satisfied by JSON output shaped to AXI's schema conventions (minimal fields, stdout errors, aggregates, help suggestions). The format is a pluggable serializer at the CLI output boundary; switching it is a one-file change.
 5. **The capability registry generates every surface adapter.**
-   - Hono routes via `@hono/zod-openapi` (preserves types for `hc<AppType>`).
+   - Hono routes via the code-first generator (`hono-openapi` + `hono/factory`; preserves types for `hc<AppType>` through `.route()` composition — see [ADR 0029](0029-api-package-shape.md), which reversed the original schema-first substrate).
    - MCP tools via the 1.x SDK's `server.tool()` registration loop.
    - CLI subcommands via citty `defineCommand` loop.
    - OpenAPI spec + `AppType` export for `hc` consumers.
@@ -139,6 +139,10 @@ A codegen step emits `packages/sdk/` from the capability registry with two drive
 - XDG base directories: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
 ## Amendment — 2026-04-19: api-server composition primitive and folder layout
+
+> **⚠ Superseded in part by [ADR 0029](0029-api-package-shape.md) (2026-05-30 substrate reversal).** This amendment chose `@hono/zod-openapi` + the `openapiRoutes([...] as const)` composition primitive on the belief that the literal tuple was the *only* composition preserving the `hc<AppType>` merge. Empirical `tsc` spikes disproved that — `.route()` composition preserves the merge under a code-first shape — so ADR 0029 reversed the substrate to **`hono-openapi` + `hono/factory`** (code-first).
+> **Retired below:** the `openapiRoutes([...] as const)` primitive + its `as const` footgun; the *Why not `hono-openapi`* and *Why not the `.route()` chain* rejections; the `defineOpenAPIRoute`/`OpenAPIHono` shape; and the `@hono/zod-openapi`-specific revisit triggers + source.
+> **Survives below (substrate-independent):** folder-per-route, path-mirrors-folder, identifier-friendly path segments, the domain-`index.ts` aggregation, the minimal-app per-route test posture, and `packages/api-client`'s two typed-RPC builders. Read the rest as historical context.
 
 Scaffolding `packages/api-server` surfaced specifics the original decision deferred. Codified here so future slices (capability routes, registry-driven codegen, parity matrix) plug into a settled shape rather than rediscovering it.
 
