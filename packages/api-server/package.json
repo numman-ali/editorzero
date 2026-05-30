@@ -21,6 +21,7 @@
     "@editorzero/audit": "workspace:*",
     "@editorzero/auth": "workspace:*",
     "@editorzero/capabilities": "workspace:*",
+    "@editorzero/config": "workspace:*",
     "@editorzero/db": "workspace:*",
     "@editorzero/dispatcher": "workspace:*",
     "@editorzero/errors": "workspace:*",

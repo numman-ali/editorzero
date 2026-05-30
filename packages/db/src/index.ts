@@ -35,6 +35,7 @@ export {
   WORKSPACE_MEMBERS_DDL,
   WORKSPACES_DDL,
 } from "./drivers/sqlite-ddl";
+export { ensureSchema } from "./ensure-schema";
 export { createLoadRoles, type LoadRoles, type LoadRolesDriver } from "./load-roles";
 export { createOutboxWriter, type OutboxAppendInput, type OutboxWriter } from "./outbox-writer";
 export { createQueryFaultPlugin, describeQueryNode, type QueryTag } from "./query-fault";

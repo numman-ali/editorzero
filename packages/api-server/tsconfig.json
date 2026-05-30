@@ -10,6 +10,7 @@
     { "path": "../audit" },
     { "path": "../auth" },
     { "path": "../capabilities" },
+    { "path": "../config" },
     { "path": "../db" },
     { "path": "../dispatcher" },
     { "path": "../errors" },

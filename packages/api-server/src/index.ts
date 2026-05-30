@@ -11,6 +11,13 @@
  *     `createServerClient({ app })`). The triad `{ auth, loadRoles,
  *     dispatcher }` is all-or-nothing — partial shapes throw at
  *     composition time (see `app.ts` docblock).
+ *   - `getApiApp(options?)` — the production composition root (ADR
+ *     0027/0029 §8). Constructs the driver, auth (+ migrations),
+ *     registry, sync, dispatcher, and role lookup from runtime config,
+ *     then calls `createApiApp`. Returns a `BootedApp` (the trunk + a
+ *     dependency-ordered `close()`). The `serve()` entrypoint and any
+ *     in-process boot consume this; `createApiApp` is the lower layer
+ *     that only assembles already-constructed singletons.
  *   - `app` — zero-arg default instance used by smoke tests and
  *     typed-RPC binding consumers that don't need the auth stack.
  *     `AppType` binds to this value.
@@ -38,3 +45,4 @@ export {
   type PrincipalMiddlewareOptions,
   type PrincipalResolver,
 } from "./middleware/principal";
+export { type BootedApp, type GetApiAppOptions, getApiApp } from "./server";

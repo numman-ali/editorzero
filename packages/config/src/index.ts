@@ -18,6 +18,7 @@ export {
   parseRuntimeConfig,
   runtimeConfigSchema,
 } from "./env";
+export { resolveSecretRef, SecretResolutionError } from "./resolve-secret";
 export type {
   RotatableSecretHandle,
   RotatableSecretKind,

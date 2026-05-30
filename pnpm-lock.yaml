@@ -136,6 +136,9 @@ importers:
       '@editorzero/capabilities':
         specifier: workspace:*
         version: link:../capabilities
+      '@editorzero/config':
+        specifier: workspace:*
+        version: link:../config
       '@editorzero/db':
         specifier: workspace:*
         version: link:../db
