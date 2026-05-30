@@ -33,6 +33,14 @@ export const runtimeConfigSchema = z.object({
   node_env: z.enum(["development", "test", "production"]).default("development"),
   /** Public origin the app self-identifies as (OAuth issuer, webhook signer, CORS). */
   public_origin: z.string().url(),
+  /**
+   * TCP port the server (`apps/server`) binds. Container-internal and
+   * independent of `public_origin`: a reverse proxy (Caddy, ADR 0011)
+   * terminates the public URL and forwards here, so the listen port is
+   * its own setting, not derivable from the origin. `PORT` is the
+   * conventional env var (Railway, Fly, Render, Heroku all inject it).
+   */
+  port: z.coerce.number().int().min(1).max(65535).default(3000),
   /** Primary database URL. Startup-only secret; rotation requires restart. */
   database_url: z.string().min(1),
   /** Redis URL — required in `ha` mode, optional in single-node. */
@@ -69,6 +77,7 @@ const ENV_MAP = {
   mode: "EDITORZERO_MODE",
   node_env: "NODE_ENV",
   public_origin: "EDITORZERO_PUBLIC_ORIGIN",
+  port: "PORT",
   database_url: "DATABASE_URL",
   redis_url: "REDIS_URL",
   otlp_endpoint: "OTEL_EXPORTER_OTLP_ENDPOINT",

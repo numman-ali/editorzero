@@ -48,7 +48,10 @@ export type LogEvent =
   | "job.failed"
   | "secret.rotated"
   | "reaper.batch_completed"
-  | "admin.diagnose_generated";
+  | "admin.diagnose_generated"
+  | "server.listening"
+  | "server.draining"
+  | "server.boot_failed";
 
 /**
  * Structured log metadata. Use the `event` key for the log-event

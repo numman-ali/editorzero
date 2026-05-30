@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "tsBuildInfoFile": "./.tsbuildinfo.test",
+    "rootDir": "."
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../packages/api-server" },
+    { "path": "../../packages/config" },
+    { "path": "../../packages/observability" }
+  ],
+  "exclude": ["node_modules", "dist"]
+}
