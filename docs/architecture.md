@@ -48,7 +48,7 @@ The specifics of the layering, the codegen inventory, the lint rules, and the te
 ```
               ┌───────────────────────────────────────────────┐
               │                 Clients                       │
-              │   Web UI (Next 16)   CLI (bun)   MCP clients  │
+              │   Web UI (SPA)       CLI (bun)   MCP clients  │
               │                 HTTP API (any)                │
               └──────────────┬────────────────────────────────┘
                              │  OAuth 2.1 / API key / session
@@ -61,13 +61,13 @@ The specifics of the layering, the codegen inventory, the lint rules, and the te
   ┌────────────────────────────────────────────────────────────────────┐
   │                    Node 22 LTS app process                         │
   │ ┌──────────────────────────────────────────────────────────────┐   │
-  │ │ Next.js 16 (top-level server) — App Router                   │   │
-  │ │   (app)/    (public)/[domain]/[slug]    (api)/api/…          │   │
-  │ │   proxy.ts (Node runtime, not Edge)                          │   │
+  │ │ Hono trunk (top-level server) — serves SPA                   │   │
+  │ │   / (SPA)   /p/[slug] (static)  /api · /auth · /mcp          │   │
+  │ │   embedded Hocuspocus WS (one port)                          │   │
   │ └──────────────────────────────────────────────────────────────┘   │
   │ ┌──────────────────────────────────────────────────────────────┐   │
-  │ │ Hono router (mounted under (api)/api/ and at /mcp)           │   │
-  │ │   OpenAPI derived from capability zod schemas                │   │
+  │ │ Capability routes — OpenAPI from zod (one tuple)             │   │
+  │ │   typed RPC via hc<AppType> (in-proc + HTTP)                 │   │
   │ └───────────┬────────────────────────┬─────────────────────────┘   │
   │             ▼                        ▼                             │
   │ ┌───────────────────────┐ ┌─────────────────────────┐              │
@@ -824,7 +824,7 @@ MVP is `v1`. Breaking changes ship a new capability id alongside (`doc.update_v2
 
 Invariant #4 is the **target parity contract**, not current-tree status: as of P3.7 the shared registry/dispatcher/sync primitive + Hono trunk + CLI surface + MCP adapter have all landed (`packages/api-server`, `packages/api-client`, `packages/mcp-server`, `apps/cli`); still absent are `apps/{app,admin}` (Web UI) and `packages/contract-tests` (cross-surface parity harness). The subsections below describe the intended adapters and matrix; for surfaces that have landed, hand-written adapter glue is **forbidden** — the three existing surfaces all derive from the capability registry.
 
-> **Read [ADR 0021](adr/0021-surface-transport-topology.md) before implementing any §5.x slice.** It names the Hono app as the single trunk, commits each eventual surface adapter (Server Actions / RSC / CLI / MCP) to consuming it via typed RPC (`hc<AppType>` — in-process via `app.request` for server-side callers, HTTP for clients), drops MCP stdio in favour of Streamable HTTP, names `citty` as the CLI framework, and pins `@hono/mcp` as the MCP integration. The subsections below describe the resulting surfaces; the ADR is the why.
+> **Read [ADR 0021](adr/0021-surface-transport-topology.md) before implementing any §5.x slice.** It names the Hono app as the single trunk, commits each eventual surface adapter (Web UI SPA / CLI / MCP) to consuming it via typed RPC (`hc<AppType>` — in-process via `app.request` for server-side callers, HTTP for clients), drops MCP stdio in favour of Streamable HTTP, names `citty` as the CLI framework, and pins `@hono/mcp` as the MCP integration. The subsections below describe the resulting surfaces; the ADR is the why.
 
 ### 5.1 HTTP API (Hono)
 
@@ -861,17 +861,17 @@ Per ADR 0009 + [ADR 0021](adr/0021-surface-transport-topology.md), capabilities 
 - **Auth**: `withMcpAuth` / `mcpAuthHono` (`@better-auth/mcp`) in front of the transport on the same Hono route. OAuth 2.1 DCR + PKCE S256 + RFC 8707 audience; `resolveTenantAudience(host)` binds custom-domain tenants.
 - **Reconnect**: keepalive 15 s, `Mcp-Session-Id` + `Last-Event-Id` resume, `tool_call_id` persisted 24 h for interrupted calls.
 
-### 5.4 Web UI (Next 16 App Router)
+### 5.4 Web UI (Hono trunk + Vite/React SPA — ADR 0027–0033)
 
-- **Server Actions + RSC consume the Hono trunk via in-process typed RPC** ([ADR 0021](adr/0021-surface-transport-topology.md)). `@editorzero/api-client` exports `createServerClient()` which returns `hc<AppType>` bound to `app.request.bind(app)` — full Hono middleware chain runs (Better Auth → `Principal` resolution → tenant scope → rate limit → dispatcher), zero TCP hop. Server-side callers never invoke the dispatcher outside this chain.
-- **Header forwarding.** Next middleware runs on the Next request; Hono middleware runs on the synthesized `Request`. `createServerClient` forwards a capped allowlist (`cookie`, `authorization`) from `next/headers` into the synthesized request — never a `...req.headers` dump, to avoid accepting spoofed tenant hints.
-- **Better Auth + `"use cache"` gotcha** remains: session resolution cannot run inside a `"use cache"` scope. Cached functions receive already-resolved `Principal` / `TenantContext` as arguments (architecture.md §Gotchas).
-- `(app)/` routes use the editor (BlockNote + `y-prosemirror` over Hocuspocus WebSocket).
-- `(public)/[domain]/[slug]` uses `"use cache"` + `cacheLife` for published-doc render. **Cache key includes `visibility_version`** (red-team F5 fix):
-  - Key: `(workspace_id, doc_id, latest_snapshot_seq, visibility_version)`.
-  - `visibility_version` is a scalar per-doc counter bumped on every `block.set_visibility`, `doc.publish`, `doc.unpublish`, `doc.delete`, and `doc.restore` for that doc. The counter is stored on `docs.visibility_version`; set-visibility handler increments it synchronously. Delete/restore bump too because a soft-delete of a published doc must flip the public-route render from "200" to "404" (and restore flips it back) — without a version movement, a cached render would keep serving a deleted-but-published doc (F5 + ADR 0017).
-  - `revalidateTag("doc:<doc_id>")` is called in the Server Action for any capability that bumps `visibility_version`.
-  - Property test (`public-cache-invariance.prop.ts`): after any sequence of `{block.set_visibility, doc.publish, doc.unpublish, doc.delete, doc.restore, block.update}`, the `(public)` route's rendered HTML does not contain content from a block with `visibility='internal'` as of that snapshot, and a soft-deleted doc renders 404 regardless of prior publish state.
+> **Topology re-decided 2026-05-30 ([ADR 0027](adr/0027-web-ui-topology.md)–0033), superseding the Next.js design ([ADR 0005](adr/0005-ui-framework.md)).** The Hono trunk is the top-level server; there is no framework above it. The Next-specific machinery this section used to describe (Server Actions/RSC, header-forwarding across a synthesized request, `"use cache"`) is retired.
+
+- **In-process typed RPC is preserved** ([ADR 0021](adr/0021-surface-transport-topology.md), [ADR 0027](adr/0027-web-ui-topology.md)). `@editorzero/api-client` still exports `createServerClient()` = `hc<AppType>` bound to `app.request.bind(app)` — full middleware chain (Better Auth → `Principal` → tenant scope → rate limit → dispatcher), zero TCP. It now serves SSR-shell / reader-render callers rather than Next Server Actions/RSC; the SPA uses `createHttpClient()` over same-origin fetch. Server-side callers never invoke the dispatcher outside this chain (invariant 5).
+- **Same-origin auth** ([ADR 0030](adr/0030-better-auth-mount.md)). Better Auth mounts directly on the trunk; SPA, RPC, and `/auth/*` share one origin → first-party `SameSite=Lax` cookies, no CORS, no synthesized-request header-forwarding allowlist (so no spoofed-tenant-hint risk), and the Better-Auth-in-`"use cache"` gotcha is moot.
+- **Editor route is client-only** (`ssr: false`; [ADR 0031](adr/0031-editor-substrate.md)). Bootstraps on BlockNote + `y-prosemirror` over the embedded Hocuspocus WebSocket; ejects to Tiptap v3 + an owned thin block layer (clean-start) fused with the version-history/track-changes slice ([ADR 0032](adr/0032-version-history-track-changes.md)). Production collab is gated on **broadcast-after-commit** so a rolled-back SQL tx never leaves a mutation resident in the live `Y.Doc` (ADR 0027 / invariant 7).
+- **Published docs are event-rendered static HTML** ([ADR 0027](adr/0027-web-ui-topology.md)), replacing the `"use cache"` + `cacheLife` + `revalidateTag` design. An outbox consumer regenerates a published doc's HTML on **both** `doc.visibility_changed` (publish/unpublish/delete/restore) **and** `doc.updated` (content edits to an already-published doc) — keying on visibility alone was a staleness bug. Rendered via a neutral block-JSON→HTML projection (not BlockNote's `blocksToFullHTML`), written under `./data/published/<workspace>/<slug>.html(.br)`, served with `ETag` / `must-revalidate` (the shareable slug can't carry a content hash, so not `immutable`; only hashed sub-assets are `immutable`).
+  - Cache/artifact key: composite (`workspace_id`, `doc_id`, `visibility_version`, content-hash). `visibility_version` remains a scalar per-doc counter bumped on `block.set_visibility`, `doc.publish`, `doc.unpublish`, `doc.delete`, `doc.restore`; the content-hash arm catches content edits to an already-published doc, which `visibility_version` does not move. Delete/restore must flip the public render 200↔404 (F5 + ADR 0017).
+  - The outbox consumer (not a Server Action) re-renders on the events above and writes/evicts the static artifact; publish-snapshot-vs-live-latest semantics are a reader-slice product decision (ADR 0027).
+  - Property test (`public-cache-invariance.prop.ts`, adapted to the artifact): after any sequence of `{block.set_visibility, doc.publish, doc.unpublish, doc.delete, doc.restore, block.update}`, the rendered public HTML contains no `visibility='internal'` block content as of that snapshot, and a soft-deleted doc renders 404 regardless of prior publish state — now asserted against the event-rendered artifact rather than a `"use cache"` key.
 - `proxy.ts` resolves `Host` → workspace via `custom_domains` using a small in-memory LRU primed at startup and invalidated on `custom_domains` mutation. **In HA mode (F53):** `custom_domain.add`, `custom_domain.remove`, `custom_domain.verify` publish `custom_domains:invalidated` on the Redis pub/sub channel; each node's proxy LRU subscribes and evicts matching keys. LRU entries also carry a **60s TTL** as a safety net so that a missed pub/sub message self-heals within one minute.
 
 ### 5.5 Contract enforcement
@@ -1217,7 +1217,7 @@ Alice runs `doc.publish(doc_id=D)` on a doc with some `block.visibility='interna
 
 1. Dispatcher checks `Alice` has `doc:publish` on D. Allowed.
 2. Handler: sets `docs.visibility='public'`, `published_at=now()`. Enqueues `projection_blocks` job.
-3. Published render path (`/public/[domain]/[slug]`) reads blocks WHERE `visibility != 'internal'`. The (public) route uses `"use cache"` keyed on `(doc_id, snapshot_seq)`, so the render is deterministic per snapshot.
+3. Published render path reads blocks WHERE `visibility != 'internal'` and is regenerated to static HTML by the outbox consumer (ADR 0027) — keyed on a composite (`visibility_version` + content-hash), served with `ETag`/`must-revalidate`, so the render is deterministic per snapshot.
 4. Audit row on the publish itself; per-block visibility enforcement is not audited per-read (would flood the log).
 
 #### (c) Agent-only API token
@@ -1653,7 +1653,7 @@ A CI contract test snapshots the generated spec to `packages/api-server/openapi.
 
 ### 14.3 Security schemes
 
-- `sessionCookie` — Better Auth session, browsers (via Next Server Actions + fetch from same origin).
+- `sessionCookie` — Better Auth session, browsers (same-origin fetch from the Vite SPA; `SameSite=Lax`, ADR 0030).
 - `bearerToken` — API keys (human PAT) and agent API-keys (`@better-auth/api-key`).
 - `oauth2` — OAuth 2.1 with DCR + PKCE S256; scopes from capability `requires` vocabulary.
 
@@ -1730,8 +1730,8 @@ pnpm workspaces, single root `tsconfig.json` with project references, single `pa
 ```
 editorzero/
 ├── apps/
-│   ├── app/                       # Next.js 16 — (app)/ (public)/ (api)/
-│   ├── admin/                     # Next.js 16 — operator console, gated
+│   ├── app/                       # Vite + React SPA (ADR 0027/0028) — editor UI
+│   ├── admin/                     # operator console, gated (SPA)
 │   └── cli/                       # Bun-compiled CLI from registry (ADR 0021)
 ├── packages/
 │   ├── ids/                       # Branded ID types + parsers (no runtime deps)
@@ -1799,7 +1799,7 @@ Import direction is strictly downward. Higher layers import from lower; never th
 ```
   ┌───────────────────────────────────────────────┐
   │ Surface adapters (api-server, cli,            │
-  │ mcp-server, app Server Actions)               │   Adapters only.
+  │ mcp-server, app — the Vite SPA)               │   Adapters only.
   └───────────────────┬───────────────────────────┘   No business logic.
                       ▼
   ┌───────────────────────────────────────────────┐
@@ -1832,12 +1832,12 @@ Import direction is strictly downward. Higher layers import from lower; never th
   └───────────────────────────────────────────────┘
 ```
 
-The surface-adapters box includes `api-server` / `mcp-server` at `packages/*` and `apps/cli` / `apps/app` (Server Actions) per ADR 0021. `api-client` (typed-RPC client via `hc<AppType>`) is not a surface adapter itself — it rides alongside `api-server` for consumers, so it sits at the capability-layer boundary rather than in this diagram. Lint rules derived from this section will crystallize as a dedicated `@editorzero/arch-lint` package when it lands.
+The surface-adapters box includes `api-server` / `mcp-server` at `packages/*` and `apps/cli` / `apps/app` (Vite SPA) per ADR 0021/0027. `api-client` (typed-RPC client via `hc<AppType>`) is not a surface adapter itself — it rides alongside `api-server` for consumers, so it sits at the capability-layer boundary rather than in this diagram. Lint rules derived from this section will crystallize as a dedicated `@editorzero/arch-lint` package when it lands.
 
 **Layer import rules (enforced by Biome + custom tsmorph lint):**
 
 - `capabilities/*` may import from: `ids`, `scopes`, `principal`, `audit`, `auth-service`, domain-service packages, `dispatcher` (for types only).
-- `capabilities/*` may **not** import from: `db` (use `ctx.db`), `sync` (use `ctx.transact`), `auth` (use `auth-service`), `api-server`, `mcp-server`, `apps/*` (CLI + Next.js UI). Business logic lives in services, not handlers.
+- `capabilities/*` may **not** import from: `db` (use `ctx.db`), `sync` (use `ctx.transact`), `auth` (use `auth-service`), `api-server`, `mcp-server`, `apps/*` (CLI + Web UI SPA). Business logic lives in services, not handlers.
 - Service packages (including `auth-service`) may import from: `ids`, `scopes`, `principal`, `db/repos`, infrastructure (`auth`, `sync`, `observability`), sibling service packages (sparingly, document in the import). May **not** import from: any surface package, `dispatcher`, `capabilities`.
 - Repo packages (`db/repos/*`) may import from: `db` (Kysely) only. May **not** import services, capabilities, surfaces.
 - Surface adapters may import from: `capabilities/registry`, `dispatcher`. Never services or repos directly.
@@ -2552,7 +2552,7 @@ Both will appear in the Phase 3 continuation as "pending, no change."
 
 Legend:
 - **H** = callable by human (session / PAT). **A** = callable by agent (API key / agent-auth / MCP). **—** = unavailable.
-- **Surfaces**: **API** / **CLI** / **MCP** / **UI** (Next Server Action or RSC).
+- **Surfaces**: **API** / **CLI** / **MCP** / **UI** (Web UI SPA via typed RPC).
 
 This matrix incorporates red-team fixes F12, F13, F15, F19, F22.
 

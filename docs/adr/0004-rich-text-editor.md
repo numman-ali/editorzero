@@ -1,8 +1,10 @@
 # ADR 0004 — Rich-text editor: BlockNote
 
-**Status:** Accepted (post-refresh, supersedes v1 Milkdown decision)
-**Date:** 2026-04-17 (v2)
+**Status:** Superseded by [ADR 0031](0031-editor-substrate.md) (2026-05-30)
+**Date:** 2026-04-17 (v2); superseded 2026-05-30
 **Deciders:** @numman
+
+> **Superseded by [ADR 0031](0031-editor-substrate.md) + [ADR 0032](0032-version-history-track-changes.md) (2026-05-30).** BlockNote remains the *bootstrap* editor, but the standing decision is to eject to Tiptap v3 + an owned thin block layer (clean-start) and to **build** version-history / track-changes ourselves on Yjs snapshots + `prosemirror-changeset` — reversing this ADR's bet (the FOSDEM-2026 line below) that we would *inherit* track-changes from BlockNote's upstream Yjs-14 work. Neither BlockNote nor Tiptap ships free + self-hostable track-changes, and the killer feature (tracked *agent* edits) wants schema sovereignty we don't get from a vendor's block wrapper.
 
 ## Context
 ADR 0013 v1 made "Markdown AST is the source of truth" a monolithic hard invariant, which uniquely qualified Milkdown (remark-under-the-hood) as the editor. ADR 0013 v2 relaxes that: **the CRDT (Yjs) is the source of truth; each block type declares its own Markdown fidelity contract.** Under the relaxed constraint, the editor choice is re-opened.

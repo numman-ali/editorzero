@@ -1,8 +1,10 @@
 # ADR 0005 — UI framework: Next.js 16 App Router
 
-**Status:** Accepted (post-refresh)
-**Date:** 2026-04-17 (v2)
+**Status:** Superseded by [ADR 0027](0027-web-ui-topology.md) (2026-05-30)
+**Date:** 2026-04-17 (v2); superseded 2026-05-30
 **Deciders:** @numman
+
+> **Superseded by [ADR 0027](0027-web-ui-topology.md) (2026-05-30), with the 0028–0033 cluster.** Next.js is no longer the Web UI framework. This ADR's choice put Next on top with the Hono trunk mounted under it — directly contradicting ADR 0021 (Hono trunk as the single source every surface consumes). ADR 0027 resolves that toward 0021: the Hono trunk is the top-level server; the authenticated UI is a Vite + React SPA served as static assets, published docs are event-rendered static HTML, and Hocuspocus is embedded on the same port. Decisive facts: Next `output:export` ⊥ `output:standalone` (can't be one container *and* zero-JS) and Next can't host the collab WebSocket.
 
 ## Context
 The refresh confirmed Next.js **16** is current (16.0 GA Oct 21 2025; 16.2 Mar 2026). v1 cited Next 15; update to 16 and note the breaking surface.

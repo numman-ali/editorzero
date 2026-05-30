@@ -1,0 +1,74 @@
+# ADR 0027 — Web UI surface topology: Hono trunk as top-level server; Vite + React SPA; event-rendered static published docs
+
+**Status:** Accepted (2026-05-30; supersedes ADR 0005)
+**Date:** 2026-05-29
+**Deciders:** @numman (determination delegated to Claude Opus 4.8; output of the exhaustive multi-agent review `wf_b3e0aac1-bff` — 36 agents, judge panels, 5 adversarial red-teamers — and a Codex ADR-level peer pass)
+
+## Context
+
+ADR 0005 chose **Next.js 16 App Router** as the Web UI framework, with the Hono trunk (ADR 0021) mounted *under* Next at `/api/*`. That left two Accepted ADRs in direct tension: 0005 ("Next is the top-level server; put Hono under it") vs. 0021 ("Hono is the trunk; every surface consumes it via `hc<AppType>`"). The Web UI is editorzero's one unbuilt surface; before standing it up we re-decided the topology from scratch, treating Next.js as up-for-review and the isomorphic-vs-split question as open.
+
+The review verified three facts that are individually load-bearing and jointly decisive:
+
+1. **Next.js cannot be both single-container and zero-JS.** `output: 'export'` (static, the true zero-JS path for published docs) and `output: 'standalone'` (the Node server image) are **mutually exclusive per build** (nextjs.org/docs, confirmed 2026-05-29). One Next app cannot serve both an SSR'd authenticated surface and statically-exported public docs from one image.
+2. **Next route handlers cannot host the Hocuspocus WebSocket upgrade.** Collab requires a long-lived WS server; Next's serverless-shaped handler model does not host it, forcing a second process under any Next topology.
+3. **`@hono/node-server` v2 ships built-in `upgradeWebSocket`** (`new WebSocketServer({ noServer: true })` passed to `serve()`), so the Hono trunk *can* host the JSON-RPC surface, static assets, **and** the collab WS on one port. The WS fact only helps the Hono topology — under Next it would still need a second process.
+
+The in-process typed-RPC seam that ADR 0021 was built around (`createServerClient` = `hc<AppType>` bound to `app.request`, zero TCP) means the trunk already works whether the frontend ships as one deploy or two. So the real choice is not "isomorphic vs split" in the abstract — every viable variant is **one process serving a static client bundle**. The decision reduces to: what serves the bytes, and what renders the public reader path.
+
+## Options considered
+
+### A. Next.js isomorphic (mount Hono at `/api/*` via `hono/vercel`) — the ADR 0005 / `ui-slice-1-plan.md` shape — REJECTED
+`basePath('/api')` breaks `hc<AppType>` RPC inference (Hono #4512, won't-fix); the `.route(prefix, subApp)` alternative breaks the `AppType` tuple-merge (the codebase already documents this). The only repair is a Next rewrite layer that is invisible to agents and *still* can't host the collab WS. Plus facts 1–2: cannot be 1-container + zero-JS, and forces a second process for WS. Contradicts "the app carries only the mount" — the app also needs a config rewrite + custom server.
+
+### B. Next.js split (standalone frontend + standalone trunk) — REJECTED
+Deletes `createServerClient`'s zero-TCP path (the thing the repo was built around), converts same-origin Better Auth into a cross-origin `SameSite=None` / CSRF / `trustedOrigins` tax, produces two deploy artifacts (⊥ ADR 0012 single-box), and imports a CORS surface for nothing the goals ask for.
+
+### C. TanStack Start, React Router v7 framework mode, Astro, Hono-native React SSR, non-React frameworks — REJECTED
+- **TanStack Start** (full framework): its RSC layer is experimental and Flight-only, and **branded IDs are not serializable across the RSC boundary** (only primitives/Dates/React elements). `DocId`/`WorkspaceId`/`BlockId` are pervasive, so the gap bites directly. (We *do* take TanStack **Router** alone — see ADR 0028.)
+- **React Router v7 framework mode** (via `react-router-hono-server`): single-maintainer lib that *inverts build ownership* (mounts the trunk inside its own `app` option, ⊥ "app carries only the mount"); RR7 loaders add a second data idiom alongside `hc`; framework-mode ships hydration JS on every route.
+- **Astro**: adds a second UI runtime (`.astro` ≠ React) outside the registry SSOT and tempts a second `Astro.locals` auth context (invariant-5 drift); its only win (zero-JS reader) is captured by the trunk-renders-static path with no second framework.
+- **Hono-native React SSR / HonoX / Vike**: editor is client-only React regardless; HonoX is alpha, Vike pre-1.0, `@hono/react-renderer` is a self-owned meta-framework. Wins process-count (already cheap via `app.request`) at the cost of framework maturity.
+- **Non-React** (SvelteKit/SolidStart/Qwik): forces abandoning the React editor ecosystem (BlockNote/Tiptap React UI + AriaKit WCAG baseline) to win SSR/perf the client-only editor can't use.
+
+### D. Hono trunk as the literal top-level server — CHOSEN
+The trunk *is* the server. There is no framework above it.
+
+## Decision
+
+**The Hono trunk is the top-level server** (`createApiApp(...)` behind `@hono/node-server` v2 `serve()`), serving three things on one origin / one process at the floor:
+
+1. **A bare Vite + React SPA** (the authenticated editor app) built to static assets and served via `serveStatic`. The editor route is client-only (`ssr: false`) — BlockNote/Tiptap cannot SSR, and the mandatory `editor.mount` + DOM shim is a **server-only dispatcher concern** (headless `ctx.transact` mutation), framework-neutral on the client (real browser DOM, no shim).
+2. **The JSON-RPC + `/auth/*` + `/mcp`** the trunk already owns (ADR 0021), consumed by the SPA via `createHttpClient` (`hc<AppType>` over same-origin fetch) and by in-process/SSR-shell callers via `createServerClient` (`app.request`).
+3. **Published docs as pre-rendered static HTML.** An outbox consumer regenerates a published doc's static HTML on **both** triggers: `doc.visibility_changed` (publish/unpublish/delete/restore) **and** `doc.updated` (content edits to an already-published doc — emitted by `doc-updates-writer`, architecture.md §5.4). Keying only on `visibility_version` (the original §5.4 design) is a **staleness bug** (Codex finding): content edits don't bump `visibility_version`, so an edited-after-publish doc would never regenerate. The artifact is therefore keyed on a **composite** (`visibility_version` + a content hash). It renders to `./data/published/<workspace>/<slug>.html(.br)` and is served **with revalidation** — an `ETag` on the composite key, `must-revalidate`, **not** `immutable`: the public slug URL is stable and shareable (it can't carry a content hash, for SEO), so immutable caching would pin stale content. Only hashed sub-assets (CSS/JS bundles) are served `immutable`. **The render is a neutral HTML projection from the block JSON editorzero already owns** (a per-block `toHTML` on the same `BlockTypeSpec` kernel as `toMarkdown`), **not** BlockNote's `blocksToFullHTML` (see Consequences / red-team finding). This keeps the public, indexable path under our control, substrate-independent (survives the ADR 0031 Tiptap migration verbatim), and free of any open upstream editor bug.
+
+**Embedded Hocuspocus on the same port** via `@hono/node-server` v2 `upgradeWebSocket` + `new WebSocketServer({ noServer: true })`, on a `/collab/*` path with CORS scoped away from it (it needs none, and the documented WS-upgrade-vs-immutable-CORS-headers conflict is thereby avoided).
+
+This is ADR 0021 taken to its conclusion: the trunk is the single front door, so Server-Action/RSC bypass vectors of invariant 5 cannot exist; the "app carries only the mount" intent is native — **there is no app**; the trunk serves the SPA. The isomorphic-vs-split distinction collapses to **split build artifacts (SPA bundle + static reader HTML), single origin, one process**.
+
+### Deploy floor (confirms ADR 0012)
+One container at the floor: trunk + SQLite + embedded Hocuspocus + SPA assets + static reader HTML under `./data/`. Caddy remains the only ever-second container (custom domains + on-demand TLS, ADR 0011). Single-box self-host stays the primary distribution target — it is what makes the same-origin / one-process / no-shared-cache design correct.
+
+## Consequences
+
+- **Resolves the 0005-vs-0021 contradiction toward 0021.** This ADR supersedes ADR 0005's framework choice. It also **requires rewriting** ADR 0012's "one service running the Next 16 app" line to "one service running the Hono trunk (SPA assets + static published HTML + embedded Hocuspocus)", and **architecture.md §5.4's `"use cache"` / `revalidateTag` published-cache design** to the event-rendered-static-artifact design on a **composite (`visibility_version` + content-hash)** key with `ETag`/`must-revalidate` serving (not the visibility-version-only key the prior design assumed). Leaving 0005 Accepted alongside this is itself an agentic-drift hazard, so the supersession is explicit.
+- **The reader path is a greenfield slice, not a near-term bump.** `published_slug` / `published_at` are target DDL not yet in the live schema; `doc.list` / `doc.get` currently ignore `visibility`; the `(public)` route does not exist; the outbox→render consumer is unbuilt and has no job-queue binding yet (ADR 0014). The reader path therefore lands as its own slice: (1) the `published_slug`/`published_at` additive migration + **visibility-filtered** `doc.list`/`doc.get`, (2) the outbox consumer wired to ADR 0014's queue, (3) a **head-metadata contract** (`<title>`, OG/Twitter, canonical, JSON-LD) for the chrome template — the public path is the one indexable surface and a Vite SPA serves a blank shell to crawlers, so self-contained pre-rendered HTML with full head metadata is a correctness requirement, not polish, (4) the neutral-HTML renderer with a fixture gate, (5) the **publish-semantics product decision** — does an already-published doc reflect *live latest* content (regenerate on every `doc.updated`, as the composite key above assumes) or is publish a *re-taken snapshot* (regenerate only on an explicit re-publish)? This ADR fixes the *mechanism* (regenerate on content + visibility events, revalidated serving); the slice fixes the *product rule*.
+- **Reader chrome is a second small presentational surface** (the published typography wrapper authored once, not shared with the React SPA). Accepted cost; the body is the same block JSON either way.
+- **`@hono/node-server` v2 + embedded Hocuspocus is a prerequisite smoke, not a settled fact.** The repo pins v1.19.14; nothing uses v2; `serve`/`serveStatic`/`upgradeWebSocket` are absent. v2 removes the `/vercel` adapter and needs `ws` + `@types/ws`. Co-hosting Hocuspocus (which expects to own/attach a server) on one `serve()` instance is unproven in-tree. **First the production boot entrypoint must exist at all** (`createApiApp` is invoked only in `app.ts`/`index.ts` + tests today): the `getApiApp()` composition-root extraction + `serve()` entrypoint is the genuine first deliverable, and it is the same composition root where ADR 0029's triad guard and ADR 0030's auth instance live. A dedicated smoke must prove `serve()` + `serveStatic` + `upgradeWebSocket` + Hocuspocus `openDirectConnection` + a client WS upgrade with a real `onAuthenticate` resolving the session cookie, before "one port, one process" is asserted as built.
+- **Embedding live collab activates a latent write-path rollback gap (Codex finding).** Today the dispatcher mutates headlessly; once production Web UI clients are attached to the live `Y.Doc` (`packages/sync/src/hocuspocus.ts`), a mutation applied-and-broadcast to connected clients whose backing SQL transaction then *rolls back* leaves clients diverged from the DB — clients hold it, the DB doesn't. Production Web UI collab is therefore **gated on a broadcast-after-commit rule** (apply/broadcast to the shared doc only after the persisting transaction commits) or equivalent commit-gated buffering: invariant 7 (`ctx.transact`) + the write-path-atomicity property must cover the **WS-attached** case, not just the headless one. This is a prerequisite for activating collab in the Web UI, tracked alongside the co-hosting smoke (cross-ref ADR 0018).
+- **No `"use cache"` footguns.** Dropping Next removes the "`cookies()`/`headers()` cannot run inside `"use cache"`" hazard and the Better-Auth-in-cache gotcha entirely.
+- **One mental model for every consumer.** CLI, agents, and the SPA are all `hc<AppType>` over the same origin; no RSC server/client trichotomy for an authoring model to hold.
+
+## Revisit triggers
+
+- **Horizontal scale becomes near-term** (multiple trunk replicas): the static-reader path needs a shared invalidation/storage story (object store or shared volume) instead of a local `./data/published` dir; revisit the single-box assumption that underpins same-origin auth.
+- **`@hono/node-server` v2 + Hocuspocus co-hosting fails the prerequisite smoke**: fall back to a second WS process (Hocuspocus standalone) on the same origin behind Caddy — the SPA/reader/RPC topology is unchanged; only the WS host moves.
+- **A reader-path requirement needs editor-CSS pixel-parity** beyond the neutral HTML projection: gate BlockNote `blocksToFullHTML` (or the Tiptap equivalent post-0031) behind a passing React-custom-block + image fixture (#1049/#720) and use it as an enhancement, never the default.
+- **`hc<AppType>` inference cost regresses** (Hono #3869/#4638): the SPA has no RSC fallback — the materialized precompile (ADR 0028) + a type-level RPC smoke are the mitigation; if they prove insufficient, split `AppType` per domain.
+
+## Cross-references
+
+- **Supersedes** ADR 0005 (UI framework). **Rewrites** ADR 0012 server-artifact line + architecture.md §5.4.
+- **Builds on** ADR 0021 (Hono trunk + typed RPC), ADR 0011 (Caddy custom domains), ADR 0014 (job queue, for the outbox→render consumer).
+- **Drives** ADR 0028 (client routing + typed client), 0029 (API package shape + composition root), 0030 (auth mount), 0033 (testing + RPC error contract).
+- **Independent of** ADR 0031 (editor substrate): the editor route is `ssr: false` in every topology, so the BlockNote-vs-Tiptap decision neither drives nor is driven by the framework choice.

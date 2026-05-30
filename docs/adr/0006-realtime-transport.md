@@ -15,7 +15,7 @@ Server-side Yjs sync with auth hooks, durable persistence, awareness/presence, f
 ### Durability boundary (explicit)
 
 ```
-  Request (API / CLI / MCP / Web UI Server Action)
+  Request (API / CLI / MCP / Web UI)
      │
      ▼
   Capability dispatcher (ADR 0015)  ──►  permission + rate-limit + scope checks

@@ -30,15 +30,15 @@ What becomes easier. What becomes harder.
 
 ## Index
 
-All ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 boundary (2026-04-17); 0021–0026 landed as additive Phase-3 slices and are Accepted-and-implemented. The red-team and refresh trails are linked at the bottom.
+Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 boundary (2026-04-17); 0021–0026 landed as additive Phase-3 slices and are Accepted-and-implemented; **0027–0033 are the Web UI surface-architecture cluster (2026-05-30)**, which **superseded 0004 and 0005**. The red-team and refresh trails are linked at the bottom.
 
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-license.md) | License: AGPL-3.0 with DCO | Accepted |
 | [0002](0002-backend-runtime.md) | Backend runtime: Node 22 LTS with Hono | Accepted (v2) |
 | [0003](0003-crdt-library.md) | CRDT library: Yjs with resource limits | Accepted |
-| [0004](0004-rich-text-editor.md) | Rich-text editor: BlockNote | **Accepted (v2, supersedes v1 Milkdown)** |
-| [0005](0005-ui-framework.md) | UI framework: Next.js 16 App Router | Accepted (v2) |
+| [0004](0004-rich-text-editor.md) | Rich-text editor: BlockNote | **Superseded by [0031](0031-editor-substrate.md) (2026-05-30)** |
+| [0005](0005-ui-framework.md) | UI framework: Next.js 16 App Router | **Superseded by [0027](0027-web-ui-topology.md) (2026-05-30)** |
 | [0006](0006-realtime-transport.md) | Real-time transport: Hocuspocus embedded | Accepted (v2) |
 | [0007](0007-database-strategy.md) | Database: dual SQLite + Postgres, Kysely + Atlas CE | Accepted (v2) |
 | [0008](0008-search.md) | Search: FTS5 + sqlite-vec / tsvector + pgvector, RRF, eval harness | Accepted (v2) |
@@ -60,6 +60,13 @@ All ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 bo
 | [0024](0024-workspace-membership-shape.md) | **Workspace membership shape: custom `workspace_members` table; Better Auth for credentials only** | **Accepted (new, 2026-04-20)** |
 | [0025](0025-cli-auth-bootstrap-credential-store.md) | **CLI auth bootstrap: email+password → session cookie (transitional); `AuthCredentialStore` seam; `/infra/whoami`** | **Accepted (new, 2026-04-20)** |
 | [0026](0026-mcp-auth-bootstrap-session-cookie.md) | **MCP first-slice: transitional cookie auth + deliberately stateless** | **Accepted (new, 2026-04-20)** |
+| [0027](0027-web-ui-topology.md) | **Web UI topology: Hono trunk as top-level server; Vite/React SPA; event-rendered static published docs** | **Accepted (new, 2026-05-30; supersedes 0005)** |
+| [0028](0028-web-ui-routing-typed-client.md) | **Web UI routing: TanStack Router + the single typed-client seam** | **Accepted (new, 2026-05-30)** |
+| [0029](0029-api-package-shape.md) | **API package shape: registry-generated per-route Hono factories under one tuple literal** | **Accepted (new, 2026-05-30; refines 0021)** |
+| [0030](0030-better-auth-mount.md) | **Better Auth mounted in-trunk, same-origin, zero framework adapter** | **Accepted (new, 2026-05-30)** |
+| [0031](0031-editor-substrate.md) | **Editor substrate: bootstrap on BlockNote, eject to Tiptap v3 + owned block layer (clean-start)** | **Accepted (new, 2026-05-30; supersedes 0004)** |
+| [0032](0032-version-history-track-changes.md) | **Version history + track-changes: build ourselves on Yjs snapshots + prosemirror-changeset** | **Accepted (new, 2026-05-30)** |
+| [0033](0033-web-ui-testing-rpc-contract.md) | **Web UI testing strategy + typed RPC error contract** | **Accepted (new, 2026-05-30)** |
 
 ## Review trails
 
@@ -68,3 +75,4 @@ All ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 bo
 - [`red-team-phase-3.md`](red-team-phase-3.md) — Phase 2 pass-3 (cross-model Opus + Codex): F54–F84 (all applied).
 - [`red-team-phase-4.md`](red-team-phase-4.md) — Phase 3 first pass against landed code (Codex): F85–F97 (3 BLOCKER, 4 HIGH, 1 MEDIUM, 1 LOW, 4 UNUSUAL-GOOD). All applied 2026-04-18.
 - [`refresh-research-phase-1.md`](refresh-research-phase-1.md) — Phase 1 v2 refresh: 8 Opus sub-agent memos; substantive changes to ADRs 0002/0004/0005/0006/0007/0008/0009/0010/0012/0013/0016/0018; new ADR 0020.
+- **Web UI surface-architecture review (2026-05-30)** — the 0027–0033 cluster: a 36-agent exhaustive Workflow review (`wf_b3e0aac1-bff`) with judge panels + 5 adversarial red-teamers, plus a cross-model Codex ADR-level pass (3 block-acceptance findings + 2 refinements, all integrated). Superseded 0004 (editor) and 0005 (UI framework); rewrote ADR 0012's server-artifact line and architecture.md §5.4.

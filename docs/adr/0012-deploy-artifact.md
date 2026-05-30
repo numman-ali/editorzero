@@ -1,6 +1,6 @@
 # ADR 0012 — Deploy artifact: docker-compose primary + Bun-compiled CLI binary
 
-**Status:** Accepted (post-refresh; CLI framework + agent-output contract refined by [ADR 0021](0021-surface-transport-topology.md), 2026-04-18)
+**Status:** Accepted (post-refresh; CLI framework + agent-output contract refined by [ADR 0021](0021-surface-transport-topology.md), 2026-04-18; server artifact updated to the Hono-trunk topology by [ADR 0027](0027-web-ui-topology.md), 2026-05-30)
 **Date:** 2026-04-17 (v2)
 **Deciders:** @numman
 
@@ -14,7 +14,7 @@ v1 honestly declared "docker-compose, full stop" because the Bun `--compile` sin
 
 ### Server artifact (primary)
 
-`docker-compose.yml` with sane defaults. Single-host default: one service running the Next 16 app with embedded Hocuspocus (ADR 0006), SQLite, embedded Web UI. Advanced services (Postgres, Caddy, Redis) are opt-in compose additions.
+`docker-compose.yml` with sane defaults. Single-host default: one service running the **Hono trunk** ([ADR 0027](0027-web-ui-topology.md)) — Vite/React SPA assets + event-rendered static published HTML + embedded Hocuspocus (ADR 0006), over SQLite. Advanced services (Postgres, Caddy, Redis) are opt-in compose additions.
 
 ```yaml
 services:

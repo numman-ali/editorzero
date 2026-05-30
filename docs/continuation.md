@@ -4,9 +4,9 @@ What's happening now + what's next. `AGENTS.md` is the stable companion.
 
 ## Current phase
 
-**Phase 3 — verification harness + first slices.** Phase 2 closed 2026-04-18 after three red-team passes (F1–F84). Architecture in `docs/architecture.md`. ADRs 0001–0026 (all Accepted).
+**Phase 3 — verification harness + first slices.** Phase 2 closed 2026-04-18 after three red-team passes (F1–F84). Architecture in `docs/architecture.md`. ADRs 0001–0033 Accepted (0004 + 0005 superseded by the Web UI cluster, 2026-05-30).
 
-> **Resumed 2026-05-29** after a ~5-week pause. Authoring model upgraded Opus 4.7 → **Opus 4.8 (1M context)**. Immediate focus: a from-scratch **Web UI surface-architecture ADR** — the one remaining unbuilt surface (see *What's next*).
+> **Resumed 2026-05-29** after a ~5-week pause. Authoring model upgraded Opus 4.7 → **Opus 4.8 (1M context)**. The from-scratch **Web UI surface-architecture decision is settled** — ADR cluster **0027–0033, Accepted 2026-05-30** (superseding 0004 + 0005). Immediate focus shifts to **implementation** of the Web UI surface (see *What's next*).
 
 Twenty-four capabilities land end-to-end at the kernel layer and across three surface adapters — the Hono API trunk, the CLI (`ez`), and MCP (`/mcp`). Every capability also *declares* the `ui` surface (so the contract matrix tracks it), but no Web UI app exists yet — `apps/` holds only `cli`. The set: `doc.{list,create,get,publish,unpublish,delete,restore,rename,update,move}` (10), `collection.{create,list,update,delete,restore,move}` (6), `workspace.{get,update,member_add,member_list,member_remove,member_update_role}` (6), `audit.{list,get}` (2). Write-path single-tx atomicity is **closed for both lanes**:
 
@@ -17,16 +17,26 @@ AGENTS.md invariant 6 (soft-deletes recoverable via first-class capability) is r
 
 ## What's next
 
-Three of the four surfaces are **landed** — the Hono API trunk (`packages/api-server`), the CLI (`apps/cli`, compiled `ez` binary), and MCP (`/mcp` on the trunk). The Web UI is the one unbuilt surface, and it is the immediate focus.
+Three of the four surfaces are **landed** — the Hono API trunk (`packages/api-server`), the CLI (`apps/cli`, compiled `ez` binary), and MCP (`/mcp` on the trunk). The Web UI is the one unbuilt surface; its **architecture is now decided** (ADR 0027–0033, Accepted 2026-05-30) and implementation is the immediate focus.
 
-**Primary focus — Web UI surface-architecture ADR (from scratch).** The prior `docs/ui-slice-1-plan.md` (untracked draft) is **superseded**; we are redoing the decision as a proper ADR. Axes explicitly on the table:
+**Web UI surface-architecture — DECIDED (ADR 0027–0033, 2026-05-30).** Redone from scratch via a 36-agent exhaustive review + 5 red-teamers + a cross-model Codex ADR pass; superseded ADR 0005 (Next.js) and ADR 0004 (BlockNote-as-final). The shape:
 
-- **Isomorphic vs. split** frontend/backend — the core fork. ADR 0005's Next.js choice reopens *for the Web UI surface*.
-- **API as a composable package of per-route Hono factory functions** — mirroring the per-capability structure; the framework (if any) becomes a thin mount/adapter, with Better Auth mounted into Hono.
-- **BlockNote vs. raw Tiptap** — BlockNote is load-bearing low in the stack (ADR 0018 write path, `packages/blocks`, `packages/sync`); raw-Tiptap-plus-own-components is a genuine feasibility analysis (control / scale / agent-DX / customisation).
-- Best-in-class testing + Hono RPC throughout, in service of agentic engineering at scale.
+- **Topology (0027):** the Hono trunk is the top-level server (`@hono/node-server` v2 `serve()`) — Vite + React SPA as static assets, JSON-RPC + `/auth` + `/mcp`, event-rendered static published HTML, embedded Hocuspocus on one port. No Next.js (`output:export` ⊥ `standalone`; Next can't host the collab WS).
+- **Routing (0028):** TanStack Router; one typed-client seam (`packages/api-client`); raw `hc<AppType>` forbidden outside it.
+- **API shape (0029):** registry-generated per-route Hono factories committed to disk, under one `openapiRoutes([...] as const)` literal; generator emits the typed error arm at the route boundary.
+- **Auth (0030):** Better Auth in-trunk, same-origin → `SameSite=Lax`, zero framework adapter.
+- **Editor (0031):** bootstrap on BlockNote, then eject to Tiptap v3 + owned thin block layer (clean-start), fused with track-changes.
+- **Version history + track-changes (0032):** build ourselves on Yjs snapshots + `prosemirror-changeset` (restore appends a corrective update; anchors are Yjs `RelativePosition`; tracked *agent* edits are the differentiator).
+- **Testing + RPC (0033):** typed error envelope at the route boundary, real-browser editor tests, `ui` parity cell fails the build.
 
-The landscape-review *approach* (how heavily to fan it out) is to be agreed with @numman before kickoff.
+**Implementation sequence (first deliverables):**
+
+1. **Composition root + boot entrypoint** — extract `getApiApp()` and add the `serve()` production entrypoint (today `createApiApp` is invoked only in `app.ts` + tests). This is where the 0029 route-tuple, the 0030 auth instance, and the dispatcher wiring converge. **The materialized typed-RPC precompile must be created — it does not exist yet** (named first deliverable).
+2. **`@hono/node-server` v2 + embedded-Hocuspocus co-hosting smoke** — prove `serve()` + `serveStatic` + `upgradeWebSocket` + Hocuspocus `openDirectConnection` + a real `onAuthenticate` on the WS upgrade, before "one port, one process" is asserted (repo pins v1.19.14; nothing uses v2 today). Production collab is gated on **broadcast-after-commit** (a rolled-back SQL tx must not leave a mutation resident in the live `Y.Doc` once WS clients attach).
+3. **SPA bootstrap** — Vite + React + TanStack Router; sign-in + the `doc.list × Web UI` parity cell; on BlockNote.
+4. **Reader-path slice (greenfield):** `published_slug`/`published_at` additive migration + visibility-filtered `doc.list`/`doc.get`; outbox→render consumer (ADR 0014 queue); neutral block-JSON→HTML projection + fixture gate; head-metadata contract; and the publish-snapshot-vs-live product decision.
+
+**Two current-code bugs to fix in the implementation slice (Codex-found, ADR 0029/0033):** `doc.create` route accepts any UUID while the capability requires UUIDv7 (OpenAPI over-advertises; same pattern across several collection/doc routes); and `doc.create` can leak a raw DB unique-violation instead of a typed 409 (no slug-uniqueness pre-check despite the DB unique doc-slug index).
 
 **CLI dogfood punch list** (2026-04-22; deferred behind API/capability coverage; convergent across two dogfood subagents):
 
