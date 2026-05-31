@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>editorzero — Aperture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   editorzero — "APERTURE"
+   Territory: vibrant & humane. Risograph supergraphic energy.
+   Zero = a recurring aperture / ring motif. Cool porcelain +
+   ink grounds, loud saturated accents (ultramarine, acid lime,
+   hot magenta). NOT warm paper, NOT earth, NOT Claude.
+   Everything tokenised; light mode canonical.
+   ============================================================ */
+
+:root{
+  /* ---- core palette ---- */
+  --ink:#0B0B14;            /* near-black, faint violet bias */
+  --ink-2:#1B1B2A;
+  --slate:#4C4C5E;          /* secondary text on light */
+  --slate-2:#6E6E82;
+  --porcelain:#F4F4FB;      /* app ground — cool, not cream */
+  --paper:#FFFFFF;          /* card / sheet */
+  --lavender:#E9E9FB;       /* tint chip */
+  --lavender-2:#DEDEF6;
+  --hairline:#E2E2F0;
+
+  /* ---- saturated accents (the "vibrant") ---- */
+  --indigo:#2B2BF5;         /* primary — electric ultramarine */
+  --indigo-bright:#5B5BFF;
+  --indigo-ink:#1A1ACC;
+  --lime:#C6FF4A;           /* acid lime — the joy accent */
+  --lime-deep:#A6E018;
+  --magenta:#E6007A;        /* hot pink — agents / signature */
+  --magenta-soft:#FFD6EC;
+  --cyan:#19D3E6;           /* cool pop */
+  --amber:#FFB020;          /* sparing warm-via-colour */
+
+  /* ---- semantic roles ---- */
+  --bg:var(--porcelain);
+  --surface:var(--paper);
+  --text:var(--ink);
+  --text-dim:var(--slate);
+  --text-faint:var(--slate-2);
+  --brand:var(--indigo);
+  --human:var(--indigo);    /* human co-editor colour */
+  --agent:var(--magenta);   /* agent co-editor colour — the differentiator */
+
+  /* ---- geometry ---- */
+  --r-sm:8px;
+  --r:14px;
+  --r-lg:22px;
+  --r-pill:999px;
+  --bd:1.5px solid var(--ink);     /* the studio "hard outline" */
+  --bd-hair:1px solid var(--hairline);
+  --shadow-pop:4px 4px 0 0 var(--ink);   /* offset block shadow */
+  --shadow-pop-sm:3px 3px 0 0 var(--ink);
+  --shadow-soft:0 12px 30px -12px rgba(11,11,20,.28);
+
+  /* ---- type ---- */
+  --display:"Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --sans:"DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --mono:"DM Mono", ui-monospace, "SF Mono", monospace;
+
+  --maxw:1180px;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--bg);
+  color:var(--text);
+  -webkit-font-smoothing:antialiased;
+  line-height:1.55;
+}
+h1,h2,h3,h4{font-family:var(--display);margin:0;line-height:1.05;letter-spacing:-.02em}
+button{font-family:inherit;cursor:pointer}
+a{color:inherit}
+::selection{background:var(--lime);color:var(--ink)}
+
+/* ---------- page scaffold ---------- */
+.screen{
+  max-width:var(--maxw);
+  margin:0 auto;
+  padding:30px 26px 8px;
+}
+.screen-tag{
+  display:flex;align-items:center;gap:14px;
+  margin:54px auto 16px;max-width:var(--maxw);padding:0 26px;
+}
+.screen-tag .dot{
+  width:34px;height:34px;border-radius:50%;
+  border:var(--bd);background:var(--lime);
+  display:grid;place-items:center;font-family:var(--display);
+  font-weight:700;font-size:15px;color:var(--ink);flex:none;
+  box-shadow:var(--shadow-pop-sm);
+}
+.screen-tag .label{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--slate)}
+.screen-tag .title{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.02em}
+.screen-tag .rule{flex:1;height:2px;background:repeating-linear-gradient(90deg,var(--ink) 0 6px,transparent 6px 12px);opacity:.25}
+
+/* ---------- aperture mark (the "zero") ---------- */
+.aperture{
+  position:relative;display:inline-grid;place-items:center;flex:none;
+}
+.aperture .ring{
+  border-radius:50%;
+  border:3.5px solid var(--indigo);
+}
+.aperture .ring::after{
+  content:"";position:absolute;inset:0;margin:auto;
+  width:36%;height:36%;border-radius:50%;background:var(--magenta);
+}
+.brandmark{display:inline-flex;align-items:center;gap:11px}
+.brandmark .word{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-.03em}
+.brandmark .word b{color:var(--indigo);font-weight:700}
+.brandmark .ap{width:26px;height:26px;border:3px solid var(--indigo);border-radius:50%;position:relative;flex:none;animation:apeRotate 14s linear infinite}
+.brandmark .ap::after{content:"";position:absolute;inset:0;margin:auto;width:9px;height:9px;border-radius:50%;background:var(--magenta)}
+@keyframes apeRotate{to{transform:rotate(360deg)}}
+
+/* ============================================================
+   GENERIC FRAME — sidebar + topbar shared by app screens
+   ============================================================ */
+.app{
+  border:var(--bd);border-radius:var(--r-lg);overflow:hidden;
+  background:var(--surface);box-shadow:var(--shadow-pop);
+  display:grid;grid-template-columns:248px 1fr;min-height:560px;
+}
+.side{
+  background:var(--ink);color:#D9D9E8;
+  padding:20px 16px;display:flex;flex-direction:column;gap:22px;
+  border-right:var(--bd);
+}
+.side .brandmark .word{color:#fff}
+.side .brandmark .word b{color:var(--indigo-bright)}
+.side .ap{border-color:var(--indigo-bright)}
+.nav{display:flex;flex-direction:column;gap:3px}
+.nav .grp{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:#7777a0;margin:14px 8px 6px}
+.nav a{
+  display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--r-sm);
+  font-size:14px;font-weight:500;color:#C9C9DE;text-decoration:none;transition:.16s;
+}
+.nav a .ic{width:17px;height:17px;flex:none;opacity:.85}
+.nav a:hover{background:#22223a;color:#fff}
+.nav a.on{background:var(--indigo);color:#fff;box-shadow:inset 0 0 0 1.5px var(--indigo-bright)}
+.nav a.on .ic{opacity:1}
+.side .foot{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px;border-radius:var(--r);background:#19192b}
+.avatar{width:32px;height:32px;border-radius:50%;flex:none;display:grid;place-items:center;font-family:var(--display);font-weight:700;font-size:13px;color:#fff;border:2px solid var(--ink)}
+.side .foot .meta{font-size:12.5px;line-height:1.3}
+.side .foot .meta .n{color:#fff;font-weight:600}
+.side .foot .meta .e{color:#8888aa;font-size:11px}
+
+.main{display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+.topbar{
+  display:flex;align-items:center;gap:16px;padding:16px 24px;
+  background:var(--surface);border-bottom:var(--bd);
+}
+.crumbs{font-family:var(--mono);font-size:12.5px;color:var(--slate);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.crumbs b{color:var(--ink);font-weight:500}
+.crumbs .sep{color:#b9b9d6}
+.search{
+  margin-left:auto;display:flex;align-items:center;gap:9px;
+  background:var(--bg);border:var(--bd-hair);border-radius:var(--r-pill);
+  padding:8px 15px;min-width:230px;color:var(--slate-2);font-size:13.5px;
+}
+.search kbd{margin-left:auto;font-family:var(--mono);font-size:10.5px;background:var(--surface);border:var(--bd-hair);border-radius:5px;padding:2px 6px;color:var(--slate)}
+.btn{
+  border:var(--bd);background:var(--surface);color:var(--ink);
+  padding:9px 16px;border-radius:var(--r-pill);font-weight:600;font-size:13.5px;
+  display:inline-flex;align-items:center;gap:8px;transition:.14s;box-shadow:var(--shadow-pop-sm);
+}
+.btn:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 0 var(--ink)}
+.btn:active{transform:translate(1px,1px);box-shadow:1px 1px 0 0 var(--ink)}
+.btn.primary{background:var(--indigo);color:#fff}
+.btn.lime{background:var(--lime);color:var(--ink)}
+.btn.ghost{box-shadow:none;border-color:var(--hairline);background:transparent}
+.btn.ghost:hover{background:var(--lavender);transform:none;box-shadow:none}
+
+.body{padding:26px 28px 34px;overflow:auto;flex:1}
+
+/* ---------- chips / badges ---------- */
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:4px 10px;border-radius:var(--r-pill);border:var(--bd-hair)}
+.chip.live{background:var(--magenta-soft);border-color:var(--magenta);color:#9a0052}
+.chip.pub{background:var(--lime);border-color:var(--lime-deep);color:#3c4d00}
+.chip.draft{background:var(--lavender);border-color:var(--lavender-2);color:var(--indigo-ink)}
+.chip.cyan{background:#D4F7FB;border-color:var(--cyan);color:#0a6b75}
+.tagdot{width:8px;height:8px;border-radius:50%;flex:none}
+
+/* presence pip */
+.pip{width:7px;height:7px;border-radius:50%;background:var(--lime-deep);box-shadow:0 0 0 0 rgba(166,224,24,.7);animation:pulse 2.4s infinite}
+.pip.agent{background:var(--magenta);box-shadow:0 0 0 0 rgba(230,0,122,.6);animation:pulseA 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(166,224,24,.6)}70%{box-shadow:0 0 0 7px rgba(166,224,24,0)}100%{box-shadow:0 0 0 0 rgba(166,224,24,0)}}
+@keyframes pulseA{0%{box-shadow:0 0 0 0 rgba(230,0,122,.55)}70%{box-shadow:0 0 0 7px rgba(230,0,122,0)}100%{box-shadow:0 0 0 0 rgba(230,0,122,0)}}
+
+/* avatar stack */
+.stack{display:flex}
+.stack .avatar{width:27px;height:27px;font-size:11px;margin-left:-8px;box-shadow:0 0 0 2px var(--surface)}
+.stack .avatar:first-child{margin-left:0}
+.avatar.ag{border-style:dashed;border-color:var(--magenta)}
+
+/* avatar colour helpers (tokenised hues, not one-offs) */
+.a-indigo{background:var(--indigo)}
+.a-magenta{background:var(--magenta)}
+.a-cyan{background:#0a8f9c}
+.a-amber{background:#9a6800}
+.a-lime{background:var(--lime-deep);color:var(--ink)}
+.a-slate{background:var(--slate)}
+
+/* ============================================================
+   (A) DASHBOARD
+   ============================================================ */
+.hero{
+  border:var(--bd);border-radius:var(--r-lg);background:var(--indigo);color:#fff;
+  padding:30px 30px 28px;position:relative;overflow:hidden;box-shadow:var(--shadow-pop);
+}
+.hero .supergraphic{position:absolute;right:-70px;top:-90px;width:340px;height:340px;border-radius:50%;border:42px solid var(--indigo-bright);opacity:.55}
+.hero .supergraphic.two{right:30px;top:90px;width:150px;height:150px;border:24px solid var(--lime);opacity:.9;border-color:transparent;background:
+   radial-gradient(circle at center, transparent 38%, var(--lime) 38% 60%, transparent 60%)}
+.hero h1{font-size:38px;letter-spacing:-.035em;max-width:18ch;position:relative}
+.hero h1 em{font-style:normal;color:var(--lime)}
+.hero p{position:relative;margin:12px 0 0;color:#C9C9F8;max-width:48ch;font-size:14.5px}
+.hero .acts{position:relative;margin-top:20px;display:flex;gap:11px;flex-wrap:wrap}
+.hero .btn{box-shadow:var(--shadow-pop-sm)}
+
+.grid{display:grid;gap:18px;margin-top:18px}
+.g-3{grid-template-columns:repeat(3,1fr)}
+.g-2-1{grid-template-columns:1.6fr 1fr}
+
+.card{border:var(--bd);border-radius:var(--r);background:var(--surface);padding:18px;box-shadow:var(--shadow-pop-sm)}
+.card h3{font-size:15px;display:flex;align-items:center;gap:9px}
+.card .sub{font-size:12px;color:var(--slate);font-family:var(--mono);letter-spacing:.04em}
+
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat .num{font-family:var(--display);font-weight:700;font-size:40px;letter-spacing:-.04em;line-height:1}
+.stat .lab{font-size:12.5px;color:var(--slate);font-weight:500}
+.stat .delta{font-family:var(--mono);font-size:11px;color:#5d7a00}
+
+.recent{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.doc-row{display:flex;align-items:center;gap:13px;padding:11px 10px;border-radius:var(--r-sm);transition:.14s;text-decoration:none;color:inherit}
+.doc-row:hover{background:var(--lavender)}
+.doc-ico{width:38px;height:38px;border-radius:10px;border:var(--bd-hair);display:grid;place-items:center;flex:none;font-size:17px;background:var(--bg)}
+.doc-row .nm{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.doc-row .mt{font-size:11.5px;color:var(--slate);font-family:var(--mono)}
+.doc-row .right{margin-left:auto;display:flex;align-items:center;gap:12px}
+
+.spaces{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:6px}
+.space{border:var(--bd-hair);border-left:5px solid var(--indigo);border-radius:var(--r-sm);padding:14px;transition:.16s;background:var(--surface);text-decoration:none;color:inherit;display:block}
+.space:hover{box-shadow:var(--shadow-pop-sm);transform:translate(-1px,-1px)}
+.space .nm{font-family:var(--display);font-weight:700;font-size:15px}
+.space .ct{font-size:12px;color:var(--slate);margin-top:3px}
+.space .ed{margin-top:11px;display:flex;align-items:center;gap:0}
+
+/* activity feed */
+.feed{display:flex;flex-direction:column;gap:0;margin-top:4px}
+.fitem{display:flex;gap:12px;padding:10px 4px;position:relative}
+.fitem:not(:last-child)::before{content:"";position:absolute;left:14px;top:34px;bottom:-2px;width:2px;background:var(--hairline)}
+.fitem .av{position:relative;z-index:1}
+.fitem .tx{font-size:13px;line-height:1.45}
+.fitem .tx b{font-weight:600}
+.fitem .tx .who{font-weight:700}
+.fitem .tm{font-family:var(--mono);font-size:11px;color:var(--slate-2);margin-top:1px}
+
+/* ============================================================
+   (B) DOCUMENTS LIST + COLLECTIONS TREE
+   ============================================================ */
+.split{display:grid;grid-template-columns:236px 1fr;min-height:480px}
+.tree{background:var(--surface);border-right:var(--bd-hair);padding:18px 12px}
+.tree .th{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--slate-2);padding:0 8px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.tree .th .add{width:20px;height:20px;border-radius:6px;border:var(--bd-hair);display:grid;place-items:center;font-size:14px;color:var(--slate);background:var(--bg)}
+.tnode{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:var(--r-sm);font-size:13.5px;color:var(--ink-2);transition:.13s;cursor:pointer}
+.tnode:hover{background:var(--lavender)}
+.tnode.on{background:var(--lime);font-weight:600;color:var(--ink)}
+.tnode .tw{width:14px;flex:none;color:var(--slate-2);font-size:10px}
+.tnode .tt{display:flex;align-items:center;gap:7px}
+.tnode .ct{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--slate-2)}
+.tchild{margin-left:14px;padding-left:8px;border-left:var(--bd-hair)}
+
+.list-head{display:flex;align-items:center;gap:14px;margin-bottom:4px}
+.list-head h2{font-size:24px;letter-spacing:-.03em}
+.seg{display:flex;border:var(--bd-hair);border-radius:var(--r-pill);overflow:hidden;font-size:12.5px}
+.seg button{border:0;background:transparent;padding:7px 13px;color:var(--slate);font-weight:600}
+.seg button.on{background:var(--ink);color:#fff}
+
+.table{border:var(--bd-hair);border-radius:var(--r);overflow:hidden;margin-top:16px;background:var(--surface)}
+.tr{display:grid;grid-template-columns:1fr 168px 132px 120px;align-items:center;padding:13px 18px;border-bottom:var(--bd-hair);transition:.12s}
+.tr:last-child{border-bottom:0}
+.tr.head{background:var(--bg);font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--slate);padding:11px 18px}
+.tr:not(.head):hover{background:var(--lavender)}
+.tr .doc{display:flex;align-items:center;gap:12px;min-width:0}
+.tr .doc .ttl{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr .doc .pth{font-family:var(--mono);font-size:11px;color:var(--slate-2)}
+.tr .ed{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--slate)}
+.tr .when{font-family:var(--mono);font-size:11.5px;color:var(--slate-2)}
+.editor-by{display:flex;align-items:center;gap:7px}
+.editor-by .who{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.editor-by.agent .who{color:var(--magenta)}
+.kind{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;padding:1px 5px;border-radius:4px}
+.kind.h{background:var(--lavender);color:var(--indigo-ink)}
+.kind.a{background:var(--magenta-soft);color:#9a0052}
+
+/* ============================================================
+   (C) READING VIEW
+   ============================================================ */
+.reader-wrap{display:grid;grid-template-columns:1fr 256px;gap:0}
+.reader{background:var(--surface);padding:46px 56px 60px;min-width:0}
+.reader .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--indigo);font-weight:500;display:flex;align-items:center;gap:9px}
+.reader h1.title{font-size:46px;letter-spacing:-.04em;margin:14px 0 0;max-width:20ch}
+.reader .deck{font-size:17px;color:var(--slate);margin-top:14px;max-width:62ch;line-height:1.55}
+.reader .byline{display:flex;align-items:center;gap:14px;margin:22px 0 0;padding:14px 0;border-top:var(--bd-hair);border-bottom:var(--bd-hair);flex-wrap:wrap}
+.reader .byline .who{font-size:13px}
+.reader .byline .who b{font-weight:600}
+.reader .byline .who span{color:var(--slate-2);font-family:var(--mono);font-size:11px;display:block}
+
+.prose{margin-top:30px;max-width:64ch}
+.prose h2{font-size:25px;letter-spacing:-.03em;margin:34px 0 12px;display:flex;align-items:center;gap:12px}
+.prose h2::before{content:"";width:13px;height:13px;border-radius:50%;border:3px solid var(--indigo);flex:none}
+.prose p{font-size:16px;line-height:1.72;color:#23232f;margin:0 0 16px}
+.prose p strong{font-weight:600}
+.prose a.ln{color:var(--indigo-ink);text-decoration:underline;text-decoration-color:var(--lime-deep);text-decoration-thickness:2px;text-underline-offset:3px;font-weight:500}
+.prose blockquote{margin:24px 0;padding:16px 22px;border-left:5px solid var(--magenta);background:var(--magenta-soft);border-radius:0 var(--r) var(--r) 0;font-size:16px;color:#5a0030}
+.prose ul{padding-left:4px;margin:0 0 18px;list-style:none}
+.prose li{font-size:16px;line-height:1.7;color:#23232f;padding-left:30px;position:relative;margin-bottom:9px}
+.prose li::before{content:"";position:absolute;left:4px;top:11px;width:9px;height:9px;border-radius:50%;background:var(--lime-deep)}
+.prose .callout{display:flex;gap:14px;background:var(--lavender);border:var(--bd-hair);border-radius:var(--r);padding:16px 18px;margin:22px 0}
+.prose .callout .ce{font-size:22px}
+.prose .callout .ct{font-size:14.5px;color:var(--ink-2)}
+.prose pre{background:var(--ink);color:#E6E6F5;border-radius:var(--r);padding:18px 20px;font-family:var(--mono);font-size:13px;overflow:auto;margin:22px 0;border:var(--bd);box-shadow:var(--shadow-pop-sm);line-height:1.6}
+.prose pre .k{color:var(--lime)}
+.prose pre .s{color:#FF93C9}
+.prose pre .c{color:#7777a0}
+
+.rsidebar{background:var(--bg);border-left:var(--bd-hair);padding:30px 22px;font-size:13px}
+.rsidebar .blk{margin-bottom:26px}
+.rsidebar .blk .h{font-family:var(--mono);font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--slate-2);margin-bottom:12px}
+.meta-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px}
+.meta-row .k{color:var(--slate)}
+.meta-row .v{font-weight:600;color:var(--ink-2);font-family:var(--mono);font-size:12px}
+.toc a{display:block;padding:6px 0 6px 14px;border-left:2px solid var(--hairline);color:var(--slate);text-decoration:none;font-size:13px;transition:.13s}
+.toc a.on{border-color:var(--indigo);color:var(--indigo-ink);font-weight:600}
+.toc a:hover{color:var(--ink)}
+.contrib{display:flex;align-items:center;gap:9px;padding:7px 0}
+.contrib .nm{font-size:12.5px;font-weight:600}
+.contrib .rl{font-size:11px;color:var(--slate-2);font-family:var(--mono)}
+
+/* ============================================================
+   (D) EDITOR — the signature screen
+   ============================================================ */
+.editor-shell{display:grid;grid-template-columns:1fr 270px}
+.editor-main{background:var(--surface);min-width:0;display:flex;flex-direction:column}
+
+/* toolbar */
+.toolbar{
+  position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:5px;
+  padding:11px 18px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
+  border-bottom:var(--bd-hair);flex-wrap:wrap;
+}
+.tg{display:flex;gap:3px;align-items:center;padding-right:8px;margin-right:4px;border-right:var(--bd-hair)}
+.tg:last-of-type{border-right:0}
+.tbtn{width:32px;height:32px;border-radius:8px;border:1px solid transparent;background:transparent;display:grid;place-items:center;font-size:14px;color:var(--ink-2);font-weight:600;transition:.12s;font-family:var(--display)}
+.tbtn:hover{background:var(--lavender)}
+.tbtn.on{background:var(--ink);color:#fff}
+.tbtn.wide{width:auto;padding:0 11px;gap:6px;font-size:12.5px;display:flex;align-items:center}
+.tbtn .u{text-decoration:underline}.tbtn .i{font-style:italic}.tbtn .s{text-decoration:line-through}
+.toolbar .save{margin-left:auto;display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11.5px;color:var(--slate)}
+
+/* presence bar */
+.presence{display:flex;align-items:center;gap:10px;padding:9px 18px;border-bottom:var(--bd-hair);background:var(--bg)}
+.presence .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate-2)}
+.peer{display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 5px;border-radius:var(--r-pill);font-size:12px;font-weight:600;border:var(--bd-hair);background:var(--surface)}
+.peer .av{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:9.5px;color:#fff;font-family:var(--display);font-weight:700}
+.peer.agent{border-color:var(--magenta);background:var(--magenta-soft);color:#9a0052;border-style:dashed}
+.peer.agent .av{background:var(--magenta)}
+
+/* the document canvas */
+.canvas{padding:40px 56px 70px;flex:1;overflow:auto;position:relative}
+.docblock{position:relative;margin:0 0 14px;padding:2px 0}
+.docblock .handle{
+  position:absolute;left:-44px;top:3px;display:flex;gap:2px;align-items:center;opacity:0;transition:.13s;
+}
+.docblock:hover .handle{opacity:1}
+.handle .h{width:18px;height:22px;border-radius:6px;border:var(--bd-hair);background:var(--surface);display:grid;place-items:center;color:var(--slate-2);font-size:13px;cursor:grab}
+.handle .h.plus{color:var(--indigo)}
+.docblock .dragdots{color:var(--slate-2);cursor:grab;font-size:13px;letter-spacing:-2px;line-height:1}
+
+.etitle{font-family:var(--display);font-weight:700;font-size:42px;letter-spacing:-.04em;outline:none;margin-bottom:6px;line-height:1.06}
+.eh2{font-family:var(--display);font-weight:700;font-size:24px;letter-spacing:-.03em;outline:none}
+.ep{font-size:16.5px;line-height:1.72;color:#23232f;outline:none}
+.ep strong{font-weight:600}
+
+/* the live caret + selection — HUMAN */
+.caret{display:inline-block;width:2px;height:1.05em;background:var(--human);vertical-align:text-bottom;margin:0 1px;animation:blink 1.1s steps(1) infinite;position:relative}
+.caret .flag{position:absolute;top:-19px;left:-2px;background:var(--human);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px 5px 5px 0;white-space:nowrap;font-family:var(--sans)}
+@keyframes blink{50%{opacity:.25}}
+
+/* AGENT caret + tracked suggestion — THE SIGNATURE */
+.agent-caret{display:inline-block;width:2px;height:1.05em;background:var(--agent);vertical-align:text-bottom;margin:0 1px;position:relative;animation:blink 1.1s steps(1) infinite}
+.agent-caret .flag{position:absolute;top:-19px;left:-2px;background:var(--agent);color:#fff;font-size:10px;font-weight:700;padding:1px 7px 1px 6px;border-radius:5px 5px 5px 0;white-space:nowrap;display:flex;align-items:center;gap:5px;font-family:var(--sans)}
+.agent-caret .flag::before{content:"";width:6px;height:6px;border-radius:50%;background:#fff;animation:pulseW 1.4s infinite}
+@keyframes pulseW{50%{opacity:.4}}
+
+/* tracked insertion (agent suggestion accepted-pending) */
+.ins{background:linear-gradient(transparent 62%, color-mix(in srgb, var(--magenta) 26%, transparent) 62%);
+  color:var(--ink);text-decoration:none;border-bottom:2px solid var(--magenta);padding-bottom:1px;
+  animation:insIn .5s ease both}
+@keyframes insIn{from{background-size:0 100%}to{background-size:100% 100%}}
+.del{color:var(--slate-2);text-decoration:line-through;text-decoration-color:var(--magenta);text-decoration-thickness:2px}
+
+/* suggestion control card floating by the tracked change */
+.suggest-card{
+  position:absolute;right:26px;width:236px;
+  border:var(--bd);border-radius:var(--r);background:var(--surface);
+  box-shadow:var(--shadow-pop-sm);padding:14px;animation:floatIn .5s cubic-bezier(.2,.8,.2,1) both;
+}
+.suggest-card::before{content:"";position:absolute;left:-9px;top:24px;width:14px;height:14px;background:var(--surface);border-left:var(--bd);border-bottom:var(--bd);transform:rotate(45deg)}
+.suggest-card .sh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.suggest-card .sh .av{width:24px;height:24px;border-radius:50%;background:var(--magenta);border:2px solid var(--ink);display:grid;place-items:center;color:#fff;font-family:var(--display);font-weight:700;font-size:11px;flex:none}
+.suggest-card .sh .nm{font-weight:700;font-size:12.5px}
+.suggest-card .sh .nm span{display:block;font-family:var(--mono);font-size:9.5px;color:var(--magenta);font-weight:500;letter-spacing:.05em}
+.suggest-card .txt{font-size:12.5px;color:var(--slate);line-height:1.5;margin-bottom:12px}
+.suggest-card .txt em{color:var(--ink-2);font-style:normal;background:var(--magenta-soft);padding:0 4px;border-radius:3px}
+.suggest-card .acts{display:flex;gap:7px}
+.suggest-card .acts button{flex:1;border:var(--bd);border-radius:var(--r-sm);padding:7px;font-weight:700;font-size:12px;transition:.12s}
+.suggest-card .acts .acc{background:var(--lime);color:var(--ink)}
+.suggest-card .acts .rej{background:var(--surface);color:var(--ink)}
+.suggest-card .acts button:hover{transform:translateY(-1px)}
+
+/* slash menu */
+.slash{
+  position:absolute;left:56px;width:268px;border:var(--bd);border-radius:var(--r);
+  background:var(--surface);box-shadow:var(--shadow-pop);overflow:hidden;animation:floatIn .35s cubic-bezier(.2,.8,.2,1) both;z-index:6;
+}
+.slash .sin{padding:9px 13px;border-bottom:var(--bd-hair);font-family:var(--mono);font-size:12px;color:var(--slate-2)}
+.slash .sin b{color:var(--ink)}
+.slash .sgrp{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate-2);padding:9px 13px 4px}
+.slash .si{display:flex;align-items:center;gap:11px;padding:8px 13px;font-size:13.5px;cursor:pointer}
+.slash .si:hover,.slash .si.on{background:var(--lavender)}
+.slash .si.ai{background:var(--magenta-soft)}
+.slash .si.ai:hover{background:#ffc4e3}
+.slash .si .si-ic{width:30px;height:30px;border-radius:8px;border:var(--bd-hair);display:grid;place-items:center;font-size:15px;background:var(--bg);flex:none}
+.slash .si.ai .si-ic{background:var(--magenta);color:#fff;border-color:var(--ink)}
+.slash .si .nm{font-weight:600}
+.slash .si .ds{font-size:11px;color:var(--slate-2);font-family:var(--mono)}
+@keyframes floatIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+
+/* editor right rail */
+.erail{background:var(--bg);border-left:var(--bd-hair);padding:22px 18px;font-size:13px;overflow:auto}
+.erail .h{font-family:var(--mono);font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--slate-2);margin:0 0 12px}
+.change-item{display:flex;gap:11px;padding:11px;border-radius:var(--r-sm);border:var(--bd-hair);margin-bottom:9px;background:var(--surface);position:relative}
+.change-item.ag{border-color:var(--magenta);background:var(--magenta-soft)}
+.change-item .av{width:26px;height:26px;border-radius:50%;flex:none;display:grid;place-items:center;font-family:var(--display);font-weight:700;font-size:11px;color:#fff;border:2px solid var(--ink)}
+.change-item .ct{font-size:12px;line-height:1.4}
+.change-item .ct b{font-weight:700}
+.change-item .tm{font-family:var(--mono);font-size:10px;color:var(--slate-2);margin-top:3px}
+.change-item .ct .q{display:inline-block;margin-top:4px;font-size:11.5px;background:var(--surface);border:var(--bd-hair);border-radius:5px;padding:2px 6px;color:var(--ink-2)}
+
+/* ============================================================
+   (E) ADMIN / MEMBERS
+   ============================================================ */
+.admin-head{display:flex;align-items:flex-end;gap:16px;margin-bottom:4px}
+.admin-head h2{font-size:26px;letter-spacing:-.03em}
+.admin-head p{font-size:13.5px;color:var(--slate);margin:0}
+.tabs{display:flex;gap:4px;margin:20px 0 0;border-bottom:var(--bd-hair)}
+.tabs button{border:0;background:transparent;padding:11px 16px;font-weight:600;font-size:13.5px;color:var(--slate);position:relative}
+.tabs button.on{color:var(--ink)}
+.tabs button.on::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:3px;background:var(--indigo);border-radius:3px 3px 0 0}
+
+.mtable{border:var(--bd-hair);border-radius:var(--r);overflow:hidden;margin-top:20px;background:var(--surface)}
+.mr{display:grid;grid-template-columns:2fr 1.2fr 1.3fr 110px 36px;align-items:center;padding:14px 18px;border-bottom:var(--bd-hair)}
+.mr:last-child{border-bottom:0}
+.mr.head{background:var(--bg);font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--slate)}
+.mr:not(.head):hover{background:var(--lavender)}
+.mr .person{display:flex;align-items:center;gap:12px}
+.mr .person .nm{font-weight:600;font-size:14px}
+.mr .person .em{font-family:var(--mono);font-size:11.5px;color:var(--slate-2)}
+.role{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;border:var(--bd-hair);border-radius:var(--r-pill);padding:4px 11px;background:var(--surface)}
+.role.admin{background:var(--indigo);color:#fff;border-color:var(--ink)}
+.role.agent{background:var(--magenta-soft);border-color:var(--magenta);color:#9a0052}
+.teamtags{display:flex;gap:5px;flex-wrap:wrap}
+.tt2{font-size:11px;font-weight:600;padding:2px 9px;border-radius:var(--r-pill);background:var(--lavender);color:var(--indigo-ink)}
+.kebab{width:28px;height:28px;border-radius:7px;border:var(--bd-hair);background:var(--surface);color:var(--slate);font-size:15px;display:grid;place-items:center;justify-self:end}
+.kebab:hover{background:var(--lavender)}
+
+.teamcards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}
+.teamcard{border:var(--bd);border-radius:var(--r);padding:16px;box-shadow:var(--shadow-pop-sm);background:var(--surface)}
+.teamcard .top{display:flex;align-items:center;gap:11px}
+.teamcard .ico{width:40px;height:40px;border-radius:11px;border:var(--bd);display:grid;place-items:center;font-size:19px}
+.teamcard h4{font-family:var(--display);font-size:15px}
+.teamcard .meta{font-size:11.5px;color:var(--slate);font-family:var(--mono)}
+.teamcard .roster{margin-top:13px;display:flex;align-items:center;justify-content:space-between}
+
+.footer{max-width:var(--maxw);margin:60px auto 70px;padding:0 26px;text-align:center;color:var(--slate-2)}
+.footer .brandmark{justify-content:center;margin-bottom:10px}
+.footer p{font-size:12.5px;font-family:var(--mono);letter-spacing:.04em}
+.footer .lic{margin-top:6px;font-size:11px;color:#9a9ab8}
+
+/* responsive niceties */
+@media (max-width:1080px){
+  .g-3{grid-template-columns:1fr}
+  .g-2-1{grid-template-columns:1fr}
+  .reader-wrap{grid-template-columns:1fr}
+  .rsidebar{border-left:0;border-top:var(--bd-hair)}
+  .editor-shell{grid-template-columns:1fr}
+  .erail{border-left:0;border-top:var(--bd-hair)}
+  .app{grid-template-columns:1fr}
+  .side{flex-direction:row;flex-wrap:wrap;align-items:center}
+  .split{grid-template-columns:1fr}
+  .suggest-card{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ===================== MASTHEAD ===================== -->
+<div style="max-width:var(--maxw);margin:0 auto;padding:40px 26px 0">
+  <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+    <div class="brandmark" style="gap:13px">
+      <span class="ap" style="width:40px;height:40px;border-width:4px"></span>
+      <span class="word" style="font-size:28px">editor<b>zero</b></span>
+    </div>
+    <span style="font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);border:var(--bd-hair);border-radius:var(--r-pill);padding:6px 13px;background:var(--surface)">Design system · &ldquo;Aperture&rdquo;</span>
+    <span style="margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--slate-2)">vibrant&nbsp;·&nbsp;humane&nbsp;·&nbsp;self-hostable</span>
+  </div>
+</div>
+
+<!-- ===================== (A) DASHBOARD ===================== -->
+<div class="screen-tag"><span class="dot">A</span><div><div class="label">Screen A</div><div class="title">Dashboard / Home</div></div><span class="rule"></span></div>
+<div class="screen">
+  <div class="app">
+    <!-- sidebar -->
+    <aside class="side">
+      <div class="brandmark"><span class="ap"></span><span class="word">editor<b>zero</b></span></div>
+      <nav class="nav">
+        <a href="#" class="on"><span class="ic">◎</span> Home</a>
+        <a href="#"><span class="ic">▤</span> All documents</a>
+        <a href="#"><span class="ic">★</span> Starred</a>
+        <a href="#"><span class="ic">⟳</span> Recent</a>
+        <div class="grp">Spaces</div>
+        <a href="#"><span class="tagdot" style="background:var(--lime-deep)"></span> Product</a>
+        <a href="#"><span class="tagdot" style="background:var(--magenta)"></span> Engineering</a>
+        <a href="#"><span class="tagdot" style="background:var(--cyan)"></span> Handbook</a>
+        <a href="#"><span class="tagdot" style="background:var(--amber)"></span> Design</a>
+        <div class="grp">Workspace</div>
+        <a href="#"><span class="ic">⚙</span> Admin</a>
+        <a href="#"><span class="ic">◷</span> Audit log</a>
+      </nav>
+      <div class="foot">
+        <span class="avatar a-indigo">NA</span>
+        <div class="meta"><div class="n">Nomi A.</div><div class="e">admin · acme.dev</div></div>
+      </div>
+    </aside>
+
+    <!-- main -->
+    <div class="main">
+      <div class="topbar">
+        <div class="crumbs"><b>Acme</b><span class="sep">/</span> Home</div>
+        <div class="search">⌕ Search docs, people, spaces… <kbd>⌘K</kbd></div>
+        <button class="btn lime">＋ New doc</button>
+      </div>
+      <div class="body">
+        <div class="hero">
+          <span class="supergraphic"></span><span class="supergraphic two"></span>
+          <h1>Start from <em>zero.</em><br>Write with everyone — human&nbsp;and&nbsp;agent.</h1>
+          <p>A self-hosted home for your team's knowledge, where people and AI agents edit side by side as peers — fully owned, fully auditable.</p>
+          <div class="acts">
+            <button class="btn lime">＋ New document</button>
+            <button class="btn" style="background:var(--surface)">⤵ Import Markdown</button>
+            <button class="btn ghost" style="border-color:var(--indigo-bright);color:#fff">Invite an agent →</button>
+          </div>
+        </div>
+
+        <div class="grid g-3">
+          <div class="card"><div class="stat"><div class="num" style="color:var(--indigo)">248</div><div class="lab">Documents across 4 spaces</div><div class="delta">▲ 12 this week</div></div></div>
+          <div class="card"><div class="stat"><div class="num" style="color:var(--magenta)">6</div><div class="lab">Agents with editor access</div><div class="delta" style="color:var(--magenta)">2 editing now</div></div></div>
+          <div class="card"><div class="stat"><div class="num">31</div><div class="lab">Teammates · 4 teams</div><div class="delta">▲ 3 invited</div></div></div>
+        </div>
+
+        <div class="grid g-2-1">
+          <!-- recent docs -->
+          <div class="card">
+            <h3>Recent documents <span class="sub" style="margin-left:auto">last 7 days</span></h3>
+            <div class="recent">
+              <a class="doc-row" href="#">
+                <span class="doc-ico">📓</span>
+                <div><div class="nm">Q3 Launch Narrative <span class="chip live"><span class="pip agent"></span> agent live</span></div><div class="mt">Product / Launches · edited 4m ago</div></div>
+                <div class="right"><div class="stack"><span class="avatar a-indigo">NA</span><span class="avatar a-cyan">JT</span><span class="avatar ag a-magenta">✦</span></div></div>
+              </a>
+              <a class="doc-row" href="#">
+                <span class="doc-ico">🏗️</span>
+                <div><div class="nm">Sync Protocol — CRDT Notes</div><div class="mt">Engineering / Architecture · edited 1h ago</div></div>
+                <div class="right"><span class="chip draft">draft</span><div class="stack"><span class="avatar a-amber">RP</span><span class="avatar ag a-magenta">✦</span></div></div>
+              </a>
+              <a class="doc-row" href="#">
+                <span class="doc-ico">📐</span>
+                <div><div class="nm">Brand Voice Guide</div><div class="mt">Design / Foundations · edited yesterday</div></div>
+                <div class="right"><span class="chip pub">published</span><div class="stack"><span class="avatar a-magenta">EM</span></div></div>
+              </a>
+              <a class="doc-row" href="#">
+                <span class="doc-ico">📖</span>
+                <div><div class="nm">Onboarding Handbook</div><div class="mt">Handbook / People · edited 2d ago</div></div>
+                <div class="right"><span class="chip cyan">internal</span><div class="stack"><span class="avatar a-lime">SK</span><span class="avatar a-slate">+4</span></div></div>
+              </a>
+            </div>
+          </div>
+
+          <!-- activity -->
+          <div class="card">
+            <h3>Live activity <span class="pip" style="margin-left:6px"></span></h3>
+            <div class="feed">
+              <div class="fitem"><span class="avatar ag a-magenta av" style="width:28px;height:28px;font-size:11px">✦</span><div><div class="tx"><span class="who" style="color:var(--magenta)">Atlas</span> <b>agent</b> suggested 3 edits in <b>Q3 Launch Narrative</b></div><div class="tm">just now</div></div></div>
+              <div class="fitem"><span class="avatar a-cyan av" style="width:28px;height:28px;font-size:11px">JT</span><div><div class="tx"><span class="who">Jordan</span> accepted an agent suggestion</div><div class="tm">4 min ago</div></div></div>
+              <div class="fitem"><span class="avatar a-indigo av" style="width:28px;height:28px;font-size:11px">NA</span><div><div class="tx"><span class="who">Nomi</span> published <b>Brand Voice Guide</b></div><div class="tm">1 hour ago</div></div></div>
+              <div class="fitem"><span class="avatar ag a-magenta av" style="width:28px;height:28px;font-size:11px">✦</span><div><div class="tx"><span class="who" style="color:var(--magenta)">Scribe</span> <b>agent</b> created <b>Release Notes 2.4</b></div><div class="tm">3 hours ago</div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- spaces -->
+        <div class="card" style="margin-top:18px">
+          <h3>Your spaces</h3>
+          <div class="spaces">
+            <a class="space" href="#" style="border-left-color:var(--lime-deep)"><div class="nm">Product</div><div class="ct">62 docs · 9 collections</div><div class="ed"><div class="stack"><span class="avatar a-indigo">NA</span><span class="avatar a-cyan">JT</span><span class="avatar ag a-magenta">✦</span></div></div></a>
+            <a class="space" href="#" style="border-left-color:var(--magenta)"><div class="nm">Engineering</div><div class="ct">104 docs · 14 collections</div><div class="ed"><div class="stack"><span class="avatar a-amber">RP</span><span class="avatar a-lime">SK</span><span class="avatar ag a-magenta">✦</span></div></div></a>
+            <a class="space" href="#" style="border-left-color:var(--cyan)"><div class="nm">Handbook</div><div class="ct">38 docs · 5 collections</div><div class="ed"><div class="stack"><span class="avatar a-slate">+7</span></div></div></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== (B) DOCUMENTS LIST ===================== -->
+<div class="screen-tag"><span class="dot">B</span><div><div class="label">Screen B</div><div class="title">Documents in a space — tree + list, human &amp; agent editors</div></div><span class="rule"></span></div>
+<div class="screen">
+  <div class="app">
+    <div class="main" style="border-radius:0">
+      <div class="topbar">
+        <div class="crumbs"><b>Acme</b><span class="sep">/</span> <b style="color:var(--indigo)">Engineering</b><span class="sep">/</span> Architecture</div>
+        <div class="search">⌕ Filter in this space… <kbd>/</kbd></div>
+        <button class="btn primary">＋ New doc</button>
+      </div>
+      <div class="split">
+        <!-- collections tree -->
+        <aside class="tree">
+          <div class="th">Collections <span class="add">＋</span></div>
+          <div class="tnode"><span class="tw">▾</span><span class="tt">📦 Product</span><span class="ct">62</span></div>
+          <div class="tnode"><span class="tw">▾</span><span class="tt" style="color:var(--indigo);font-weight:600">🛠 Engineering</span><span class="ct">104</span></div>
+          <div class="tchild">
+            <div class="tnode on"><span class="tw"></span><span class="tt">⌬ Architecture</span><span class="ct">18</span></div>
+            <div class="tnode"><span class="tw">▸</span><span class="tt">⚙ Runbooks</span><span class="ct">22</span></div>
+            <div class="tnode"><span class="tw">▸</span><span class="tt">🧪 RFCs</span><span class="ct">31</span></div>
+            <div class="tnode"><span class="tw"></span><span class="tt">📋 Postmortems</span><span class="ct">12</span></div>
+          </div>
+          <div class="tnode"><span class="tw">▸</span><span class="tt">📐 Design</span><span class="ct">44</span></div>
+          <div class="tnode"><span class="tw">▸</span><span class="tt">📖 Handbook</span><span class="ct">38</span></div>
+          <div style="margin-top:18px;padding:11px;border:1.5px dashed var(--lavender-2);border-radius:var(--r);font-size:11.5px;color:var(--slate);font-family:var(--mono);line-height:1.5">
+            <b style="color:var(--magenta)">✦ 2 agents</b> have write access to this collection
+          </div>
+        </aside>
+
+        <!-- document list -->
+        <div class="body" style="padding:24px 28px">
+          <div class="list-head">
+            <h2>Architecture</h2>
+            <div class="seg" style="margin-left:auto"><button class="on">List</button><button>Board</button><button>Tree</button></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--slate);margin-top:8px">18 documents · sorted by last edited</div>
+
+          <div class="table">
+            <div class="tr head"><div>Document</div><div>Last editor</div><div>Status</div><div>Updated</div></div>
+
+            <div class="tr">
+              <div class="doc"><span class="doc-ico" style="width:34px;height:34px;font-size:15px">🏗️</span><div><div class="ttl">Sync Protocol — CRDT Notes</div><div class="pth">/engineering/architecture</div></div></div>
+              <div class="ed"><div class="editor-by agent"><span class="avatar ag a-magenta" style="width:22px;height:22px;font-size:10px">✦</span><span class="who">Atlas</span><span class="kind a">agent</span></div></div>
+              <div><span class="chip live"><span class="pip agent"></span> editing</span></div>
+              <div class="when">4 min ago</div>
+            </div>
+
+            <div class="tr">
+              <div class="doc"><span class="doc-ico" style="width:34px;height:34px;font-size:15px">⌬</span><div><div class="ttl">Dispatcher Write-Path Atomicity</div><div class="pth">/engineering/architecture</div></div></div>
+              <div class="ed"><div class="editor-by"><span class="avatar a-amber" style="width:22px;height:22px;font-size:10px">RP</span><span class="who">Riya P.</span><span class="kind h">human</span></div></div>
+              <div><span class="chip draft">draft</span></div>
+              <div class="when">1 hour ago</div>
+            </div>
+
+            <div class="tr">
+              <div class="doc"><span class="doc-ico" style="width:34px;height:34px;font-size:15px">🔐</span><div><div class="ttl">Permission Invariants &amp; Tenant Isolation</div><div class="pth">/engineering/architecture</div></div></div>
+              <div class="ed"><div class="editor-by"><span class="avatar a-indigo" style="width:22px;height:22px;font-size:10px">NA</span><span class="who">Nomi A.</span><span class="kind h">human</span></div></div>
+              <div><span class="chip pub">published</span></div>
+              <div class="when">yesterday</div>
+            </div>
+
+            <div class="tr">
+              <div class="doc"><span class="doc-ico" style="width:34px;height:34px;font-size:15px">📡</span><div><div class="ttl">Event Outbox &amp; Render Consumer</div><div class="pth">/engineering/architecture</div></div></div>
+              <div class="ed"><div class="editor-by agent"><span class="avatar ag a-magenta" style="width:22px;height:22px;font-size:10px">✦</span><span class="who">Scribe</span><span class="kind a">agent</span></div></div>
+              <div><span class="chip cyan">internal</span></div>
+              <div class="when">2 days ago</div>
+            </div>
+
+            <div class="tr">
+              <div class="doc"><span class="doc-ico" style="width:34px;height:34px;font-size:15px">🧩</span><div><div class="ttl">Capability Registry — SSOT</div><div class="pth">/engineering/architecture</div></div></div>
+              <div class="ed"><div class="editor-by"><span class="avatar a-cyan" style="width:22px;height:22px;font-size:10px">JT</span><span class="who">Jordan T.</span><span class="kind h">human</span></div></div>
+              <div><span class="chip pub">published</span></div>
+              <div class="when">3 days ago</div>
+            </div>
+
+            <div class="tr">
+              <div class="doc"><span class="doc-ico" style="width:34px;height:34px;font-size:15px">🗄️</span><div><div class="ttl">Dual-Backend Conformance (SQLite ↔ PG)</div><div class="pth">/engineering/architecture</div></div></div>
+              <div class="ed"><div class="editor-by"><span class="avatar a-lime" style="width:22px;height:22px;font-size:10px">SK</span><span class="who">Sam K.</span><span class="kind h">human</span></div></div>
+              <div><span class="chip draft">draft</span></div>
+              <div class="when">4 days ago</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== (C) READING VIEW ===================== -->
+<div class="screen-tag"><span class="dot">C</span><div><div class="label">Screen C</div><div class="title">Document reading view</div></div><span class="rule"></span></div>
+<div class="screen">
+  <div class="app" style="grid-template-columns:1fr">
+    <div class="main" style="border-radius:0">
+      <div class="topbar">
+        <div class="crumbs"><b>Acme</b><span class="sep">/</span> Design <span class="sep">/</span> Foundations <span class="sep">/</span> <b style="color:var(--indigo)">Brand Voice Guide</b></div>
+        <span class="chip pub" style="margin-left:auto"><span class="tagdot" style="background:var(--lime-deep)"></span> Published</span>
+        <button class="btn ghost">⤴ Share</button>
+        <button class="btn primary">✎ Edit</button>
+      </div>
+      <div class="reader-wrap">
+        <article class="reader">
+          <div class="kicker"><span class="tagdot" style="background:var(--indigo)"></span> Design · Foundations</div>
+          <h1 class="title">The editorzero Voice: warm, exact, never beige.</h1>
+          <p class="deck">How we sound when we write — for docs, product copy, and the words an agent puts on the page on our behalf. One source of truth, co-maintained by the Design team and our writing agent.</p>
+          <div class="byline">
+            <div style="display:flex;align-items:center;gap:9px"><span class="avatar a-magenta">EM</span><div class="who"><b>Elena M.</b><span>Author · Design</span></div></div>
+            <div style="display:flex;align-items:center;gap:9px"><span class="avatar ag a-magenta">✦</span><div class="who"><b style="color:var(--magenta)">Scribe</b><span>Agent contributor</span></div></div>
+            <div class="who" style="margin-left:auto;text-align:right"><b>v14</b><span>updated yesterday</span></div>
+          </div>
+
+          <div class="prose">
+            <p>Our voice is the through-line that makes a CLI error, a tooltip, and a 40-page handbook all feel like <strong>the same company talking</strong>. It is colourful without being loud, precise without being cold. When an agent drafts on our behalf, these are the rails it writes on.</p>
+
+            <h2>Three principles</h2>
+            <p>Every sentence we ship — human-written or agent-drafted — should pass these three tests before it reaches a reader.</p>
+            <ul>
+              <li><strong>Lead with the useful truth.</strong> Say the real thing first; context second. Never bury the answer under throat-clearing.</li>
+              <li><strong>Be specific, not safe.</strong> Concrete nouns and real numbers over hedged abstractions. &ldquo;Converges in under 40ms across replicas,&rdquo; not &ldquo;fast.&rdquo;</li>
+              <li><strong>Warmth through clarity, not decoration.</strong> We earn friendliness by being easy to follow — not by sprinkling exclamation marks.</li>
+            </ul>
+
+            <blockquote>&ldquo;If a reader has to slow down to decode <em>us</em> instead of the <em>idea</em>, we've failed — no matter how polished the prose looks.&rdquo;</blockquote>
+
+            <div class="callout"><span class="ce">✦</span><div class="ct"><strong>Agent guidance.</strong> When <b>Scribe</b> drafts copy, it cites this guide as its system context and surfaces any sentence that scores low on specificity for a human to confirm before publish.</div></div>
+
+            <h2>Worked example</h2>
+            <p>The same release note, rewritten to the voice. Notice how the second version trades abstraction for a concrete, checkable claim:</p>
+            <pre><span class="c"># before — vague, safe</span>
+We've made <span class="s">significant improvements</span> to sync reliability.
+
+<span class="c"># after — specific, warm</span>
+Edits from people and agents now <span class="k">converge in &lt;40ms</span>
+across every replica — even offline-then-online.</pre>
+
+            <p>Read the companion <a class="ln" href="#">Terminology &amp; Capitalisation</a> sheet for the exact word list, and the <a class="ln" href="#">Inclusive Language</a> guidelines before you publish anything public.</p>
+          </div>
+        </article>
+
+        <!-- reader sidebar -->
+        <aside class="rsidebar">
+          <div class="blk">
+            <div class="h">On this page</div>
+            <nav class="toc">
+              <a href="#" class="on">Three principles</a>
+              <a href="#">Worked example</a>
+              <a href="#">Terminology</a>
+              <a href="#">Inclusive language</a>
+            </nav>
+          </div>
+          <div class="blk">
+            <div class="h">Details</div>
+            <div class="meta-row"><span class="k">Space</span><span class="v">Design</span></div>
+            <div class="meta-row"><span class="k">Collection</span><span class="v">Foundations</span></div>
+            <div class="meta-row"><span class="k">Visibility</span><span class="v" style="color:#5d7a00">Public</span></div>
+            <div class="meta-row"><span class="k">Version</span><span class="v">v14</span></div>
+            <div class="meta-row"><span class="k">Words</span><span class="v">1,284</span></div>
+          </div>
+          <div class="blk">
+            <div class="h">Contributors</div>
+            <div class="contrib"><span class="avatar a-magenta" style="width:26px;height:26px;font-size:10px">EM</span><div><div class="nm">Elena M.</div><div class="rl">human · 41 edits</div></div></div>
+            <div class="contrib"><span class="avatar ag a-magenta" style="width:26px;height:26px;font-size:10px">✦</span><div><div class="nm" style="color:var(--magenta)">Scribe</div><div class="rl">agent · 12 edits</div></div></div>
+            <div class="contrib"><span class="avatar a-indigo" style="width:26px;height:26px;font-size:10px">NA</span><div><div class="nm">Nomi A.</div><div class="rl">human · 6 edits</div></div></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== (D) EDITOR — THE SIGNATURE SCREEN ===================== -->
+<div class="screen-tag"><span class="dot" style="background:var(--magenta);color:#fff">D</span><div><div class="label" style="color:var(--magenta)">Screen D · signature</div><div class="title">Document editor — human &amp; AI agent co-editing live</div></div><span class="rule"></span></div>
+<div class="screen">
+  <div class="app" style="grid-template-columns:1fr">
+    <div class="main" style="border-radius:0">
+      <div class="topbar">
+        <div class="crumbs"><b>Acme</b><span class="sep">/</span> Product <span class="sep">/</span> Launches <span class="sep">/</span> <b style="color:var(--indigo)">Q3 Launch Narrative</b></div>
+        <span class="chip draft" style="margin-left:auto"><span class="tagdot" style="background:var(--indigo)"></span> Draft</span>
+        <button class="btn ghost">⤴ Share</button>
+        <button class="btn primary">Publish</button>
+      </div>
+
+      <div class="editor-shell">
+        <div class="editor-main">
+          <!-- formatting toolbar -->
+          <div class="toolbar">
+            <div class="tg"><button class="tbtn wide">Text ▾</button></div>
+            <div class="tg"><button class="tbtn"><b>B</b></button><button class="tbtn"><span class="i">I</span></button><button class="tbtn"><span class="u">U</span></button><button class="tbtn"><span class="s">S</span></button><button class="tbtn" style="font-size:12px">&lt;/&gt;</button></div>
+            <div class="tg"><button class="tbtn on">H2</button><button class="tbtn">H3</button><button class="tbtn">”</button><button class="tbtn">• </button><button class="tbtn">1.</button></div>
+            <div class="tg"><button class="tbtn" style="color:var(--indigo)">🔗</button><button class="tbtn">＠</button><button class="tbtn" style="color:var(--magenta);font-weight:700">✦ Ask agent</button></div>
+            <div class="save"><span class="pip"></span> saved · synced to 3 peers</div>
+          </div>
+
+          <!-- live presence -->
+          <div class="presence">
+            <span class="lbl">Editing now</span>
+            <span class="peer"><span class="av a-indigo">NA</span> Nomi A.</span>
+            <span class="peer"><span class="av a-cyan">JT</span> Jordan T.</span>
+            <span class="peer agent"><span class="av">✦</span> Atlas <span class="pip agent" style="margin-left:2px"></span></span>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--slate-2);margin-left:auto">2 humans · 1 agent · peers</span>
+          </div>
+
+          <!-- the editable canvas -->
+          <div class="canvas">
+            <!-- slash menu floating -->
+            <div class="slash" style="top:150px">
+              <div class="sin">/<b>head</b></div>
+              <div class="sgrp">Blocks</div>
+              <div class="si on"><span class="si-ic">H</span><div><div class="nm">Heading 2</div><div class="ds">section title</div></div></div>
+              <div class="si"><span class="si-ic">¶</span><div><div class="nm">Paragraph</div><div class="ds">body text</div></div></div>
+              <div class="si"><span class="si-ic">”</span><div><div class="nm">Quote</div><div class="ds">callout / pull quote</div></div></div>
+              <div class="sgrp">AI</div>
+              <div class="si ai"><span class="si-ic">✦</span><div><div class="nm">Ask an agent to draft…</div><div class="ds">delegate this block</div></div></div>
+            </div>
+
+            <div class="docblock">
+              <div class="handle"><span class="h plus">＋</span><span class="h"><span class="dragdots">⠿</span></span></div>
+              <div class="etitle" contenteditable="false">Q3 Launch Narrative</div>
+            </div>
+
+            <div class="docblock">
+              <div class="handle"><span class="h plus">＋</span><span class="h"><span class="dragdots">⠿</span></span></div>
+              <h2 class="eh2">Why this launch matters</h2>
+            </div>
+
+            <div class="docblock">
+              <div class="handle"><span class="h plus">＋</span><span class="h"><span class="dragdots">⠿</span></span></div>
+              <p class="ep">This release is the moment editorzero stops being &ldquo;docs with an API&rdquo; and becomes a place where <strong>people and agents do the work together</strong>. The narrative below is what we'll tell customers — and it has to be exact<span class="caret"><span class="flag">Nomi</span></span></p>
+            </div>
+
+            <!-- BLOCK WITH LIVE AGENT TRACKED SUGGESTION -->
+            <div class="docblock">
+              <div class="handle"><span class="h plus">＋</span><span class="h"><span class="dragdots">⠿</span></span></div>
+              <p class="ep">Our sync layer is the differentiator. Edits from humans and agents <span class="del">are usually fast</span> <span class="ins">converge in under 40ms across every replica, even after going offline and reconnecting</span><span class="agent-caret"><span class="flag">✦ Atlas</span></span> — a claim we can actually defend in a demo.</p>
+
+              <!-- floating suggestion control -->
+              <div class="suggest-card" style="top:-6px">
+                <div class="sh"><span class="av">✦</span><div class="nm">Atlas<span>AI AGENT · SUGGESTING</span></div></div>
+                <div class="txt">Replaced a vague phrase with a measurable claim → <em>&ldquo;converge in under 40ms&rdquo;</em>. Cites <b>Sync Protocol</b>.</div>
+                <div class="acts"><button class="acc">✓ Accept</button><button class="rej">Dismiss</button></div>
+              </div>
+            </div>
+
+            <div class="docblock">
+              <div class="handle"><span class="h plus">＋</span><span class="h"><span class="dragdots">⠿</span></span></div>
+              <p class="ep" style="color:var(--slate-2)">Type <b style="color:var(--ink)">/</b> for blocks · <b style="color:var(--magenta)">✦</b> to delegate a block to an agent · drag <b style="color:var(--ink)">⠿</b> to reorder</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- editor right rail: tracked changes / co-editing log -->
+        <aside class="erail">
+          <div class="h">Suggestions &amp; changes</div>
+          <div class="change-item ag">
+            <span class="av a-magenta">✦</span>
+            <div><div class="ct"><b style="color:var(--magenta)">Atlas</b> proposed an edit<span class="q">+ &ldquo;converge in under 40ms…&rdquo;</span></div><div class="tm">live · awaiting review</div></div>
+          </div>
+          <div class="change-item">
+            <span class="av a-cyan">JT</span>
+            <div><div class="ct"><b>Jordan</b> edited &ldquo;Why this launch matters&rdquo;</div><div class="tm">2 min ago</div></div>
+          </div>
+          <div class="change-item ag">
+            <span class="av a-magenta">✦</span>
+            <div><div class="ct"><b style="color:var(--magenta)">Atlas</b> suggestion <b>accepted</b> by Nomi<span class="q">tightened the opening line</span></div><div class="tm">8 min ago</div></div>
+          </div>
+          <div class="change-item">
+            <span class="av a-indigo">NA</span>
+            <div><div class="ct"><b>Nomi</b> created this document</div><div class="tm">today · 09:12</div></div>
+          </div>
+
+          <div class="h" style="margin-top:24px">Agents on this doc</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px;padding:10px;border:1.5px dashed var(--magenta);border-radius:var(--r-sm);background:var(--magenta-soft)">
+              <span class="avatar a-magenta" style="width:28px;height:28px;font-size:11px;border-color:var(--ink)">✦</span>
+              <div style="font-size:12.5px"><b style="color:var(--magenta)">Atlas</b><div style="font-family:var(--mono);font-size:10px;color:#9a0052">editor · rate 60/min · revocable</div></div>
+              <span class="pip agent" style="margin-left:auto"></span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== (E) ADMIN / MEMBERS ===================== -->
+<div class="screen-tag"><span class="dot">E</span><div><div class="label">Screen E</div><div class="title">Admin — members, teams &amp; agents</div></div><span class="rule"></span></div>
+<div class="screen">
+  <div class="app">
+    <aside class="side">
+      <div class="brandmark"><span class="ap"></span><span class="word">editor<b>zero</b></span></div>
+      <nav class="nav">
+        <a href="#"><span class="ic">◎</span> Home</a>
+        <a href="#"><span class="ic">▤</span> All documents</a>
+        <div class="grp">Workspace admin</div>
+        <a href="#" class="on"><span class="ic">⚇</span> Members</a>
+        <a href="#"><span class="ic">⧉</span> Teams</a>
+        <a href="#"><span class="tagdot" style="background:var(--magenta)"></span> Agents</a>
+        <a href="#"><span class="ic">▦</span> Spaces</a>
+        <a href="#"><span class="ic">◷</span> Audit log</a>
+        <a href="#"><span class="ic">⚙</span> Settings</a>
+      </nav>
+      <div class="foot"><span class="avatar a-indigo">NA</span><div class="meta"><div class="n">Nomi A.</div><div class="e">admin · acme.dev</div></div></div>
+    </aside>
+
+    <div class="main">
+      <div class="topbar">
+        <div class="crumbs"><b>Acme</b><span class="sep">/</span> Admin <span class="sep">/</span> <b style="color:var(--indigo)">Members</b></div>
+        <div class="search">⌕ Find a person or agent…</div>
+        <button class="btn ghost">⧉ New team</button>
+        <button class="btn lime">＋ Invite member</button>
+      </div>
+      <div class="body">
+        <div class="admin-head">
+          <div><h2>Members &amp; agents</h2><p>31 people · 6 agents · everyone is a peer principal with its own audit trail.</p></div>
+        </div>
+        <div class="tabs"><button class="on">People</button><button>Agents</button><button>Teams</button><button>Invitations</button><button>Roles</button></div>
+
+        <div class="mtable">
+          <div class="mr head"><div>Principal</div><div>Role</div><div>Teams</div><div>Status</div><div></div></div>
+
+          <div class="mr">
+            <div class="person"><span class="avatar a-indigo">NA</span><div><div class="nm">Nomi Ali</div><div class="em">nomi@acme.dev</div></div></div>
+            <div><span class="role admin">⚑ Admin</span></div>
+            <div class="teamtags"><span class="tt2">Platform</span><span class="tt2">Design</span></div>
+            <div><span class="chip" style="background:#E4FBE9;border-color:#46c46a;color:#1d7a37"><span class="tagdot" style="background:#27a844"></span> active</span></div>
+            <button class="kebab">⋯</button>
+          </div>
+
+          <div class="mr">
+            <div class="person"><span class="avatar a-cyan">JT</span><div><div class="nm">Jordan Tan</div><div class="em">jordan@acme.dev</div></div></div>
+            <div><span class="role">✎ Editor</span></div>
+            <div class="teamtags"><span class="tt2">Product</span></div>
+            <div><span class="chip" style="background:#E4FBE9;border-color:#46c46a;color:#1d7a37"><span class="tagdot" style="background:#27a844"></span> active</span></div>
+            <button class="kebab">⋯</button>
+          </div>
+
+          <!-- AGENT PRINCIPAL ROW -->
+          <div class="mr" style="background:linear-gradient(90deg, var(--magenta-soft), transparent 70%)">
+            <div class="person"><span class="avatar ag a-magenta" style="border-style:dashed">✦</span><div><div class="nm" style="color:var(--magenta)">Atlas <span style="font-family:var(--mono);font-size:10px;font-weight:500;color:#9a0052;background:#fff;border:1px solid var(--magenta);padding:1px 6px;border-radius:999px;vertical-align:middle">AI AGENT</span></div><div class="em">agent:atlas · rate 60/min</div></div></div>
+            <div><span class="role agent">✦ Agent editor</span></div>
+            <div class="teamtags"><span class="tt2">Product</span><span class="tt2">Engineering</span></div>
+            <div><span class="chip live"><span class="pip agent"></span> editing</span></div>
+            <button class="kebab">⋯</button>
+          </div>
+
+          <div class="mr">
+            <div class="person"><span class="avatar a-amber">RP</span><div><div class="nm">Riya Patel</div><div class="em">riya@acme.dev</div></div></div>
+            <div><span class="role">✎ Editor</span></div>
+            <div class="teamtags"><span class="tt2">Engineering</span></div>
+            <div><span class="chip" style="background:#E4FBE9;border-color:#46c46a;color:#1d7a37"><span class="tagdot" style="background:#27a844"></span> active</span></div>
+            <button class="kebab">⋯</button>
+          </div>
+
+          <div class="mr">
+            <div class="person"><span class="avatar ag a-magenta" style="border-style:dashed">✦</span><div><div class="nm" style="color:var(--magenta)">Scribe <span style="font-family:var(--mono);font-size:10px;font-weight:500;color:#9a0052;background:#fff;border:1px solid var(--magenta);padding:1px 6px;border-radius:999px;vertical-align:middle">AI AGENT</span></div><div class="em">agent:scribe · rate 30/min</div></div></div>
+            <div><span class="role agent">✦ Agent author</span></div>
+            <div class="teamtags"><span class="tt2">Design</span></div>
+            <div><span class="chip draft">idle</span></div>
+            <button class="kebab">⋯</button>
+          </div>
+
+          <div class="mr">
+            <div class="person"><span class="avatar a-lime">SK</span><div><div class="nm">Sam Kim</div><div class="em">sam@acme.dev</div></div></div>
+            <div><span class="role">👁 Viewer</span></div>
+            <div class="teamtags"><span class="tt2">Handbook</span></div>
+            <div><span class="chip draft">invited</span></div>
+            <button class="kebab">⋯</button>
+          </div>
+        </div>
+
+        <!-- teams preview -->
+        <div class="admin-head" style="margin-top:34px"><div><h2 style="font-size:20px">Teams</h2></div></div>
+        <div class="teamcards">
+          <div class="teamcard"><div class="top"><span class="ico" style="background:var(--lime)">📦</span><div><h4>Product</h4><div class="meta">9 members · 1 agent</div></div></div><div class="roster"><div class="stack"><span class="avatar a-indigo">NA</span><span class="avatar a-cyan">JT</span><span class="avatar ag a-magenta">✦</span><span class="avatar a-slate">+6</span></div><span class="chip draft">2 spaces</span></div></div>
+          <div class="teamcard"><div class="top"><span class="ico" style="background:var(--magenta-soft)">🛠</span><div><h4>Engineering</h4><div class="meta">14 members · 2 agents</div></div></div><div class="roster"><div class="stack"><span class="avatar a-amber">RP</span><span class="avatar a-lime">SK</span><span class="avatar ag a-magenta">✦</span><span class="avatar a-slate">+11</span></div><span class="chip draft">3 spaces</span></div></div>
+          <div class="teamcard"><div class="top"><span class="ico" style="background:#D4F7FB">📐</span><div><h4>Design</h4><div class="meta">6 members · 1 agent</div></div></div><div class="roster"><div class="stack"><span class="avatar a-magenta">EM</span><span class="avatar ag a-magenta">✦</span><span class="avatar a-slate">+4</span></div><span class="chip draft">1 space</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== FOOTER ===================== -->
+<div class="footer">
+  <div class="brandmark"><span class="ap"></span><span class="word" style="font-size:22px">editor<b>zero</b></span></div>
+  <p>&ldquo;Aperture&rdquo; — vibrant &amp; humane design system · five screens · light mode</p>
+  <p class="lic">Space Grotesk · DM Sans · DM Mono — all SIL OFL / Apache · self-hostable · AGPL-3.0</p>
+</div>
+
+</body>
+</html>

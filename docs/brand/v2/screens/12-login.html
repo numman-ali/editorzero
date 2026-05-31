@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Login / Onboarding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   LOGIN / ONBOARDING — screen-specific only. Tokens only.
+   prefix: login-
+   ============================================================ */
+.login-field{
+  min-height:100vh; min-height:100dvh; background:var(--paper);
+  background-image:
+    linear-gradient(var(--grid-line) var(--rule), transparent var(--rule)),
+    linear-gradient(90deg, var(--grid-line) var(--rule), transparent var(--rule));
+  background-size:32px 32px; background-position:-1px -1px;
+  display:flex; flex-direction:column;
+}
+/* engineering coordinate strip across the very top */
+.login-topstrip{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:11px 22px; border-bottom:var(--rule) solid var(--ink);
+  background:var(--paper); position:sticky; top:0; z-index:4;
+}
+.login-topstrip .lhs{ display:flex; align-items:center; gap:16px; min-width:0; }
+.login-topstrip .div{ width:var(--rule); height:26px; background:var(--hair-strong); flex:0 0 var(--rule); }
+.login-topstrip .coord{ font-family:var(--mono); font-size:10px; color:var(--steel); letter-spacing:0.06em; }
+.login-topstrip .coord b{ color:var(--ink-1); font-weight:500; }
+
+/* the centered stage that holds the three state cards */
+.login-stage{
+  flex:1; width:100%; max-width:var(--maxw); margin:0 auto;
+  padding:30px 24px 26px; display:flex; flex-direction:column; gap:16px;
+}
+.login-stage-h{ display:flex; align-items:flex-end; justify-content:space-between; gap:18px; }
+.login-stage-h h1{ font-size:24px; line-height:1; letter-spacing:-0.03em; }
+.login-stage-h h1 .z{ color:var(--ultra-ink); }
+.login-stage-h .sub{ font-family:var(--mono); font-size:10.5px; color:var(--steel); letter-spacing:0.05em; margin-top:8px; display:flex; gap:12px; flex-wrap:wrap; }
+
+.login-set{ display:grid; grid-template-columns:1.18fr 1fr 1fr; gap:0; border:var(--rule) solid var(--hair-strong); background:var(--surface); }
+.login-col{ border-right:var(--rule) solid var(--hair-strong); display:flex; flex-direction:column; min-width:0; }
+.login-col:last-child{ border-right:0; }
+
+/* per-state coordinate header */
+.login-ch{
+  display:flex; align-items:center; gap:10px; padding:10px 15px;
+  border-bottom:var(--rule) solid var(--ink); background:var(--paper);
+}
+.login-ch .id{ font-family:var(--display); font-weight:700; font-size:12px; letter-spacing:-0.01em; color:var(--ink); }
+.login-ch .tag{ margin-left:auto; }
+
+/* the card body inside a state column */
+.login-card{ padding:20px 18px 18px; display:flex; flex-direction:column; gap:14px; flex:1; }
+
+/* brand lockup centered on the card */
+.login-brand{ display:flex; flex-direction:column; align-items:center; gap:11px; text-align:center; padding:4px 0 2px; }
+.login-brand .markwrap{ position:relative; width:46px; height:46px; display:grid; place-items:center; border:var(--rule) solid var(--hair-strong); background:var(--surface); }
+.login-brand .markwrap .cross{ width:30px; height:30px; color:var(--ultra); }
+.login-brand .markwrap .cross-ring{ inset:6px; }
+/* corner ticks on the mark frame — drawing registration marks */
+.login-brand .markwrap::before,.login-brand .markwrap::after{ content:""; position:absolute; width:5px; height:5px; border:var(--rule) solid var(--ultra); }
+.login-brand .markwrap::before{ left:-3px; top:-3px; border-right:0; border-bottom:0; }
+.login-brand .markwrap::after{ right:-3px; bottom:-3px; border-left:0; border-top:0; }
+.login-brand .title{ font-family:var(--display); font-weight:700; font-size:17px; letter-spacing:-0.02em; }
+.login-brand .title b{ color:var(--ultra-ink); }
+.login-brand .lede{ font-size:12px; color:var(--ink-2); line-height:1.5; max-width:34ch; }
+
+/* form atoms */
+.login-form{ display:flex; flex-direction:column; gap:11px; }
+.login-fl{ display:flex; flex-direction:column; gap:5px; }
+.login-lbl{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel); display:flex; align-items:center; gap:7px; }
+.login-lbl .req{ color:var(--ultra-ink); }
+.login-lbl .opt{ margin-left:auto; color:var(--steel-2); letter-spacing:0.06em; }
+.login-input{
+  font-family:var(--text); font-size:13px; color:var(--ink); background:var(--surface);
+  border:var(--rule) solid var(--hair-strong); padding:9px 11px; width:100%;
+  border-radius:var(--radius); transition:border-color .12s, box-shadow .12s;
+  min-height:40px;
+}
+.login-input::placeholder{ color:var(--steel-2); }
+.login-input:focus{ outline:none; border-color:var(--ultra); box-shadow:inset 0 0 0 var(--rule) var(--ultra); }
+.login-input.mono{ font-family:var(--mono); font-size:12px; letter-spacing:0.01em; }
+.login-input[readonly]{ background:var(--surface-2); color:var(--ink-1); cursor:default; }
+/* input with a trailing affix (e.g. .editorzero domain, reveal pwd) */
+.login-affix{ display:flex; align-items:stretch; border:var(--rule) solid var(--hair-strong); background:var(--surface); }
+.login-affix:focus-within{ border-color:var(--ultra); box-shadow:inset 0 0 0 var(--rule) var(--ultra); }
+.login-affix .login-input{ border:0; box-shadow:none; }
+.login-affix .login-input:focus{ box-shadow:none; }
+.login-affix .ax{
+  display:flex; align-items:center; padding:0 11px; font-family:var(--mono); font-size:11px;
+  color:var(--steel); background:var(--paper); border-left:var(--rule) solid var(--hair-strong); white-space:nowrap;
+}
+.login-affix .ax.btn-ax{ cursor:pointer; color:var(--ink-2); }
+.login-affix .ax.btn-ax:hover{ color:var(--ink); background:var(--surface-2); }
+.login-hint{ font-family:var(--mono); font-size:9.5px; color:var(--steel); letter-spacing:0.02em; line-height:1.5; }
+.login-row2{ display:grid; grid-template-columns:1fr 1fr; gap:11px; }
+
+/* stepper rail for the first-run wizard */
+.login-steps{ display:flex; flex-direction:column; gap:0; border:var(--rule) solid var(--hair); background:var(--paper); }
+.login-step{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-bottom:var(--rule) solid var(--hair); position:relative; }
+.login-step:last-child{ border-bottom:0; }
+.login-step .sx{
+  width:22px; height:22px; flex:0 0 22px; display:grid; place-items:center;
+  font-family:var(--mono); font-size:10px; font-weight:700; color:var(--steel);
+  border:var(--rule) solid var(--hair-strong); background:var(--surface);
+}
+.login-step .stx{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+.login-step .stx .nm{ font-size:11.5px; font-weight:600; color:var(--ink-1); letter-spacing:-0.005em; }
+.login-step .stx .ds{ font-family:var(--mono); font-size:9px; color:var(--steel); letter-spacing:0.03em; }
+.login-step.done .sx{ color:var(--paper); background:var(--ink); border-color:var(--ink); }
+.login-step.on{ background:var(--surface); }
+.login-step.on::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--ultra); }
+.login-step.on .sx{ color:var(--surface); background:var(--ultra); border-color:var(--ultra); }
+.login-step.on .stx .nm{ color:var(--ink); }
+.login-step.todo .stx .nm{ color:var(--steel); font-weight:500; }
+
+/* progress meter line under wizard header */
+.login-prog{ display:flex; align-items:center; gap:9px; }
+.login-prog .track{ flex:1; height:4px; background:var(--surface-sunk); display:flex; gap:2px; }
+.login-prog .track i{ flex:1; background:var(--surface-sunk); }
+.login-prog .track i.on{ background:var(--ultra); }
+.login-prog .lab{ font-family:var(--mono); font-size:9.5px; color:var(--steel); letter-spacing:0.04em; white-space:nowrap; }
+
+/* SSO + divider */
+.login-or{ display:flex; align-items:center; gap:12px; }
+.login-or .hr{ flex:1; }
+.login-or .t{ font-family:var(--mono); font-size:9px; letter-spacing:0.12em; text-transform:uppercase; color:var(--steel-2); }
+.login-sso{ display:flex; flex-direction:column; gap:8px; }
+.login-ssobtn{
+  display:flex; align-items:center; gap:10px; width:100%; justify-content:flex-start;
+  font-family:var(--mono); font-size:11px; letter-spacing:0.04em; color:var(--ink-1);
+  border:var(--rule) solid var(--hair-strong); background:var(--surface); padding:0 12px; cursor:pointer;
+  min-height:42px; border-radius:var(--radius); transition:border-color .12s, background .12s;
+}
+.login-ssobtn:hover{ border-color:var(--ink); background:var(--surface-2); }
+.login-ssobtn .gl{
+  width:18px; height:18px; flex:0 0 18px; display:grid; place-items:center; color:var(--ultra);
+  border:var(--rule) solid var(--ultra-edge); background:var(--ultra-wash);
+}
+.login-ssobtn .ar{ margin-left:auto; color:var(--steel-2); font-family:var(--mono); }
+
+/* primary submit + meta row */
+.login-actions{ margin-top:auto; padding-top:4px; display:flex; flex-direction:column; gap:11px; }
+.login-submit{ width:100%; justify-content:center; min-height:44px; font-size:11.5px; }
+.login-nav{ display:flex; align-items:center; gap:10px; }
+.login-nav .back{
+  min-height:44px; padding:0 14px; display:inline-flex; align-items:center; gap:7px; cursor:pointer;
+  font-family:var(--mono); font-size:11px; letter-spacing:0.06em; text-transform:uppercase;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface); color:var(--ink-1); border-radius:var(--radius);
+}
+.login-nav .back:hover{ border-color:var(--ink); }
+.login-nav .login-submit{ flex:1; }
+
+.login-foot-line{ font-family:var(--mono); font-size:10px; color:var(--steel); letter-spacing:0.03em; text-align:center; }
+.login-foot-line a{ color:var(--ultra-ink); font-weight:500; }
+.login-foot-line a:hover{ text-decoration:underline; }
+
+/* peers strip — human + agent as first-class principals */
+.login-peers{ border:var(--rule) solid var(--hair); background:var(--paper); }
+.login-peers .ph{ display:flex; align-items:center; gap:8px; padding:8px 11px; border-bottom:var(--rule) solid var(--hair); font-family:var(--mono); font-size:9.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel); }
+.login-peer{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-bottom:var(--rule) solid var(--hair); }
+.login-peer:last-child{ border-bottom:0; }
+.login-peer .pi{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+.login-peer .pi .nm{ font-size:12px; font-weight:600; color:var(--ink-1); }
+.login-peer .pi .rl{ font-family:var(--mono); font-size:9px; color:var(--steel); letter-spacing:0.04em; }
+.login-peer .rt{ margin-left:auto; }
+
+/* invite summary block */
+.login-invite{ border:var(--rule) solid var(--ultra-edge); background:var(--ultra-wash); padding:14px 15px; display:flex; gap:12px; }
+.login-invite .b{ width:2px; background:var(--ultra); flex:0 0 2px; }
+.login-invite .ix{ display:flex; flex-direction:column; gap:7px; }
+.login-invite .org{ font-family:var(--display); font-weight:700; font-size:17px; letter-spacing:-0.02em; color:var(--ink); }
+.login-invite .ln{ font-size:12px; color:var(--ink-1); line-height:1.5; }
+.login-invite .ln b{ color:var(--ultra-ink); }
+.login-grant{ display:flex; gap:0; border:var(--rule) solid var(--hair-strong); }
+.login-grant .gc{ flex:1; padding:9px 11px; border-right:var(--rule) solid var(--hair); }
+.login-grant .gc:last-child{ border-right:0; }
+.login-grant .gc .k{ font-family:var(--mono); font-size:8.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel); }
+.login-grant .gc .v{ font-size:13px; font-weight:600; color:var(--ink); margin-top:4px; display:flex; align-items:center; gap:6px; }
+.login-grant .gc .v.mono{ font-family:var(--mono); font-size:12px; font-weight:500; }
+
+/* who-invited-you mini line */
+.login-by{ display:flex; align-items:center; gap:9px; padding:9px 0; }
+.login-by .bt{ font-family:var(--mono); font-size:9.5px; color:var(--steel); letter-spacing:0.04em; }
+.login-by .nm{ font-size:12px; font-weight:600; color:var(--ink-1); }
+
+/* the agent footnote — repeated trust statement */
+.login-agentnote{
+  display:flex; align-items:flex-start; gap:10px; padding:11px 13px;
+  border:var(--rule) solid var(--agent-edge); background:var(--agent-wash);
+}
+.login-agentnote .ic{ flex:0 0 22px; }
+.login-agentnote .tx{ font-size:11px; color:var(--agent-ink); line-height:1.5; }
+.login-agentnote .tx b{ font-weight:700; }
+.login-agentnote .tx code{ font-family:var(--mono); font-size:10px; background:var(--surface); border:var(--rule) solid var(--agent-edge); padding:0 4px; color:var(--agent-ink); }
+
+/* footer credit (reuse .credit feel) */
+.login-footer{
+  border-top:var(--rule) solid var(--hair-strong); background:var(--paper);
+  padding:13px 22px; display:flex; align-items:center; justify-content:space-between; gap:14px;
+  font-family:var(--mono); font-size:10px; color:var(--steel); letter-spacing:0.04em; flex-wrap:wrap;
+}
+.login-footer .ms{ display:flex; gap:18px; flex-wrap:wrap; }
+.login-footer .ms a:hover{ color:var(--ink); }
+.login-footer .rhs{ display:flex; align-items:center; gap:9px; }
+
+/* instance readout chip group */
+.login-inst{ display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:10px; color:var(--steel); letter-spacing:0.04em; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1080px){
+  .login-set{ grid-template-columns:1fr; }
+  .login-col{ border-right:0; border-bottom:var(--rule) solid var(--hair-strong); }
+  .login-col:last-child{ border-bottom:0; }
+}
+@media (max-width:640px){
+  .login-field{ background-size:24px 24px; }
+  .login-topstrip{ padding:10px 14px; }
+  .login-topstrip .coord.hideS{ display:none; }
+  .login-topstrip .div.hideS{ display:none; }
+  .login-stage{ padding:18px 12px 20px; gap:13px; }
+  .login-stage-h{ flex-direction:column; align-items:flex-start; gap:9px; }
+  .login-stage-h h1{ font-size:21px; }
+  .login-ch{ padding:11px 14px; }
+  .login-card{ padding:16px 14px; gap:13px; }
+  .login-row2{ grid-template-columns:1fr; }
+  .login-grant{ flex-direction:column; }
+  .login-grant .gc{ border-right:0; border-bottom:var(--rule) solid var(--hair); }
+  .login-grant .gc:last-child{ border-bottom:0; }
+  .login-footer{ padding:12px 14px; justify-content:flex-start; gap:10px; }
+  .login-nav{ flex-wrap:wrap; }
+  .login-nav .back{ width:100%; justify-content:center; }
+  /* >=44px touch targets on phones */
+  .login-input{ min-height:46px; font-size:16px; } /* 16px also stops iOS zoom-on-focus */
+  .login-input.mono{ font-size:14px; }
+  .login-ssobtn{ min-height:46px; }
+  .login-affix .ax.btn-ax{ min-width:52px; justify-content:center; }
+  .login-toggle .tg{ width:40px; height:24px; flex:0 0 40px; }
+  .login-toggle .tg i{ width:20px; height:20px; }
+  .login-toggle .tg.on i{ left:17px; }
+}
+/* honor reduced motion: kill all transitions/animations on this screen */
+@media (prefers-reduced-motion: reduce){
+  .login-input, .login-ssobtn, .login-nav .back, .login-submit{ transition:none !important; }
+  .login-field *, .login-field *::before, .login-field *::after{ animation:none !important; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<div class="login-field">
+
+  <!-- top coordinate strip: brand + instance identity -->
+  <header class="login-topstrip">
+    <div class="lhs">
+      <div class="logo">
+        <span class="mark"><span class="cross"></span><span class="cross-ring"></span></span>
+        <span class="word">editor<b class="zero">zero</b></span>
+      </div>
+      <span class="div hideS"></span>
+      <span class="coord hideS">SELF-HOSTED · <b>ENTRY</b></span>
+    </div>
+    <div class="login-inst">
+      <span class="cross" style="width:12px;height:12px;color:var(--ultra)"></span>
+      <span>node <b style="color:var(--ink-1)">nw-01</b></span>
+      <span style="color:var(--steel-2)">·</span>
+      <span class="dot dot--ok" aria-hidden="true"></span>
+      <span>v0.1.0</span>
+    </div>
+  </header>
+
+  <!-- centered stage -->
+  <main class="login-stage">
+    <div class="login-stage-h">
+      <div class="lhs">
+        <div class="kicker kicker--ultra">⊹ ACCESS · ORIGIN POINT</div>
+        <h1>Sign in to editor<span class="z">zero</span></h1>
+        <div class="sub"><span>SELF-HOSTED INSTANCE</span><span>·</span><span>SINGLE ORG</span><span>·</span><span>HUMANS + AGENTS AS PEERS</span></div>
+      </div>
+      <div class="mono" style="font-size:10px;color:var(--steel);text-align:right;letter-spacing:0.06em;line-height:1.7;">
+        LAT 00.000 · LON 00.000<br>3 ENTRY STATES
+      </div>
+    </div>
+
+    <!-- THE THREE STATES -->
+    <div class="login-set">
+
+      <!-- ============ STATE 1 — FIRST-RUN WIZARD ============ -->
+      <section class="login-col" aria-label="First-run setup">
+        <div class="login-ch">
+          <span class="ord">01</span>
+          <span class="id">First-run setup</span>
+          <span class="tag"><span class="chip chip--ultra">ADMIN · STEP 2/4</span></span>
+        </div>
+        <div class="login-card">
+          <div class="login-brand">
+            <div class="markwrap"><span class="cross"></span><span class="cross-ring"></span></div>
+            <div class="title">Initialise <b>editorzero</b></div>
+            <div class="lede">No instance exists yet on <b style="color:var(--ink-1)">nw-01</b>. Create your organisation and the first admin account.</div>
+          </div>
+
+          <div class="login-prog">
+            <span class="lab">SETUP</span>
+            <div class="track"><i class="on"></i><i class="on"></i><i></i><i></i></div>
+            <span class="lab">02 / 04</span>
+          </div>
+
+          <div class="login-steps">
+            <div class="login-step done"><span class="sx">✓</span><div class="stx"><span class="nm">Database &amp; storage</span><span class="ds">SQLITE · /var/ez/data</span></div></div>
+            <div class="login-step on"><span class="sx">2</span><div class="stx"><span class="nm">Organisation &amp; admin</span><span class="ds">ORG · OWNER ACCOUNT</span></div></div>
+            <div class="login-step todo"><span class="sx">3</span><div class="stx"><span class="nm">Instance settings</span><span class="ds">AUTH · AGENTS · LIMITS</span></div></div>
+            <div class="login-step todo"><span class="sx">4</span><div class="stx"><span class="nm">Review &amp; launch</span><span class="ds">WRITE CONFIG · BOOT</span></div></div>
+          </div>
+
+          <form class="login-form" onsubmit="return false">
+            <div class="login-fl">
+              <label class="login-lbl" for="lg-org">Organisation name <span class="req" aria-hidden="true">*</span></label>
+              <input id="lg-org" class="login-input" type="text" value="Northwind Eng" autocomplete="organization"/>
+            </div>
+            <div class="login-fl">
+              <label class="login-lbl" for="lg-slug">Instance URL <span class="req" aria-hidden="true">*</span></label>
+              <div class="login-affix">
+                <input id="lg-slug" class="login-input mono" type="text" value="northwind" autocomplete="off" aria-describedby="lg-slug-h"/>
+                <span class="ax">.ez.internal</span>
+              </div>
+              <span class="login-hint" id="lg-slug-h">Resolvable host for this self-hosted node. API · CLI · MCP share this origin.</span>
+            </div>
+            <div class="login-row2">
+              <div class="login-fl">
+                <label class="login-lbl" for="lg-adn">Admin name <span class="req" aria-hidden="true">*</span></label>
+                <input id="lg-adn" class="login-input" type="text" value="Nadia Arslan" autocomplete="name"/>
+              </div>
+              <div class="login-fl">
+                <label class="login-lbl" for="lg-ade">Admin email <span class="req" aria-hidden="true">*</span></label>
+                <input id="lg-ade" class="login-input" type="email" value="nadia@northwind.eng" autocomplete="email"/>
+              </div>
+            </div>
+            <div class="login-fl">
+              <label class="login-lbl" for="lg-adp">Password <span class="req" aria-hidden="true">*</span> <span class="opt">MIN 12 CHARS</span></label>
+              <div class="login-affix">
+                <input id="lg-adp" class="login-input mono" type="password" value="correct-horse-battery" autocomplete="new-password"/>
+                <button type="button" class="ax btn-ax" aria-label="Reveal password">SHOW</button>
+              </div>
+            </div>
+          </form>
+
+          <div class="login-agentnote">
+            <span class="av av--agent ic" aria-hidden="true">AI</span>
+            <div class="tx"><b>Agents join after setup.</b> The owner you create here can mint agent API keys in Admin. Agents are peer principals — scoped roles, rate limits, revocation. They never use this form.</div>
+          </div>
+
+          <div class="login-actions">
+            <div class="login-nav">
+              <button type="button" class="back">← Back</button>
+              <button type="button" class="btn btn--ultra login-submit">Continue → Instance settings</button>
+            </div>
+            <div class="login-foot-line">Step 2 of 4 · config is written only at <b>Launch</b></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STATE 2 — RETURNING SIGN-IN ============ -->
+      <section class="login-col" aria-label="Sign in">
+        <div class="login-ch">
+          <span class="ord">02</span>
+          <span class="id">Sign in</span>
+          <span class="tag"><span class="chip chip--ghost">RETURNING</span></span>
+        </div>
+        <div class="login-card">
+          <div class="login-brand">
+            <div class="markwrap"><span class="cross"></span><span class="cross-ring"></span></div>
+            <div class="title">Northwind Eng</div>
+            <div class="lede">Sign in to your workspace. Real-time docs, co-edited with your team and agents.</div>
+          </div>
+
+          <form class="login-form" onsubmit="return false">
+            <div class="login-fl">
+              <label class="login-lbl" for="lg2-em">Email</label>
+              <input id="lg2-em" class="login-input" type="email" placeholder="you@northwind.eng" autocomplete="username" value=""/>
+            </div>
+            <div class="login-fl">
+              <label class="login-lbl" for="lg2-pw">Password <a class="opt" href="#" style="color:var(--ultra-ink);text-decoration:none;text-transform:none;letter-spacing:0.02em;">Forgot?</a></label>
+              <div class="login-affix">
+                <input id="lg2-pw" class="login-input mono" type="password" placeholder="••••••••••••" autocomplete="current-password"/>
+                <button type="button" class="ax btn-ax" aria-label="Reveal password">SHOW</button>
+              </div>
+            </div>
+            <button type="button" class="btn btn--primary login-submit" style="margin-top:3px;">Sign in →</button>
+          </form>
+
+          <div class="login-or"><span class="hr"></span><span class="t">OR</span><span class="hr"></span></div>
+
+          <div class="login-sso">
+            <button type="button" class="login-ssobtn">
+              <span class="gl"><span class="cross" style="width:11px;height:11px;"></span></span>
+              Continue with SSO · SAML
+              <span class="ar">→</span>
+            </button>
+            <button type="button" class="login-ssobtn">
+              <span class="gl" style="color:var(--ink-1);border-color:var(--hair-strong);background:var(--surface-2);">◑</span>
+              Continue with OIDC
+              <span class="ar">→</span>
+            </button>
+          </div>
+
+          <div class="login-agentnote" style="margin-top:2px;">
+            <span class="av av--agent ic" aria-hidden="true">AI</span>
+            <div class="tx"><b>Agents don't sign in here.</b> They authenticate with an API token or key — <code>Authorization: Bearer ez_…</code> — never with email + password.</div>
+          </div>
+
+          <div class="login-actions">
+            <div class="login-foot-line">No account? Ask an admin for an invite · <a href="#">View instance status</a></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STATE 3 — INVITED-USER ACCEPT ============ -->
+      <section class="login-col" aria-label="Accept invitation">
+        <div class="login-ch">
+          <span class="ord">03</span>
+          <span class="id">Accept invite</span>
+          <span class="tag"><span class="chip chip--ultra">INVITED</span></span>
+        </div>
+        <div class="login-card">
+          <div class="login-brand" style="gap:9px;">
+            <div class="markwrap"><span class="cross"></span><span class="cross-ring"></span></div>
+            <div class="kicker">You've been invited</div>
+          </div>
+
+          <div class="login-invite">
+            <span class="b" aria-hidden="true"></span>
+            <div class="ix">
+              <div class="org">Northwind Eng</div>
+              <div class="ln">You're invited to join as an <b>Editor</b>. Accept to create your account and start co-editing.</div>
+            </div>
+          </div>
+
+          <div class="login-grant">
+            <div class="gc"><div class="k">Role</div><div class="v"><span class="cross" style="width:11px;height:11px;color:var(--ultra)"></span> Editor</div></div>
+            <div class="gc"><div class="k">Spaces</div><div class="v mono">03 granted</div></div>
+            <div class="gc"><div class="k">Expires</div><div class="v mono">in 6d</div></div>
+          </div>
+
+          <div class="login-by">
+            <span class="av av--u" aria-hidden="true">NA</span>
+            <div>
+              <div class="bt">INVITED BY</div>
+              <div class="nm">Nadia A. · Admin</div>
+            </div>
+            <span class="chip chip--ghost" style="margin-left:auto;">#001</span>
+          </div>
+
+          <form class="login-form" onsubmit="return false">
+            <div class="login-fl">
+              <label class="login-lbl" for="lg3-em">Your email</label>
+              <input id="lg3-em" class="login-input mono" type="email" value="theo@northwind.eng" readonly aria-readonly="true"/>
+              <span class="login-hint">Locked to the invited address.</span>
+            </div>
+            <div class="login-fl">
+              <label class="login-lbl" for="lg3-nm">Display name <span class="req" aria-hidden="true">*</span></label>
+              <input id="lg3-nm" class="login-input" type="text" placeholder="Theo Mensah" autocomplete="name"/>
+            </div>
+            <div class="login-fl">
+              <label class="login-lbl" for="lg3-pw">Set a password <span class="req" aria-hidden="true">*</span> <span class="opt">MIN 12</span></label>
+              <div class="login-affix">
+                <input id="lg3-pw" class="login-input mono" type="password" placeholder="••••••••••••" autocomplete="new-password"/>
+                <button type="button" class="ax btn-ax" aria-label="Reveal password">SHOW</button>
+              </div>
+            </div>
+          </form>
+
+          <div class="login-peers">
+            <div class="ph"><span>YOUR NEW PEERS</span><span style="margin-left:auto;color:var(--steel-2)">8 HUMANS · 4 AGENTS</span></div>
+            <div class="login-peer">
+              <span class="av av--u" aria-hidden="true">NA</span>
+              <div class="pi"><span class="nm">Nadia A.</span><span class="rl">ADMIN · HUMAN</span></div>
+              <span class="rt"><span class="dot dot--ok live" aria-hidden="true"></span></span>
+            </div>
+            <div class="login-peer">
+              <span class="av av--agent" aria-hidden="true">AR</span>
+              <div class="pi"><span class="nm">archivist</span><span class="rl">EDITOR · AGENT</span></div>
+              <span class="rt"><span class="chip chip--agent" style="padding:1px 6px;">AI</span></span>
+            </div>
+          </div>
+
+          <div class="login-actions">
+            <button type="button" class="btn btn--ultra login-submit">✓ Accept &amp; join Northwind Eng</button>
+            <div class="login-foot-line">By accepting you agree to the workspace <a href="#">usage policy</a> · or <a href="#">decline</a></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- footer credit strip -->
+  <footer class="login-footer">
+    <div class="ms">
+      <span>editor<b style="color:var(--ink-1)">zero</b> · AGPL-3.0</span>
+      <a href="#">Docs</a>
+      <a href="#">API reference</a>
+      <a href="#">Self-host guide</a>
+    </div>
+    <div class="rhs">
+      <span class="dot dot--agent" aria-hidden="true"></span>
+      <span>Agents authenticate via token / key — not this form</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

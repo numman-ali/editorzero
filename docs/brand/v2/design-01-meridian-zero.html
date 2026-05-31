@@ -1,0 +1,1249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>editorzero — MERIDIAN ZERO</title>
+
+<!-- Open-source fonts: Space Grotesk (OFL), Archivo (OFL), JetBrains Mono (OFL) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+<style>
+/* ============================================================
+   MERIDIAN ZERO — cold-swiss design system for editorzero
+   Graphite / steel / paper-white. One cold accent: ULTRAMARINE.
+   Agents are a SECOND cold signal: ELECTRIC CYAN.
+   Everything is a token. Light mode is canonical.
+   ============================================================ */
+:root{
+  /* —— neutrals: cold, no warmth in any channel —— */
+  --paper:        #f4f6f8;   /* paper-white, faint blue-grey */
+  --surface:      #ffffff;
+  --surface-2:    #eef1f4;
+  --surface-sunk: #e7ebf0;
+  --ink:          #0b0e14;   /* graphite near-black, blue-cold */
+  --ink-1:        #2a323d;
+  --ink-2:        #4d5867;   /* steel */
+  --ink-3:        #79859a;
+  --steel:        #6b7785;
+  --steel-2:      #97a2b0;
+  --hair:         #d4dae1;   /* hairline rule */
+  --hair-strong:  #aeb8c4;
+  --grid-line:    #e1e6eb;   /* visible grid field */
+
+  /* —— the single saturated cold accent —— */
+  --ultra:        #1f3cff;   /* ULTRAMARINE / cobalt */
+  --ultra-ink:    #0a1ea8;   /* AA text on light */
+  --ultra-wash:   #e6eaff;
+  --ultra-edge:   #b9c4ff;
+
+  /* —— agents: a distinct COLD second signal (not warm) —— */
+  --agent:        #00b6c4;   /* electric cyan-teal */
+  --agent-ink:    #02646d;   /* AA text on light */
+  --agent-wash:   #d6f6f8;
+  --agent-edge:   #8fe3ea;
+
+  /* —— functional —— */
+  --ok:           #0d8a4f;
+  --warn-ink:     #8a5a00;
+  --warn-wash:    #fbeecb;
+
+  /* —— type —— */
+  --display: "Space Grotesk", system-ui, sans-serif;
+  --text:    "Archivo", system-ui, sans-serif;
+  --mono:    "JetBrains Mono", ui-monospace, monospace;
+
+  /* —— metrics —— */
+  --u: 8px;                  /* base unit */
+  --rule: 1px;
+  --rule-2: 1.5px;
+  --maxw: 1240px;
+  --radius: 0px;             /* cold swiss = no rounding anywhere structural */
+  --radius-chip: 1px;
+}
+
+*{ box-sizing:border-box; }
+html{ -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--text);
+  font-size:14px;
+  line-height:1.5;
+  letter-spacing:-0.005em;
+}
+h1,h2,h3,h4{ margin:0; font-family:var(--display); font-weight:600; letter-spacing:-0.02em; }
+a{ color:inherit; text-decoration:none; }
+::selection{ background:var(--ultra); color:#fff; }
+
+/* ——— shared atoms ——————————————————————————————————— */
+.mono{ font-family:var(--mono); font-variant-numeric:tabular-nums; }
+.tnum{ font-variant-numeric:tabular-nums; }
+.kicker{
+  font-family:var(--mono); font-size:10.5px; font-weight:500;
+  letter-spacing:0.16em; text-transform:uppercase; color:var(--steel);
+}
+.kicker--ultra{ color:var(--ultra-ink); }
+.ord{ /* ordinal marker, the "zero" counting motif */
+  font-family:var(--mono); font-size:10.5px; font-weight:500;
+  color:var(--steel-2); letter-spacing:0.04em;
+}
+.hr{ height:var(--rule); background:var(--hair); border:0; }
+
+/* crosshair "zero / origin" mark — repeated brand device */
+.cross{ position:relative; display:inline-block; width:16px; height:16px; flex:0 0 16px; }
+.cross::before,.cross::after{ content:""; position:absolute; background:currentColor; }
+.cross::before{ left:50%; top:0; width:var(--rule); height:100%; transform:translateX(-50%); }
+.cross::after{ top:50%; left:0; height:var(--rule); width:100%; transform:translateY(-50%); }
+.cross-ring{ position:absolute; inset:3px; border:var(--rule) solid currentColor; border-radius:50%; }
+
+/* the editorzero logotype lockup */
+.logo{ display:flex; align-items:center; gap:9px; color:var(--ink); }
+.logo .mark{ position:relative; width:22px; height:22px; color:var(--ultra); }
+.logo .mark .cross-ring{ inset:4px; }
+.logo .cross{ width:22px; height:22px; }
+.logo .word{ font-family:var(--display); font-weight:700; font-size:15px; letter-spacing:-0.03em; }
+.logo .word b{ color:var(--ultra-ink); font-weight:700; }
+.logo .word .zero{ display:inline-block; }
+
+/* chips / badges ——————————————————————————————————— */
+.chip{
+  display:inline-flex; align-items:center; gap:5px;
+  font-family:var(--mono); font-size:10.5px; font-weight:500; letter-spacing:0.04em;
+  padding:2px 7px; border:var(--rule) solid var(--hair-strong);
+  color:var(--ink-1); background:var(--surface); text-transform:uppercase;
+  border-radius:var(--radius-chip);
+}
+.chip--ultra{ color:var(--ultra-ink); border-color:var(--ultra-edge); background:var(--ultra-wash); }
+.chip--agent{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+.chip--ghost{ color:var(--steel); }
+.dot{ width:6px; height:6px; border-radius:50%; background:var(--steel); flex:0 0 6px; }
+.dot--ok{ background:var(--ok); }
+.dot--ultra{ background:var(--ultra); }
+.dot--agent{ background:var(--agent); box-shadow:0 0 0 2px var(--agent-wash); }
+.live{ animation:pulse 1.8s ease-in-out infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.35} }
+
+/* avatars: humans = square cobalt monogram; agents = notched cyan square */
+.av{
+  width:24px; height:24px; flex:0 0 24px; display:grid; place-items:center;
+  font-family:var(--mono); font-size:10px; font-weight:700; color:#fff;
+  background:var(--ink-1); letter-spacing:0;
+}
+.av--u{ background:var(--ultra); }
+.av--u2{ background:#3a52ff; }
+.av--u3{ background:var(--ink-1); }
+.av--agent{
+  background:var(--agent); color:#03363b;
+  clip-path:polygon(22% 0,100% 0,100% 78%,78% 100%,0 100%,0 22%); /* notched = non-human */
+}
+
+/* buttons ——————————————————————————————————————— */
+.btn{
+  display:inline-flex; align-items:center; gap:7px; cursor:pointer;
+  font-family:var(--mono); font-size:11px; font-weight:500; letter-spacing:0.06em; text-transform:uppercase;
+  padding:8px 13px; border:var(--rule) solid var(--ink); background:var(--surface); color:var(--ink);
+  border-radius:var(--radius); transition:background .12s, color .12s, transform .04s;
+}
+.btn:active{ transform:translateY(1px); }
+.btn--primary{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
+.btn--primary:hover{ background:var(--ultra-ink); border-color:var(--ultra-ink); }
+.btn--ultra{ background:var(--ultra); color:#fff; border-color:var(--ultra); }
+.btn--ultra:hover{ background:var(--ultra-ink); }
+.btn--ghost{ border-color:var(--hair-strong); color:var(--ink-1); }
+.btn--ghost:hover{ border-color:var(--ink); }
+.btn--sm{ padding:5px 9px; font-size:10px; }
+
+/* ============================================================
+   APP CHROME — a strict 3-zone frame, grid made visible
+   ============================================================ */
+.viewport{ max-width:var(--maxw); margin:0 auto; padding:28px 24px 64px; }
+
+.screen{
+  background:var(--surface);
+  border:var(--rule) solid var(--hair-strong);
+  margin-bottom:30px;
+  position:relative;
+}
+/* screen header band — coordinate label, like an engineering drawing */
+.screen-tab{
+  display:flex; align-items:stretch; justify-content:space-between;
+  border-bottom:var(--rule) solid var(--ink);
+  background:var(--paper);
+}
+.screen-tab .id{
+  display:flex; align-items:center; gap:12px; padding:11px 16px;
+  border-right:var(--rule) solid var(--hair-strong);
+}
+.screen-tab .id .big{ font-family:var(--display); font-weight:700; font-size:13px; letter-spacing:-0.01em; color:var(--ink); }
+.screen-tab .meta{ display:flex; align-items:center; gap:0; }
+.screen-tab .meta span{
+  padding:11px 16px; font-family:var(--mono); font-size:10.5px; color:var(--steel);
+  border-left:var(--rule) solid var(--hair); letter-spacing:0.06em;
+}
+
+/* —— the product window (chrome) —— */
+.win{ display:grid; grid-template-columns:248px 1fr; min-height:560px; }
+.win--editor{ grid-template-columns:248px 1fr 268px; }
+.win--full{ grid-template-columns:1fr; }
+
+/* sidebar */
+.side{ border-right:var(--rule) solid var(--hair-strong); background:var(--paper); display:flex; flex-direction:column; }
+.side .top{ padding:16px 16px 14px; border-bottom:var(--rule) solid var(--hair); }
+.side .ws{
+  display:flex; align-items:center; gap:9px; padding:8px 9px; border:var(--rule) solid var(--hair-strong);
+  background:var(--surface); margin-top:12px; cursor:pointer;
+}
+.side .ws .av{ width:20px; height:20px; flex:0 0 20px; }
+.side .ws .nm{ font-weight:600; font-size:12.5px; letter-spacing:-0.01em; }
+.side .ws .sub{ font-family:var(--mono); font-size:9.5px; color:var(--steel); letter-spacing:0.05em; }
+.side .ws .car{ margin-left:auto; color:var(--steel); font-family:var(--mono); font-size:11px; }
+
+.nav{ padding:10px 8px; display:flex; flex-direction:column; gap:1px; }
+.nav a{
+  display:flex; align-items:center; gap:10px; padding:7px 10px; color:var(--ink-2);
+  font-size:12.5px; font-weight:500; position:relative;
+}
+.nav a .ic{ width:14px; height:14px; flex:0 0 14px; color:var(--steel-2); }
+.nav a .ct{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--steel-2); }
+.nav a:hover{ color:var(--ink); background:var(--surface); }
+.nav a.on{ color:var(--ink); background:var(--surface); }
+.nav a.on::before{ content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; background:var(--ultra); }
+.nav a.on .ic{ color:var(--ultra); }
+
+.nav-h{ padding:14px 18px 6px; }
+
+/* collections tree */
+.tree{ padding:6px 8px 14px; font-size:12.5px; }
+.tree .row{ display:flex; align-items:center; gap:8px; padding:5px 10px; color:var(--ink-2); cursor:pointer; position:relative; }
+.tree .row:hover{ background:var(--surface); color:var(--ink); }
+.tree .row.on{ background:var(--surface); color:var(--ink); }
+.tree .row.on::before{ content:""; position:absolute; left:0; top:4px; bottom:4px; width:2px; background:var(--ultra); }
+.tree .tw{ font-family:var(--mono); color:var(--steel-2); font-size:10px; width:9px; }
+.tree .ic{ width:13px; height:13px; flex:0 0 13px; color:var(--steel); }
+.tree .ct{ margin-left:auto; font-family:var(--mono); font-size:9.5px; color:var(--steel-2); }
+.tree .ind{ padding-left:26px; }
+.tree .ind2{ padding-left:42px; }
+.tree .ind .ic, .tree .ind2 .ic{ color:var(--steel-2); }
+
+.side .foot{ margin-top:auto; padding:12px 14px; border-top:var(--rule) solid var(--hair); display:flex; align-items:center; gap:9px; }
+.side .foot .av{ width:22px; height:22px; flex:0 0 22px; }
+.side .foot .nm{ font-size:12px; font-weight:600; }
+.side .foot .rl{ font-family:var(--mono); font-size:9px; color:var(--steel); letter-spacing:0.06em; }
+
+/* main column */
+.main{ background:var(--surface); min-width:0; display:flex; flex-direction:column; }
+.bar{
+  display:flex; align-items:center; gap:14px; padding:13px 22px;
+  border-bottom:var(--rule) solid var(--hair); min-height:54px;
+}
+.bar .crumb{ font-family:var(--mono); font-size:11px; color:var(--steel); letter-spacing:0.04em; display:flex; align-items:center; gap:8px; }
+.bar .crumb b{ color:var(--ink); font-weight:500; }
+.bar .crumb .sep{ color:var(--steel-2); }
+.bar .search{
+  margin-left:auto; display:flex; align-items:center; gap:8px; width:240px;
+  border:var(--rule) solid var(--hair-strong); padding:6px 10px; background:var(--paper); color:var(--steel);
+  font-family:var(--mono); font-size:11px;
+}
+.bar .search .k{ margin-left:auto; border:var(--rule) solid var(--hair-strong); padding:0 5px; font-size:9px; color:var(--steel-2); }
+
+.body{ padding:22px; }
+
+/* page title block, drawing-style */
+.page-h{ display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:20px; }
+.page-h .lhs{ display:flex; flex-direction:column; gap:9px; }
+.page-h h1{ font-size:30px; line-height:1; letter-spacing:-0.035em; }
+.page-h h1 .z{ color:var(--ultra-ink); }
+.page-h .sub{ font-family:var(--mono); font-size:11px; color:var(--steel); letter-spacing:0.04em; display:flex; gap:14px; }
+
+/* ============================================================
+   (a) DASHBOARD
+   ============================================================ */
+.statgrid{ display:grid; grid-template-columns:repeat(4,1fr); border:var(--rule) solid var(--hair-strong); margin-bottom:22px; }
+.stat{ padding:15px 16px 16px; border-right:var(--rule) solid var(--hair); position:relative; }
+.stat:last-child{ border-right:0; }
+.stat .k{ font-family:var(--mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel); }
+.stat .v{ font-family:var(--display); font-weight:700; font-size:30px; line-height:1.05; letter-spacing:-0.03em; margin-top:8px; }
+.stat .v .u{ font-size:13px; color:var(--steel-2); font-weight:500; margin-left:3px; }
+.stat .d{ margin-top:7px; font-family:var(--mono); font-size:10px; color:var(--steel); display:flex; align-items:center; gap:6px; }
+.stat .d .up{ color:var(--ok); }
+.stat .ix{ position:absolute; top:11px; right:13px; }
+.stat--ultra .v{ color:var(--ultra-ink); }
+
+/* spark bar (cold, monochrome + cobalt tip) */
+.spark{ display:flex; align-items:flex-end; gap:2px; height:22px; margin-top:10px; }
+.spark i{ flex:1; background:var(--surface-sunk); }
+.spark i.h{ background:var(--ink-1); }
+.spark i.t{ background:var(--ultra); }
+
+.cols2{ display:grid; grid-template-columns:1.55fr 1fr; gap:22px; }
+
+/* a "block" panel with engineering header */
+.panel{ border:var(--rule) solid var(--hair-strong); background:var(--surface); }
+.panel > .ph{
+  display:flex; align-items:center; gap:10px; padding:11px 15px;
+  border-bottom:var(--rule) solid var(--hair); background:var(--paper);
+}
+.panel > .ph .t{ font-family:var(--display); font-weight:600; font-size:13px; letter-spacing:-0.01em; }
+.panel > .ph .r{ margin-left:auto; display:flex; align-items:center; gap:10px; }
+.panel > .ph .link{ font-family:var(--mono); font-size:10px; color:var(--ultra-ink); letter-spacing:0.05em; text-transform:uppercase; cursor:pointer; }
+.panel > .ph .link:hover{ text-decoration:underline; }
+
+/* tabular doc rows (recent) */
+.tt{ width:100%; border-collapse:collapse; }
+.tt th{
+  text-align:left; font-family:var(--mono); font-weight:500; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase;
+  color:var(--steel); padding:9px 15px; border-bottom:var(--rule) solid var(--hair); background:var(--surface);
+}
+.tt th.num, .tt td.num{ text-align:right; }
+.tt td{ padding:11px 15px; border-bottom:var(--rule) solid var(--hair); vertical-align:middle; font-size:12.5px; }
+.tt tr:last-child td{ border-bottom:0; }
+.tt tr:hover td{ background:var(--paper); }
+.tt .doc{ display:flex; align-items:center; gap:10px; }
+.tt .doc .ord{ width:20px; }
+.tt .doc .nm{ font-weight:600; color:var(--ink); letter-spacing:-0.01em; }
+.tt .doc .pth{ font-family:var(--mono); font-size:9.5px; color:var(--steel-2); margin-top:1px; }
+.tt .who{ display:flex; align-items:center; gap:7px; }
+.tt .who .lbl{ font-family:var(--mono); font-size:10.5px; color:var(--ink-2); }
+.tt .when{ font-family:var(--mono); font-size:10.5px; color:var(--steel); }
+.editors-stack{ display:flex; align-items:center; }
+.editors-stack .av{ margin-left:-6px; border:var(--rule-2) solid var(--surface); }
+.editors-stack .av:first-child{ margin-left:0; }
+
+/* activity feed (cold ledger) */
+.feed{ display:flex; flex-direction:column; }
+.fe{ display:flex; gap:11px; padding:11px 15px; border-bottom:var(--rule) solid var(--hair); }
+.fe:last-child{ border-bottom:0; }
+.fe .t{ font-family:var(--mono); font-size:9.5px; color:var(--steel-2); width:38px; flex:0 0 38px; padding-top:2px; letter-spacing:0.02em; }
+.fe .ax{ font-size:12px; color:var(--ink-1); line-height:1.45; }
+.fe .ax b{ font-weight:600; color:var(--ink); }
+.fe .ax .ev{ font-family:var(--mono); font-size:10px; color:var(--ultra-ink); }
+.fe .ax .ev.ag{ color:var(--agent-ink); }
+.fe .rail{ width:2px; background:var(--hair); flex:0 0 2px; }
+.fe .rail.ag{ background:var(--agent); }
+.fe .rail.u{ background:var(--ultra); }
+
+/* spaces grid */
+.spaces{ display:grid; grid-template-columns:repeat(3,1fr); gap:0; border:var(--rule) solid var(--hair-strong); border-bottom:0; }
+.sp{ padding:15px; border-right:var(--rule) solid var(--hair); border-bottom:var(--rule) solid var(--hair); cursor:pointer; position:relative; }
+.sp:nth-child(3n){ border-right:0; }
+.sp:hover{ background:var(--paper); }
+.sp .nm{ font-family:var(--display); font-weight:600; font-size:14px; letter-spacing:-0.02em; margin-top:8px; }
+.sp .ds{ font-size:11px; color:var(--steel); margin-top:4px; line-height:1.4; }
+.sp .ft{ display:flex; align-items:center; gap:10px; margin-top:13px; font-family:var(--mono); font-size:9.5px; color:var(--steel); }
+.sp .ft .av{ width:18px; height:18px; flex:0 0 18px; }
+.sp .bar-tip{ position:absolute; left:0; bottom:0; height:2px; width:0; background:var(--ultra); transition:width .25s; }
+.sp:hover .bar-tip{ width:100%; }
+
+/* ============================================================
+   (b) DOCUMENTS LIST  — reuses .tt + tree in sidebar
+   ============================================================ */
+.toolbar2{ display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+.toolbar2 .seg{ display:flex; border:var(--rule) solid var(--hair-strong); }
+.toolbar2 .seg button{
+  font-family:var(--mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; padding:6px 11px;
+  background:var(--surface); color:var(--steel); border:0; border-right:var(--rule) solid var(--hair); cursor:pointer;
+}
+.toolbar2 .seg button:last-child{ border-right:0; }
+.toolbar2 .seg button.on{ background:var(--ink); color:var(--paper); }
+.toolbar2 .filt{ font-family:var(--mono); font-size:10px; color:var(--steel); margin-left:auto; display:flex; gap:7px; align-items:center; }
+
+.status-tag{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.06em; text-transform:uppercase; padding:2px 6px; border:var(--rule) solid; border-radius:var(--radius-chip); }
+.st-pub{ color:var(--ok); border-color:#a7d9bf; background:#e4f4eb; }
+.st-draft{ color:var(--steel); border-color:var(--hair-strong); background:var(--surface); }
+.st-rev{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+
+/* ============================================================
+   (c) READING VIEW
+   ============================================================ */
+.reader{ display:grid; grid-template-columns:1fr; max-width:760px; margin:0 auto; padding:6px 0 30px; }
+.read-meta{ display:flex; flex-wrap:wrap; gap:10px 22px; align-items:center; padding-bottom:18px; margin-bottom:26px; border-bottom:var(--rule) solid var(--ink); }
+.read-meta .mi{ display:flex; flex-direction:column; gap:3px; }
+.read-meta .mi .k{ font-family:var(--mono); font-size:9px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel-2); }
+.read-meta .mi .v{ font-family:var(--mono); font-size:11px; color:var(--ink-1); display:flex; align-items:center; gap:6px; }
+.read-h1{ font-size:40px; line-height:1.02; letter-spacing:-0.04em; margin:6px 0 14px; }
+.read-h1 .z{ color:var(--ultra-ink); }
+.read-lede{ font-size:16px; line-height:1.6; color:var(--ink-1); max-width:62ch; }
+.doc-body{ font-size:14.5px; line-height:1.72; color:var(--ink-1); }
+.doc-body h2{ font-family:var(--display); font-size:18px; letter-spacing:-0.02em; margin:30px 0 10px; padding-top:18px; border-top:var(--rule) solid var(--hair); display:flex; align-items:baseline; gap:12px; }
+.doc-body p{ margin:0 0 14px; max-width:66ch; }
+.doc-body code{ font-family:var(--mono); font-size:12px; background:var(--surface-2); padding:1px 5px; border:var(--rule) solid var(--hair); }
+.doc-body ul{ margin:0 0 14px; padding-left:0; list-style:none; }
+.doc-body ul li{ position:relative; padding-left:24px; margin-bottom:7px; max-width:64ch; }
+.doc-body ul li::before{ content:"—"; position:absolute; left:0; color:var(--ultra); font-family:var(--mono); }
+.callout{ border:var(--rule) solid var(--ultra-edge); background:var(--ultra-wash); padding:14px 16px; margin:16px 0; display:flex; gap:12px; }
+.callout .b{ width:2px; background:var(--ultra); flex:0 0 2px; }
+.callout .tx{ font-size:13px; color:var(--ink-1); }
+.callout .tx b{ color:var(--ultra-ink); }
+.codeblock{ border:var(--rule) solid var(--hair-strong); margin:16px 0; }
+.codeblock .ch{ display:flex; align-items:center; justify-content:space-between; padding:7px 12px; border-bottom:var(--rule) solid var(--hair); background:var(--paper); font-family:var(--mono); font-size:10px; color:var(--steel); letter-spacing:0.05em; }
+.codeblock pre{ margin:0; padding:13px 14px; font-family:var(--mono); font-size:12px; line-height:1.65; color:var(--ink-1); overflow:auto; background:var(--surface); }
+.codeblock .cm{ color:var(--steel-2); }
+.codeblock .kw{ color:var(--ultra-ink); }
+.codeblock .st{ color:var(--ok); }
+
+/* table of contents rail (reader, on right) */
+.win--reader{ grid-template-columns:248px 1fr 230px; }
+.toc{ border-left:var(--rule) solid var(--hair-strong); background:var(--paper); padding:18px 16px; }
+.toc .h{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel); margin-bottom:12px; }
+.toc a{ display:flex; gap:9px; padding:5px 0; font-size:11.5px; color:var(--ink-2); border-bottom:var(--rule) solid var(--hair); }
+.toc a.on{ color:var(--ultra-ink); font-weight:600; }
+.toc a:hover{ color:var(--ink); }
+.toc .ver{ margin-top:18px; padding-top:14px; border-top:var(--rule) solid var(--hair); }
+.toc .ver .vrow{ display:flex; align-items:center; gap:8px; padding:5px 0; font-family:var(--mono); font-size:10px; color:var(--steel); }
+
+/* ============================================================
+   (d) EDITOR — the signature screen
+   ============================================================ */
+.edcanvas{ position:relative; padding:8px 0 30px; max-width:720px; margin:0 auto; }
+
+/* live presence bar at top of editor */
+.presence{ display:flex; align-items:center; gap:9px; padding:9px 0 15px; margin-bottom:8px; border-bottom:var(--rule) solid var(--hair); }
+.presence .lbl{ font-family:var(--mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; color:var(--steel); }
+.pchip{ display:inline-flex; align-items:center; gap:6px; padding:3px 8px 3px 4px; border:var(--rule) solid var(--hair-strong); font-family:var(--mono); font-size:10px; }
+.pchip .av{ width:18px; height:18px; flex:0 0 18px; }
+.pchip.u{ border-color:var(--ultra-edge); }
+.pchip.ag{ border-color:var(--agent-edge); background:var(--agent-wash); color:var(--agent-ink); }
+.presence .save{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--steel); display:flex; align-items:center; gap:7px; }
+
+/* slash / format toolbar */
+.fmtbar{
+  display:flex; align-items:center; gap:2px; padding:5px; margin-bottom:14px;
+  border:var(--rule) solid var(--ink); background:var(--surface); width:fit-content;
+  box-shadow:3px 3px 0 var(--surface-sunk);
+}
+.fmtbar .grp{ display:flex; gap:2px; padding:0 4px; border-right:var(--rule) solid var(--hair); }
+.fmtbar .grp:last-child{ border-right:0; }
+.fb{ min-width:28px; height:28px; padding:0 7px; display:grid; place-items:center; background:transparent; border:0; cursor:pointer;
+  font-family:var(--mono); font-size:12px; color:var(--ink-1); }
+.fb:hover{ background:var(--surface-2); }
+.fb.on{ background:var(--ink); color:var(--paper); }
+.fb b{ font-weight:700; } .fb i{ font-style:italic; }
+.fb.ai{ color:var(--agent-ink); font-size:10px; letter-spacing:0.04em; padding:0 9px; display:flex; gap:5px; align-items:center; }
+.fb.ai:hover{ background:var(--agent-wash); }
+
+/* editor blocks with hover handles */
+.eblock{ position:relative; padding:3px 0; }
+.eblock .handle{
+  position:absolute; left:-44px; top:5px; display:flex; gap:2px; opacity:0; transition:opacity .12s;
+}
+.eblock:hover .handle{ opacity:1; }
+.eblock .handle .h{
+  width:18px; height:18px; display:grid; place-items:center; color:var(--steel-2);
+  font-family:var(--mono); font-size:12px; cursor:grab; border:var(--rule) solid transparent;
+}
+.eblock .handle .h:hover{ color:var(--ink); border-color:var(--hair-strong); background:var(--surface); }
+.ed-h1{ font-family:var(--display); font-weight:700; font-size:34px; letter-spacing:-0.035em; line-height:1.05; color:var(--ink); }
+.ed-h1 .z{ color:var(--ultra-ink); }
+.ed-p{ font-size:14.5px; line-height:1.72; color:var(--ink-1); }
+.ed-h2{ font-family:var(--display); font-weight:600; font-size:18px; letter-spacing:-0.02em; color:var(--ink); }
+
+/* HUMAN caret + selection */
+.caret-u{ position:relative; }
+.caret-u::after{ content:""; display:inline-block; width:2px; height:1.05em; background:var(--ultra); margin:0 0 -3px 1px; animation:blink 1.1s steps(1) infinite; }
+@keyframes blink{ 0%,49%{opacity:1} 50%,100%{opacity:0} }
+.sel-u{ background:rgba(31,60,255,.16); box-shadow:0 0 0 1px rgba(31,60,255,.25); padding:0 1px; }
+
+/* AGENT live caret with floating flag — THE signature */
+.agentline{ position:relative; }
+.agent-caret{ position:relative; display:inline-block; width:2px; height:1.15em; background:var(--agent); vertical-align:-2px; margin:0 1px; }
+.agent-caret .flag{
+  position:absolute; left:0; top:-22px; white-space:nowrap;
+  background:var(--agent); color:#02363b; font-family:var(--mono); font-size:9.5px; font-weight:700;
+  letter-spacing:0.04em; padding:2px 7px 2px 5px; display:flex; align-items:center; gap:5px;
+  border-radius:var(--radius-chip);
+}
+.agent-caret .flag::after{ content:""; position:absolute; left:0; bottom:-3px; width:3px; height:3px; background:var(--agent); }
+.agent-caret .flag .pulse{ width:5px; height:5px; border-radius:50%; background:#02363b; }
+.agent-typing{ background:var(--agent-wash); box-shadow:inset 0 -2px 0 var(--agent); padding:0 1px; }
+
+/* tracked AGENT suggestion (insertion / deletion) inline */
+.sugg-ins{ color:var(--agent-ink); background:var(--agent-wash); box-shadow:inset 0 -2px 0 var(--agent); text-decoration:none; padding:0 1px; }
+.sugg-del{ color:var(--steel); text-decoration:line-through; text-decoration-color:var(--agent); text-decoration-thickness:1.5px; }
+
+/* the suggestion review card pinned in the margin */
+.sugg-card{
+  position:absolute; right:-256px; top:0; width:236px;
+  border:var(--rule-2) solid var(--agent); background:var(--surface);
+  box-shadow:4px 4px 0 var(--agent-wash);
+}
+.sugg-card .sh{ display:flex; align-items:center; gap:8px; padding:9px 11px; border-bottom:var(--rule) solid var(--agent-edge); background:var(--agent-wash); }
+.sugg-card .sh .av{ width:18px; height:18px; flex:0 0 18px; }
+.sugg-card .sh .nm{ font-family:var(--mono); font-size:10px; font-weight:700; color:var(--agent-ink); }
+.sugg-card .sh .ord{ margin-left:auto; color:var(--agent-ink); }
+.sugg-card .sc{ padding:11px; }
+.sugg-card .sc .qt{ font-size:11.5px; line-height:1.5; color:var(--ink-1); }
+.sugg-card .sc .qt .add{ color:var(--agent-ink); background:var(--agent-wash); padding:0 2px; }
+.sugg-card .sc .qt .rm{ color:var(--steel); text-decoration:line-through; text-decoration-color:var(--agent); }
+.sugg-card .sc .why{ margin-top:9px; font-size:10.5px; color:var(--steel); line-height:1.5; border-top:var(--rule) solid var(--hair); padding-top:9px; }
+.sugg-card .sf{ display:flex; gap:0; border-top:var(--rule) solid var(--agent-edge); }
+.sugg-card .sf button{ flex:1; padding:8px; font-family:var(--mono); font-size:10px; letter-spacing:0.05em; text-transform:uppercase; cursor:pointer; border:0; background:var(--surface); }
+.sugg-card .sf button.acc{ background:var(--agent); color:#02363b; font-weight:700; }
+.sugg-card .sf button.rej{ color:var(--steel); border-left:var(--rule) solid var(--agent-edge); }
+.sugg-card .sf button.rej:hover{ color:var(--ink); }
+
+/* slash menu popover */
+.slash{ position:absolute; left:0; width:268px; border:var(--rule) solid var(--ink); background:var(--surface); box-shadow:4px 4px 0 var(--surface-sunk); z-index:5; }
+.slash .sht{ padding:7px 11px; border-bottom:var(--rule) solid var(--hair); font-family:var(--mono); font-size:9.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel); display:flex; }
+.slash .si{ display:flex; align-items:center; gap:10px; padding:7px 11px; font-size:12px; color:var(--ink-1); cursor:pointer; }
+.slash .si .ic{ width:18px; height:18px; flex:0 0 18px; display:grid; place-items:center; border:var(--rule) solid var(--hair-strong); font-family:var(--mono); font-size:10px; color:var(--steel); }
+.slash .si .key{ margin-left:auto; font-family:var(--mono); font-size:9px; color:var(--steel-2); }
+.slash .si:hover{ background:var(--paper); }
+.slash .si.on{ background:var(--ink); color:var(--paper); }
+.slash .si.on .ic{ border-color:var(--paper); color:var(--paper); }
+.slash .si.ai{ color:var(--agent-ink); }
+.slash .si.ai .ic{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+
+/* right context rail for editor */
+.erail{ border-left:var(--rule) solid var(--hair-strong); background:var(--paper); display:flex; flex-direction:column; }
+.erail .es{ padding:14px 15px; border-bottom:var(--rule) solid var(--hair); }
+.erail .es .h{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel); margin-bottom:11px; display:flex; align-items:center; }
+.erail .es .h .ord{ margin-left:auto; }
+.kv{ display:flex; justify-content:space-between; gap:10px; padding:5px 0; font-size:11.5px; }
+.kv .k{ font-family:var(--mono); font-size:10px; color:var(--steel); }
+.kv .v{ color:var(--ink-1); text-align:right; }
+.kv .v.mono{ font-family:var(--mono); font-size:10.5px; }
+
+/* changes ledger in rail */
+.chg{ display:flex; gap:9px; padding:8px 0; border-bottom:var(--rule) solid var(--hair); }
+.chg:last-child{ border-bottom:0; }
+.chg .rail{ width:2px; flex:0 0 2px; }
+.chg .rail.ag{ background:var(--agent); }
+.chg .rail.u{ background:var(--ultra); }
+.chg .bd .ln{ font-size:11px; color:var(--ink-1); line-height:1.4; }
+.chg .bd .ln b{ font-weight:600; }
+.chg .bd .mt{ font-family:var(--mono); font-size:9px; color:var(--steel-2); margin-top:2px; letter-spacing:0.03em; }
+.chg .st{ font-family:var(--mono); font-size:8.5px; letter-spacing:0.06em; text-transform:uppercase; padding:1px 5px; border:var(--rule) solid; align-self:flex-start; }
+.chg .st.pend{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+.chg .st.acc{ color:var(--ok); border-color:#a7d9bf; }
+
+/* ============================================================
+   (e) ADMIN / MEMBERS
+   ============================================================ */
+.adm-tabs{ display:flex; gap:0; border:var(--rule) solid var(--hair-strong); border-bottom:0; }
+.adm-tabs button{ font-family:var(--mono); font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase; padding:10px 16px; background:var(--paper); border:0; border-right:var(--rule) solid var(--hair); color:var(--steel); cursor:pointer; position:relative; }
+.adm-tabs button:last-child{ border-right:0; margin-left:auto; }
+.adm-tabs button.on{ background:var(--surface); color:var(--ink); }
+.adm-tabs button.on::after{ content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--ultra); }
+
+.mtbl{ width:100%; border-collapse:collapse; border:var(--rule) solid var(--hair-strong); }
+.mtbl th{ text-align:left; font-family:var(--mono); font-weight:500; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel); padding:10px 15px; border-bottom:var(--rule) solid var(--ink); background:var(--paper); }
+.mtbl th.r, .mtbl td.r{ text-align:right; }
+.mtbl td{ padding:12px 15px; border-bottom:var(--rule) solid var(--hair); font-size:12.5px; vertical-align:middle; }
+.mtbl tr:last-child td{ border-bottom:0; }
+.mtbl tr:hover td{ background:var(--paper); }
+.mtbl .person{ display:flex; align-items:center; gap:11px; }
+.mtbl .person .nm{ font-weight:600; }
+.mtbl .person .em{ font-family:var(--mono); font-size:9.5px; color:var(--steel); margin-top:1px; }
+.kind{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.06em; text-transform:uppercase; padding:2px 6px; border:var(--rule) solid; border-radius:var(--radius-chip); }
+.kind-h{ color:var(--ultra-ink); border-color:var(--ultra-edge); background:var(--ultra-wash); }
+.kind-a{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+.role-sel{ display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:10.5px; color:var(--ink-1); border:var(--rule) solid var(--hair-strong); padding:4px 9px; background:var(--surface); cursor:pointer; }
+.role-sel .car{ color:var(--steel-2); }
+.scope-bar{ display:flex; gap:2px; margin-top:5px; }
+.scope-bar i{ height:3px; width:14px; background:var(--surface-sunk); }
+.scope-bar i.on{ background:var(--agent); }
+.scope-bar i.onu{ background:var(--ultra); }
+
+/* footer credit strip */
+.credit{ display:flex; align-items:center; justify-content:space-between; padding:16px 4px 0; font-family:var(--mono); font-size:10px; color:var(--steel-2); letter-spacing:0.05em; }
+.credit .ms{ display:flex; gap:18px; }
+
+/* responsive: collapse rails */
+@media (max-width:1120px){
+  .win, .win--editor, .win--reader{ grid-template-columns:1fr; }
+  .side, .toc, .erail{ display:none; }
+  .sugg-card{ position:static; width:auto; margin-top:14px; right:auto; box-shadow:none; }
+  .cols2{ grid-template-columns:1fr; }
+  .statgrid{ grid-template-columns:repeat(2,1fr); }
+}
+</style>
+</head>
+<body>
+<div class="viewport">
+
+  <!-- ============ MASTHEAD ============ -->
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:26px;padding-bottom:18px;border-bottom:var(--rule-2) solid var(--ink);">
+    <div style="display:flex;align-items:center;gap:18px;">
+      <div class="logo">
+        <span class="mark"><span class="cross"></span><span class="cross-ring"></span></span>
+        <span class="word">editor<b class="zero">zero</b></span>
+      </div>
+      <span class="hr" style="width:1px;height:34px;align-self:stretch;"></span>
+      <div>
+        <div class="kicker">Design System · MERIDIAN ZERO</div>
+        <div style="font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:-0.01em;margin-top:3px;">Cold-Swiss · Graphite / Steel / Ultramarine · Human + Agent as peer co-editors</div>
+      </div>
+    </div>
+    <div class="mono" style="font-size:10px;color:var(--steel);text-align:right;letter-spacing:0.06em;line-height:1.7;">
+      LAT 00.000 · LON 00.000<br>BUILD 0.1.0 · LIGHT MODE
+    </div>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- (a) DASHBOARD                                          -->
+  <!-- ===================================================== -->
+  <section class="screen">
+    <div class="screen-tab">
+      <div class="id"><span class="ord">SCR.A</span><span class="big">Dashboard / Home</span></div>
+      <div class="meta"><span>OVERVIEW</span><span>RECENT</span><span>SPACES</span></div>
+    </div>
+    <div class="win">
+      <!-- sidebar -->
+      <aside class="side">
+        <div class="top">
+          <div class="kicker">Workspace</div>
+          <div class="ws">
+            <span class="av av--u3">N</span>
+            <div style="min-width:0;">
+              <div class="nm">Northwind Eng</div>
+              <div class="sub">self-hosted · 6 spaces</div>
+            </div>
+            <span class="car">▾</span>
+          </div>
+        </div>
+        <nav class="nav">
+          <a class="on" href="#"><span class="ic">⊹</span> Overview</a>
+          <a href="#"><span class="ic">▤</span> All Documents <span class="ct">312</span></a>
+          <a href="#"><span class="ic">◫</span> Spaces <span class="ct">06</span></a>
+          <a href="#"><span class="ic">↻</span> Shared with me <span class="ct">24</span></a>
+          <a href="#"><span class="ic">⌦</span> Trash <span class="ct">07</span></a>
+        </nav>
+        <div class="nav-h kicker">Agents · live</div>
+        <nav class="nav">
+          <a href="#"><span class="dot dot--agent live" style="margin:0 3px"></span> archivist <span class="ct">editor</span></a>
+          <a href="#"><span class="dot dot--agent" style="margin:0 3px"></span> linter-bot <span class="ct">author</span></a>
+          <a href="#"><span class="dot" style="margin:0 3px"></span> summariser <span class="ct">r-only</span></a>
+        </nav>
+        <div class="foot">
+          <span class="av av--u">NA</span>
+          <div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div>
+        </div>
+      </aside>
+
+      <!-- main -->
+      <div class="main">
+        <div class="bar">
+          <div class="crumb"><span class="cross" style="width:13px;height:13px;color:var(--ultra)"></span> <b>Northwind Eng</b> <span class="sep">/</span> Overview</div>
+          <div class="search"><span>⌕</span> Search documents… <span class="k">⌘K</span></div>
+          <button class="btn btn--ultra btn--sm">+ New doc</button>
+        </div>
+        <div class="body">
+          <div class="page-h">
+            <div class="lhs">
+              <div class="kicker kicker--ultra">⊹ 2026 · WK22 · TUE</div>
+              <h1>Good morning, Nadia<span class="z">.</span></h1>
+              <div class="sub"><span>312 DOCUMENTS</span><span>·</span><span>6 SPACES</span><span>·</span><span>4 AGENTS ACTIVE</span></div>
+            </div>
+            <button class="btn btn--ghost">⤓ Export ledger</button>
+          </div>
+
+          <!-- stats -->
+          <div class="statgrid">
+            <div class="stat stat--ultra">
+              <div class="ix"><span class="cross" style="width:12px;height:12px;color:var(--ultra)"></span></div>
+              <div class="k">Documents</div>
+              <div class="v tnum">312</div>
+              <div class="d"><span class="up">▲ 18</span> this week</div>
+            </div>
+            <div class="stat">
+              <div class="k">Edits · 24h</div>
+              <div class="v tnum">1,204</div>
+              <div class="spark">
+                <i style="height:40%"></i><i style="height:55%"></i><i class="h" style="height:30%"></i><i style="height:70%"></i><i class="h" style="height:48%"></i><i style="height:85%"></i><i class="t" style="height:100%"></i>
+              </div>
+            </div>
+            <div class="stat">
+              <div class="k">Agent edits</div>
+              <div class="v tnum" style="color:var(--agent-ink)">487 <span class="u">/ 40%</span></div>
+              <div class="d"><span class="dot dot--agent" style="margin-right:2px"></span> 4 agents co-editing</div>
+            </div>
+            <div class="stat">
+              <div class="k">Published</div>
+              <div class="v tnum">58</div>
+              <div class="d"><span class="dot dot--ok" style="margin-right:2px"></span> 3 pending review</div>
+            </div>
+          </div>
+
+          <div class="cols2">
+            <!-- recent docs table -->
+            <div class="panel">
+              <div class="ph"><span class="ord">01</span><span class="t">Recently edited</span><div class="r"><span class="link">View all →</span></div></div>
+              <table class="tt">
+                <thead><tr><th>Document</th><th>Last editor</th><th class="num">Updated</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td><div class="doc"><span class="ord">01</span><div><div class="nm">Runtime topology &amp; co-hosting</div><div class="pth">platform / architecture</div></div></div></td>
+                    <td><div class="who"><span class="av av--agent">AR</span><span class="lbl">archivist</span><span class="chip chip--agent" style="padding:1px 5px">AI</span></div></td>
+                    <td class="num when">02m</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">02</span><div><div class="nm">Capability registry — SSOT</div><div class="pth">platform / specs</div></div></div></td>
+                    <td><div class="who"><span class="av av--u">NA</span><span class="lbl">Nadia A.</span></div></td>
+                    <td class="num when">14m</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">03</span><div><div class="nm">Agent scope tiers &amp; revocation</div><div class="pth">platform / security</div></div></div></td>
+                    <td><div class="who"><div class="editors-stack"><span class="av av--u2">JK</span><span class="av av--agent">LB</span></div><span class="lbl">2 editors</span></div></td>
+                    <td class="num when">1h</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">04</span><div><div class="nm">Onboarding — new engineers</div><div class="pth">handbook / people</div></div></div></td>
+                    <td><div class="who"><span class="av av--u3">TM</span><span class="lbl">Theo M.</span></div></td>
+                    <td class="num when">3h</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">05</span><div><div class="nm">Markdown fidelity tiers</div><div class="pth">platform / specs</div></div></div></td>
+                    <td><div class="who"><span class="av av--agent">SM</span><span class="lbl">summariser</span><span class="chip chip--agent" style="padding:1px 5px">AI</span></div></td>
+                    <td class="num when">5h</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- activity ledger -->
+            <div class="panel">
+              <div class="ph"><span class="ord">02</span><span class="t">Activity ledger</span><div class="r"><span class="chip chip--ghost">AUDIT · LIVE</span></div></div>
+              <div class="feed">
+                <div class="fe"><div class="rail ag"></div><div class="t">09:41</div><div class="ax"><b>archivist</b> proposed <span class="ev ag">doc.suggest</span> on <b>Runtime topology</b> — 1 insertion pending</div></div>
+                <div class="fe"><div class="rail u"></div><div class="t">09:38</div><div class="ax"><b>Nadia A.</b> ran <span class="ev">doc.publish</span> → <b>Capability registry</b></div></div>
+                <div class="fe"><div class="rail ag"></div><div class="t">09:30</div><div class="ax"><b>linter-bot</b> applied <span class="ev ag">doc.update</span> · 4 blocks normalised</div></div>
+                <div class="fe"><div class="rail u"></div><div class="t">09:12</div><div class="ax"><b>Jo K.</b> ran <span class="ev">collection.create</span> → <b>Security</b></div></div>
+                <div class="fe"><div class="rail"></div><div class="t">08:55</div><div class="ax"><b>Theo M.</b> ran <span class="ev">doc.restore</span> · recovered <b>RFC-014</b></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- spaces -->
+          <div style="margin-top:22px;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:13px;">
+              <span class="ord">03</span><h2 style="font-size:14px;">Spaces</h2>
+              <span class="hr" style="flex:1"></span>
+              <span class="kicker">6 TOTAL</span>
+            </div>
+            <div class="spaces">
+              <div class="sp"><div class="ord">SP·01</div><div class="nm">Platform</div><div class="ds">Architecture, specs, security &amp; the kernel.</div><div class="ft"><div class="editors-stack"><span class="av av--u">NA</span><span class="av av--agent">AR</span></div> 128 docs · 2 agents</div><div class="bar-tip"></div></div>
+              <div class="sp"><div class="ord">SP·02</div><div class="nm">Handbook</div><div class="ds">People, process, onboarding, rituals.</div><div class="ft"><div class="editors-stack"><span class="av av--u2">TM</span><span class="av av--u3">JK</span></div> 64 docs · public</div><div class="bar-tip"></div></div>
+              <div class="sp"><div class="ord">SP·03</div><div class="nm">Product</div><div class="ds">Briefs, decisions, release notes.</div><div class="ft"><div class="editors-stack"><span class="av av--u3">RP</span></div> 47 docs · 1 agent</div><div class="bar-tip"></div></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== -->
+  <!-- (b) DOCUMENTS LIST INSIDE A SPACE                      -->
+  <!-- ===================================================== -->
+  <section class="screen">
+    <div class="screen-tab">
+      <div class="id"><span class="ord">SCR.B</span><span class="big">Documents · Space</span></div>
+      <div class="meta"><span>COLLECTIONS</span><span>HUMAN + AGENT EDITORS</span><span>TABLE</span></div>
+    </div>
+    <div class="win">
+      <!-- sidebar with collections tree -->
+      <aside class="side">
+        <div class="top">
+          <div class="kicker">Space</div>
+          <div class="ws">
+            <span class="av av--u3" style="background:var(--ultra)">P</span>
+            <div style="min-width:0;"><div class="nm">Platform</div><div class="sub">128 docs · SP·01</div></div>
+            <span class="car">▾</span>
+          </div>
+        </div>
+        <div class="nav-h kicker">Collections</div>
+        <div class="tree">
+          <div class="row on"><span class="tw">▾</span><span class="ic">◫</span> Architecture <span class="ct">42</span></div>
+          <div class="row ind"><span class="ic">▤</span> Topology <span class="ct">11</span></div>
+          <div class="row ind"><span class="ic">▤</span> Data &amp; storage <span class="ct">18</span></div>
+          <div class="row ind"><span class="ic">▤</span> Sync &amp; CRDT <span class="ct">13</span></div>
+          <div class="row"><span class="tw">▾</span><span class="ic">◫</span> Specs <span class="ct">37</span></div>
+          <div class="row ind"><span class="ic">▤</span> Capabilities <span class="ct">24</span></div>
+          <div class="row ind"><span class="ic">▤</span> Markdown tiers <span class="ct">13</span></div>
+          <div class="row"><span class="tw">▸</span><span class="ic">◫</span> Security <span class="ct">29</span></div>
+          <div class="row"><span class="tw">▸</span><span class="ic">◫</span> Operations <span class="ct">20</span></div>
+        </div>
+        <div class="foot">
+          <span class="av av--u">NA</span>
+          <div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div>
+        </div>
+      </aside>
+
+      <!-- main -->
+      <div class="main">
+        <div class="bar">
+          <div class="crumb"><b>Platform</b> <span class="sep">/</span> <b>Architecture</b> <span class="sep">/</span> Topology</div>
+          <div class="search"><span>⌕</span> Filter in collection… <span class="k">/</span></div>
+          <button class="btn btn--ultra btn--sm">+ New doc</button>
+        </div>
+        <div class="body">
+          <div class="page-h" style="margin-bottom:16px;">
+            <div class="lhs">
+              <div class="kicker kicker--ultra">◫ COLLECTION · SP·01 / ARCHITECTURE</div>
+              <h1>Topology</h1>
+            </div>
+          </div>
+
+          <div class="toolbar2">
+            <div class="seg"><button class="on">Table</button><button>Board</button><button>Tree</button></div>
+            <div class="filt"><span class="chip chip--ghost">STATUS · ALL</span><span class="chip chip--ghost">EDITOR · ANY</span><span>SORT ↓ UPDATED</span></div>
+          </div>
+
+          <table class="tt" style="border:var(--rule) solid var(--hair-strong);">
+            <thead><tr><th>Title</th><th>Status</th><th>Editors</th><th class="num">Words</th><th class="num">Updated</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="doc"><span class="ord">01</span><div><div class="nm">Runtime topology &amp; co-hosting</div><div class="pth">topology / runtime-topology</div></div></div></td>
+                <td><span class="status-tag st-rev">In review</span></td>
+                <td><div class="who"><div class="editors-stack"><span class="av av--u">NA</span><span class="av av--agent" title="archivist (AI)">AR</span></div></div></td>
+                <td class="num tnum">2,410</td>
+                <td class="num when">02m</td>
+              </tr>
+              <tr>
+                <td><div class="doc"><span class="ord">02</span><div><div class="nm">Co-hosting &amp; auth smoke</div><div class="pth">topology / co-hosting</div></div></div></td>
+                <td><span class="status-tag st-pub">Published</span></td>
+                <td><div class="who"><div class="editors-stack"><span class="av av--u">NA</span></div></div></td>
+                <td class="num tnum">1,884</td>
+                <td class="num when">3h</td>
+              </tr>
+              <tr>
+                <td><div class="doc"><span class="ord">03</span><div><div class="nm">WS upgrade &amp; presence channel</div><div class="pth">topology / ws-upgrade</div></div></div></td>
+                <td><span class="status-tag st-draft">Draft</span></td>
+                <td><div class="who"><div class="editors-stack"><span class="av av--agent" title="linter-bot (AI)">LB</span></div><span class="lbl" style="font-size:10px">linter-bot</span></div></td>
+                <td class="num tnum">642</td>
+                <td class="num when">5h</td>
+              </tr>
+              <tr>
+                <td><div class="doc"><span class="ord">04</span><div><div class="nm">Same-origin auth &amp; cookies</div><div class="pth">topology / same-origin</div></div></div></td>
+                <td><span class="status-tag st-pub">Published</span></td>
+                <td><div class="who"><div class="editors-stack"><span class="av av--u2">JK</span><span class="av av--u3">TM</span></div></div></td>
+                <td class="num tnum">3,120</td>
+                <td class="num when">1d</td>
+              </tr>
+              <tr>
+                <td><div class="doc"><span class="ord">05</span><div><div class="nm">Embedded Hocuspocus port plan</div><div class="pth">topology / hocuspocus-port</div></div></div></td>
+                <td><span class="status-tag st-draft">Draft</span></td>
+                <td><div class="who"><div class="editors-stack"><span class="av av--u3">RP</span><span class="av av--agent" title="archivist (AI)">AR</span></div></div></td>
+                <td class="num tnum">980</td>
+                <td class="num when">2d</td>
+              </tr>
+              <tr>
+                <td><div class="doc"><span class="ord">06</span><div><div class="nm">Reader-path render projection</div><div class="pth">topology / reader-path</div></div></div></td>
+                <td><span class="status-tag st-rev">In review</span></td>
+                <td><div class="who"><div class="editors-stack"><span class="av av--agent" title="summariser (AI)">SM</span><span class="av av--u">NA</span></div></div></td>
+                <td class="num tnum">1,455</td>
+                <td class="num when">2d</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;">
+            <span class="mono" style="font-size:10px;color:var(--steel);letter-spacing:0.05em;">ROWS 01–06 / 11 · HUMAN ◼ ULTRAMARINE · AGENT ◣ CYAN</span>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn--ghost btn--sm">‹ Prev</button>
+              <button class="btn btn--ghost btn--sm">Next ›</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== -->
+  <!-- (c) READING VIEW                                       -->
+  <!-- ===================================================== -->
+  <section class="screen">
+    <div class="screen-tab">
+      <div class="id"><span class="ord">SCR.C</span><span class="big">Document · Reading view</span></div>
+      <div class="meta"><span>TITLE</span><span>RICH BODY</span><span>METADATA</span></div>
+    </div>
+    <div class="win win--reader">
+      <aside class="side">
+        <div class="top">
+          <div class="kicker">Space</div>
+          <div class="ws"><span class="av av--u3" style="background:var(--ultra)">P</span><div style="min-width:0;"><div class="nm">Platform</div><div class="sub">SP·01 / Topology</div></div><span class="car">▾</span></div>
+        </div>
+        <div class="nav-h kicker">In this collection</div>
+        <div class="tree">
+          <div class="row on"><span class="ic">▤</span> Runtime topology <span class="ct">↦</span></div>
+          <div class="row"><span class="ic">▤</span> Co-hosting &amp; auth</div>
+          <div class="row"><span class="ic">▤</span> WS upgrade</div>
+          <div class="row"><span class="ic">▤</span> Same-origin auth</div>
+        </div>
+        <div class="foot"><span class="av av--u">NA</span><div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div></div>
+      </aside>
+
+      <div class="main">
+        <div class="bar">
+          <div class="crumb"><b>Platform</b> <span class="sep">/</span> Architecture <span class="sep">/</span> <b>Runtime topology</b></div>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <span class="status-tag st-pub">Published</span>
+            <button class="btn btn--ghost btn--sm">⤴ Share</button>
+            <button class="btn btn--primary btn--sm">✎ Edit</button>
+          </div>
+        </div>
+        <div class="body">
+          <article class="reader">
+            <div class="kicker kicker--ultra" style="margin-bottom:14px;">⊹ RFC · PLATFORM / ARCHITECTURE · DOC #0a1e</div>
+            <h1 class="read-h1">Runtime topology<br>&amp; co-hosting<span class="z">.</span></h1>
+            <p class="read-lede">The Hono trunk is the top-level server: it hosts the SPA as static assets, the JSON-RPC capability surface, auth, MCP, and an embedded collaboration server — all on one owned port. This document fixes that decision and the four production-attach blockers it leaves open.</p>
+
+            <div class="read-meta">
+              <div class="mi"><span class="k">Author</span><span class="v"><span class="av av--u" style="width:16px;height:16px;flex:0 0 16px">NA</span> Nadia A.</span></div>
+              <div class="mi"><span class="k">Co-editors</span><span class="v"><span class="av av--agent" style="width:16px;height:16px;flex:0 0 16px">AR</span> archivist · AI</span></div>
+              <div class="mi"><span class="k">Version</span><span class="v">v14 · snapshot</span></div>
+              <div class="mi"><span class="k">Words</span><span class="v tnum">2,410</span></div>
+              <div class="mi"><span class="k">Updated</span><span class="v">2026·05·31</span></div>
+            </div>
+
+            <div class="doc-body">
+              <h2><span class="ord">01</span> Decision</h2>
+              <p>Adopt a single-process trunk. The HTTP server, the static SPA assets, the <code>/auth</code> and <code>/mcp</code> mounts, the event-rendered published HTML, and the embedded Hocuspocus collaboration server co-host on one <code>http.Server</code> instance. No second framework hosts the collaboration WebSocket.</p>
+
+              <div class="callout"><div class="b"></div><div class="tx"><b>Invariant.</b> The WebSocket upgrade authenticates the principal from the same-origin cookie before any document is reachable; per-document authorization runs at <code>onAuthenticate</code>. A rolled-back SQL transaction must never leave a mutation resident in the live Y.Doc once clients attach.</div></div>
+
+              <h2><span class="ord">02</span> Co-hosting mechanism</h2>
+              <p>The trunk owns the server; raw <code>ws</code> in <code>noServer</code> mode receives the upgrade and hands the connection to Hocuspocus. Static assets are served from the SPA build directory; everything else routes through the capability surface.</p>
+              <div class="codeblock">
+                <div class="ch"><span>server.ts · upgrade handoff</span><span>TS</span></div>
+<pre><span class="cm">// one owned http.Server — all surfaces co-host</span>
+server.<span class="kw">on</span>(<span class="st">"upgrade"</span>, <span class="kw">async</span> (req, socket, head) =&gt; {
+  <span class="kw">const</span> principal = <span class="kw">await</span> resolver.fromCookie(req);
+  <span class="kw">if</span> (!principal) <span class="kw">return</span> socket.destroy();
+  ws.handleUpgrade(req, socket, head, (conn) =&gt;
+    hocuspocus.handleConnection(conn, req, { principal })
+  );
+});</pre>
+              </div>
+
+              <h2><span class="ord">03</span> Open blockers</h2>
+              <ul>
+                <li>Role-aware read / write at <code>onAuthenticate</code>, not the tenant-only floor.</li>
+                <li>An <code>Origin</code> check on the WebSocket upgrade.</li>
+                <li>Revocation freshness on the upgrade-time principal snapshot.</li>
+                <li>Enforce the <code>onAuthenticate</code> invariant by construction, not by convention.</li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <aside class="toc">
+        <div class="h">On this page</div>
+        <a class="on" href="#"><span class="ord">01</span> Decision</a>
+        <a href="#"><span class="ord">02</span> Co-hosting mechanism</a>
+        <a href="#"><span class="ord">03</span> Open blockers</a>
+        <div class="ver">
+          <div class="h">Version trail</div>
+          <div class="vrow"><span class="dot dot--ultra"></span> v14 · current</div>
+          <div class="vrow"><span class="dot dot--agent"></span> v13 · archivist</div>
+          <div class="vrow"><span class="dot"></span> v12 · Nadia A.</div>
+          <div class="vrow"><span class="dot"></span> v11 · Jo K.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================================================== -->
+  <!-- (d) EDITOR  — THE SIGNATURE SCREEN                     -->
+  <!-- ===================================================== -->
+  <section class="screen">
+    <div class="screen-tab">
+      <div class="id"><span class="ord" style="color:var(--agent-ink)">SCR.D</span><span class="big">Document · Editor</span><span class="chip chip--agent" style="margin-left:4px"><span class="dot dot--agent live"></span> AGENT CO-EDITING LIVE</span></div>
+      <div class="meta"><span>SLASH MENU</span><span>BLOCK HANDLES</span><span>TRACKED AGENT SUGGESTION</span></div>
+    </div>
+    <div class="win win--editor">
+      <!-- sidebar -->
+      <aside class="side">
+        <div class="top">
+          <div class="kicker">Space</div>
+          <div class="ws"><span class="av av--u3" style="background:var(--ultra)">P</span><div style="min-width:0;"><div class="nm">Platform</div><div class="sub">SP·01 / Topology</div></div><span class="car">▾</span></div>
+        </div>
+        <div class="nav-h kicker">Collection</div>
+        <div class="tree">
+          <div class="row on"><span class="ic">✎</span> Runtime topology</div>
+          <div class="row"><span class="ic">▤</span> Co-hosting &amp; auth</div>
+          <div class="row"><span class="ic">▤</span> WS upgrade</div>
+        </div>
+        <div class="nav-h kicker">Co-editors · live</div>
+        <nav class="nav">
+          <a href="#"><span class="dot dot--ultra" style="margin:0 3px"></span> Nadia A. <span class="ct">you</span></a>
+          <a href="#"><span class="dot dot--agent live" style="margin:0 3px"></span> archivist <span class="ct" style="color:var(--agent-ink)">writing…</span></a>
+        </nav>
+        <div class="foot"><span class="av av--u">NA</span><div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div></div>
+      </aside>
+
+      <!-- editor canvas -->
+      <div class="main">
+        <div class="bar">
+          <div class="crumb"><b>Platform</b> <span class="sep">/</span> Topology <span class="sep">/</span> <b>Runtime topology</b></div>
+          <div style="margin-left:auto;display:flex;gap:10px;align-items:center;">
+            <span class="mono" style="font-size:10px;color:var(--agent-ink);display:flex;align-items:center;gap:6px;"><span class="dot dot--agent live"></span> 1 SUGGESTION</span>
+            <button class="btn btn--ghost btn--sm">⌫ History</button>
+            <button class="btn btn--primary btn--sm">⤴ Share</button>
+          </div>
+        </div>
+        <div class="body" style="overflow:visible;">
+
+          <!-- live presence row -->
+          <div class="presence">
+            <span class="lbl">Live</span>
+            <span class="pchip u"><span class="av av--u">NA</span> Nadia A.</span>
+            <span class="pchip ag"><span class="av av--agent">AR</span> archivist · AI <span class="dot dot--agent live"></span></span>
+            <span class="save"><span class="dot dot--ok"></span> Synced · CRDT converged · v14</span>
+          </div>
+
+          <!-- format / slash toolbar -->
+          <div class="fmtbar">
+            <div class="grp"><button class="fb" title="Paragraph">¶</button><button class="fb on" title="H2">H2</button><button class="fb" title="H3">H3</button></div>
+            <div class="grp"><button class="fb"><b>B</b></button><button class="fb"><i>I</i></button><button class="fb"><span style="text-decoration:underline">U</span></button><button class="fb"><span style="text-decoration:line-through">S</span></button><button class="fb mono">&lt;/&gt;</button></div>
+            <div class="grp"><button class="fb">•</button><button class="fb">1.</button><button class="fb">"</button><button class="fb" style="color:var(--ultra-ink)">⛓</button></div>
+            <div class="grp"><button class="fb ai">✦ ASK AGENT</button></div>
+          </div>
+
+          <div class="edcanvas">
+            <!-- title block -->
+            <div class="eblock">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+              <div class="ed-h1">Runtime topology &amp; co-hosting<span class="z">.</span></div>
+            </div>
+
+            <!-- paragraph with HUMAN caret + selection -->
+            <div class="eblock">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+              <div class="ed-p">The Hono trunk is the top-level server: it hosts the <span class="sel-u">SPA as static assets</span><span class="caret-u"></span>, the JSON-RPC capability surface, auth, MCP, and an embedded collaboration server — all on one owned port.</div>
+            </div>
+
+            <!-- H2 -->
+            <div class="eblock">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+              <div class="ed-h2">01 — Decision</div>
+            </div>
+
+            <!-- paragraph being live-typed BY THE AGENT (caret + flag) -->
+            <div class="eblock agentline">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+              <div class="ed-p">Adopt a single-process trunk. The HTTP server, static SPA assets, <span class="agent-typing">the&nbsp;<code>/auth</code>&nbsp;and&nbsp;<code>/mcp</code>&nbsp;mounts</span><span class="agent-caret"><span class="flag"><span class="pulse live"></span>archivist</span></span> </div>
+            </div>
+
+            <!-- paragraph carrying a TRACKED AGENT SUGGESTION (ins + del) with margin review card -->
+            <div class="eblock" style="margin-top:6px;">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+              <div class="ed-p">
+                A rolled-back SQL transaction must
+                <span class="sugg-del">not break the</span><span class="sugg-ins">never leave a mutation resident in the</span>
+                live Y.Doc once WebSocket clients attach.
+
+                <!-- the pinned review card -->
+                <div class="sugg-card">
+                  <div class="sh"><span class="av av--agent">AR</span><span class="nm">archivist</span><span class="ord">SG·01</span></div>
+                  <div class="sc">
+                    <div class="qt"><span class="rm">not break the</span> <span class="add">never leave a mutation resident in the</span> live Y.Doc…</div>
+                    <div class="why">Tightens the invariant wording per ADR 0030 — “resident in the live Y.Doc” matches the rollback-eviction guarantee.</div>
+                  </div>
+                  <div class="sf"><button class="acc">✓ Accept</button><button class="rej">✕ Reject</button></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- empty block with the slash menu open -->
+            <div class="eblock" style="min-height:120px;">
+              <div class="handle"><span class="h">⠿</span><span class="h" style="color:var(--ultra);border-color:var(--ultra-edge)">+</span></div>
+              <div class="ed-p" style="color:var(--steel-2)">Type <span class="mono" style="color:var(--ultra-ink)">/</span> for blocks, <span class="mono" style="color:var(--agent-ink)">✦</span> to ask an agent…</div>
+              <div class="slash" style="top:30px;">
+                <div class="sht"><span>BLOCKS</span><span style="margin-left:auto">/co</span></div>
+                <div class="si on"><span class="ic">¶</span> Text <span class="key">⏎</span></div>
+                <div class="si"><span class="ic">H2</span> Heading 2 <span class="key">##</span></div>
+                <div class="si"><span class="ic">&lt;&gt;</span> Code block <span class="key">```</span></div>
+                <div class="si"><span class="ic">▤</span> Table</div>
+                <div class="si"><span class="ic">"</span> Callout</div>
+                <div class="sht"><span>AGENT ACTIONS</span></div>
+                <div class="si ai"><span class="ic">✦</span> Ask agent to draft <span class="key">⌘↵</span></div>
+                <div class="si ai"><span class="ic">↻</span> Summarise selection</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- right context / changes rail -->
+      <aside class="erail">
+        <div class="es">
+          <div class="h">Properties <span class="ord">D·01</span></div>
+          <div class="kv"><span class="k">doc.id</span><span class="v mono">0a1e·c7</span></div>
+          <div class="kv"><span class="k">status</span><span class="v"><span class="status-tag st-rev" style="font-size:8.5px">In review</span></span></div>
+          <div class="kv"><span class="k">version</span><span class="v mono">v14</span></div>
+          <div class="kv"><span class="k">crdt</span><span class="v mono" style="color:var(--ok)">converged</span></div>
+          <div class="kv"><span class="k">words</span><span class="v mono tnum">2,410</span></div>
+        </div>
+        <div class="es" style="flex:1;">
+          <div class="h">Tracked changes <span class="ord">2 OPEN</span></div>
+          <div class="chg">
+            <div class="rail ag"></div>
+            <div class="bd"><div class="ln"><b>archivist</b> · insertion</div><div class="mt">SG·01 · invariant wording · 09:41</div></div>
+            <span class="st pend">pending</span>
+          </div>
+          <div class="chg">
+            <div class="rail u"></div>
+            <div class="bd"><div class="ln"><b>Nadia A.</b> · edit</div><div class="mt">block 02 · live · now</div></div>
+            <span class="st acc">live</span>
+          </div>
+          <div class="chg">
+            <div class="rail ag"></div>
+            <div class="bd"><div class="ln"><b>linter-bot</b> · normalised</div><div class="mt">4 blocks · 09:30 · accepted</div></div>
+            <span class="st acc">done</span>
+          </div>
+          <div style="margin-top:14px;display:flex;gap:6px;">
+            <button class="btn btn--sm" style="flex:1;border-color:var(--agent);color:var(--agent-ink);background:var(--agent-wash)">Accept all</button>
+            <button class="btn btn--ghost btn--sm" style="flex:1;">Review →</button>
+          </div>
+        </div>
+        <div class="es" style="border-bottom:0;">
+          <div class="h">Agent access <span class="ord">SCOPE</span></div>
+          <div class="kv"><span class="k">archivist</span><span class="v mono" style="color:var(--agent-ink)">editor</span></div>
+          <div class="scope-bar"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================================================== -->
+  <!-- (e) ADMIN / MEMBERS                                    -->
+  <!-- ===================================================== -->
+  <section class="screen">
+    <div class="screen-tab">
+      <div class="id"><span class="ord">SCR.E</span><span class="big">Admin · Members</span></div>
+      <div class="meta"><span>USERS</span><span>AGENTS</span><span>TEAMS</span><span>SCOPES</span></div>
+    </div>
+    <div class="win">
+      <aside class="side">
+        <div class="top">
+          <div class="kicker">Administration</div>
+          <div class="ws"><span class="av av--u3">N</span><div style="min-width:0;"><div class="nm">Northwind Eng</div><div class="sub">self-hosted · v0.1.0</div></div><span class="car">▾</span></div>
+        </div>
+        <div class="nav-h kicker">Manage</div>
+        <nav class="nav">
+          <a class="on" href="#"><span class="ic">◑</span> Members <span class="ct">38</span></a>
+          <a href="#"><span class="ic">◫</span> Teams <span class="ct">07</span></a>
+          <a href="#"><span class="ic">▦</span> Spaces <span class="ct">06</span></a>
+          <a href="#"><span class="ic">✦</span> Agents <span class="ct">04</span></a>
+          <a href="#"><span class="ic">⊹</span> Settings</a>
+          <a href="#"><span class="ic">▤</span> Audit log</a>
+        </nav>
+        <div class="foot"><span class="av av--u">NA</span><div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div></div>
+      </aside>
+
+      <div class="main">
+        <div class="bar">
+          <div class="crumb"><b>Administration</b> <span class="sep">/</span> Members</div>
+          <div class="search"><span>⌕</span> Search members… <span class="k">⌘K</span></div>
+          <button class="btn btn--ultra btn--sm">+ Invite</button>
+        </div>
+        <div class="body">
+          <div class="page-h" style="margin-bottom:16px;">
+            <div class="lhs">
+              <div class="kicker kicker--ultra">◑ WORKSPACE MEMBERS</div>
+              <h1>Members &amp; agents<span class="z">.</span></h1>
+              <div class="sub"><span>34 USERS</span><span>·</span><span>4 AGENTS</span><span>·</span><span>7 TEAMS</span></div>
+            </div>
+            <button class="btn btn--ghost">＋ New agent token</button>
+          </div>
+
+          <div class="adm-tabs">
+            <button class="on">All · 38</button>
+            <button>Humans · 34</button>
+            <button>Agents · 04</button>
+            <button>Pending · 02</button>
+            <button>＋ Add team</button>
+          </div>
+
+          <table class="mtbl" style="border-top:0;">
+            <thead><tr><th>Member</th><th>Kind</th><th>Team</th><th>Role / Scope</th><th class="r">Last active</th><th class="r">Audit</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="person"><span class="av av--u">NA</span><div><div class="nm">Nadia Ahmadi</div><div class="em">nadia@northwind.eng</div></div></div></td>
+                <td><span class="kind kind-h">Human</span></td>
+                <td class="mono" style="font-size:11px">Platform</td>
+                <td><span class="role-sel">Admin <span class="car">▾</span></span></td>
+                <td class="r when">now</td>
+                <td class="r mono" style="font-size:11px">2,104</td>
+              </tr>
+              <tr>
+                <td><div class="person"><span class="av av--agent">AR</span><div><div class="nm">archivist</div><div class="em">agent · token #a7c1 · created by Nadia</div></div></div></td>
+                <td><span class="kind kind-a">Agent</span></td>
+                <td class="mono" style="font-size:11px">Platform</td>
+                <td>
+                  <span class="role-sel" style="border-color:var(--agent-edge);color:var(--agent-ink)">Editor <span class="car">▾</span></span>
+                  <div class="scope-bar" title="read · author · edit · admin"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+                </td>
+                <td class="r when" style="color:var(--agent-ink)">writing…</td>
+                <td class="r mono" style="font-size:11px">487</td>
+              </tr>
+              <tr>
+                <td><div class="person"><span class="av av--u2">JK</span><div><div class="nm">Jo Kerrigan</div><div class="em">jo@northwind.eng</div></div></div></td>
+                <td><span class="kind kind-h">Human</span></td>
+                <td class="mono" style="font-size:11px">Security</td>
+                <td><span class="role-sel">Editor <span class="car">▾</span></span></td>
+                <td class="r when">12m</td>
+                <td class="r mono" style="font-size:11px">988</td>
+              </tr>
+              <tr>
+                <td><div class="person"><span class="av av--agent">LB</span><div><div class="nm">linter-bot</div><div class="em">agent · token #3f02 · created by Jo</div></div></div></td>
+                <td><span class="kind kind-a">Agent</span></td>
+                <td class="mono" style="font-size:11px">Security</td>
+                <td>
+                  <span class="role-sel" style="border-color:var(--agent-edge);color:var(--agent-ink)">Author <span class="car">▾</span></span>
+                  <div class="scope-bar"><i class="on"></i><i class="on"></i><i></i><i></i></div>
+                </td>
+                <td class="r when">09:30</td>
+                <td class="r mono" style="font-size:11px">1,240</td>
+              </tr>
+              <tr>
+                <td><div class="person"><span class="av av--u3">TM</span><div><div class="nm">Theo Mensah</div><div class="em">theo@northwind.eng</div></div></div></td>
+                <td><span class="kind kind-h">Human</span></td>
+                <td class="mono" style="font-size:11px">Handbook</td>
+                <td><span class="role-sel">Member <span class="car">▾</span></span></td>
+                <td class="r when">3h</td>
+                <td class="r mono" style="font-size:11px">512</td>
+              </tr>
+              <tr>
+                <td><div class="person"><span class="av av--agent">SM</span><div><div class="nm">summariser</div><div class="em">agent · token #9d4e · created by Nadia</div></div></div></td>
+                <td><span class="kind kind-a">Agent</span></td>
+                <td class="mono" style="font-size:11px">Product</td>
+                <td>
+                  <span class="role-sel" style="border-color:var(--hair-strong)">Read-only <span class="car">▾</span></span>
+                  <div class="scope-bar"><i class="on"></i><i></i><i></i><i></i></div>
+                </td>
+                <td class="r when">5h</td>
+                <td class="r mono" style="font-size:11px">203</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;">
+            <span class="mono" style="font-size:10px;color:var(--steel);letter-spacing:0.05em;">SCOPE TIERS · READ → AUTHOR → EDITOR → ADMIN · AGENT TOKENS REVOCABLE PER ROW</span>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn--ghost btn--sm">⤓ Export CSV</button>
+              <button class="btn btn--ghost btn--sm" style="border-color:var(--agent);color:var(--agent-ink)">＋ Provision agent</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- credit -->
+  <div class="credit">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span class="logo" style="gap:7px;"><span class="mark" style="width:16px;height:16px;"><span class="cross" style="width:16px;height:16px;"></span><span class="cross-ring" style="inset:3px;"></span></span><span class="word" style="font-size:12px;">editor<b>zero</b></span></span>
+    </div>
+    <div class="ms"><span>MERIDIAN ZERO</span><span>SPACE GROTESK · ARCHIVO · JETBRAINS MONO</span><span>WCAG 2.1 AA</span><span>LIGHT MODE</span></div>
+  </div>
+
+</div>
+</body>
+</html>

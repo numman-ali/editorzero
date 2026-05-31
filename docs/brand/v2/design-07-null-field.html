@@ -1,0 +1,1059 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>editorzero — Null Field</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   NULL FIELD — editorzero "electric-dark" design language
+   Tokens: every colour, radius, glow is a CSS custom property.
+   Light + dark both defined; [data-theme] flips the field.
+   ============================================================ */
+:root{
+  /* --- core neutrals (DARK is the home key) --- */
+  --void:#05060a;          /* absolute background */
+  --field:#0a0d16;         /* primary surface */
+  --panel:#0f1320;         /* raised panel */
+  --panel-2:#141a2b;       /* hover / nested */
+  --line:#1d2438;          /* hairlines */
+  --line-bright:#2b3550;   /* emphasised hairline */
+  --ink:#eef2ff;           /* primary text */
+  --ink-dim:#9aa6c4;       /* secondary text */
+  --ink-faint:#5d6889;     /* tertiary */
+
+  /* --- the two signal channels (the whole product language) --- */
+  --human:#28e0ff;         /* electric cyan = humans */
+  --human-deep:#0c8cb0;
+  --agent:#9b6bff;         /* electric violet = AI agents */
+  --agent-deep:#5b2fd6;
+  --acid:#c6ff3d;          /* acid lime = active / live signal */
+
+  /* --- glows --- */
+  --glow-human:0 0 0 1px rgba(40,224,255,.35), 0 0 22px -4px rgba(40,224,255,.55);
+  --glow-agent:0 0 0 1px rgba(155,107,255,.4), 0 0 24px -4px rgba(155,107,255,.6);
+  --glow-acid:0 0 18px -2px rgba(198,255,61,.5);
+
+  /* --- structure --- */
+  --r:6px; --r-lg:12px; --r-pill:999px;
+  --grid:rgba(120,140,200,.05);    /* engineering grid lines */
+  --grid-major:rgba(120,140,200,.09);
+  --ff-display:"Space Grotesk",system-ui,sans-serif;
+  --ff-body:"Inter",system-ui,sans-serif;
+  --ff-mono:"JetBrains Mono",ui-monospace,monospace;
+  --shadow:0 24px 60px -20px rgba(0,0,0,.8);
+}
+/* ---------- LIGHT MODE (required) — same language, inverted field ---------- */
+[data-theme="light"]{
+  --void:#eef1f8;
+  --field:#f6f8fe;
+  --panel:#ffffff;
+  --panel-2:#eef1fb;
+  --line:#dde3f2;
+  --line-bright:#c4cde4;
+  --ink:#0a0d16;
+  --ink-dim:#475069;
+  --ink-faint:#7a85a3;
+  --human:#0083a8;
+  --human-deep:#28e0ff;
+  --agent:#6a2fd6;
+  --agent-deep:#9b6bff;
+  --acid:#5f8e00;
+  --glow-human:0 0 0 1px rgba(0,131,168,.25), 0 0 16px -6px rgba(0,131,168,.4);
+  --glow-agent:0 0 0 1px rgba(106,47,214,.25), 0 0 18px -6px rgba(106,47,214,.4);
+  --glow-acid:0 0 0 1px rgba(95,142,0,.3);
+  --grid:rgba(60,80,160,.06);
+  --grid-major:rgba(60,80,160,.1);
+  --shadow:0 24px 50px -28px rgba(40,60,120,.4);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--void);
+  color:var(--ink);
+  font-family:var(--ff-body);
+  -webkit-font-smoothing:antialiased;
+  line-height:1.55;
+}
+::selection{background:var(--human);color:var(--void)}
+a{color:inherit;text-decoration:none}
+
+/* the global engineering grid that backs every screen */
+.grid-bg{
+  position:absolute;inset:0;pointer-events:none;
+  background-image:
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px),
+    linear-gradient(var(--grid-major) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid-major) 1px,transparent 1px);
+  background-size:28px 28px,28px 28px,140px 140px,140px 140px;
+  mask-image:radial-gradient(120% 90% at 50% 0%,#000 35%,transparent 100%);
+}
+
+/* ====== shared chrome ====== */
+.screen{position:relative;border-bottom:1px solid var(--line);overflow:hidden}
+.screen-tag{
+  position:absolute;top:0;left:0;z-index:6;
+  font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--void);
+  background:var(--acid);padding:5px 12px 5px 14px;
+  clip-path:polygon(0 0,100% 0,calc(100% - 10px) 100%,0 100%);
+  font-weight:700;box-shadow:var(--glow-acid);
+}
+[data-theme="light"] .screen-tag{color:#1a2400}
+.wrap{max-width:1320px;margin:0 auto;padding:0 28px;position:relative;z-index:2}
+
+/* coordinate readout — the "zero / origin" motif */
+.coord{font-family:var(--ff-mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.06em}
+.mono{font-family:var(--ff-mono)}
+
+/* the zero-mark logo */
+.brand{display:flex;align-items:center;gap:11px;font-family:var(--ff-display);font-weight:600;letter-spacing:-.01em}
+.zero-mark{
+  position:relative;width:30px;height:30px;border-radius:50%;
+  border:1.5px solid var(--human);flex:none;
+  background:radial-gradient(circle at 50% 50%,transparent 52%,rgba(40,224,255,.08) 53%);
+  box-shadow:var(--glow-human);
+}
+.zero-mark::before,.zero-mark::after{
+  content:"";position:absolute;background:var(--human);
+}
+.zero-mark::before{left:50%;top:-5px;bottom:-5px;width:1.5px;transform:translateX(-50%);opacity:.55}
+.zero-mark::after{top:50%;left:-5px;right:-5px;height:1.5px;transform:translateY(-50%);opacity:.55}
+.brand b{font-weight:700}
+.brand span{color:var(--human)}
+
+/* buttons */
+.btn{
+  font-family:var(--ff-mono);font-size:12px;font-weight:500;letter-spacing:.04em;
+  border:1px solid var(--line-bright);background:var(--panel);color:var(--ink);
+  padding:9px 15px;border-radius:var(--r);cursor:pointer;display:inline-flex;
+  align-items:center;gap:8px;transition:.18s;text-transform:uppercase;
+}
+.btn:hover{border-color:var(--human);color:var(--human)}
+.btn-primary{
+  background:linear-gradient(180deg,var(--human),var(--human-deep));
+  color:var(--void);border-color:transparent;font-weight:700;
+  box-shadow:var(--glow-human);
+}
+[data-theme="light"] .btn-primary{color:#fff}
+.btn-primary:hover{color:var(--void);filter:brightness(1.08)}
+[data-theme="light"] .btn-primary:hover{color:#fff}
+
+/* channel chips: human / agent */
+.chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--ff-mono);
+  font-size:10.5px;letter-spacing:.05em;padding:3px 9px;border-radius:var(--r-pill);
+  border:1px solid var(--line-bright);text-transform:uppercase}
+.chip .dot{width:6px;height:6px;border-radius:50%}
+.chip.human{color:var(--human);border-color:color-mix(in srgb,var(--human) 45%,transparent)}
+.chip.human .dot{background:var(--human);box-shadow:0 0 8px var(--human)}
+.chip.agent{color:var(--agent);border-color:color-mix(in srgb,var(--agent) 50%,transparent)}
+.chip.agent .dot{background:var(--agent);box-shadow:0 0 8px var(--agent)}
+
+/* avatars */
+.av{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;
+  font-family:var(--ff-mono);font-size:11px;font-weight:700;flex:none;border:1px solid var(--line-bright)}
+.av.h{background:linear-gradient(150deg,rgba(40,224,255,.22),rgba(40,224,255,.04));color:var(--human);border-color:color-mix(in srgb,var(--human) 40%,transparent)}
+.av.a{background:linear-gradient(150deg,rgba(155,107,255,.26),rgba(155,107,255,.05));color:var(--agent);border-color:color-mix(in srgb,var(--agent) 45%,transparent)}
+.av.bot{border-radius:50%}
+
+/* top bar shared */
+.topbar{height:60px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--field) 80%,transparent);
+  backdrop-filter:blur(10px);position:relative;z-index:5}
+.topbar .nav{display:flex;gap:4px;align-items:center}
+.navlink{font-family:var(--ff-mono);font-size:11.5px;letter-spacing:.06em;color:var(--ink-dim);
+  padding:7px 12px;border-radius:var(--r);text-transform:uppercase}
+.navlink:hover{color:var(--ink);background:var(--panel)}
+.navlink.on{color:var(--human);background:color-mix(in srgb,var(--human) 9%,transparent)}
+.search{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);padding:7px 12px;width:280px;color:var(--ink-faint);font-family:var(--ff-mono);font-size:12px}
+.search .k{margin-left:auto;border:1px solid var(--line-bright);border-radius:4px;padding:1px 6px;font-size:10px}
+
+h1,h2,h3,h4{font-family:var(--ff-display);font-weight:600;margin:0;letter-spacing:-.02em;line-height:1.1}
+.eyebrow{font-family:var(--ff-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--human)}
+
+/* live pulse */
+.live{display:inline-flex;align-items:center;gap:7px;font-family:var(--ff-mono);font-size:10.5px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--acid)}
+.live .pulse{width:7px;height:7px;border-radius:50%;background:var(--acid);box-shadow:var(--glow-acid);
+  animation:pulse 1.8s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+
+/* =====================================================================
+   (A) DASHBOARD
+   ===================================================================== */
+.dash{padding:34px 0 56px}
+.dash-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:30px;margin-bottom:30px}
+.dash-hero h1{font-size:46px;letter-spacing:-.03em}
+.dash-hero h1 em{font-style:normal;color:var(--human);position:relative}
+.dash-hero .sub{color:var(--ink-dim);font-size:14.5px;max-width:420px;margin-top:10px}
+.origin-badge{font-family:var(--ff-mono);font-size:11px;color:var(--ink-faint);text-align:right;line-height:1.9}
+.origin-badge b{color:var(--acid)}
+
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;position:relative;overflow:hidden}
+.stat::after{content:"";position:absolute;right:-30px;top:-30px;width:90px;height:90px;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--human) 18%,transparent),transparent 70%)}
+.stat .lab{font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+.stat .val{font-family:var(--ff-display);font-size:30px;font-weight:600;margin-top:6px;letter-spacing:-.02em}
+.stat .val .u{font-size:13px;color:var(--ink-dim);font-family:var(--ff-mono);margin-left:5px}
+.stat .delta{font-family:var(--ff-mono);font-size:11px;margin-top:7px;color:var(--acid)}
+.stat.agent::after{background:radial-gradient(circle,color-mix(in srgb,var(--agent) 22%,transparent),transparent 70%)}
+.stat.agent .val{color:var(--agent)}
+
+.dash-grid{display:grid;grid-template-columns:1.55fr 1fr;gap:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.card-h{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid var(--line)}
+.card-h h3{font-size:15px}
+.card-h .coord{text-transform:uppercase}
+
+.doc-row{display:flex;align-items:center;gap:14px;padding:13px 18px;border-bottom:1px solid var(--line);transition:.15s;cursor:pointer}
+.doc-row:last-child{border-bottom:none}
+.doc-row:hover{background:var(--panel-2)}
+.doc-ico{width:34px;height:34px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line-bright);
+  display:grid;place-items:center;flex:none;color:var(--human);font-family:var(--ff-mono);font-weight:700;font-size:13px}
+.doc-row .meta{flex:1;min-width:0}
+.doc-row .meta .t{font-weight:500;font-size:14px;display:flex;align-items:center;gap:8px}
+.doc-row .meta .s{font-family:var(--ff-mono);font-size:11px;color:var(--ink-faint);margin-top:3px}
+.stack{display:flex;align-items:center}
+.stack .av{margin-left:-7px;box-shadow:0 0 0 2px var(--panel)}
+.stack .av:first-child{margin-left:0}
+.badge-edit{font-family:var(--ff-mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 7px;border-radius:var(--r-pill);border:1px solid var(--line-bright);color:var(--ink-dim);
+  display:inline-flex;align-items:center;white-space:nowrap;vertical-align:middle;line-height:1.2;flex:none}
+
+.space-card{padding:14px 16px;border-bottom:1px solid var(--line);cursor:pointer;transition:.15s}
+.space-card:hover{background:var(--panel-2)}
+.space-card:last-child{border-bottom:none}
+.space-card .top{display:flex;align-items:center;gap:10px}
+.space-glyph{width:30px;height:30px;border-radius:8px;flex:none;display:grid;place-items:center;
+  font-family:var(--ff-mono);font-weight:700;font-size:13px;color:var(--void)}
+.space-card .nm{font-family:var(--ff-display);font-weight:600;font-size:14px}
+.space-card .ct{font-family:var(--ff-mono);font-size:10.5px;color:var(--ink-faint);margin-left:auto}
+.space-bar{height:4px;border-radius:var(--r-pill);background:var(--panel-2);margin-top:11px;overflow:hidden;display:flex}
+.space-bar .h{background:var(--human)}.space-bar .a{background:var(--agent)}
+.space-card .split{font-family:var(--ff-mono);font-size:10px;color:var(--ink-faint);margin-top:7px;display:flex;justify-content:space-between}
+
+/* =====================================================================
+   (B) DOCUMENTS LIST + TREE
+   ===================================================================== */
+.docs-layout{display:grid;grid-template-columns:262px 1fr;align-items:start}
+.tree{border-right:1px solid var(--line);background:var(--field);padding:18px 0;position:relative;z-index:2;min-height:560px}
+.tree-h{padding:0 18px 14px;display:flex;align-items:center;justify-content:space-between}
+.tree-h .ttl{font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+.tnode{display:flex;align-items:center;gap:9px;padding:7px 18px;font-size:13px;color:var(--ink-dim);cursor:pointer;
+  position:relative;font-family:var(--ff-body)}
+.tnode:hover{color:var(--ink);background:var(--panel)}
+.tnode.on{color:var(--human);background:color-mix(in srgb,var(--human) 8%,transparent)}
+.tnode.on::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--human);box-shadow:0 0 10px var(--human)}
+.tnode .tw{width:14px;text-align:center;font-family:var(--ff-mono);font-size:10px;color:var(--ink-faint)}
+.tnode.child{padding-left:40px;font-size:12.5px}
+.tnode.child2{padding-left:58px;font-size:12.5px}
+.tnode .cnt{margin-left:auto;font-family:var(--ff-mono);font-size:10px;color:var(--ink-faint)}
+
+.docs-main{padding:22px 26px;position:relative;z-index:2}
+.docs-bread{font-family:var(--ff-mono);font-size:11px;color:var(--ink-faint);margin-bottom:6px;letter-spacing:.05em}
+.docs-bread b{color:var(--human)}
+.docs-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:20px}
+.docs-head h2{font-size:26px}
+.docs-head .desc{color:var(--ink-dim);font-size:13px;margin-top:6px;max-width:480px}
+.filters{display:flex;gap:8px;margin-bottom:14px;align-items:center}
+.fpill{font-family:var(--ff-mono);font-size:11px;letter-spacing:.04em;padding:6px 11px;border-radius:var(--r-pill);
+  border:1px solid var(--line);color:var(--ink-dim);cursor:pointer;text-transform:uppercase}
+.fpill.on{border-color:var(--human);color:var(--human);background:color-mix(in srgb,var(--human) 8%,transparent)}
+
+.dtable{width:100%;border-collapse:collapse;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.dtable thead th{font-family:var(--ff-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-faint);text-align:left;padding:11px 16px;background:var(--field);border-bottom:1px solid var(--line);font-weight:500}
+.dtable tbody td{padding:13px 16px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:middle}
+.dtable tbody tr{cursor:pointer;transition:.13s}
+.dtable tbody tr:hover{background:var(--panel-2)}
+.dtable tbody tr:last-child td{border-bottom:none}
+.dtable .name{display:flex;align-items:center;gap:11px}
+.dtable .name .di{width:30px;height:30px;border-radius:7px;background:var(--panel);border:1px solid var(--line-bright);
+  display:grid;place-items:center;color:var(--human);font-family:var(--ff-mono);font-size:11px;font-weight:700;flex:none}
+.dtable .name .tt{font-weight:500}
+.dtable .name .pp{font-family:var(--ff-mono);font-size:10.5px;color:var(--ink-faint);margin-top:2px}
+.statust{font-family:var(--ff-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;
+  border-radius:var(--r-pill);border:1px solid var(--line-bright);display:inline-flex;align-items:center;gap:6px;
+  white-space:nowrap;vertical-align:middle;line-height:1.2}
+.statust.live{color:var(--acid);border-color:color-mix(in srgb,var(--acid) 40%,transparent)}
+.statust.draft{color:var(--ink-dim)}
+.statust.pub{color:var(--human);border-color:color-mix(in srgb,var(--human) 40%,transparent)}
+.editor-cell{display:flex;align-items:center;gap:8px}
+.editor-cell .nm{font-family:var(--ff-mono);font-size:11px}
+.editor-cell.is-agent .nm{color:var(--agent)}
+.editor-cell.is-human .nm{color:var(--ink-dim)}
+.tcoord{font-family:var(--ff-mono);font-size:11px;color:var(--ink-faint)}
+
+/* =====================================================================
+   (C) READING VIEW
+   ===================================================================== */
+.read-shell{display:grid;grid-template-columns:1fr 260px;max-width:1180px;margin:0 auto;padding:46px 28px 64px;gap:48px;position:relative;z-index:2}
+.read-main{max-width:680px}
+.read-kicker{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.read-main h1{font-size:42px;letter-spacing:-.03em;line-height:1.07;margin-bottom:16px}
+.read-lede{font-size:18px;color:var(--ink-dim);line-height:1.6;margin-bottom:14px;font-family:var(--ff-body)}
+.read-byline{display:flex;align-items:center;gap:10px;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:30px;flex-wrap:wrap}
+.read-byline .who{font-family:var(--ff-mono);font-size:11.5px;color:var(--ink-dim)}
+.read-byline .who b{color:var(--ink)}
+.prose p{font-size:15.5px;line-height:1.72;color:var(--ink);margin:0 0 18px}
+.prose h2{font-size:23px;margin:34px 0 14px}
+.prose h2 .hx{font-family:var(--ff-mono);font-size:13px;color:var(--human);margin-right:10px;font-weight:500}
+.prose ul{margin:0 0 18px;padding-left:20px}
+.prose li{font-size:15px;line-height:1.7;margin-bottom:8px;color:var(--ink)}
+.prose li::marker{color:var(--human)}
+.prose strong{color:var(--ink)}
+.prose code{font-family:var(--ff-mono);font-size:13px;background:var(--panel);border:1px solid var(--line);
+  padding:1px 6px;border-radius:5px;color:var(--acid)}
+.callout{border:1px solid var(--line-bright);border-left:3px solid var(--agent);background:linear-gradient(90deg,color-mix(in srgb,var(--agent) 9%,transparent),transparent);
+  border-radius:var(--r);padding:15px 18px;margin:0 0 22px}
+.callout .ch{font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--agent);margin-bottom:7px;display:flex;align-items:center;gap:7px}
+.callout p{margin:0;font-size:14px;color:var(--ink-dim)}
+.codeblock{background:var(--void);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin:0 0 22px;
+  font-family:var(--ff-mono);font-size:13px;line-height:1.7;overflow:auto}
+.codeblock .cm{color:var(--ink-faint)}.codeblock .kw{color:var(--agent)}.codeblock .st{color:var(--acid)}.codeblock .fn{color:var(--human)}
+
+.read-aside{position:relative}
+.aside-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;margin-bottom:14px;position:sticky;top:20px}
+.aside-card .at{font-family:var(--ff-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:13px}
+.aside-meta{display:flex;justify-content:space-between;font-family:var(--ff-mono);font-size:11px;padding:7px 0;border-bottom:1px solid var(--line)}
+.aside-meta:last-child{border-bottom:none}
+.aside-meta .k{color:var(--ink-faint)}.aside-meta .v{color:var(--ink)}
+.aside-meta .v.h{color:var(--human)}.aside-meta .v.a{color:var(--agent)}
+.toc a{display:block;font-size:12.5px;color:var(--ink-dim);padding:5px 0 5px 12px;border-left:1px solid var(--line);font-family:var(--ff-body)}
+.toc a.on{color:var(--human);border-color:var(--human)}
+.toc a:hover{color:var(--ink)}
+
+/* =====================================================================
+   (D) EDITOR — the signature screen
+   ===================================================================== */
+.ed-shell{position:relative;z-index:2;display:grid;grid-template-columns:1fr 300px;align-items:start}
+.ed-main{position:relative;border-right:1px solid var(--line);min-height:640px}
+.ed-toolbar{position:sticky;top:0;z-index:8;display:flex;align-items:center;gap:4px;padding:9px 16px;
+  background:color-mix(in srgb,var(--field) 92%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tg{display:flex;gap:2px;padding-right:8px;margin-right:4px;border-right:1px solid var(--line)}
+.tg:last-child{border-right:none}
+.tbtn{font-family:var(--ff-mono);font-size:12px;min-width:30px;height:30px;padding:0 8px;border-radius:5px;
+  border:1px solid transparent;background:transparent;color:var(--ink-dim);cursor:pointer;display:grid;place-items:center;transition:.13s}
+.tbtn:hover{background:var(--panel-2);color:var(--ink)}
+.tbtn.on{background:color-mix(in srgb,var(--human) 14%,transparent);color:var(--human);border-color:color-mix(in srgb,var(--human) 35%,transparent)}
+.tbtn b{font-weight:700}.tbtn i{font-style:italic}.tbtn s{text-decoration:line-through}.tbtn u{text-decoration:underline}
+.ed-toolbar .spacer{flex:1}
+.ai-toggle{font-family:var(--ff-mono);font-size:11px;letter-spacing:.04em;text-transform:uppercase;
+  display:inline-flex;align-items:center;gap:8px;padding:6px 13px;border-radius:var(--r-pill);cursor:pointer;
+  background:linear-gradient(100deg,color-mix(in srgb,var(--agent) 22%,transparent),color-mix(in srgb,var(--agent) 6%,transparent));
+  border:1px solid color-mix(in srgb,var(--agent) 45%,transparent);color:var(--agent);box-shadow:var(--glow-agent)}
+.ai-toggle .pulse{width:6px;height:6px;border-radius:50%;background:var(--agent);box-shadow:0 0 8px var(--agent);animation:pulse 1.6s infinite}
+
+.ed-canvas{padding:40px 56px 80px;max-width:760px}
+.doc-title-ed{font-family:var(--ff-display);font-size:38px;font-weight:600;letter-spacing:-.03em;color:var(--ink);
+  border:none;background:none;width:100%;outline:none;margin-bottom:8px}
+.doc-sub-ed{font-family:var(--ff-mono);font-size:11.5px;color:var(--ink-faint);margin-bottom:30px;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+
+/* editor blocks with hover handle */
+.eblock{position:relative;padding:5px 0;margin-left:-44px;padding-left:44px}
+.eblock .handle{position:absolute;left:0;top:7px;display:flex;gap:2px;opacity:0;transition:.13s}
+.eblock:hover .handle{opacity:1}
+.hbtn{width:18px;height:22px;border-radius:4px;display:grid;place-items:center;color:var(--ink-faint);
+  cursor:grab;font-family:var(--ff-mono);font-size:13px;background:transparent;border:none}
+.hbtn:hover{background:var(--panel-2);color:var(--human)}
+.eblock p{margin:0;font-size:15.5px;line-height:1.74;color:var(--ink)}
+.eblock h2{font-size:24px;margin:6px 0}
+.eblock.is-h{margin-top:14px}
+
+/* human caret + selection */
+.caret-h{display:inline-block;width:2px;height:1.05em;background:var(--human);vertical-align:text-bottom;
+  margin:0 1px;animation:blink 1.1s steps(1) infinite;box-shadow:0 0 8px var(--human);position:relative}
+.caret-h::after{content:"NOMI";position:absolute;top:-19px;left:-2px;font-family:var(--ff-mono);font-size:9px;
+  font-weight:700;letter-spacing:.05em;color:var(--void);background:var(--human);padding:2px 6px;border-radius:4px 4px 4px 0;white-space:nowrap}
+@keyframes blink{50%{opacity:0}}
+
+/* AGENT presence — live co-editor */
+.sel-agent{background:color-mix(in srgb,var(--agent) 22%,transparent);border-radius:3px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent) 45%,transparent);padding:1px 0}
+.caret-a{display:inline-block;width:2px;height:1.05em;background:var(--agent);vertical-align:text-bottom;margin:0 1px;
+  box-shadow:0 0 10px var(--agent);position:relative;animation:blink 1s steps(1) infinite}
+.caret-a::after{content:"◇ docwright · agent";position:absolute;top:-19px;left:-2px;font-family:var(--ff-mono);font-size:9px;
+  font-weight:700;letter-spacing:.04em;color:#fff;background:var(--agent);padding:2px 7px;border-radius:4px 4px 4px 0;white-space:nowrap;box-shadow:0 0 14px -2px var(--agent)}
+
+/* TRACKED agent suggestion block */
+.suggestion{position:relative;margin:8px 0 8px;border-radius:var(--r);overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--agent) 45%,transparent);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--agent) 10%,transparent),color-mix(in srgb,var(--agent) 3%,transparent));
+  box-shadow:0 0 30px -10px color-mix(in srgb,var(--agent) 60%,transparent)}
+.suggestion .sg-h{display:flex;align-items:center;gap:9px;padding:8px 13px;border-bottom:1px solid color-mix(in srgb,var(--agent) 30%,transparent);
+  background:color-mix(in srgb,var(--agent) 10%,transparent)}
+.suggestion .sg-h .lab{font-family:var(--ff-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--agent);font-weight:700}
+.suggestion .sg-h .meta{font-family:var(--ff-mono);font-size:10px;color:var(--ink-faint);margin-left:auto}
+.suggestion .sg-body{padding:12px 14px;font-size:15px;line-height:1.7}
+.ins{color:var(--acid);background:color-mix(in srgb,var(--acid) 12%,transparent);border-radius:3px;text-decoration:none;box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--acid) 60%,transparent)}
+.del{color:var(--ink-faint);text-decoration:line-through;text-decoration-color:#ff5d7a;opacity:.7}
+.sg-actions{display:flex;gap:8px;padding:0 14px 13px}
+.sg-act{font-family:var(--ff-mono);font-size:11px;letter-spacing:.03em;text-transform:uppercase;padding:6px 13px;border-radius:var(--r);cursor:pointer;border:1px solid var(--line-bright);background:var(--panel);color:var(--ink-dim)}
+.sg-act.accept{background:linear-gradient(180deg,var(--agent),var(--agent-deep));color:#fff;border-color:transparent;font-weight:700;box-shadow:var(--glow-agent)}
+.sg-act.accept:hover{filter:brightness(1.1)}
+.sg-act:hover{color:var(--ink)}
+
+/* slash menu */
+.slash{position:absolute;left:100px;top:354px;width:268px;background:var(--panel);border:1px solid var(--line-bright);
+  border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden;z-index:9}
+.slash-h{font-family:var(--ff-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);padding:10px 14px 6px}
+.slash-i{display:flex;align-items:center;gap:11px;padding:8px 14px;cursor:pointer;font-size:13px;color:var(--ink-dim)}
+.slash-i .ik{width:26px;height:26px;border-radius:6px;background:var(--panel-2);border:1px solid var(--line-bright);display:grid;place-items:center;
+  font-family:var(--ff-mono);font-size:12px;color:var(--ink);flex:none}
+.slash-i.on,.slash-i:hover{background:color-mix(in srgb,var(--human) 12%,transparent);color:var(--human)}
+.slash-i.on .ik,.slash-i:hover .ik{border-color:var(--human);color:var(--human)}
+.slash-i.ai{color:var(--agent)}
+.slash-i.ai .ik{color:var(--agent);border-color:color-mix(in srgb,var(--agent) 40%,transparent)}
+.slash-i .kb{margin-left:auto;font-family:var(--ff-mono);font-size:10px;color:var(--ink-faint)}
+
+/* editor right rail: presence + activity */
+.ed-rail{background:var(--field);padding:18px 16px;position:relative;z-index:2}
+.rail-sec{margin-bottom:24px}
+.rail-sec .rt{font-family:var(--ff-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
+.presence{display:flex;align-items:center;gap:10px;padding:8px;border-radius:var(--r);margin-bottom:5px}
+.presence:hover{background:var(--panel)}
+.presence .info{flex:1;min-width:0}
+.presence .info .n{font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:7px}
+.presence .info .r{font-family:var(--ff-mono);font-size:10px;color:var(--ink-faint);margin-top:1px}
+.presence .stat{width:7px;height:7px;border-radius:50%}
+.presence .stat.h{background:var(--human);box-shadow:0 0 8px var(--human)}
+.presence .stat.a{background:var(--agent);box-shadow:0 0 8px var(--agent);animation:pulse 1.6s infinite}
+
+.activity{position:relative;padding-left:18px}
+.activity::before{content:"";position:absolute;left:4px;top:4px;bottom:4px;width:1px;background:var(--line)}
+.act-item{position:relative;padding:0 0 16px}
+.act-item::before{content:"";position:absolute;left:-17px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--panel-2);border:1.5px solid var(--line-bright)}
+.act-item.h::before{border-color:var(--human);background:var(--human)}
+.act-item.a::before{border-color:var(--agent);background:var(--agent)}
+.act-item .aw{font-size:12px}
+.act-item .aw b.h{color:var(--human)}.act-item .aw b.a{color:var(--agent)}
+.act-item .ax{font-family:var(--ff-mono);font-size:10px;color:var(--ink-faint);margin-top:2px}
+
+/* =====================================================================
+   (E) ADMIN / MEMBERS
+   ===================================================================== */
+.admin{display:grid;grid-template-columns:218px 1fr;align-items:start}
+.admin-side{border-right:1px solid var(--line);background:var(--field);padding:20px 0;position:relative;z-index:2;min-height:600px}
+.admin-side .sh{font-family:var(--ff-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);padding:0 18px 10px}
+.aside-link{display:flex;align-items:center;gap:10px;padding:8px 18px;font-size:13px;color:var(--ink-dim);cursor:pointer}
+.aside-link:hover{color:var(--ink);background:var(--panel)}
+.aside-link.on{color:var(--human);background:color-mix(in srgb,var(--human) 8%,transparent);position:relative}
+.aside-link.on::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--human);box-shadow:0 0 10px var(--human)}
+.aside-link .g{width:16px;text-align:center;font-family:var(--ff-mono);font-size:12px}
+
+.admin-main{padding:24px 28px;position:relative;z-index:2}
+.admin-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px}
+.admin-head h2{font-size:25px}
+.admin-head .sub{font-family:var(--ff-mono);font-size:11px;color:var(--ink-faint);margin-top:5px}
+.seg{display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:3px;margin-bottom:18px;width:fit-content}
+.seg .s{font-family:var(--ff-mono);font-size:11px;letter-spacing:.04em;text-transform:uppercase;padding:6px 14px;border-radius:4px;color:var(--ink-dim);cursor:pointer}
+.seg .s.on{background:color-mix(in srgb,var(--human) 14%,transparent);color:var(--human)}
+
+.mtable{width:100%;border-collapse:collapse;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.mtable thead th{font-family:var(--ff-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);
+  text-align:left;padding:11px 16px;background:var(--field);border-bottom:1px solid var(--line);font-weight:500}
+.mtable td{padding:13px 16px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:middle}
+.mtable tr:last-child td{border-bottom:none}
+.mtable tr:hover td{background:var(--panel-2)}
+.mname{display:flex;align-items:center;gap:11px}
+.mname .info .n{font-weight:500;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.mname .info .e{font-family:var(--ff-mono);font-size:10.5px;color:var(--ink-faint);margin-top:2px}
+.role{font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:var(--r-pill);border:1px solid var(--line-bright);color:var(--ink-dim);display:inline-flex;align-items:center;white-space:nowrap;vertical-align:middle;line-height:1.2}
+.role.admin{color:var(--acid);border-color:color-mix(in srgb,var(--acid) 40%,transparent)}
+.role.agent{color:var(--agent);border-color:color-mix(in srgb,var(--agent) 45%,transparent)}
+.tok{font-family:var(--ff-mono);font-size:11px;color:var(--ink-faint)}
+.kbd-status{display:inline-flex;align-items:center;gap:6px;font-family:var(--ff-mono);font-size:11px;color:var(--ink-dim)}
+.kbd-status .d{width:6px;height:6px;border-radius:50%;background:var(--acid);box-shadow:var(--glow-acid)}
+.rl{font-family:var(--ff-mono);font-size:11px;color:var(--ink-dim)}
+.rl b{color:var(--agent)}
+.row-act{font-family:var(--ff-mono);font-size:14px;color:var(--ink-faint);cursor:pointer;text-align:right}
+.row-act:hover{color:var(--human)}
+
+.footer{padding:30px 28px;text-align:center;font-family:var(--ff-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.08em}
+.footer b{color:var(--human)}
+
+/* theme switch (demo) */
+.theme-switch{position:fixed;right:18px;bottom:18px;z-index:50;display:flex;gap:0;background:var(--panel);
+  border:1px solid var(--line-bright);border-radius:var(--r-pill);padding:3px;box-shadow:var(--shadow);font-family:var(--ff-mono)}
+.theme-switch button{border:none;background:none;color:var(--ink-dim);font-family:var(--ff-mono);font-size:10.5px;
+  letter-spacing:.06em;text-transform:uppercase;padding:6px 13px;border-radius:var(--r-pill);cursor:pointer}
+.theme-switch button.on{background:var(--human);color:var(--void);font-weight:700}
+[data-theme="light"] .theme-switch button.on{color:#fff}
+
+@media (max-width:900px){
+  .dash-grid,.docs-layout,.ed-shell,.admin,.read-shell{grid-template-columns:1fr}
+  .stat-row{grid-template-columns:1fr 1fr}
+  .ed-rail,.read-aside,.tree,.admin-side{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= (A) DASHBOARD ================= -->
+<section class="screen" id="dashboard">
+  <div class="grid-bg"></div>
+  <span class="screen-tag">A · Home / Dashboard</span>
+
+  <div class="topbar">
+    <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;width:100%">
+      <div style="display:flex;align-items:center;gap:30px">
+        <div class="brand"><span class="zero-mark"></span><b>editor</b><span>zero</span></div>
+        <nav class="nav">
+          <a class="navlink on">Home</a>
+          <a class="navlink">Spaces</a>
+          <a class="navlink">Activity</a>
+          <a class="navlink">Agents</a>
+          <a class="navlink">Admin</a>
+        </nav>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="search"><span>⌕</span> search the field…<span class="k">⌘K</span></div>
+        <div class="av h">NA</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap dash">
+    <div class="dash-hero">
+      <div>
+        <div class="eyebrow">ORIGIN · acme-internal.editorzero.host</div>
+        <h1 style="margin-top:14px">Start from <em>zero.</em></h1>
+        <p class="sub">Your self-hosted knowledge field. Humans and agents co-author here as peers — every edit attributed, every mutation in the audit log.</p>
+      </div>
+      <div class="origin-badge">
+        NODE&nbsp;&nbsp;<b>0,0</b><br>
+        UPTIME&nbsp;&nbsp;142d&nbsp;06h<br>
+        DOCS&nbsp;&nbsp;<b>1,284</b><br>
+        AGENTS&nbsp;&nbsp;<b>07</b>&nbsp;active
+      </div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat">
+        <div class="lab">Documents</div>
+        <div class="val">1,284</div>
+        <div class="delta">▲ 38 this week</div>
+      </div>
+      <div class="stat">
+        <div class="lab">Live sessions</div>
+        <div class="val">12<span class="u">open</span></div>
+        <div class="delta">3 docs co-edited now</div>
+      </div>
+      <div class="stat agent">
+        <div class="lab">Agent edits / 24h</div>
+        <div class="val">412</div>
+        <div class="delta" style="color:var(--agent)">◇ 84 suggestions pending</div>
+      </div>
+      <div class="stat">
+        <div class="lab">Audit events</div>
+        <div class="val">96k</div>
+        <div class="delta">100% reconstructable</div>
+      </div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-h">
+          <h3>Recently touched</h3>
+          <span class="coord">SORT · updated_at ▾</span>
+        </div>
+        <div class="doc-row">
+          <div class="doc-ico">RFC</div>
+          <div class="meta">
+            <div class="t">Realtime sync protocol — v3 <span class="badge-edit">RFC</span></div>
+            <div class="s">engineering / protocols · edited 4m ago</div>
+          </div>
+          <div class="stack">
+            <div class="av h">NA</div><div class="av h">JC</div><div class="av a bot">◇</div>
+          </div>
+          <span class="live"><span class="pulse"></span>LIVE</span>
+        </div>
+        <div class="doc-row">
+          <div class="doc-ico">DOC</div>
+          <div class="meta">
+            <div class="t">Onboarding playbook 2026</div>
+            <div class="s">people / handbook · edited 22m ago by <span style="color:var(--agent)">◇ scribe</span></div>
+          </div>
+          <div class="stack"><div class="av a bot">◇</div><div class="av h">MO</div></div>
+          <span class="badge-edit">DRAFT</span>
+        </div>
+        <div class="doc-row">
+          <div class="doc-ico">API</div>
+          <div class="meta">
+            <div class="t">Capability registry — reference</div>
+            <div class="s">platform / api · edited 1h ago</div>
+          </div>
+          <div class="stack"><div class="av h">NA</div><div class="av a bot">◇</div></div>
+          <span class="badge-edit" style="color:var(--human);border-color:color-mix(in srgb,var(--human) 40%,transparent)">PUBLISHED</span>
+        </div>
+        <div class="doc-row">
+          <div class="doc-ico">SEC</div>
+          <div class="meta">
+            <div class="t">Threat model — tenant isolation</div>
+            <div class="s">security / reviews · edited 3h ago</div>
+          </div>
+          <div class="stack"><div class="av h">JC</div></div>
+          <span class="badge-edit">REVIEW</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>Spaces</h3><span class="coord">05 TOTAL</span></div>
+        <div class="space-card">
+          <div class="top">
+            <span class="space-glyph" style="background:linear-gradient(150deg,var(--human),var(--human-deep))">E</span>
+            <span class="nm">Engineering</span><span class="ct">428 docs</span>
+          </div>
+          <div class="space-bar"><span class="h" style="width:62%"></span><span class="a" style="width:38%"></span></div>
+          <div class="split"><span style="color:var(--human)">62% human</span><span style="color:var(--agent)">38% agent</span></div>
+        </div>
+        <div class="space-card">
+          <div class="top">
+            <span class="space-glyph" style="background:linear-gradient(150deg,var(--agent),var(--agent-deep))">P</span>
+            <span class="nm">Platform</span><span class="ct">311 docs</span>
+          </div>
+          <div class="space-bar"><span class="h" style="width:48%"></span><span class="a" style="width:52%"></span></div>
+          <div class="split"><span style="color:var(--human)">48% human</span><span style="color:var(--agent)">52% agent</span></div>
+        </div>
+        <div class="space-card">
+          <div class="top">
+            <span class="space-glyph" style="background:linear-gradient(150deg,var(--acid),#7fa800);color:#1a2400">S</span>
+            <span class="nm">Security</span><span class="ct">96 docs</span>
+          </div>
+          <div class="space-bar"><span class="h" style="width:81%"></span><span class="a" style="width:19%"></span></div>
+          <div class="split"><span style="color:var(--human)">81% human</span><span style="color:var(--agent)">19% agent</span></div>
+        </div>
+        <div class="space-card">
+          <div class="top">
+            <span class="space-glyph" style="background:linear-gradient(150deg,#ff6fae,#c0356f)">D</span>
+            <span class="nm">Design</span><span class="ct">204 docs</span>
+          </div>
+          <div class="space-bar"><span class="h" style="width:70%"></span><span class="a" style="width:30%"></span></div>
+          <div class="split"><span style="color:var(--human)">70% human</span><span style="color:var(--agent)">30% agent</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= (B) DOCUMENTS LIST + TREE ================= -->
+<section class="screen" id="docs">
+  <div class="grid-bg"></div>
+  <span class="screen-tag">B · Space / Documents</span>
+  <div class="docs-layout">
+    <aside class="tree">
+      <div class="tree-h"><span class="ttl">Collections</span><span class="coord" style="cursor:pointer;color:var(--human)">+ new</span></div>
+      <div class="tnode"><span class="tw">▾</span> Engineering <span class="cnt">428</span></div>
+      <div class="tnode child on"><span class="tw">▾</span> Protocols <span class="cnt">34</span></div>
+      <div class="tnode child2"><span class="tw">·</span> Sync <span class="cnt">12</span></div>
+      <div class="tnode child2"><span class="tw">·</span> Auth <span class="cnt">9</span></div>
+      <div class="tnode child"><span class="tw">▸</span> Services <span class="cnt">88</span></div>
+      <div class="tnode child"><span class="tw">▸</span> Runbooks <span class="cnt">41</span></div>
+      <div class="tnode"><span class="tw">▸</span> Platform <span class="cnt">311</span></div>
+      <div class="tnode"><span class="tw">▸</span> Security <span class="cnt">96</span></div>
+      <div class="tnode"><span class="tw">▸</span> Design <span class="cnt">204</span></div>
+      <div class="tnode"><span class="tw">▸</span> People <span class="cnt">120</span></div>
+      <div style="border-top:1px solid var(--line);margin:14px 18px 0;padding-top:14px">
+        <div class="tnode" style="padding-left:18px;color:var(--agent)"><span class="tw">◇</span> Agent drafts <span class="cnt">84</span></div>
+        <div class="tnode" style="padding-left:18px"><span class="tw">⌫</span> Trash <span class="cnt">12</span></div>
+      </div>
+    </aside>
+
+    <main class="docs-main">
+      <div class="docs-bread">engineering <b>/</b> protocols <b>/</b> sync</div>
+      <div class="docs-head">
+        <div>
+          <h2>Sync</h2>
+          <p class="desc">CRDT replication, presence, and offline reconciliation. Co-maintained by the platform guild and <span style="color:var(--agent)">◇ docwright</span>.</p>
+        </div>
+        <button class="btn btn-primary">＋ New document</button>
+      </div>
+      <div class="filters">
+        <span class="fpill on">All · 12</span>
+        <span class="fpill">Edited by human</span>
+        <span class="fpill">Edited by agent</span>
+        <span class="fpill">Live now · 2</span>
+        <span class="fpill">Published</span>
+        <span style="margin-left:auto" class="coord">VIEW · table</span>
+      </div>
+
+      <table class="dtable">
+        <thead><tr>
+          <th style="width:42%">Document</th><th>Status</th><th>Last editor</th><th>Updated</th><th>Rev</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="name"><div class="di">RFC</div><div><div class="tt">Realtime sync protocol — v3</div><div class="pp">/protocols/sync/realtime-v3</div></div></div></td>
+            <td><span class="statust live"><span class="pulse" style="width:6px;height:6px;border-radius:50%;background:var(--acid);box-shadow:var(--glow-acid)"></span>live · 3</span></td>
+            <td><div class="editor-cell is-human"><div class="av h">NA</div><span class="nm">nomi.ali</span></div></td>
+            <td class="tcoord">4m ago</td>
+            <td class="tcoord">r.482</td>
+          </tr>
+          <tr>
+            <td><div class="name"><div class="di" style="color:var(--agent);border-color:color-mix(in srgb,var(--agent) 40%,transparent)">◇</div><div><div class="tt">Conflict resolution model</div><div class="pp">/protocols/sync/conflicts</div></div></div></td>
+            <td><span class="statust draft">draft</span></td>
+            <td><div class="editor-cell is-agent"><div class="av a bot">◇</div><span class="nm">docwright</span></div></td>
+            <td class="tcoord">18m ago</td>
+            <td class="tcoord">r.119</td>
+          </tr>
+          <tr>
+            <td><div class="name"><div class="di">DOC</div><div><div class="tt">Presence + awareness channel</div><div class="pp">/protocols/sync/presence</div></div></div></td>
+            <td><span class="statust pub">published</span></td>
+            <td><div class="editor-cell is-human"><div class="av h">JC</div><span class="nm">j.chen</span></div></td>
+            <td class="tcoord">2h ago</td>
+            <td class="tcoord">r.301</td>
+          </tr>
+          <tr>
+            <td><div class="name"><div class="di">DOC</div><div><div class="tt">Offline reconciliation strategy</div><div class="pp">/protocols/sync/offline</div></div></div></td>
+            <td><span class="statust live"><span class="pulse" style="width:6px;height:6px;border-radius:50%;background:var(--acid);box-shadow:var(--glow-acid)"></span>live · 1</span></td>
+            <td><div class="editor-cell is-agent"><div class="av a bot">◇</div><span class="nm">scribe</span></div></td>
+            <td class="tcoord">just now</td>
+            <td class="tcoord">r.064</td>
+          </tr>
+          <tr>
+            <td><div class="name"><div class="di">SPEC</div><div><div class="tt">Yjs update encoding notes</div><div class="pp">/protocols/sync/yjs-encoding</div></div></div></td>
+            <td><span class="statust draft">draft</span></td>
+            <td><div class="editor-cell is-human"><div class="av h">MO</div><span class="nm">m.osei</span></div></td>
+            <td class="tcoord">1d ago</td>
+            <td class="tcoord">r.207</td>
+          </tr>
+          <tr>
+            <td><div class="name"><div class="di">DOC</div><div><div class="tt">Snapshot + checkpoint cadence</div><div class="pp">/protocols/sync/snapshots</div></div></div></td>
+            <td><span class="statust pub">published</span></td>
+            <td><div class="editor-cell is-agent"><div class="av a bot">◇</div><span class="nm">docwright</span></div></td>
+            <td class="tcoord">2d ago</td>
+            <td class="tcoord">r.155</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+  </div>
+</section>
+
+<!-- ================= (C) READING VIEW ================= -->
+<section class="screen" id="read">
+  <div class="grid-bg"></div>
+  <span class="screen-tag">C · Document · Reading</span>
+  <div class="read-shell">
+    <article class="read-main">
+      <div class="read-kicker">
+        <span class="chip human"><span class="dot"></span>engineering / protocols</span>
+        <span class="statust pub">published</span>
+        <span class="coord">REV r.482</span>
+      </div>
+      <h1>Realtime sync protocol — v3</h1>
+      <p class="read-lede">How editorzero converges concurrent edits from humans and agents into a single causal history — without a central lock, and with every keystroke attributable in the audit log.</p>
+      <div class="read-byline">
+        <div class="av h">NA</div>
+        <span class="who">Authored by <b>nomi.ali</b></span>
+        <span class="coord">·</span>
+        <div class="av a bot">◇</div>
+        <span class="who">reviewed by <b style="color:var(--agent)">◇ docwright</b></span>
+        <span class="coord" style="margin-left:auto">UPDATED 2026·05·31 · 14 min read</span>
+      </div>
+
+      <div class="prose">
+        <p>Every document in editorzero is a <strong>conflict-free replicated data type</strong> (CRDT). Replicas hold their own copy of the doc and exchange compact update messages; the merge function is commutative, so the order of arrival never changes the result. Two editors — a person in the browser and an agent on the API — can both write into the same paragraph and <strong>converge to the same bytes</strong>.</p>
+
+        <h2><span class="hx">01</span>The causal model</h2>
+        <p>Each update carries a logical clock. We never overwrite; we <em>accumulate</em>. A delete is itself an operation, tombstoned rather than erased, so that a replica which was offline can still reconcile cleanly when it returns to the field.</p>
+
+        <div class="callout">
+          <div class="ch">◇ Agent annotation · docwright</div>
+          <p>Verified against the durability property test: snapshot + replayed updates reproduce the live <code>Y.Doc</code> byte-for-byte. This claim is safe to publish.</p>
+        </div>
+
+        <h2><span class="hx">02</span>Presence &amp; attribution</h2>
+        <p>Awareness state rides a side channel — cursors, selections, and the principal behind each one. Humans render in <strong>cyan</strong>, agents in <strong>violet</strong>, everywhere in the product. Attribution is not cosmetic: it maps to a row in the audit log.</p>
+        <ul>
+          <li><strong>Human principals</strong> — session-scoped, MFA-gated, cursor labelled by handle.</li>
+          <li><strong>Agent principals</strong> — token-scoped, rate-limited, revocable, every mutation signed with the agent's identity.</li>
+          <li><strong>Suggestions</strong> — agents may propose tracked changes that a human accepts or rejects before they land.</li>
+        </ul>
+
+        <h2><span class="hx">03</span>The wire format</h2>
+        <p>Updates are length-prefixed binary frames. The reference encoder is small enough to read in one sitting:</p>
+        <div class="codeblock"><span class="cm">// encode a single update frame</span><br><span class="kw">export function</span> <span class="fn">encodeFrame</span>(u: Update): Uint8Array {<br>&nbsp;&nbsp;<span class="kw">const</span> body = Y.<span class="fn">encodeStateAsUpdate</span>(u.doc)<br>&nbsp;&nbsp;<span class="kw">return</span> <span class="fn">frame</span>(<span class="st">"sync/v3"</span>, u.clock, body)<br>}</div>
+        <p>That is the entire contract a new surface needs to speak. The CLI, the MCP server, and the web client all encode the same frame — parity is a property test, not a promise.</p>
+      </div>
+    </article>
+
+    <aside class="read-aside">
+      <div class="aside-card">
+        <div class="at">Metadata</div>
+        <div class="aside-meta"><span class="k">DOC_ID</span><span class="v mono">d_8fz1aa</span></div>
+        <div class="aside-meta"><span class="k">COLLECTION</span><span class="v">protocols/sync</span></div>
+        <div class="aside-meta"><span class="k">AUTHOR</span><span class="v h">nomi.ali</span></div>
+        <div class="aside-meta"><span class="k">CONTRIBUTORS</span><span class="v">4 · 1 agent</span></div>
+        <div class="aside-meta"><span class="k">REVISION</span><span class="v mono">r.482</span></div>
+        <div class="aside-meta"><span class="k">VISIBILITY</span><span class="v">public page</span></div>
+        <div class="aside-meta"><span class="k">LICENSE</span><span class="v">CC-BY-4.0</span></div>
+        <div class="at" style="margin:18px 0 12px">On this page</div>
+        <nav class="toc">
+          <a class="on">01 · The causal model</a>
+          <a>02 · Presence &amp; attribution</a>
+          <a>03 · The wire format</a>
+        </nav>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ================= (D) EDITOR — signature screen ================= -->
+<section class="screen" id="editor">
+  <div class="grid-bg"></div>
+  <span class="screen-tag">D · Document · Editor — live co-edit</span>
+  <div class="ed-shell">
+    <div class="ed-main">
+      <div class="ed-toolbar">
+        <div class="tg">
+          <button class="tbtn">¶<span style="font-size:9px;margin-left:2px">▾</span></button>
+        </div>
+        <div class="tg">
+          <button class="tbtn on"><b>B</b></button>
+          <button class="tbtn"><i>I</i></button>
+          <button class="tbtn"><u>U</u></button>
+          <button class="tbtn"><s>S</s></button>
+          <button class="tbtn mono">&lt;/&gt;</button>
+        </div>
+        <div class="tg">
+          <button class="tbtn">H1</button>
+          <button class="tbtn">H2</button>
+          <button class="tbtn">•</button>
+          <button class="tbtn">1.</button>
+          <button class="tbtn">❝</button>
+        </div>
+        <div class="tg">
+          <button class="tbtn" style="color:var(--human)">🔗</button>
+          <button class="tbtn">⊞</button>
+        </div>
+        <div class="spacer"></div>
+        <div class="ai-toggle"><span class="pulse"></span>◇ docwright · co-editing</div>
+      </div>
+
+      <div class="ed-canvas">
+        <input class="doc-title-ed" value="Conflict resolution model" />
+        <div class="doc-sub-ed">
+          <span>/protocols/sync/conflicts</span>
+          <span style="color:var(--agent)">◇ draft</span>
+          <span>r.119</span>
+          <span class="live"><span class="pulse"></span>2 EDITING</span>
+        </div>
+
+        <div class="eblock">
+          <div class="handle"><button class="hbtn">⠿</button><button class="hbtn">＋</button></div>
+          <p>When two replicas edit the same block, the merge is deterministic: operations are ordered by their logical clock, ties broken by replica id<span class="caret-h"></span>.</p>
+        </div>
+
+        <div class="eblock is-h">
+          <div class="handle"><button class="hbtn">⠿</button><button class="hbtn">＋</button></div>
+          <h2>Tombstones over deletion</h2>
+        </div>
+
+        <div class="eblock">
+          <div class="handle"><button class="hbtn">⠿</button><button class="hbtn">＋</button></div>
+          <p>A delete never removes a character from history. Instead we mark it as a tombstone, <span class="sel-agent">so an offline replica can still reconcile its own edits against ours when it reconnects<span class="caret-a"></span></span> to the field.</p>
+        </div>
+
+        <div class="suggestion">
+          <div class="sg-h">
+            <div class="av a bot" style="width:20px;height:20px;font-size:9px">◇</div>
+            <span class="lab">Tracked suggestion · docwright</span>
+            <span class="meta">just now · awaiting review by nomi.ali</span>
+          </div>
+          <div class="sg-body">
+            Garbage collection compacts tombstones only after <del>all replicas</del> <span class="ins">every known replica has acknowledged the snapshot sequence</span>, which guarantees no live edit can reference a reaped operation.
+          </div>
+          <div class="sg-actions">
+            <span class="sg-act accept">✓ Accept</span>
+            <span class="sg-act">✕ Reject</span>
+            <span class="sg-act">↳ Reply</span>
+            <span class="sg-act" style="margin-left:auto;border:none;color:var(--ink-faint)">diff · +14 −2 chars</span>
+          </div>
+        </div>
+
+        <div class="eblock">
+          <div class="handle"><button class="hbtn">⠿</button><button class="hbtn">＋</button></div>
+          <p style="color:var(--ink-faint)">Type <span class="mono" style="color:var(--human)">/</span> for blocks, or <span class="mono" style="color:var(--agent)">@docwright</span> to ask the agent…</p>
+        </div>
+      </div>
+
+      <div class="slash">
+        <div class="slash-h">Blocks</div>
+        <div class="slash-i on"><span class="ik">H1</span> Heading 1 <span class="kb">#</span></div>
+        <div class="slash-i"><span class="ik">¶</span> Text <span class="kb">⏎</span></div>
+        <div class="slash-i"><span class="ik">&lt;&gt;</span> Code block <span class="kb">```</span></div>
+        <div class="slash-i"><span class="ik">❝</span> Callout</div>
+        <div class="slash-h" style="border-top:1px solid var(--line);margin-top:4px;padding-top:10px">AI</div>
+        <div class="slash-i ai"><span class="ik">◇</span> Ask docwright to draft…</div>
+        <div class="slash-i ai"><span class="ik">⟳</span> Rewrite selection</div>
+      </div>
+    </div>
+
+    <aside class="ed-rail">
+      <div class="rail-sec">
+        <div class="rt">In this doc <span class="live"><span class="pulse"></span>live</span></div>
+        <div class="presence">
+          <div class="av h">NA</div>
+          <div class="info"><div class="n">nomi.ali</div><div class="r">human · editing ¶1</div></div>
+          <span class="stat h"></span>
+        </div>
+        <div class="presence">
+          <div class="av a bot">◇</div>
+          <div class="info"><div class="n">docwright <span class="chip agent" style="padding:1px 6px;font-size:9px"><span class="dot"></span>agent</span></div><div class="r">violet · suggesting in ¶3</div></div>
+          <span class="stat a"></span>
+        </div>
+        <div class="presence">
+          <div class="av h">JC</div>
+          <div class="info"><div class="n">j.chen</div><div class="r">human · viewing</div></div>
+          <span class="stat h" style="opacity:.4"></span>
+        </div>
+      </div>
+
+      <div class="rail-sec">
+        <div class="rt">Change feed</div>
+        <div class="activity">
+          <div class="act-item a">
+            <div class="aw"><b class="a">◇ docwright</b> proposed a tracked edit</div>
+            <div class="ax">¶ GC compaction · +14 −2 · now</div>
+          </div>
+          <div class="act-item h">
+            <div class="aw"><b class="h">nomi.ali</b> typed in ¶1</div>
+            <div class="ax">causal model · 12s ago</div>
+          </div>
+          <div class="act-item a">
+            <div class="aw"><b class="a">◇ docwright</b> accepted into history</div>
+            <div class="ax">audit e_4471 · 2m ago</div>
+          </div>
+          <div class="act-item h">
+            <div class="aw"><b class="h">nomi.ali</b> rejected a suggestion</div>
+            <div class="ax">¶ wire format · 5m ago</div>
+          </div>
+          <div class="act-item h">
+            <div class="aw"><b class="h">j.chen</b> opened the doc</div>
+            <div class="ax">session s_88a · 6m ago</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rail-sec">
+        <div class="rt">Permissions</div>
+        <div class="aside-meta" style="border:none;padding:4px 0"><span class="k">YOU</span><span class="v h">can edit</span></div>
+        <div class="aside-meta" style="border:none;padding:4px 0"><span class="k">◇ docwright</span><span class="v a">suggest-only</span></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ================= (E) ADMIN / MEMBERS ================= -->
+<section class="screen" id="admin">
+  <div class="grid-bg"></div>
+  <span class="screen-tag">E · Admin · Members</span>
+  <div class="admin">
+    <aside class="admin-side">
+      <div class="sh">Workspace</div>
+      <div class="aside-link"><span class="g">▦</span> Overview</div>
+      <div class="aside-link on"><span class="g">◍</span> Members</div>
+      <div class="aside-link"><span class="g">⧉</span> Teams</div>
+      <div class="aside-link"><span class="g">▣</span> Spaces</div>
+      <div class="sh" style="margin-top:18px">System</div>
+      <div class="aside-link" style="color:var(--agent)"><span class="g">◇</span> Agents &amp; tokens</div>
+      <div class="aside-link"><span class="g">⌘</span> Audit log</div>
+      <div class="aside-link"><span class="g">⊟</span> Publishing</div>
+      <div class="aside-link"><span class="g">⚙</span> Settings</div>
+    </aside>
+
+    <main class="admin-main">
+      <div class="admin-head">
+        <div>
+          <h2>Members &amp; agents</h2>
+          <div class="sub">acme-internal.editorzero.host · 41 humans · 7 agents · self-hosted</div>
+        </div>
+        <button class="btn btn-primary">＋ Invite / provision</button>
+      </div>
+
+      <div class="seg">
+        <span class="s on">All · 48</span>
+        <span class="s">Humans · 41</span>
+        <span class="s">◇ Agents · 7</span>
+        <span class="s">Pending · 3</span>
+      </div>
+
+      <table class="mtable">
+        <thead><tr>
+          <th style="width:32%">Principal</th><th>Role</th><th>Teams</th><th>Rate / status</th><th>Last active</th><th></th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="mname"><div class="av h">NA</div><div class="info"><div class="n">Nomi Ali</div><div class="e">nomi.ali@acme.dev</div></div></div></td>
+            <td><span class="role admin">owner</span></td>
+            <td class="tok">Platform · Eng</td>
+            <td><span class="kbd-status"><span class="d"></span>session active</span></td>
+            <td class="tok">now</td>
+            <td class="row-act">⋯</td>
+          </tr>
+          <tr>
+            <td><div class="mname"><div class="av a bot">◇</div><div class="info"><div class="n">docwright <span class="chip agent" style="padding:1px 7px;font-size:9px"><span class="dot"></span>agent</span></div><div class="e">agent · tok_4f…a91 · suggest+write</div></div></div></td>
+            <td><span class="role agent">agent</span></td>
+            <td class="tok">Eng · Platform</td>
+            <td><span class="rl"><b>240</b> req/min · 84 pending</span></td>
+            <td class="tok">12s ago</td>
+            <td class="row-act">⋯</td>
+          </tr>
+          <tr>
+            <td><div class="mname"><div class="av h">JC</div><div class="info"><div class="n">June Chen</div><div class="e">j.chen@acme.dev</div></div></div></td>
+            <td><span class="role">editor</span></td>
+            <td class="tok">Security</td>
+            <td><span class="kbd-status"><span class="d"></span>session active</span></td>
+            <td class="tok">6m ago</td>
+            <td class="row-act">⋯</td>
+          </tr>
+          <tr>
+            <td><div class="mname"><div class="av a bot">◇</div><div class="info"><div class="n">scribe <span class="chip agent" style="padding:1px 7px;font-size:9px"><span class="dot"></span>agent</span></div><div class="e">agent · tok_9b…c20 · suggest-only</div></div></div></td>
+            <td><span class="role agent">agent</span></td>
+            <td class="tok">People</td>
+            <td><span class="rl"><b>60</b> req/min · idle</span></td>
+            <td class="tok">2m ago</td>
+            <td class="row-act">⋯</td>
+          </tr>
+          <tr>
+            <td><div class="mname"><div class="av h">MO</div><div class="info"><div class="n">Mara Osei</div><div class="e">m.osei@acme.dev</div></div></div></td>
+            <td><span class="role">editor</span></td>
+            <td class="tok">Engineering</td>
+            <td><span class="kbd-status" style="color:var(--ink-faint)"><span class="d" style="background:var(--ink-faint);box-shadow:none"></span>offline</span></td>
+            <td class="tok">1d ago</td>
+            <td class="row-act">⋯</td>
+          </tr>
+          <tr>
+            <td><div class="mname"><div class="av h" style="opacity:.6">RV</div><div class="info"><div class="n">Rafa Vidal</div><div class="e">r.vidal@acme.dev · invite sent</div></div></div></td>
+            <td><span class="role">pending</span></td>
+            <td class="tok">—</td>
+            <td><span class="kbd-status" style="color:var(--ink-faint)"><span class="d" style="background:var(--ink-faint);box-shadow:none"></span>awaiting accept</span></td>
+            <td class="tok">—</td>
+            <td class="row-act">⋯</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+  </div>
+</section>
+
+<div class="footer">EDITORZERO · NULL FIELD · open-source · self-hostable · AGPL-3.0 — <b>humans + agents, equal weight</b></div>
+
+<div class="theme-switch">
+  <button id="t-dark" class="on">Dark</button>
+  <button id="t-light">Light</button>
+</div>
+<script>
+  const root=document.documentElement, d=document.getElementById('t-dark'), l=document.getElementById('t-light');
+  d.onclick=()=>{root.setAttribute('data-theme','dark');d.classList.add('on');l.classList.remove('on')};
+  l.onclick=()=>{root.setAttribute('data-theme','light');l.classList.add('on');d.classList.remove('on')};
+</script>
+</body>
+</html>

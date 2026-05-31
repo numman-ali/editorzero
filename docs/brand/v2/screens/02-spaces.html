@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Spaces overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ===== Spaces overview — screen-specific (composes Meridian Zero) ===== */
+
+.spaces-screen{ position:relative; }
+
+/* toolbar spacing under page header */
+.spaces-toolbar{ margin-bottom:18px; }
+
+/* section head rule, matching dashboard "Spaces" pattern */
+.spaces-sechead{ display:flex; align-items:center; gap:12px; margin-bottom:13px; }
+.spaces-sechead h2{ font-size:14px; letter-spacing:-0.02em; }
+.spaces-sechead .ord{ width:auto; }
+
+/* ---- grid: override the base 3-up nth-child borders so a 7th (New) card
+        sits in a clean 3-col field with hairlines on all interior edges ---- */
+.spaces-grid{ grid-template-columns:repeat(3,1fr); border-bottom:0; }
+.spaces-grid .spaces-sp{ border-right:var(--rule) solid var(--hair); border-bottom:var(--rule) solid var(--hair); }
+.spaces-grid .spaces-sp:nth-child(3n){ border-right:0; }
+
+/* ---- card internals ---- */
+.spaces-sp{
+  display:flex; flex-direction:column; min-height:172px; padding:15px;
+  text-decoration:none; color:inherit;
+  transition:background .14s, box-shadow .14s;
+}
+.spaces-sp:focus-visible{ outline:var(--rule-2) solid var(--ultra); outline-offset:-3px; }
+.spaces-sp .nm{ margin-top:9px; }
+.spaces-sp .ds{ min-height:30px; }
+
+.spaces-toprow{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.spaces-glyph{
+  font-family:var(--mono); font-size:13px; color:var(--steel-2);
+  width:20px; height:20px; display:grid; place-items:center;
+}
+.spaces-sp:hover .spaces-glyph{ color:var(--ultra); }
+
+/* compact doc/member counts row (tabular) */
+.spaces-meta{
+  display:flex; align-items:center; gap:8px; margin-top:11px;
+  font-family:var(--mono); font-size:10px; color:var(--steel); letter-spacing:0.02em;
+}
+.spaces-meta b{ color:var(--ink); font-weight:600; }
+.spaces-sep{ color:var(--steel-2); }
+
+/* footer: avatar stack (humans + agents) + last-active */
+.spaces-ft{ margin-top:auto; padding-top:13px; justify-content:space-between; }
+.spaces-more{
+  background:var(--surface-2); color:var(--steel);
+  width:18px; height:18px; flex:0 0 18px; font-size:8.5px; font-weight:600;
+}
+.editors-stack .spaces-more{ border:var(--rule-2) solid var(--surface); }
+.spaces-active{ display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:9.5px; color:var(--steel); }
+.spaces-active .dot{ width:5px; height:5px; flex:0 0 5px; }
+
+/* ---- PUBLISHED / PUBLIC space — distinct cyan-agent signal ---- */
+.spaces-sp--public{ background:var(--agent-wash); }
+.spaces-sp--public:hover{ background:var(--agent-wash); box-shadow:inset 0 0 0 var(--rule) var(--agent-edge); }
+.spaces-sp--public .ds{ color:var(--ink-2); }
+.spaces-ord--pub{ color:var(--agent-ink); }
+.spaces-sp--public .spaces-meta b{ color:var(--agent-ink); }
+.spaces-pubtag{ display:inline-flex; align-items:center; gap:5px; }
+/* published space carries a permanent left accent bar so it reads distinct without hover */
+.spaces-sp--public{ box-shadow:inset 3px 0 0 var(--ok); }
+.spaces-tip--pub{ background:var(--ok); }
+
+.spaces-publine{
+  display:flex; align-items:center; gap:7px; margin-top:11px;
+  padding:6px 8px; border:var(--rule) solid var(--agent-edge); background:var(--surface);
+}
+.spaces-puburl{ font-size:10px; color:var(--agent-ink); letter-spacing:0.01em; }
+.spaces-visit{
+  margin-left:auto; font-family:var(--mono); font-size:9px; letter-spacing:0.05em;
+  text-transform:uppercase; color:var(--agent-ink); font-weight:600;
+}
+.spaces-active--pub{ color:var(--agent-ink); }
+
+/* ---- New space card ---- */
+.spaces-sp--new{ background:repeating-linear-gradient(135deg,transparent,transparent 9px,var(--surface-2) 9px,var(--surface-2) 10px); }
+.spaces-sp--new:hover{ background:var(--ultra-wash); }
+.spaces-newcard{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:8px; padding:6px; }
+.spaces-newcross{ width:26px; height:26px; color:var(--ultra); }
+.spaces-newcross .cross-ring{ inset:5px; }
+.spaces-sp--new:hover .spaces-newcross{ color:var(--ultra-ink); }
+.spaces-newtitle{ font-family:var(--display); font-weight:600; font-size:14px; letter-spacing:-0.02em; color:var(--ink); }
+.spaces-newsub{ font-size:10.5px; color:var(--steel); max-width:22ch; line-height:1.4; }
+.spaces-newcard-btn{ margin-top:6px; }
+
+.spaces-credit{ margin-top:20px; }
+
+/* ===== mobile bottom tab bar — hidden on desktop ===== */
+.spaces-mtab{ display:none; }
+
+/* ======================= RESPONSIVE ======================= */
+
+/* tablet: base stylesheet already collapses .side at <=1120px and forces
+   .win to 1 column; bring the grid to 2-up and fix interior borders */
+@media (max-width:1120px){
+  .spaces-grid{ grid-template-columns:repeat(2,1fr); }
+  .spaces-grid .spaces-sp:nth-child(3n){ border-right:var(--rule) solid var(--hair); }
+  .spaces-grid .spaces-sp:nth-child(2n){ border-right:0; }
+}
+
+/* show the mobile tab bar once the sidebar is gone */
+@media (max-width:1120px){
+  .spaces-mtab{
+    display:grid; grid-auto-flow:column; grid-auto-columns:1fr; align-items:center;
+    position:sticky; bottom:0; z-index:30;
+    background:var(--surface); border-top:var(--rule) solid var(--hair-strong);
+  }
+  .spaces-mtab a{
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    min-height:56px; padding:7px 4px; color:var(--steel);
+    font-family:var(--mono); font-size:8.5px; letter-spacing:0.04em; text-transform:uppercase;
+    border-right:var(--rule) solid var(--hair); position:relative;
+  }
+  .spaces-mtab a:last-child{ border-right:0; }
+  .spaces-mtab a .spaces-mt-ic{ font-size:15px; line-height:1; color:var(--steel-2); }
+  .spaces-mtab a.on{ color:var(--ink); }
+  .spaces-mtab a.on .spaces-mt-ic{ color:var(--ultra); }
+  .spaces-mtab a.on::before{ content:""; position:absolute; left:0; right:0; top:0; height:2px; background:var(--ultra); }
+  .spaces-mt-ag{ color:var(--agent-ink) !important; }
+  .spaces-mt-me{ width:22px; height:22px; flex:0 0 22px; font-size:9px; }
+  /* center FAB */
+  .spaces-mt-fab{ background:var(--ink); border-right:0; }
+  .spaces-mt-fab .spaces-mt-cross{ width:22px; height:22px; color:var(--paper); }
+  .spaces-mt-fab .cross-ring{ inset:5px; }
+}
+
+/* phone */
+@media (max-width:640px){
+  .spaces-screen .body{ padding:16px 14px 18px; }
+  .spaces-screen .bar{ padding:11px 14px; flex-wrap:wrap; gap:10px; }
+  /* the desktop search + header export/new are redundant with the FAB on phone */
+  .spaces-screen .bar .search{ display:none; }
+  .spaces-newbtn-ghost{ display:none; }
+  .spaces-newbtn{ margin-left:auto; }
+
+  .spaces-screen .page-h{ flex-direction:column; align-items:flex-start; gap:10px; margin-bottom:16px; }
+  .spaces-screen .page-h h1{ font-size:26px; }
+
+  /* toolbar wraps; segments stay tappable */
+  .spaces-toolbar{ flex-wrap:wrap; gap:8px; }
+  .spaces-toolbar .seg button{ padding:8px 12px; }
+  .spaces-toolbar .filt{ width:100%; margin-left:0; justify-content:flex-start; }
+
+  /* single-column stacked cards, full hairline box */
+  .spaces-grid{ grid-template-columns:1fr; }
+  .spaces-grid .spaces-sp,
+  .spaces-grid .spaces-sp:nth-child(3n),
+  .spaces-grid .spaces-sp:nth-child(2n){ border-right:0; }
+  .spaces-sp{ min-height:0; padding:14px; }
+  .spaces-sp .ds{ min-height:0; }
+
+  /* keep touch targets >=44px on the card-level CTAs */
+  .spaces-newcard-btn,
+  .spaces-visit{ min-height:36px; display:inline-flex; align-items:center; }
+  .spaces-sp--new{ min-height:120px; }
+
+  .spaces-credit{ flex-direction:column; align-items:flex-start; gap:8px; font-size:9px; }
+  .spaces-credit .ms{ flex-direction:column; gap:4px; }
+
+  /* breathing room above the sticky tab bar */
+  .spaces-screen{ padding-bottom:8px; }
+}
+
+/* very small phones: tighten avatar stack + tab labels */
+@media (max-width:380px){
+  .spaces-mtab a{ font-size:0; gap:0; }
+  .spaces-mtab a .spaces-mt-ic{ font-size:17px; }
+  .spaces-mt-me{ width:24px; height:24px; flex:0 0 24px; }
+}
+
+/* respect reduced-motion: kill the hover tip-bar slide + live pulse here */
+@media (prefers-reduced-motion: reduce){
+  .spaces-sp, .spaces-glyph, .spaces-newcross{ transition:none; }
+  .spaces-sp .bar-tip{ transition:none; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<section class="screen spaces-screen">
+  <div class="screen-tab">
+    <div class="id">
+      <span class="cross" style="width:14px;height:14px;color:var(--ultra)"></span>
+      <span class="big">Spaces</span>
+    </div>
+    <div class="meta">
+      <span>SURFACE · WEB-UI</span>
+      <span>VIEW / SPACES</span>
+      <span>ORG · NORTHWIND-ENG</span>
+    </div>
+  </div>
+
+  <div class="win">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="side">
+      <div class="top">
+        <div class="kicker">Workspace</div>
+        <div class="ws">
+          <span class="av av--u3">N</span>
+          <div style="min-width:0;">
+            <div class="nm">Northwind Eng</div>
+            <div class="sub">self-hosted · 6 spaces</div>
+          </div>
+          <span class="car">▾</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <a href="#"><span class="ic">⊹</span> Overview</a>
+        <a href="#"><span class="ic">▤</span> All Documents <span class="ct">312</span></a>
+        <a class="on" href="#"><span class="ic">◫</span> Spaces <span class="ct">06</span></a>
+        <a href="#"><span class="ic">↻</span> Shared with me <span class="ct">24</span></a>
+        <a href="#"><span class="ic">⌦</span> Trash <span class="ct">07</span></a>
+      </nav>
+      <div class="nav-h kicker">Agents · live</div>
+      <nav class="nav">
+        <a href="#"><span class="dot dot--agent live" style="margin:0 3px"></span> archivist <span class="ct">editor</span></a>
+        <a href="#"><span class="dot dot--agent" style="margin:0 3px"></span> linter-bot <span class="ct">author</span></a>
+        <a href="#"><span class="dot" style="margin:0 3px"></span> summariser <span class="ct">r-only</span></a>
+      </nav>
+      <div class="foot">
+        <span class="av av--u">NA</span>
+        <div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div class="main">
+      <div class="bar">
+        <div class="crumb"><span class="cross" style="width:13px;height:13px;color:var(--ultra)"></span> <b>Northwind Eng</b> <span class="sep">/</span> Spaces</div>
+        <div class="search"><span>⌕</span> Search spaces… <span class="k">⌘K</span></div>
+        <button class="btn btn--ultra btn--sm spaces-newbtn">+ New space</button>
+      </div>
+
+      <div class="body">
+        <div class="page-h">
+          <div class="lhs">
+            <div class="kicker kicker--ultra">⊹ ORG · 6 SPACES · 1 PUBLIC</div>
+            <h1>Spaces<span class="z">.</span></h1>
+            <div class="sub"><span>312 DOCUMENTS</span><span>·</span><span>41 MEMBERS</span><span>·</span><span>9 AGENTS</span></div>
+          </div>
+          <button class="btn btn--ghost spaces-newbtn-ghost">⤓ Export index</button>
+        </div>
+
+        <!-- toolbar: view + filter -->
+        <div class="toolbar2 spaces-toolbar">
+          <div class="seg">
+            <button class="on">Grid</button>
+            <button>Table</button>
+          </div>
+          <div class="seg">
+            <button class="on">All</button>
+            <button>Mine</button>
+            <button>Public</button>
+          </div>
+          <div class="filt">
+            <span class="dot dot--ultra"></span> Sort: Last active
+            <span class="ord" style="margin-left:6px">▾</span>
+          </div>
+        </div>
+
+        <!-- section rule -->
+        <div class="spaces-sechead">
+          <span class="ord">SP</span><h2>All spaces</h2>
+          <span class="hr" style="flex:1"></span>
+          <span class="kicker">6 TOTAL · 1 PUBLISHED</span>
+        </div>
+
+        <!-- ============ SPACES GRID ============ -->
+        <div class="spaces spaces-grid">
+
+          <!-- 01 Engineering -->
+          <a class="sp spaces-sp" href="#">
+            <div class="spaces-toprow">
+              <div class="ord">SP·01</div>
+              <span class="spaces-glyph">◫</span>
+            </div>
+            <div class="nm">Engineering</div>
+            <div class="ds">Architecture, the kernel, specs, security &amp; runtime topology.</div>
+            <div class="spaces-meta">
+              <span class="spaces-stat"><b class="tnum">128</b> docs</span>
+              <span class="spaces-sep">·</span>
+              <span class="spaces-stat"><b class="tnum">12</b> members</span>
+            </div>
+            <div class="ft spaces-ft">
+              <div class="editors-stack">
+                <span class="av av--u">NA</span>
+                <span class="av av--u2">JK</span>
+                <span class="av av--agent">AR</span>
+                <span class="av spaces-more">+9</span>
+              </div>
+              <span class="spaces-active"><span class="dot dot--agent live"></span> active 2m</span>
+            </div>
+            <div class="bar-tip"></div>
+          </a>
+
+          <!-- 02 Product -->
+          <a class="sp spaces-sp" href="#">
+            <div class="spaces-toprow">
+              <div class="ord">SP·02</div>
+              <span class="spaces-glyph">◳</span>
+            </div>
+            <div class="nm">Product</div>
+            <div class="ds">Briefs, product decisions, release notes &amp; roadmap.</div>
+            <div class="spaces-meta">
+              <span class="spaces-stat"><b class="tnum">47</b> docs</span>
+              <span class="spaces-sep">·</span>
+              <span class="spaces-stat"><b class="tnum">8</b> members</span>
+            </div>
+            <div class="ft spaces-ft">
+              <div class="editors-stack">
+                <span class="av av--u3">RP</span>
+                <span class="av av--u2">TM</span>
+                <span class="av av--agent">SM</span>
+                <span class="av spaces-more">+5</span>
+              </div>
+              <span class="spaces-active">active 1h</span>
+            </div>
+            <div class="bar-tip"></div>
+          </a>
+
+          <!-- 03 Design -->
+          <a class="sp spaces-sp" href="#">
+            <div class="spaces-toprow">
+              <div class="ord">SP·03</div>
+              <span class="spaces-glyph">◰</span>
+            </div>
+            <div class="nm">Design</div>
+            <div class="ds">Design system, component specs, brand &amp; review boards.</div>
+            <div class="spaces-meta">
+              <span class="spaces-stat"><b class="tnum">39</b> docs</span>
+              <span class="spaces-sep">·</span>
+              <span class="spaces-stat"><b class="tnum">6</b> members</span>
+            </div>
+            <div class="ft spaces-ft">
+              <div class="editors-stack">
+                <span class="av av--u2">LM</span>
+                <span class="av av--u">DV</span>
+                <span class="av av--agent">PX</span>
+              </div>
+              <span class="spaces-active">active 4h</span>
+            </div>
+            <div class="bar-tip"></div>
+          </a>
+
+          <!-- 04 Company Wiki -->
+          <a class="sp spaces-sp" href="#">
+            <div class="spaces-toprow">
+              <div class="ord">SP·04</div>
+              <span class="spaces-glyph">▦</span>
+            </div>
+            <div class="nm">Company Wiki</div>
+            <div class="ds">People, process, onboarding, rituals &amp; the handbook.</div>
+            <div class="spaces-meta">
+              <span class="spaces-stat"><b class="tnum">64</b> docs</span>
+              <span class="spaces-sep">·</span>
+              <span class="spaces-stat"><b class="tnum">41</b> members</span>
+            </div>
+            <div class="ft spaces-ft">
+              <div class="editors-stack">
+                <span class="av av--u3">TM</span>
+                <span class="av av--u">NA</span>
+                <span class="av av--u2">JK</span>
+                <span class="av spaces-more">+38</span>
+              </div>
+              <span class="spaces-active">active 6h</span>
+            </div>
+            <div class="bar-tip"></div>
+          </a>
+
+          <!-- 05 Customer Docs — PUBLISHED / PUBLIC READER -->
+          <a class="sp spaces-sp spaces-sp--public" href="#">
+            <div class="spaces-toprow">
+              <div class="ord spaces-ord--pub">SP·05</div>
+              <span class="status-tag st-pub spaces-pubtag">● Published</span>
+            </div>
+            <div class="nm">Customer Docs</div>
+            <div class="ds">Public product documentation &amp; API reference — served to the open reader.</div>
+            <div class="spaces-meta">
+              <span class="spaces-stat"><b class="tnum">73</b> docs</span>
+              <span class="spaces-sep">·</span>
+              <span class="spaces-stat"><b class="tnum">5</b> members</span>
+            </div>
+            <div class="spaces-publine">
+              <span class="cross" style="width:11px;height:11px;color:var(--ok)"></span>
+              <span class="mono spaces-puburl">docs.northwind.io</span>
+              <span class="spaces-visit">Visit ↗</span>
+            </div>
+            <div class="ft spaces-ft">
+              <div class="editors-stack">
+                <span class="av av--u3">RP</span>
+                <span class="av av--agent">AR</span>
+                <span class="av av--agent">SM</span>
+                <span class="av spaces-more">+2</span>
+              </div>
+              <span class="spaces-active spaces-active--pub"><span class="dot dot--agent live"></span> agent indexing</span>
+            </div>
+            <div class="bar-tip spaces-tip--pub"></div>
+          </a>
+
+          <!-- 06 Sandbox -->
+          <a class="sp spaces-sp" href="#">
+            <div class="spaces-toprow">
+              <div class="ord">SP·06</div>
+              <span class="spaces-glyph">◇</span>
+            </div>
+            <div class="nm">Sandbox</div>
+            <div class="ds">Scratch space — experiments, drafts &amp; agent test runs.</div>
+            <div class="spaces-meta">
+              <span class="spaces-stat"><b class="tnum">18</b> docs</span>
+              <span class="spaces-sep">·</span>
+              <span class="spaces-stat"><b class="tnum">4</b> members</span>
+            </div>
+            <div class="ft spaces-ft">
+              <div class="editors-stack">
+                <span class="av av--u">NA</span>
+                <span class="av av--agent">LB</span>
+              </div>
+              <span class="spaces-active"><span class="dot dot--agent"></span> agent · 30m</span>
+            </div>
+            <div class="bar-tip"></div>
+          </a>
+
+          <!-- New space card (always last) -->
+          <a class="sp spaces-sp spaces-sp--new" href="#">
+            <div class="spaces-newcard">
+              <span class="cross spaces-newcross"></span>
+              <div class="spaces-newtitle">New space</div>
+              <div class="spaces-newsub">Create a space &amp; invite members + agents</div>
+              <span class="btn btn--primary btn--sm spaces-newcard-btn">+ Create</span>
+            </div>
+          </a>
+
+        </div>
+
+        <div class="credit spaces-credit">
+          <span>EDITORZERO · SELF-HOSTED · v0</span>
+          <div class="ms"><span>API · CLI · MCP · WEB AT PARITY</span><span>AGPL-3.0</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MOBILE BOTTOM TAB BAR ============ -->
+  <nav class="spaces-mtab" aria-label="Primary">
+    <a href="#"><span class="spaces-mt-ic">⊹</span><span>Home</span></a>
+    <a href="#"><span class="spaces-mt-ic">▤</span><span>Docs</span></a>
+    <a class="on" href="#"><span class="spaces-mt-ic">◫</span><span>Spaces</span></a>
+    <a href="#" class="spaces-mt-fab" aria-label="New space"><span class="cross spaces-mt-cross"></span></a>
+    <a href="#"><span class="spaces-mt-ic spaces-mt-ag">◈</span><span>Agents</span></a>
+    <a href="#"><span class="av av--u spaces-mt-me">NA</span><span>You</span></a>
+  </nav>
+</section>
+</body>
+</html>

@@ -1,8 +1,10 @@
 # ADR 0031 — Editor substrate: bootstrap on BlockNote, eject to Tiptap v3 + an owned thin block layer (clean-start)
 
-**Status:** Accepted (2026-05-30; supersedes ADR 0004)
+**Status:** **Superseded by [0038](0038-owned-editor-tiptap-direct.md) (2026-05-31)** — the Phase-1 BlockNote bootstrap is **dropped** and Tiptap v3 is adopted **directly**. (Originally: Accepted 2026-05-30; superseded ADR 0004.)
 **Date:** 2026-05-29
 **Deciders:** @numman (determination delegated to Claude Opus 4.8; review `wf_b3e0aac1-bff`)
+
+> **Superseded by ADR 0038 (2026-05-31).** Two facts that emerged after this ADR collapsed its two phases into one: the design system is now **Base UI, not Mantine** (ADR 0037), so a BlockNote bootstrap would pull in throwaway Mantine CSS that fights the token cascade; and the SPA scaffold (ADR 0035) never shipped a BlockNote editor route, so there is no Phase-1 investment to protect. ADR 0038 therefore adopts Tiptap directly and **carries forward the owned-Tiptap eject, the clean-start constraint, and the schema-sovereignty reasoning below verbatim** — only the BlockNote-first *sequencing* is reversed. A research Workflow (`wf_734a602e-3d6`) also corrected two draft pin claims (no `y-prosemirror@2.0.0`; Hocuspocus is at 4.1.0, not 3.4.x-current) — see ADR 0038.
 
 ## Context
 

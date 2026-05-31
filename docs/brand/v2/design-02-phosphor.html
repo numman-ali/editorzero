@@ -1,0 +1,1093 @@
+<!doctype html>
+<html lang="en" data-theme="phosphor">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>editorzero · PHOSPHOR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+<style>
+/* ════════════════════════════════════════════════════════════════════
+   PHOSPHOR — a terminal that became a design system.
+   editorzero. Humans (cyan beam) + agents (amber beam) as peer channels.
+   Every value is a token; retheme by overriding :root custom properties.
+   ════════════════════════════════════════════════════════════════════ */
+:root{
+  /* ── canvas: true-black CRT, not warm paper ── */
+  --bg:#05070a;
+  --bg-raise:#0a0e14;
+  --bg-panel:#0c1118;
+  --bg-inset:#070a0f;
+  --bg-hover:#10161f;
+  --grid:rgba(64,255,170,.045);
+
+  /* ── phosphor channels ── */
+  --p-green:#3dffa8;      /* primary phosphor — system / brand */
+  --p-green-dim:#1f9c66;
+  --p-green-glow:rgba(61,255,168,.20);
+  --p-cyan:#46d4ff;       /* HUMAN channel */
+  --p-cyan-glow:rgba(70,212,255,.16);
+  --p-amber:#ffb645;      /* AGENT channel */
+  --p-amber-glow:rgba(255,182,69,.16);
+  --p-magenta:#ff5c8a;    /* destructive / alert */
+  --p-violet:#b58bff;     /* publish / external */
+
+  /* ── ink ── */
+  --ink:#cfe6dd;          /* primary text — AA on --bg */
+  --ink-mid:#7e9a92;      /* secondary */
+  --ink-low:#4f655f;      /* tertiary / chrome labels */
+  --ink-faint:#2c3a37;    /* rules, ghost glyphs */
+
+  /* ── geometry ── */
+  --line:#16201d;
+  --line-bright:#22312c;
+  --rad:3px;
+  --gut:16px;
+  --row:30px;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --mono-text:"IBM Plex Mono",ui-monospace,monospace;
+  --fs:13px;
+  --lh:1.62;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--mono);
+  font-size:var(--fs);
+  line-height:1.4;
+  -webkit-font-smoothing:antialiased;
+  letter-spacing:.01em;
+}
+/* faint phosphor scanline + grid wash over the whole page */
+body::before{
+  content:"";position:fixed;inset:0;z-index:9999;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.16) 2px 3px);
+  mix-blend-mode:multiply;opacity:.5;
+}
+::selection{background:var(--p-green);color:#02130c}
+
+/* ── scrollbars ── */
+*::-webkit-scrollbar{width:9px;height:9px}
+*::-webkit-scrollbar-track{background:var(--bg-inset)}
+*::-webkit-scrollbar-thumb{background:var(--line-bright);border:2px solid var(--bg-inset)}
+*::-webkit-scrollbar-thumb:hover{background:var(--p-green-dim)}
+
+/* ════ shared atoms ════ */
+.mono-text{font-family:var(--mono-text)}
+.dim{color:var(--ink-mid)}
+.faint{color:var(--ink-low)}
+.glow-g{text-shadow:0 0 10px var(--p-green-glow)}
+.cur{display:inline-block;width:.62ch;height:1.05em;vertical-align:-.16em;background:var(--p-green);
+  box-shadow:0 0 8px var(--p-green-glow);animation:blink 1.05s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+/* channel chips: the core peer-co-editor colour language */
+.chan{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;
+  padding:2px 8px 2px 6px;border-radius:999px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.chan .dot{width:7px;height:7px;border-radius:50%}
+.chan--human{color:var(--p-cyan);background:rgba(70,212,255,.08);border:1px solid rgba(70,212,255,.30)}
+.chan--human .dot{background:var(--p-cyan);box-shadow:0 0 7px var(--p-cyan-glow)}
+.chan--agent{color:var(--p-amber);background:rgba(255,182,69,.07);border:1px solid rgba(255,182,69,.30)}
+.chan--agent .dot{background:var(--p-amber);box-shadow:0 0 7px var(--p-amber-glow)}
+
+.kbd{font-family:var(--mono);font-size:11px;color:var(--ink-mid);background:var(--bg-inset);
+  border:1px solid var(--line-bright);border-bottom-width:2px;border-radius:3px;padding:1px 6px;line-height:1.5}
+
+.tag{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;
+  padding:2px 7px;border-radius:2px;border:1px solid var(--line-bright);color:var(--ink-mid)}
+.tag--ok{color:var(--p-green);border-color:var(--p-green-dim);background:var(--p-green-glow)}
+.tag--pub{color:var(--p-violet);border-color:#4a3b6b;background:rgba(181,139,255,.08)}
+.tag--draft{color:var(--ink-mid)}
+.tag--lossless{color:var(--p-green);border-color:var(--p-green-dim)}
+
+/* ════ page scaffold ════ */
+.screens{max-width:1280px;margin:0 auto;padding:42px 28px 120px}
+.masthead{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
+  padding-bottom:22px;margin-bottom:40px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:14px}
+.brand .glyph{font-family:var(--mono);font-weight:800;font-size:30px;color:var(--p-green);
+  text-shadow:0 0 18px var(--p-green-glow);line-height:1}
+.brand .glyph .slash{color:var(--ink);position:relative}
+.brand .wordmark{font-weight:800;font-size:18px;letter-spacing:.02em}
+.brand .wordmark .z{color:var(--p-green)}
+.brand .tline{font-size:11px;color:var(--ink-low);letter-spacing:.05em;margin-top:3px}
+.masthead .meta{text-align:right;font-size:11px;color:var(--ink-low);line-height:1.7}
+.masthead .meta b{color:var(--p-amber);font-weight:600}
+.masthead .meta i{color:var(--p-cyan);font-style:normal}
+
+/* screen frame — every screen is a "terminal window" */
+.screen{margin-bottom:46px}
+.screen__label{display:flex;align-items:baseline;gap:12px;margin-bottom:12px;padding-left:2px}
+.screen__idx{font-weight:800;font-size:12px;color:var(--bg);background:var(--p-green);
+  padding:2px 9px;border-radius:2px;text-shadow:none;letter-spacing:.05em}
+.screen__name{font-weight:700;font-size:14px;letter-spacing:.02em}
+.screen__hint{font-size:11px;color:var(--ink-low);margin-left:auto;letter-spacing:.04em}
+
+.win{background:var(--bg-raise);border:1px solid var(--line-bright);border-radius:var(--rad);
+  overflow:hidden;box-shadow:0 0 0 1px #000,0 26px 60px -24px rgba(0,0,0,.9),0 0 80px -50px var(--p-green-glow)}
+/* title bar */
+.tbar{display:flex;align-items:center;gap:10px;height:34px;padding:0 12px;
+  background:var(--bg-panel);border-bottom:1px solid var(--line-bright)}
+.tbar .dots{display:flex;gap:6px}
+.tbar .dots i{width:10px;height:10px;border-radius:50%;display:block;background:var(--line-bright)}
+.tbar .dots i:nth-child(1){background:#2a3b36}
+.tbar .dots i.live{background:var(--p-green);box-shadow:0 0 7px var(--p-green-glow)}
+.tbar .path{font-size:11.5px;color:var(--ink-mid)}
+.tbar .path b{color:var(--ink)}
+.tbar .path .sep{color:var(--ink-faint);margin:0 6px}
+.tbar .right{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:11px;color:var(--ink-low)}
+.tbar .right .ping{color:var(--p-green)}
+
+/* status bar (vim/tmux style) common to several screens */
+.statusbar{display:flex;align-items:center;height:26px;font-size:11px;letter-spacing:.03em;
+  background:var(--bg-inset);border-top:1px solid var(--line-bright);color:var(--ink-low)}
+.statusbar .seg{padding:0 12px;height:100%;display:flex;align-items:center;gap:7px;border-right:1px solid var(--line)}
+.statusbar .seg--mode{background:var(--p-green);color:#02130c;font-weight:700}
+.statusbar .seg--mode.ins{background:var(--p-cyan);color:#021a22}
+.statusbar .seg b{color:var(--ink-mid)}
+.statusbar .spacer{flex:1}
+
+/* ── command bar atom (palette-first) ── */
+.cmd{display:flex;align-items:center;gap:10px;height:42px;padding:0 14px;background:var(--bg-inset);
+  border-bottom:1px solid var(--line-bright)}
+.cmd .prompt{color:var(--p-green);font-weight:700;text-shadow:0 0 10px var(--p-green-glow)}
+.cmd input{flex:1;background:none;border:none;outline:none;color:var(--ink);font-family:var(--mono);
+  font-size:13px;letter-spacing:.01em}
+.cmd input::placeholder{color:var(--ink-low)}
+.cmd .hint{font-size:11px;color:var(--ink-low)}
+
+/* ════════════════════════════════════════════════════════════════════
+   (A) DASHBOARD
+   ════════════════════════════════════════════════════════════════════ */
+.dash{display:grid;grid-template-columns:228px 1fr;min-height:560px}
+.nav{background:var(--bg-panel);border-right:1px solid var(--line);padding:14px 0;font-size:12.5px}
+.nav .sect{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-low);
+  padding:14px 16px 7px}
+.nav a{display:flex;align-items:center;gap:10px;padding:5px 16px;color:var(--ink-mid);
+  text-decoration:none;border-left:2px solid transparent;cursor:pointer}
+.nav a .ic{width:14px;color:var(--ink-low);text-align:center}
+.nav a:hover{background:var(--bg-hover);color:var(--ink)}
+.nav a.on{color:var(--p-green);border-left-color:var(--p-green);background:linear-gradient(90deg,var(--p-green-glow),transparent)}
+.nav a.on .ic{color:var(--p-green)}
+.nav a .ct{margin-left:auto;font-size:10.5px;color:var(--ink-low)}
+.nav .tree a{padding-left:30px;font-size:12px}
+.nav .tree .tw{color:var(--ink-faint);margin-right:-4px}
+
+.dash__body{padding:24px 26px;overflow:hidden}
+.hdr-row{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px}
+.hdr-row h1{font-size:21px;font-weight:800;letter-spacing:-.01em}
+.hdr-row h1 .accent{color:var(--p-green);text-shadow:0 0 14px var(--p-green-glow)}
+.hdr-row .sub{font-size:11.5px;color:var(--ink-low);margin-top:5px}
+.hdr-row .sub b{color:var(--p-amber)}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.stat{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--rad);padding:13px 14px;position:relative;overflow:hidden}
+.stat::after{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--p-green);opacity:.5}
+.stat.c::after{background:var(--p-cyan)}.stat.a::after{background:var(--p-amber)}.stat.v::after{background:var(--p-violet)}
+.stat .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-low)}
+.stat .v{font-size:27px;font-weight:800;margin-top:6px;font-variant-numeric:tabular-nums;line-height:1}
+.stat .d{font-size:10.5px;color:var(--ink-mid);margin-top:6px}
+.stat .d .up{color:var(--p-green)}
+
+.cols2{display:grid;grid-template-columns:1.55fr 1fr;gap:20px}
+.panel{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--rad);overflow:hidden}
+.panel__h{display:flex;align-items:center;gap:9px;padding:10px 14px;border-bottom:1px solid var(--line);
+  font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mid)}
+.panel__h .bx{color:var(--p-green-dim)}
+.panel__h .more{margin-left:auto;color:var(--ink-low);text-transform:none;letter-spacing:0;font-size:11px}
+
+.doc-line{display:grid;grid-template-columns:18px 1fr auto;gap:11px;align-items:center;
+  padding:9px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.doc-line:last-child{border-bottom:none}
+.doc-line:hover{background:var(--bg-hover)}
+.doc-line .gl{color:var(--ink-faint);font-size:13px}
+.doc-line .nm{font-weight:500;color:var(--ink)}
+.doc-line .pa{font-size:11px;color:var(--ink-low);margin-top:2px}
+.doc-line .rt{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--ink-low);white-space:nowrap}
+.avx{width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;font-size:9.5px;font-weight:700;border:1px solid}
+.avx--h{color:var(--p-cyan);border-color:rgba(70,212,255,.4);background:rgba(70,212,255,.1)}
+.avx--a{color:var(--p-amber);border-color:rgba(255,182,69,.4);background:rgba(255,182,69,.1)}
+
+/* activity feed — interleaved human + agent */
+.feed{padding:6px 0}
+.fe{display:grid;grid-template-columns:16px 1fr;gap:11px;padding:8px 14px;font-size:11.5px;position:relative}
+.fe .rail{display:flex;justify-content:center;position:relative}
+.fe .rail .d{width:8px;height:8px;border-radius:50%;margin-top:4px;z-index:1}
+.fe .rail::before{content:"";position:absolute;top:0;bottom:-16px;width:1px;background:var(--line-bright)}
+.fe:last-child .rail::before{display:none}
+.fe.h .rail .d{background:var(--p-cyan);box-shadow:0 0 6px var(--p-cyan-glow)}
+.fe.a .rail .d{background:var(--p-amber);box-shadow:0 0 6px var(--p-amber-glow)}
+.fe .who{font-weight:600}
+.fe.h .who{color:var(--p-cyan)}.fe.a .who{color:var(--p-amber)}
+.fe .what{color:var(--ink-mid)}
+.fe .cap{color:var(--ink-low);font-size:10.5px}
+.fe .t{color:var(--ink-faint);font-size:10.5px;margin-top:2px}
+
+.space-chip{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.space-chip:last-child{border-bottom:none}
+.space-chip:hover{background:var(--bg-hover)}
+.space-chip .sq{width:22px;height:22px;border-radius:3px;display:grid;place-items:center;font-weight:800;font-size:11px;
+  border:1px solid var(--line-bright);color:var(--p-green)}
+.space-chip .nm{font-weight:500}
+.space-chip .mc{margin-left:auto;font-size:10.5px;color:var(--ink-low);display:flex;gap:8px;align-items:center}
+
+/* ════════════════════════════════════════════════════════════════════
+   (B) DOCUMENTS LIST
+   ════════════════════════════════════════════════════════════════════ */
+.docs{display:grid;grid-template-columns:262px 1fr;min-height:560px}
+.tree{background:var(--bg-panel);border-right:1px solid var(--line);padding:8px 0;font-size:12.5px;overflow:auto}
+.tree__h{display:flex;align-items:center;gap:8px;padding:9px 14px 11px;font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-low);border-bottom:1px solid var(--line);margin-bottom:6px}
+.tree__h .sp{margin-left:auto;color:var(--p-green);font-size:13px;cursor:pointer}
+.tnode{display:flex;align-items:center;gap:7px;padding:5px 14px;color:var(--ink-mid);cursor:pointer;white-space:nowrap;overflow:hidden}
+.tnode:hover{background:var(--bg-hover);color:var(--ink)}
+.tnode.on{color:var(--p-green);background:linear-gradient(90deg,var(--p-green-glow),transparent)}
+.tnode .tw{color:var(--ink-faint);font-size:11px;width:9px;display:inline-block;text-align:center}
+.tnode .ic{color:var(--ink-low);width:13px;text-align:center}
+.tnode.on .ic{color:var(--p-green)}
+.tnode .ct{margin-left:auto;font-size:10px;color:var(--ink-faint)}
+.tnode.l1{padding-left:30px}.tnode.l2{padding-left:46px}
+
+.docs__main{display:flex;flex-direction:column;overflow:hidden}
+.fltbar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);background:var(--bg-panel)}
+.crumbs{font-size:12px;color:var(--ink-mid)}
+.crumbs b{color:var(--ink);font-weight:600}
+.crumbs .sep{color:var(--ink-faint);margin:0 7px}
+.fltbar .pill{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-mid);
+  border:1px solid var(--line-bright);border-radius:999px;padding:3px 10px;cursor:pointer}
+.fltbar .pill+.pill{margin-left:0}
+.fltbar .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--p-green)}
+
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl thead th{text-align:left;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-low);
+  font-weight:600;padding:9px 16px;border-bottom:1px solid var(--line-bright);background:var(--bg-inset);position:sticky;top:0}
+.tbl tbody td{padding:11px 16px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tbody tr{cursor:pointer}
+.tbl tbody tr:hover{background:var(--bg-hover)}
+.tbl .name{display:flex;align-items:center;gap:10px}
+.tbl .name .gl{color:var(--ink-faint)}
+.tbl .name b{font-weight:600;color:var(--ink)}
+.tbl .name .id{display:block;font-size:10px;color:var(--ink-faint);margin-top:2px;letter-spacing:.02em}
+.tbl .editors{display:flex;align-items:center}
+.tbl .editors .avx{margin-left:-5px;position:relative}
+.tbl .editors .avx:first-child{margin-left:0}
+.tbl .editors .more{margin-left:6px;font-size:10.5px;color:var(--ink-low)}
+.tbl .when{color:var(--ink-mid);font-variant-numeric:tabular-nums}
+.tbl .when small{display:block;color:var(--ink-faint);font-size:10px;margin-top:1px}
+.live-edit{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--p-amber);
+  background:rgba(255,182,69,.07);border:1px solid rgba(255,182,69,.25);border-radius:999px;padding:1px 8px}
+.live-edit .pulse{width:6px;height:6px;border-radius:50%;background:var(--p-amber);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+
+/* ════════════════════════════════════════════════════════════════════
+   (C) READING VIEW
+   ════════════════════════════════════════════════════════════════════ */
+.read{display:grid;grid-template-columns:1fr 248px;min-height:560px}
+.article{padding:46px 60px 60px;max-width:760px;font-family:var(--mono-text);overflow:auto}
+.article .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--p-green-dim);margin-bottom:14px}
+.article h1.title{font-family:var(--mono);font-size:31px;font-weight:800;line-height:1.16;letter-spacing:-.015em;margin-bottom:18px}
+.metarow{display:flex;flex-wrap:wrap;align-items:center;gap:9px;padding-bottom:22px;margin-bottom:28px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink-low)}
+.metarow .by{display:flex;align-items:center;gap:7px;color:var(--ink-mid)}
+.article p{color:var(--ink);line-height:var(--lh);margin:0 0 18px;font-size:14px}
+.article h2{font-family:var(--mono);font-size:16px;font-weight:700;margin:34px 0 13px;color:var(--ink);
+  letter-spacing:.01em;display:flex;align-items:center;gap:10px}
+.article h2::before{content:"##";color:var(--p-green-dim);font-weight:800}
+.article ul{margin:0 0 18px;padding-left:4px;list-style:none}
+.article li{position:relative;padding-left:24px;margin-bottom:9px;line-height:1.55;font-size:14px;color:var(--ink)}
+.article li::before{content:"▸";position:absolute;left:4px;color:var(--p-green-dim)}
+.article code{font-family:var(--mono);font-size:12.5px;background:var(--bg-inset);color:var(--p-cyan);
+  padding:1px 6px;border-radius:3px;border:1px solid var(--line)}
+.article a{color:var(--p-cyan);text-decoration:none;border-bottom:1px solid rgba(70,212,255,.3)}
+.callout{display:grid;grid-template-columns:auto 1fr;gap:14px;background:var(--bg-inset);
+  border:1px solid var(--line-bright);border-left:2px solid var(--p-amber);border-radius:var(--rad);padding:15px 17px;margin:0 0 22px}
+.callout .ic{color:var(--p-amber);font-size:16px;font-family:var(--mono)}
+.callout .bd{font-size:13px;line-height:1.55;color:var(--ink-mid)}
+.callout .bd b{color:var(--ink)}
+.codeblk{background:var(--bg-inset);border:1px solid var(--line-bright);border-radius:var(--rad);
+  margin:0 0 22px;font-family:var(--mono);font-size:12.5px;overflow:hidden}
+.codeblk .cb-h{display:flex;align-items:center;gap:8px;padding:7px 13px;border-bottom:1px solid var(--line);
+  font-size:10.5px;letter-spacing:.05em;color:var(--ink-low);text-transform:uppercase}
+.codeblk pre{padding:14px 16px;line-height:1.65;color:var(--ink);overflow:auto;white-space:pre}
+.codeblk .t-k{color:var(--p-violet)}.codeblk .t-s{color:var(--p-green)}.codeblk .t-c{color:var(--ink-low)}.codeblk .t-f{color:var(--p-cyan)}
+
+.read__aside{background:var(--bg-panel);border-left:1px solid var(--line);padding:22px 18px;font-size:12px;overflow:auto}
+.aside-h{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-low);margin:0 0 11px}
+.aside-sect{padding-bottom:20px;margin-bottom:20px;border-bottom:1px solid var(--line)}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12px}
+.kv .k{color:var(--ink-low)}.kv .v{color:var(--ink);text-align:right}
+.toc a{display:block;padding:5px 0 5px 12px;color:var(--ink-mid);text-decoration:none;border-left:1px solid var(--line);font-size:12px}
+.toc a.on{color:var(--p-green);border-left-color:var(--p-green)}
+.toc a:hover{color:var(--ink)}
+.contrib{display:flex;align-items:center;gap:9px;padding:6px 0}
+.contrib .nm{font-size:12px}.contrib .ro{margin-left:auto;font-size:10px;color:var(--ink-low)}
+
+/* ════════════════════════════════════════════════════════════════════
+   (D) EDITOR — the signature screen
+   ════════════════════════════════════════════════════════════════════ */
+.editor{display:grid;grid-template-columns:1fr 256px;min-height:640px;position:relative}
+.ed-main{display:flex;flex-direction:column;overflow:hidden}
+
+/* formatting toolbar */
+.fmtbar{display:flex;align-items:center;gap:3px;padding:7px 14px;background:var(--bg-panel);border-bottom:1px solid var(--line)}
+.fmtbar .grp{display:flex;gap:2px;padding-right:9px;margin-right:6px;border-right:1px solid var(--line)}
+.fmtbar button{font-family:var(--mono);font-size:12px;color:var(--ink-mid);background:none;border:1px solid transparent;
+  border-radius:3px;height:26px;min-width:26px;padding:0 7px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.fmtbar button:hover{background:var(--bg-hover);color:var(--ink);border-color:var(--line-bright)}
+.fmtbar button.on{color:var(--p-green);background:var(--p-green-glow);border-color:var(--p-green-dim)}
+.fmtbar button b{font-weight:800}.fmtbar button i{font-style:italic}.fmtbar button s{text-decoration:line-through}
+.fmtbar .save{margin-left:auto;font-size:11px;color:var(--p-green-dim);display:flex;align-items:center;gap:6px}
+.fmtbar .save .rec{width:7px;height:7px;border-radius:50%;background:var(--p-green);animation:pulse 2s infinite}
+
+/* the document canvas */
+.canvas{flex:1;padding:34px 56px 40px;overflow:auto;font-family:var(--mono-text);position:relative}
+.blk{position:relative;padding:3px 0;margin-left:-30px;padding-left:30px}
+.blk .handle{position:absolute;left:0;top:4px;display:flex;gap:1px;opacity:0;transition:opacity .12s;color:var(--ink-faint);cursor:grab}
+.blk:hover .handle{opacity:1}
+.blk .handle .pl{cursor:pointer}.blk .handle .pl:hover{color:var(--p-green)}
+.blk .handle .gr{cursor:grab}.blk .handle .gr:hover{color:var(--ink-mid)}
+
+.doc-title{font-family:var(--mono);font-size:30px;font-weight:800;letter-spacing:-.015em;line-height:1.16;margin-bottom:8px}
+.doc-sub{font-size:12px;color:var(--ink-low);margin-bottom:26px;display:flex;gap:8px;align-items:center}
+.canvas h2.b{font-family:var(--mono);font-size:16px;font-weight:700;margin:24px 0 12px;display:flex;align-items:center;gap:9px}
+.canvas h2.b::before{content:"##";color:var(--p-green-dim);font-weight:800}
+.canvas p.b{font-size:14px;line-height:var(--lh);color:var(--ink);margin:0}
+.canvas .li{font-size:14px;line-height:1.6;color:var(--ink);position:relative;padding-left:22px}
+.canvas .li::before{content:"▸";position:absolute;left:2px;color:var(--p-green-dim)}
+.canvas code{font-family:var(--mono);font-size:12.5px;background:var(--bg-inset);color:var(--p-cyan);padding:1px 6px;border-radius:3px;border:1px solid var(--line)}
+.canvas strong{color:#eafff6;font-weight:700}
+
+/* HUMAN caret + live selection */
+.hl-caret{display:inline-block;width:2px;height:1.15em;background:var(--p-cyan);vertical-align:-.22em;
+  position:relative;box-shadow:0 0 8px var(--p-cyan-glow);animation:blink 1.05s steps(1) infinite}
+.hl-caret .flag{position:absolute;top:-19px;left:-1px;background:var(--p-cyan);color:#021a22;font-family:var(--mono);
+  font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:3px 3px 3px 0;white-space:nowrap;letter-spacing:.04em;animation:none}
+
+/* AGENT caret + suggestion — the editorzero signature */
+.ag-caret{display:inline-block;width:2px;height:1.15em;background:var(--p-amber);vertical-align:-.22em;position:relative;
+  box-shadow:0 0 9px var(--p-amber-glow)}
+.ag-caret .flag{position:absolute;top:-19px;left:-1px;background:var(--p-amber);color:#1c1304;font-family:var(--mono);
+  font-size:9.5px;font-weight:700;padding:1px 6px 1px 5px;border-radius:3px 3px 3px 0;white-space:nowrap;letter-spacing:.03em;display:flex;align-items:center;gap:4px}
+.ag-caret .flag::before{content:"◆";font-size:8px}
+
+/* a tracked agent suggestion block (insertion) */
+.suggest{display:block;margin:14px 0;border:1px solid rgba(255,182,69,.32);border-left:2px solid var(--p-amber);
+  border-radius:var(--rad);background:linear-gradient(90deg,rgba(255,182,69,.06),rgba(255,182,69,.015));overflow:hidden;
+  animation:sugIn .5s ease both}
+@keyframes sugIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.suggest .sh{display:flex;align-items:center;gap:8px;padding:7px 13px;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.04em;color:var(--p-amber);background:rgba(255,182,69,.06);border-bottom:1px solid rgba(255,182,69,.18)}
+.suggest .sh .who{font-weight:700}
+.suggest .sh .meta{color:var(--ink-low);letter-spacing:0}
+.suggest .sbody{padding:12px 14px;font-size:14px;line-height:1.58;color:var(--ink)}
+.suggest .sbody .ins{color:#d8ffe9;background:rgba(61,255,168,.12);box-shadow:inset 0 -1px 0 var(--p-green-dim);border-radius:2px;padding:0 1px}
+.suggest .sbody .del{color:var(--p-magenta);text-decoration:line-through;opacity:.7}
+.suggest .acts{display:flex;align-items:center;gap:7px;padding:9px 14px;border-top:1px solid rgba(255,182,69,.16);background:var(--bg-inset)}
+.suggest .acts button{font-family:var(--mono);font-size:11px;padding:4px 11px;border-radius:3px;cursor:pointer;border:1px solid var(--line-bright);background:var(--bg-panel);color:var(--ink-mid);display:inline-flex;align-items:center;gap:6px}
+.suggest .acts .accept{color:#02130c;background:var(--p-green);border-color:var(--p-green);font-weight:700;box-shadow:0 0 14px var(--p-green-glow)}
+.suggest .acts .accept:hover{background:#5fffba}
+.suggest .acts .reject:hover{border-color:var(--p-magenta);color:var(--p-magenta)}
+.suggest .acts .spacer{flex:1}
+.suggest .acts .diff{font-size:10.5px;color:var(--ink-low)}
+.suggest .acts .diff .g{color:var(--p-green)}.suggest .acts .diff .r{color:var(--p-magenta)}
+
+/* slash menu popover */
+.slash{position:absolute;left:56px;top:312px;width:288px;background:var(--bg-raise);border:1px solid var(--line-bright);
+  border-radius:var(--rad);box-shadow:0 22px 50px -16px rgba(0,0,0,.85),0 0 0 1px #000;overflow:hidden;z-index:30}
+.slash .sl-h{padding:8px 13px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-low);
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:7px}
+.slash .sl-h .q{color:var(--p-green);font-family:var(--mono)}
+.slash .si{display:flex;align-items:center;gap:11px;padding:7px 13px;cursor:pointer;font-size:12.5px}
+.slash .si .ic{width:24px;height:24px;border-radius:3px;display:grid;place-items:center;border:1px solid var(--line-bright);color:var(--ink-mid);font-size:12px}
+.slash .si .nm{color:var(--ink)}
+.slash .si .ds{font-size:10.5px;color:var(--ink-low);margin-top:1px}
+.slash .si .kb{margin-left:auto;font-size:10px;color:var(--ink-faint)}
+.slash .si.on{background:var(--bg-hover)}
+.slash .si.on .ic{color:var(--p-green);border-color:var(--p-green-dim)}
+
+/* editor presence sidebar */
+.ed-aside{background:var(--bg-panel);border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.presence{padding:16px 16px 6px}
+.presence__h{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-low);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.presence__h .live{color:var(--p-green);font-size:10px}
+.peer{display:grid;grid-template-columns:26px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.peer .av{width:26px;height:26px;border-radius:4px;display:grid;place-items:center;font-weight:800;font-size:11px;border:1px solid;position:relative}
+.peer.h .av{color:var(--p-cyan);border-color:rgba(70,212,255,.45);background:rgba(70,212,255,.1)}
+.peer.a .av{color:var(--p-amber);border-color:rgba(255,182,69,.45);background:rgba(255,182,69,.1)}
+.peer .av .ring{position:absolute;inset:-3px;border-radius:6px;border:1px solid;animation:pulse 1.8s infinite}
+.peer.h .av .ring{border-color:rgba(70,212,255,.4)}.peer.a .av .ring{border-color:rgba(255,182,69,.4)}
+.peer .nm{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+.peer.h .nm{color:#cdeeff}.peer.a .nm{color:#ffe9c4}
+.peer .meta{font-size:10.5px;color:var(--ink-low);margin-top:2px;line-height:1.5}
+.peer .meta .scope{color:var(--ink-mid)}
+.peer .at{font-size:10px;color:var(--ink-faint);font-family:var(--mono)}
+
+.acttrace{flex:1;border-top:1px solid var(--line);padding:14px 16px;overflow:auto}
+.acttrace .at-h{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-low);margin-bottom:11px}
+.trace{display:grid;grid-template-columns:auto 1fr;gap:9px;font-size:11px;padding:5px 0;align-items:baseline}
+.trace .tm{color:var(--ink-faint);font-family:var(--mono);font-size:10px}
+.trace .ev b.h{color:var(--p-cyan)}.trace .ev b.a{color:var(--p-amber)}
+.trace .ev{color:var(--ink-mid);line-height:1.45}
+.trace .ev .cap{color:var(--p-green-dim);font-family:var(--mono);font-size:10px}
+
+/* ════════════════════════════════════════════════════════════════════
+   (E) ADMIN — members / teams / spaces
+   ════════════════════════════════════════════════════════════════════ */
+.admin{display:grid;grid-template-columns:200px 1fr;min-height:560px}
+.adnav{background:var(--bg-panel);border-right:1px solid var(--line);padding:14px 0;font-size:12.5px}
+.adnav .sect{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-low);padding:13px 16px 7px}
+.adnav a{display:flex;gap:9px;align-items:center;padding:6px 16px;color:var(--ink-mid);text-decoration:none;cursor:pointer;border-left:2px solid transparent}
+.adnav a:hover{background:var(--bg-hover);color:var(--ink)}
+.adnav a.on{color:var(--p-green);border-left-color:var(--p-green);background:linear-gradient(90deg,var(--p-green-glow),transparent)}
+.adnav a .ic{width:14px;color:var(--ink-low);text-align:center}
+.adnav a.on .ic{color:var(--p-green)}
+
+.admin__body{padding:22px 24px;overflow:auto}
+.ad-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+.ad-head h2{font-size:18px;font-weight:800}
+.ad-head .sub{font-size:11.5px;color:var(--ink-low);margin-top:4px}
+.ad-head .btn{font-family:var(--mono);font-size:11.5px;color:#02130c;background:var(--p-green);border:none;
+  padding:7px 13px;border-radius:3px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px;box-shadow:0 0 16px var(--p-green-glow)}
+
+.seg-tabs{display:flex;gap:0;border-bottom:1px solid var(--line-bright);margin-bottom:18px}
+.seg-tabs a{padding:8px 16px;font-size:12px;color:var(--ink-mid);text-decoration:none;border-bottom:2px solid transparent;cursor:pointer;display:flex;align-items:center;gap:7px}
+.seg-tabs a .ct{font-size:10px;color:var(--ink-faint);background:var(--bg-inset);border:1px solid var(--line);border-radius:999px;padding:0 6px}
+.seg-tabs a:hover{color:var(--ink)}
+.seg-tabs a.on{color:var(--p-green);border-bottom-color:var(--p-green)}
+.seg-tabs a.on .ct{color:var(--p-green);border-color:var(--p-green-dim)}
+
+.mtbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.mtbl thead th{text-align:left;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-low);
+  font-weight:600;padding:9px 14px;border-bottom:1px solid var(--line-bright);background:var(--bg-inset)}
+.mtbl tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+.mtbl tbody tr:hover{background:var(--bg-hover)}
+.mcell{display:flex;align-items:center;gap:11px}
+.mcell .av{width:30px;height:30px;border-radius:5px;display:grid;place-items:center;font-weight:800;font-size:12px;border:1px solid}
+.mcell.h .av{color:var(--p-cyan);border-color:rgba(70,212,255,.4);background:rgba(70,212,255,.1)}
+.mcell.a .av{color:var(--p-amber);border-color:rgba(255,182,69,.4);background:rgba(255,182,69,.1)}
+.mcell .nm{font-weight:600;color:var(--ink)}
+.mcell .em{font-size:10.5px;color:var(--ink-low);margin-top:2px}
+.role-sel{font-family:var(--mono);font-size:11px;color:var(--ink-mid);background:var(--bg-inset);border:1px solid var(--line-bright);
+  border-radius:3px;padding:4px 9px;display:inline-flex;align-items:center;gap:7px;cursor:pointer}
+.role-sel .car{color:var(--ink-faint)}
+.scopes-cell{display:flex;flex-wrap:wrap;gap:4px;max-width:230px}
+.scope{font-family:var(--mono);font-size:10px;color:var(--p-green-dim);border:1px solid var(--line-bright);
+  border-radius:2px;padding:1px 6px;background:var(--bg-inset)}
+.scope.amb{color:var(--p-amber)}
+.owner-by{font-size:11px;color:var(--ink-mid);display:flex;align-items:center;gap:6px}
+.last{font-size:11px;color:var(--ink-mid);font-variant-numeric:tabular-nums}
+.last small{display:block;color:var(--ink-faint);font-size:10px}
+.row-x{color:var(--ink-faint);cursor:pointer;font-size:14px}
+.row-x:hover{color:var(--p-magenta)}
+.st-dot{display:inline-block;width:7px;height:7px;border-radius:50%}
+.st-dot.act{background:var(--p-green);box-shadow:0 0 6px var(--p-green-glow)}
+.st-dot.idle{background:var(--ink-low)}
+
+footer.foot{text-align:center;color:var(--ink-faint);font-size:11px;letter-spacing:.04em;padding-top:8px}
+footer.foot b{color:var(--p-green-dim)}
+footer.foot .sep{margin:0 10px;color:var(--line-bright)}
+</style>
+</head>
+<body>
+<div class="screens">
+
+  <!-- ══════════ MASTHEAD ══════════ -->
+  <header class="masthead">
+    <div class="brand">
+      <div class="glyph">0<span class="slash">⁄</span></div>
+      <div>
+        <div class="wordmark">editor<span class="z">zero</span><span class="cur" style="margin-left:3px"></span></div>
+        <div class="tline">clean slate · humans + agents as peer co-editors</div>
+      </div>
+    </div>
+    <div class="meta">
+      design system <b>PHOSPHOR</b> · territory <i>terminal-native</i><br/>
+      self-hosted · API · CLI · MCP · Web UI at parity<br/>
+      <span class="faint">light mode below · dark is the daily driver</span>
+    </div>
+  </header>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       (A) DASHBOARD
+       ════════════════════════════════════════════════════════════════ -->
+  <section class="screen">
+    <div class="screen__label">
+      <span class="screen__idx">A</span><span class="screen__name">Dashboard — overview · recent · spaces</span>
+      <span class="screen__hint">⌘K to command · everything keyboard-first</span>
+    </div>
+    <div class="win">
+      <div class="tbar">
+        <span class="dots"><i></i><i></i><i class="live"></i></span>
+        <span class="path"><b>acme-corp.ez</b><span class="sep">/</span>home</span>
+        <span class="right"><span class="ping">● sync ok</span><span>3 agents online</span><span>v0.9.4</span></span>
+      </div>
+      <div class="cmd">
+        <span class="prompt">❯</span>
+        <input value="" placeholder="type a command, doc title, or capability — e.g. doc.create, open “API guide”, /agents" />
+        <span class="hint"><span class="kbd">⌘K</span></span>
+      </div>
+      <div class="dash">
+        <!-- nav -->
+        <nav class="nav">
+          <div class="sect">workspace</div>
+          <a class="on"><span class="ic">◆</span> Home</a>
+          <a><span class="ic">▤</span> All documents <span class="ct">412</span></a>
+          <a><span class="ic">↻</span> Recently edited</a>
+          <a><span class="ic">★</span> Pinned <span class="ct">7</span></a>
+          <a><span class="ic">⌦</span> Trash <span class="ct">12</span></a>
+          <div class="sect">spaces</div>
+          <a><span class="ic" style="color:var(--p-cyan)">▰</span> Engineering <span class="ct">128</span></a>
+          <a><span class="ic" style="color:var(--p-violet)">▰</span> Product <span class="ct">64</span></a>
+          <a><span class="ic" style="color:var(--p-amber)">▰</span> Ops Runbooks <span class="ct">39</span></a>
+          <a><span class="ic" style="color:var(--p-magenta)">▰</span> Design <span class="ct">22</span></a>
+          <div class="sect">agents</div>
+          <a><span class="ic" style="color:var(--p-amber)">◇</span> docwright <span class="ct">author</span></a>
+          <a><span class="ic" style="color:var(--p-amber)">◇</span> changelog-bot <span class="ct">editor</span></a>
+          <a><span class="ic" style="color:var(--p-amber)">◇</span> linkcheck <span class="ct">read</span></a>
+        </nav>
+        <!-- body -->
+        <div class="dash__body">
+          <div class="hdr-row">
+            <div>
+              <h1>Good evening, <span class="accent">Nomi</span><span class="cur"></span></h1>
+              <div class="sub">19 documents touched today · <b>4 agent runs</b> active across 2 spaces</div>
+            </div>
+          </div>
+
+          <div class="stats">
+            <div class="stat"><div class="k">Documents</div><div class="v">412</div><div class="d"><span class="up">▲ 9</span> this week</div></div>
+            <div class="stat c"><div class="k">Human edits / 24h</div><div class="v">1,284</div><div class="d">across 38 people</div></div>
+            <div class="stat a"><div class="k">Agent edits / 24h</div><div class="v">617</div><div class="d">3 agents · all audited</div></div>
+            <div class="stat v"><div class="k">Published pages</div><div class="v">46</div><div class="d">2 custom domains</div></div>
+          </div>
+
+          <div class="cols2">
+            <!-- recent docs -->
+            <div class="panel">
+              <div class="panel__h"><span class="bx">▤</span> Recently edited <span class="more">view all ›</span></div>
+              <div class="doc-line">
+                <span class="gl">¶</span>
+                <div><div class="nm">Realtime sync — convergence guarantees</div><div class="pa">Engineering / CRDT</div></div>
+                <div class="rt"><span class="chan chan--agent"><span class="dot"></span>docwright</span><span>now</span></div>
+              </div>
+              <div class="doc-line">
+                <span class="gl">¶</span>
+                <div><div class="nm">Q3 launch plan — public beta</div><div class="pa">Product / Launches</div></div>
+                <div class="rt"><span class="avx avx--h">NA</span><span>4m</span></div>
+              </div>
+              <div class="doc-line">
+                <span class="gl">¶</span>
+                <div><div class="nm">Incident 2026-05-29 — sync backpressure</div><div class="pa">Ops Runbooks</div></div>
+                <div class="rt"><span class="avx avx--h">JP</span><span class="avx avx--a">◇</span><span>22m</span></div>
+              </div>
+              <div class="doc-line">
+                <span class="gl">¶</span>
+                <div><div class="nm">Public API — authentication &amp; scopes</div><div class="pa">Engineering / API</div></div>
+                <div class="rt"><span class="tag tag--pub">published</span><span>1h</span></div>
+              </div>
+              <div class="doc-line">
+                <span class="gl">¶</span>
+                <div><div class="nm">Onboarding new agents — scope tiers</div><div class="pa">Engineering / Agents</div></div>
+                <div class="rt"><span class="avx avx--h">RM</span><span>2h</span></div>
+              </div>
+            </div>
+
+            <!-- activity feed -->
+            <div class="panel">
+              <div class="panel__h"><span class="bx">≋</span> Live activity <span class="more">audit log ›</span></div>
+              <div class="feed">
+                <div class="fe a"><div class="rail"><span class="d"></span></div>
+                  <div><span class="who">docwright</span> <span class="what">inserted 2 blocks in</span> Realtime sync<br/>
+                  <span class="cap">doc.update · lossless · acting_as RM</span><div class="t">just now</div></div></div>
+                <div class="fe h"><div class="rail"><span class="d"></span></div>
+                  <div><span class="who">Nadia A.</span> <span class="what">published</span> API authentication<br/>
+                  <span class="cap">doc.publish</span><div class="t">4 min ago</div></div></div>
+                <div class="fe a"><div class="rail"><span class="d"></span></div>
+                  <div><span class="who">changelog-bot</span> <span class="what">created</span> Release 0.9.4 notes<br/>
+                  <span class="cap">doc.create · in Product/Launches</span><div class="t">12 min ago</div></div></div>
+                <div class="fe h"><div class="rail"><span class="d"></span></div>
+                  <div><span class="who">James P.</span> <span class="what">moved</span> Incident runbook → Ops<br/>
+                  <span class="cap">doc.move</span><div class="t">22 min ago</div></div></div>
+                <div class="fe h"><div class="rail"><span class="d"></span></div>
+                  <div><span class="who">Ravi M.</span> <span class="what">restored</span> Auth design draft<br/>
+                  <span class="cap">doc.restore</span><div class="t">1 hr ago</div></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="height:18px"></div>
+          <div class="panel">
+            <div class="panel__h"><span class="bx">▰</span> Spaces <span class="more">manage ›</span></div>
+            <div class="space-chip"><span class="sq" style="color:var(--p-cyan)">E</span><span class="nm">Engineering</span>
+              <span class="mc"><span>128 docs</span><span class="chan chan--human"><span class="dot"></span>24</span><span class="chan chan--agent"><span class="dot"></span>3</span></span></div>
+            <div class="space-chip"><span class="sq" style="color:var(--p-violet)">P</span><span class="nm">Product</span>
+              <span class="mc"><span>64 docs</span><span class="chan chan--human"><span class="dot"></span>11</span><span class="chan chan--agent"><span class="dot"></span>1</span></span></div>
+            <div class="space-chip"><span class="sq" style="color:var(--p-amber)">O</span><span class="nm">Ops Runbooks</span>
+              <span class="mc"><span>39 docs</span><span class="chan chan--human"><span class="dot"></span>8</span><span class="chan chan--agent"><span class="dot"></span>2</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="statusbar">
+        <span class="seg seg--mode">NORMAL</span>
+        <span class="seg">home</span>
+        <span class="seg"><b>ws:</b> acme-corp</span>
+        <span class="spacer"></span>
+        <span class="seg"><b>j/k</b> move</span>
+        <span class="seg"><b>⏎</b> open</span>
+        <span class="seg" style="color:var(--p-green)">⌘K palette</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       (B) DOCUMENTS LIST
+       ════════════════════════════════════════════════════════════════ -->
+  <section class="screen">
+    <div class="screen__label">
+      <span class="screen__idx">B</span><span class="screen__name">Documents — collections tree + list, human &amp; agent editors</span>
+      <span class="screen__hint">space: Engineering</span>
+    </div>
+    <div class="win">
+      <div class="tbar">
+        <span class="dots"><i></i><i></i><i class="live"></i></span>
+        <span class="path"><b>acme-corp.ez</b><span class="sep">/</span>spaces<span class="sep">/</span>engineering</span>
+        <span class="right"><span class="ping">● sync ok</span><span>128 docs · 6 collections</span></span>
+      </div>
+      <div class="docs">
+        <!-- collections tree -->
+        <aside class="tree">
+          <div class="tree__h">Collections <span class="sp">＋</span></div>
+          <div class="tnode on"><span class="tw">▾</span><span class="ic">▰</span> Engineering <span class="ct">128</span></div>
+          <div class="tnode l1"><span class="tw">▾</span><span class="ic">▸</span> API <span class="ct">31</span></div>
+          <div class="tnode l2"><span class="tw"></span><span class="ic">¶</span> Authentication</div>
+          <div class="tnode l2"><span class="tw"></span><span class="ic">¶</span> Rate limits & quotas</div>
+          <div class="tnode l1"><span class="tw">▾</span><span class="ic">▸</span> CRDT &amp; sync <span class="ct">19</span></div>
+          <div class="tnode l2"><span class="tw"></span><span class="ic">¶</span> Convergence</div>
+          <div class="tnode l2"><span class="tw"></span><span class="ic">¶</span> Write-path atomicity</div>
+          <div class="tnode l1"><span class="tw">▸</span><span class="ic">▸</span> Agents <span class="ct">14</span></div>
+          <div class="tnode l1"><span class="tw">▸</span><span class="ic">▸</span> Deployment <span class="ct">26</span></div>
+          <div class="tnode l1"><span class="tw">▸</span><span class="ic">▸</span> Architecture decisions <span class="ct">38</span></div>
+        </aside>
+        <!-- main list -->
+        <div class="docs__main">
+          <div class="fltbar">
+            <div class="crumbs"><b>Engineering</b><span class="sep">/</span>CRDT &amp; sync</div>
+            <span class="pill"><span class="dot"></span>all editors</span>
+            <span class="pill">sort: edited ▾</span>
+          </div>
+          <table class="tbl">
+            <thead><tr><th style="width:42%">Document</th><th>Editors</th><th>Fidelity</th><th>Status</th><th style="width:130px">Last edit</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="name"><span class="gl">¶</span><div><b>Convergence guarantees</b><span class="id">doc_01JQ8…a7f2</span></div></div></td>
+                <td><div class="editors"><span class="avx avx--h">RM</span><span class="avx avx--a">◇</span><span class="more">+2</span></div></td>
+                <td><span class="tag tag--lossless">lossless</span></td>
+                <td><span class="live-edit"><span class="pulse"></span>docwright editing</span></td>
+                <td class="when">now<small>by docwright</small></td>
+              </tr>
+              <tr>
+                <td><div class="name"><span class="gl">¶</span><div><b>Write-path atomicity — the 5-row commit</b><span class="id">doc_01JQ7…b9c1</span></div></div></td>
+                <td><div class="editors"><span class="avx avx--h">NA</span><span class="avx avx--h">JP</span></div></td>
+                <td><span class="tag tag--lossless">lossless</span></td>
+                <td><span class="tag tag--draft">draft</span></td>
+                <td class="when">14m<small>by Nadia A.</small></td>
+              </tr>
+              <tr>
+                <td><div class="name"><span class="gl">¶</span><div><b>Hocuspocus persistence model</b><span class="id">doc_01JQ6…d3e8</span></div></div></td>
+                <td><div class="editors"><span class="avx avx--a">◇</span><span class="avx avx--h">RM</span></div></td>
+                <td><span class="tag" style="color:var(--p-amber);border-color:var(--p-amber)">directive</span></td>
+                <td><span class="tag tag--pub">published</span></td>
+                <td class="when">2h<small>by changelog-bot</small></td>
+              </tr>
+              <tr>
+                <td><div class="name"><span class="gl">¶</span><div><b>Replica reconciliation runbook</b><span class="id">doc_01JQ5…f1a0</span></div></div></td>
+                <td><div class="editors"><span class="avx avx--h">JP</span></div></td>
+                <td><span class="tag tag--lossless">lossless</span></td>
+                <td><span class="tag tag--draft">draft</span></td>
+                <td class="when">1d<small>by James P.</small></td>
+              </tr>
+              <tr>
+                <td><div class="name"><span class="gl">¶</span><div><b>Y.Doc snapshot &amp; compaction</b><span class="id">doc_01JQ4…c6b3</span></div></div></td>
+                <td><div class="editors"><span class="avx avx--h">RM</span><span class="avx avx--a">◇</span><span class="avx avx--h">NA</span></div></td>
+                <td><span class="tag tag--lossless">lossless</span></td>
+                <td><span class="tag tag--ok">reviewed</span></td>
+                <td class="when">2d<small>by Ravi M.</small></td>
+              </tr>
+              <tr>
+                <td><div class="name"><span class="gl">¶</span><div><b>Vector clocks vs. logical timestamps</b><span class="id">doc_01JQ3…99af</span></div></div></td>
+                <td><div class="editors"><span class="avx avx--a">◇</span></div></td>
+                <td><span class="tag" style="color:var(--ink-mid)">opaque</span></td>
+                <td><span class="tag tag--draft">draft</span></td>
+                <td class="when">3d<small>by linkcheck</small></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="statusbar" style="border-top:1px solid var(--line)">
+            <span class="seg seg--mode">NORMAL</span>
+            <span class="seg">6 / 19 docs</span>
+            <span class="seg"><span class="chan chan--human" style="padding:0;border:none;background:none"><span class="dot"></span>human</span></span>
+            <span class="seg"><span class="chan chan--agent" style="padding:0;border:none;background:none"><span class="dot"></span>agent</span></span>
+            <span class="spacer"></span>
+            <span class="seg"><b>n</b> new doc</span>
+            <span class="seg"><b>x</b> select</span>
+            <span class="seg" style="color:var(--p-green)">⌘K</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       (C) READING VIEW
+       ════════════════════════════════════════════════════════════════ -->
+  <section class="screen">
+    <div class="screen__label">
+      <span class="screen__idx">C</span><span class="screen__name">Reading view — finished document</span>
+      <span class="screen__hint">rendered · read-only</span>
+    </div>
+    <div class="win">
+      <div class="tbar">
+        <span class="dots"><i></i><i></i><i class="live"></i></span>
+        <span class="path"><b>acme-corp.ez</b><span class="sep">/</span>engineering<span class="sep">/</span>api<span class="sep">/</span>authentication</span>
+        <span class="right"><span class="tag tag--pub" style="font-size:9.5px">published</span><span>read</span><span class="ping">e to edit</span></span>
+      </div>
+      <div class="read">
+        <article class="article">
+          <div class="eyebrow">Engineering / API · canonical</div>
+          <h1 class="title">Public API — authentication &amp; agent scopes</h1>
+          <div class="metarow">
+            <span class="by"><span class="avx avx--h">NA</span> Nadia Ahmed</span>
+            <span>·</span><span>updated 1h ago</span>
+            <span>·</span><span class="chan chan--agent" style="font-size:10px"><span class="dot"></span>reviewed by docwright</span>
+            <span>·</span><span class="tag tag--lossless" style="font-size:9.5px">lossless</span>
+            <span>·</span><span>7 min read</span>
+          </div>
+
+          <p>editorzero treats every caller — human or agent — as a typed <strong>principal</strong>. There is no shadow-user pattern: an agent authenticates with its own credential, carries its own scopes, and is attributed independently in the audit log.</p>
+
+          <h2>Principal kinds</h2>
+          <p>Two kinds resolve from the same auth middleware: <code>user</code> (session cookie or human PAT) and <code>agent</code> (long-lived API key or short-lived delegated token). The dispatcher only ever sees a resolved <code>Principal</code> — it never learns which credential produced it.</p>
+
+          <div class="callout">
+            <span class="ic">◆</span>
+            <div class="bd"><b>Delegation.</b> When an agent acts on a human's behalf, its token carries an <code>act.sub</code> claim. Effective permission is <code>intersect(agent.scopes, delegator.permissions)</code> — an agent can never exceed the human who delegated to it.</div>
+          </div>
+
+          <h2>Scope tiers</h2>
+          <p>Agents are provisioned against one of four tiers. Tiers are presets over the raw scope vocabulary; a custom set is always allowed.</p>
+          <ul>
+            <li><code>read-only</code> — <code>doc:read · block:read · search:read</code></li>
+            <li><code>author</code> — adds <code>doc:write · block:write · comment:write</code></li>
+            <li><code>editor</code> — adds <code>doc:publish · comment:resolve</code></li>
+            <li><code>admin</code> — full workspace administration</li>
+          </ul>
+
+          <h2>Authenticating a request</h2>
+          <div class="codeblk">
+            <div class="cb-h"><span style="color:var(--p-green)">▰</span> shell · ez CLI</div>
+<pre><span class="t-c"># issue an author-tier key for an agent</span>
+<span class="t-f">ez</span> agent create <span class="t-k">--name</span> docwright <span class="t-k">--tier</span> author
+<span class="t-c"># → ezk_live_01JQ…  (shown once)</span>
+
+<span class="t-f">curl</span> https://acme-corp.ez/api/docs <span class="t-k">\</span>
+  <span class="t-k">-H</span> <span class="t-s">"Authorization: Bearer ezk_live_01JQ…"</span></pre>
+          </div>
+
+          <p>Rate limits, revocation, and trash recovery all have agent equivalents — every control a human has, an agent has too. See <a href="#">Onboarding new agents</a> for the full lifecycle.</p>
+        </article>
+
+        <aside class="read__aside">
+          <div class="aside-sect">
+            <div class="aside-h">Metadata</div>
+            <div class="kv"><span class="k">doc id</span><span class="v mono-text">doc_01JQ…3f2</span></div>
+            <div class="kv"><span class="k">collection</span><span class="v">API</span></div>
+            <div class="kv"><span class="k">visibility</span><span class="v" style="color:var(--p-violet)">public</span></div>
+            <div class="kv"><span class="k">fidelity</span><span class="v" style="color:var(--p-green)">lossless</span></div>
+            <div class="kv"><span class="k">version</span><span class="v">v34</span></div>
+          </div>
+          <div class="aside-sect">
+            <div class="aside-h">On this page</div>
+            <nav class="toc">
+              <a class="on">Principal kinds</a>
+              <a>Scope tiers</a>
+              <a>Authenticating a request</a>
+            </nav>
+          </div>
+          <div class="aside-sect" style="border-bottom:none">
+            <div class="aside-h">Contributors</div>
+            <div class="contrib"><span class="avx avx--h">NA</span><span class="nm">Nadia A.</span><span class="ro">owner</span></div>
+            <div class="contrib"><span class="avx avx--h">RM</span><span class="nm">Ravi M.</span><span class="ro">editor</span></div>
+            <div class="contrib"><span class="avx avx--a">◇</span><span class="nm" style="color:var(--p-amber)">docwright</span><span class="ro">agent</span></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       (D) EDITOR — signature screen
+       ════════════════════════════════════════════════════════════════ -->
+  <section class="screen">
+    <div class="screen__label">
+      <span class="screen__idx">D</span><span class="screen__name">Editor — live co-editing · human + AI agent as peers</span>
+      <span class="screen__hint">★ signature screen</span>
+    </div>
+    <div class="win">
+      <div class="tbar">
+        <span class="dots"><i></i><i></i><i class="live"></i></span>
+        <span class="path"><b>acme-corp.ez</b><span class="sep">/</span>engineering<span class="sep">/</span>convergence-guarantees</span>
+        <span class="right"><span class="chan chan--human" style="padding:1px 7px"><span class="dot"></span>you</span><span class="chan chan--agent" style="padding:1px 7px"><span class="dot"></span>docwright live</span></span>
+      </div>
+      <div class="editor">
+        <div class="ed-main">
+          <!-- formatting toolbar -->
+          <div class="fmtbar">
+            <div class="grp"><button>¶ Text ▾</button></div>
+            <div class="grp">
+              <button class="on"><b>B</b></button><button><i>I</i></button><button><s>S</s></button><button>&lt;/&gt;</button>
+            </div>
+            <div class="grp"><button>“ ”</button><button>≔ List</button><button>☑ Todo</button><button>▦ Table</button></div>
+            <div class="grp"><button>🔗</button><button style="color:var(--p-violet)">@ Mention</button></div>
+            <button style="color:var(--ink-mid)">＋ Block</button>
+            <span class="save"><span class="rec"></span> synced · CRDT converged</span>
+          </div>
+
+          <!-- the document canvas -->
+          <div class="canvas">
+            <div class="blk"><div class="handle"><span class="pl">＋</span><span class="gr">⠿</span></div>
+              <div class="doc-title">Convergence guarantees</div></div>
+            <div class="doc-sub">doc_01JQ8…a7f2 · lossless · <span style="color:var(--p-cyan)">2 humans</span> + <span style="color:var(--p-amber)">1 agent</span> editing</div>
+
+            <div class="blk"><div class="handle"><span class="pl">＋</span><span class="gr">⠿</span></div>
+              <p class="b">Any set of concurrent edits from any mix of human and agent clients <strong>converges to the same state</strong> across every replica. This is invariant #2, and it is enforced by property tests — not hope.</p></div>
+
+            <div class="blk"><div class="handle"><span class="pl">＋</span><span class="gr">⠿</span></div>
+              <h2 class="b">How convergence is guaranteed<span class="hl-caret"><span class="flag">Ravi M.</span></span></h2></div>
+
+            <div class="blk"><div class="handle"><span class="pl">＋</span><span class="gr">⠿</span></div>
+              <p class="b">The document model is a <code>Y.Doc</code>. Each block is a node in a shared <code>Y.XmlFragment</code>; edits commute because CRDT merge is associative and</p></div>
+
+            <!-- AGENT live suggestion (tracked insertion) -->
+            <div class="blk" style="margin-left:0;padding-left:0">
+              <div class="suggest">
+                <div class="sh">
+                  <span class="chan chan--agent" style="padding:1px 7px 1px 6px"><span class="dot"></span><span class="who">docwright</span></span>
+                  <span class="meta">suggested an edit · doc.update · acting_as Ravi&nbsp;M. · 2s ago</span>
+                </div>
+                <div class="sbody">
+                  …commutative. Concurrent inserts at the same position are ordered deterministically by their <code>(clock, clientID)</code> pair, so two replicas that have seen the same set of operations <span class="ins">— regardless of arrival order —</span> compute byte-identical state. <span class="del">We think this is probably fine.</span><span class="ins">No central server arbitrates; convergence is a property of the data type itself.</span>
+                </div>
+                <div class="acts">
+                  <button class="accept">⏎ Accept</button>
+                  <button class="reject"><span class="kbd" style="border-bottom-width:1px;padding:0 4px;margin-right:5px">esc</span>Reject</button>
+                  <button>↩ Suggest change</button>
+                  <span class="spacer"></span>
+                  <span class="diff"><span class="g">+38</span> / <span class="r">−6</span> · will write 1 audit entry</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="blk"><div class="handle"><span class="pl">＋</span><span class="gr">⠿</span></div>
+              <h2 class="b">Replica reconciliation</h2></div>
+            <div class="blk"><div class="handle"><span class="pl">＋</span><span class="gr">⠿</span></div>
+              <div class="li">A joining replica requests the state vector, receives the missing update set, and merges<span class="ag-caret"><span class="flag">docwright</span></span></div></div>
+            <div class="blk"><div class="handle"><span class="pl">＋</span><span class="gr">⠿</span></div>
+              <div class="li">No operation is ever lost; a delete is a tombstone, never a gap</div></div>
+
+            <!-- slash menu -->
+            <div class="slash">
+              <div class="sl-h">blocks <span class="q">/conv</span><span style="margin-left:auto;color:var(--ink-faint);text-transform:none;letter-spacing:0">↑↓ ⏎</span></div>
+              <div class="si on"><span class="ic">¶</span><div><div class="nm">Text</div><div class="ds">plain paragraph block</div></div><span class="kb">⌘⌥0</span></div>
+              <div class="si"><span class="ic">H2</span><div><div class="nm">Heading 2</div><div class="ds">section heading</div></div><span class="kb">##</span></div>
+              <div class="si"><span class="ic">▦</span><div><div class="nm">Table</div><div class="ds">rows &amp; columns · lossless</div></div></div>
+              <div class="si"><span class="ic" style="color:var(--p-amber)">◇</span><div><div class="nm" style="color:var(--p-amber)">Ask an agent…</div><div class="ds">delegate a block to docwright</div></div><span class="kb">@@</span></div>
+              <div class="si"><span class="ic">{ }</span><div><div class="nm">Code block</div><div class="ds">syntax highlighted</div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- presence + activity sidebar -->
+        <aside class="ed-aside">
+          <div class="presence">
+            <div class="presence__h"><span>Co-editing now</span><span class="live">● 3 live</span></div>
+            <div class="peer h"><div class="av">RM<span class="ring"></span></div>
+              <div><div class="nm">Ravi M. <span style="color:var(--ink-faint);font-weight:400">you</span></div>
+              <div class="meta"><span class="scope">owner</span> · editing “How convergence…”</div></div></div>
+            <div class="peer h"><div class="av">NA<span class="ring"></span></div>
+              <div><div class="nm">Nadia A.</div><div class="meta"><span class="scope">editor</span> · reading · line 12</div></div></div>
+            <div class="peer a"><div class="av">◇<span class="ring"></span></div>
+              <div><div class="nm">docwright</div>
+              <div class="meta"><span class="scope">agent · author</span> · <span style="color:var(--p-amber)">1 open suggestion</span><br/>acting_as Ravi&nbsp;M. · <span class="at">tok_01JQ…</span></div></div></div>
+          </div>
+          <div class="acttrace">
+            <div class="at-h">Edit trace</div>
+            <div class="trace"><span class="tm">14:02:09</span><div class="ev"><b class="a">docwright</b> suggested insertion <span class="cap">+38 −6</span></div></div>
+            <div class="trace"><span class="tm">14:01:54</span><div class="ev"><b class="h">Ravi M.</b> typed heading <span class="cap">block.write</span></div></div>
+            <div class="trace"><span class="tm">14:01:40</span><div class="ev"><b class="h">Nadia A.</b> joined session</div></div>
+            <div class="trace"><span class="tm">14:01:12</span><div class="ev"><b class="a">docwright</b> accepted on §1 <span class="cap">audit ✓</span></div></div>
+            <div class="trace"><span class="tm">14:00:58</span><div class="ev"><b class="h">Ravi M.</b> created doc <span class="cap">doc.create</span></div></div>
+          </div>
+        </aside>
+      </div>
+      <div class="statusbar">
+        <span class="seg seg--mode ins">INSERT</span>
+        <span class="seg">convergence-guarantees</span>
+        <span class="seg" style="color:var(--p-amber)">1 suggestion pending</span>
+        <span class="spacer"></span>
+        <span class="seg"><b>⏎</b> accept</span>
+        <span class="seg"><b>esc</b> reject</span>
+        <span class="seg"><b>/</b> blocks</span>
+        <span class="seg" style="color:var(--p-green)">all changes audited</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       (E) ADMIN — members / teams / spaces
+       ════════════════════════════════════════════════════════════════ -->
+  <section class="screen">
+    <div class="screen__label">
+      <span class="screen__idx">E</span><span class="screen__name">Admin — members, agents, teams &amp; spaces</span>
+      <span class="screen__hint">owner only</span>
+    </div>
+    <div class="win">
+      <div class="tbar">
+        <span class="dots"><i></i><i></i><i class="live"></i></span>
+        <span class="path"><b>acme-corp.ez</b><span class="sep">/</span>admin<span class="sep">/</span>members</span>
+        <span class="right"><span class="ping">● 3 agents online</span><span>41 principals</span></span>
+      </div>
+      <div class="admin">
+        <nav class="adnav">
+          <div class="sect">administration</div>
+          <a class="on"><span class="ic">◆</span> Members &amp; agents</a>
+          <a><span class="ic">▰</span> Spaces</a>
+          <a><span class="ic">⛁</span> Teams</a>
+          <a><span class="ic">⚿</span> Tokens &amp; keys</a>
+          <a><span class="ic">≋</span> Audit log</a>
+          <div class="sect">deployment</div>
+          <a><span class="ic">⚙</span> Settings</a>
+          <a><span class="ic">▤</span> Backups &amp; snapshots</a>
+          <a><span class="ic">◷</span> Rate limits</a>
+        </nav>
+        <div class="admin__body">
+          <div class="ad-head">
+            <div><h2>Members &amp; agents</h2><div class="sub">41 principals · 38 users · <span style="color:var(--p-amber)">3 agents</span> — humans and agents share one principal table</div></div>
+            <button class="btn">＋ Invite / provision</button>
+          </div>
+          <div class="seg-tabs">
+            <a class="on">All <span class="ct">41</span></a>
+            <a>People <span class="ct">38</span></a>
+            <a style="color:var(--p-amber)">Agents <span class="ct">3</span></a>
+            <a>Teams <span class="ct">5</span></a>
+          </div>
+          <table class="mtbl">
+            <thead><tr><th style="width:30%">Principal</th><th>Kind</th><th>Role / Tier</th><th>Scopes</th><th>Owner</th><th>Last active</th><th></th></tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="mcell h"><div class="av">NA</div><div><div class="nm">Nadia Ahmed</div><div class="em">nadia@acme-corp.io</div></div></div></td>
+                <td><span class="chan chan--human" style="font-size:10px"><span class="dot"></span>user</span></td>
+                <td><span class="role-sel">owner <span class="car">▾</span></span></td>
+                <td><div class="scopes-cell"><span class="scope">admin</span></div></td>
+                <td><span class="owner-by faint">—</span></td>
+                <td class="last"><span class="st-dot act"></span> now<small>web · session</small></td>
+                <td><span class="row-x">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="mcell a"><div class="av">◇</div><div><div class="nm" style="color:var(--p-amber)">docwright</div><div class="em mono-text">agent_01JQ8…c4</div></div></div></td>
+                <td><span class="chan chan--agent" style="font-size:10px"><span class="dot"></span>agent</span></td>
+                <td><span class="role-sel" style="color:var(--p-amber)">author <span class="car">▾</span></span></td>
+                <td><div class="scopes-cell"><span class="scope amb">doc:write</span><span class="scope amb">block:write</span><span class="scope amb">comment:write</span><span class="scope">doc:read</span></div></td>
+                <td><span class="owner-by"><span class="avx avx--h">RM</span> Ravi M.</span></td>
+                <td class="last"><span class="st-dot act"></span> editing<small>api-key · ezk_live</small></td>
+                <td><span class="row-x">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="mcell a"><div class="av">◇</div><div><div class="nm" style="color:var(--p-amber)">changelog-bot</div><div class="em mono-text">agent_01JQ7…9a</div></div></div></td>
+                <td><span class="chan chan--agent" style="font-size:10px"><span class="dot"></span>agent</span></td>
+                <td><span class="role-sel" style="color:var(--p-amber)">editor <span class="car">▾</span></span></td>
+                <td><div class="scopes-cell"><span class="scope amb">doc:publish</span><span class="scope amb">doc:write</span><span class="scope amb">comment:resolve</span></div></td>
+                <td><span class="owner-by faint">workspace-owned</span></td>
+                <td class="last"><span class="st-dot act"></span> 12m<small>api-key · ezk_live</small></td>
+                <td><span class="row-x">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="mcell h"><div class="av">RM</div><div><div class="nm">Ravi Mehta</div><div class="em">ravi@acme-corp.io</div></div></div></td>
+                <td><span class="chan chan--human" style="font-size:10px"><span class="dot"></span>user</span></td>
+                <td><span class="role-sel">admin <span class="car">▾</span></span></td>
+                <td><div class="scopes-cell"><span class="scope">workspace:admin</span><span class="scope">doc:write</span><span class="scope">agent:create</span></div></td>
+                <td><span class="owner-by faint">—</span></td>
+                <td class="last"><span class="st-dot act"></span> now<small>web · session</small></td>
+                <td><span class="row-x">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="mcell h"><div class="av">JP</div><div><div class="nm">James Park</div><div class="em">james@acme-corp.io</div></div></div></td>
+                <td><span class="chan chan--human" style="font-size:10px"><span class="dot"></span>user</span></td>
+                <td><span class="role-sel">member <span class="car">▾</span></span></td>
+                <td><div class="scopes-cell"><span class="scope">doc:write</span><span class="scope">comment:write</span></div></td>
+                <td><span class="owner-by faint">—</span></td>
+                <td class="last"><span class="st-dot idle"></span> 3h<small>web · session</small></td>
+                <td><span class="row-x">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="mcell a"><div class="av">◇</div><div><div class="nm" style="color:var(--p-amber)">linkcheck</div><div class="em mono-text">agent_01JQ5…2f</div></div></div></td>
+                <td><span class="chan chan--agent" style="font-size:10px"><span class="dot"></span>agent</span></td>
+                <td><span class="role-sel">read-only <span class="car">▾</span></span></td>
+                <td><div class="scopes-cell"><span class="scope">doc:read</span><span class="scope">block:read</span><span class="scope">search:read</span></div></td>
+                <td><span class="owner-by"><span class="avx avx--h">JP</span> James P.</span></td>
+                <td class="last"><span class="st-dot idle"></span> 1d<small>api-key · revocable</small></td>
+                <td><span class="row-x">⋯</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="statusbar" style="border-top:1px solid var(--line)">
+            <span class="seg seg--mode">NORMAL</span>
+            <span class="seg">6 / 41 principals</span>
+            <span class="spacer"></span>
+            <span class="seg"><b>i</b> invite</span>
+            <span class="seg"><b>r</b> change role</span>
+            <span class="seg" style="color:var(--p-magenta)"><b>⌫</b> revoke</span>
+            <span class="seg" style="color:var(--p-green)">⌘K</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    PHOSPHOR <span class="sep">/</span> editorzero design system <span class="sep">/</span>
+    <b>cyan = human</b> · <b style="color:var(--p-amber)">amber = agent</b> · phosphor-green = system
+    <span class="sep">/</span> all tokens themeable via CSS custom properties
+  </footer>
+
+</div>
+
+<script>
+/* ── tiny non-essential motion: typewriter the command-bar placeholder.
+      Pure progressive enhancement; the static screens stand on their own. ── */
+(function(){
+  var input = document.querySelector('.cmd input');
+  if(!input || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var phrases = [
+    'doc.create --collection "CRDT & sync" --title "…"',
+    'open "Public API — authentication"',
+    '/agents provision docwright --tier author',
+    'doc.publish --to public --strip-internal',
+    'grep "convergence" --space engineering'
+  ];
+  var pi=0, ci=0, dir=1;
+  function tick(){
+    var p = phrases[pi];
+    ci += dir;
+    input.setAttribute('placeholder', p.slice(0,ci)+'▋');
+    if(ci===p.length){ dir=-1; setTimeout(tick, 1600); return; }
+    if(ci===0){ dir=1; pi=(pi+1)%phrases.length; }
+    setTimeout(tick, dir>0 ? 42 : 18);
+  }
+  setTimeout(tick, 900);
+})();
+</script>
+</body>
+</html>

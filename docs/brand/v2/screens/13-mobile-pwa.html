@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Mobile + PWA Showcase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   MOBILE + PWA SHOWCASE — gallery of phone frames
+   All color/spacing references Meridian Zero tokens.
+   ============================================================ */
+.mobile-pwa-page{ max-width:var(--maxw); margin:0 auto; padding:28px 24px 56px; }
+
+/* —— page header —— */
+.mobile-pwa-head{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding-bottom:14px; border-bottom:var(--rule) solid var(--ink); }
+.mobile-pwa-head-meta{ display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+
+.mobile-pwa-intro{ padding:22px 0 26px; border-bottom:var(--rule) solid var(--hair); margin-bottom:26px; }
+.mobile-pwa-title{ font-family:var(--display); font-weight:700; font-size:34px; line-height:1; letter-spacing:-0.04em; }
+.mobile-pwa-title .z{ color:var(--ultra-ink); }
+.mobile-pwa-lede{ margin:12px 0 0; max-width:60ch; font-size:15px; line-height:1.6; color:var(--ink-1); }
+.mobile-pwa-legend{ display:flex; flex-wrap:wrap; gap:10px 22px; margin-top:16px; }
+.mobile-pwa-leg{ display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11px; color:var(--ink-2); }
+.mobile-pwa-leg .av{ width:18px; height:18px; flex:0 0 18px; font-size:8px; }
+
+/* —— the gallery grid —— */
+.mobile-pwa-gallery{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(300px, 375px));
+  gap:30px 26px;
+  justify-content:center;
+  align-items:start;
+}
+.mobile-pwa-frame{ margin:0; display:flex; flex-direction:column; gap:11px; }
+.mobile-pwa-frame--wide{ grid-row:span 1; }
+
+.mobile-pwa-cap{
+  display:flex; align-items:center; gap:9px;
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--steel);
+}
+.mobile-pwa-cap .ord{
+  display:inline-grid; place-items:center; width:20px; height:20px;
+  border:var(--rule) solid var(--ink); color:var(--ink); background:var(--surface);
+}
+
+/* —— device bezel —— */
+.mobile-pwa-device{
+  position:relative;
+  width:100%;
+  aspect-ratio:375 / 812;
+  background:var(--ink);
+  border:var(--rule-2) solid var(--ink);
+  padding:8px;
+  box-shadow:6px 6px 0 var(--surface-sunk);
+}
+.mobile-pwa-notch{
+  position:absolute; top:8px; left:50%; transform:translateX(-50%);
+  width:122px; height:20px; background:var(--ink);
+  border-bottom-left-radius:10px; border-bottom-right-radius:10px;
+  z-index:6;
+}
+.mobile-pwa-screen{
+  position:relative; height:100%; width:100%; overflow:hidden;
+  background:var(--paper); display:flex; flex-direction:column;
+}
+
+/* —— faux OS status bar —— */
+.mobile-pwa-status{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 16px 5px; height:30px; flex:0 0 30px;
+  background:var(--surface); border-bottom:var(--rule) solid var(--hair);
+}
+.mobile-pwa-stime{ font-size:11px; font-weight:600; color:var(--ink); letter-spacing:0; }
+.mobile-pwa-sicons{ font-size:9.5px; color:var(--ink-2); letter-spacing:0.02em; }
+.mobile-pwa-status--off{ background:var(--ink); border-bottom-color:var(--ink-1); }
+.mobile-pwa-status--off .mobile-pwa-stime{ color:var(--paper); }
+.mobile-pwa-status--off .mobile-pwa-sicons{ color:var(--agent-edge); }
+
+/* —— app bar —— */
+.mobile-pwa-appbar{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:11px 14px; border-bottom:var(--rule) solid var(--hair); background:var(--surface);
+  flex:0 0 auto;
+}
+.mobile-pwa-appbar .logo .word{ font-size:14px; }
+.mobile-pwa-mark-sm{ width:18px !important; height:18px !important; }
+.mobile-pwa-mark-sm .cross{ width:18px; height:18px; }
+.mobile-pwa-mark-sm .cross-ring{ inset:3px; }
+.mobile-pwa-appbar-r{ display:flex; align-items:center; gap:8px; }
+.mobile-pwa-appbar-r .av{ width:26px; height:26px; flex:0 0 26px; }
+
+.mobile-pwa-appbar--title{ align-items:flex-end; padding-bottom:13px; }
+.mobile-pwa-titleblock{ display:flex; flex-direction:column; gap:5px; }
+.mobile-pwa-greet-h{ font-family:var(--display); font-weight:700; font-size:21px; letter-spacing:-0.03em; line-height:1; }
+.mobile-pwa-count{ font-size:12px; color:var(--steel-2); font-weight:500; margin-left:4px; }
+
+/* icon button — 44px touch target via padding box */
+.mobile-pwa-iconbtn{
+  width:38px; height:38px; min-width:38px; display:grid; place-items:center;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface); color:var(--ink-1);
+  cursor:pointer; font-size:15px; padding:0;
+}
+.mobile-pwa-iconbtn:active{ transform:translateY(1px); }
+.mobile-pwa-iconbtn .mono{ font-size:15px; line-height:1; }
+
+/* —— scroll body —— */
+.mobile-pwa-scroll{ flex:1 1 auto; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:14px; -webkit-overflow-scrolling:touch; }
+.mobile-pwa-scroll--list{ padding:0; gap:0; }
+.mobile-pwa-scroll--read{ padding:16px 16px 24px; gap:0; }
+.mobile-pwa-scroll--edit{ padding:14px 16px 96px; gap:13px; }
+.mobile-pwa-scroll--sync{ padding:14px; gap:0; }
+
+/* —— home: greeting + stats —— */
+.mobile-pwa-greet{ display:flex; flex-direction:column; gap:7px; }
+.mobile-pwa-stat2{ display:grid; grid-template-columns:1fr 1fr; border:var(--rule) solid var(--hair-strong); }
+.mobile-pwa-stat2 .stat{ padding:12px 13px 13px; }
+.mobile-pwa-stat2 .stat:first-child{ border-right:var(--rule) solid var(--hair); }
+.mobile-pwa-stat2 .stat .v{ font-size:26px; margin-top:6px; }
+.mobile-pwa-stat2 .stat .d{ margin-top:6px; }
+
+.mobile-pwa-panel{ background:var(--surface); }
+.mobile-pwa-panel .ph{ padding:10px 13px; }
+.mobile-pwa-panel .ph .t{ font-size:12.5px; }
+.mobile-pwa-livelbl{ font-size:10px; color:var(--agent-ink); letter-spacing:0.04em; }
+
+.mobile-pwa-row{
+  display:flex; align-items:center; gap:11px; padding:11px 13px;
+  border-bottom:var(--rule) solid var(--hair); min-height:52px; cursor:pointer;
+}
+.mobile-pwa-row:last-child{ border-bottom:0; }
+.mobile-pwa-row:active{ background:var(--paper); }
+.mobile-pwa-row .ord{ width:18px; flex:0 0 18px; }
+.mobile-pwa-row-bd{ display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.mobile-pwa-row-nm{ font-weight:600; font-size:13px; color:var(--ink); letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mobile-pwa-row-pth{ font-size:9.5px; color:var(--steel-2); }
+.mobile-pwa-row .editors-stack .av{ width:20px; height:20px; flex:0 0 20px; font-size:8px; }
+.mobile-pwa-row .status-tag{ flex:0 0 auto; }
+.mobile-pwa-panel .feed .fe{ padding:10px 13px; }
+.mobile-pwa-panel .feed .fe .ax{ font-size:11.5px; }
+
+/* —— bottom tab bar —— */
+.mobile-pwa-tabbar{
+  flex:0 0 auto; display:grid; grid-template-columns:repeat(5,1fr);
+  border-top:var(--rule) solid var(--ink); background:var(--surface);
+  padding-bottom:6px; /* faux home-indicator inset */
+}
+.mobile-pwa-tab{
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+  padding:9px 2px 7px; min-height:52px; color:var(--steel); cursor:pointer; position:relative;
+}
+.mobile-pwa-tab-ic{ position:relative; width:18px; height:18px; display:grid; place-items:center; color:var(--steel-2); }
+.mobile-pwa-tab-ic .cross{ width:18px; height:18px; }
+.mobile-pwa-tab-ic .cross-ring{ inset:3px; }
+.mobile-pwa-tab-l{ font-family:var(--mono); font-size:8.5px; letter-spacing:0.04em; text-transform:uppercase; }
+.mobile-pwa-tab.on{ color:var(--ink); }
+.mobile-pwa-tab.on .mobile-pwa-tab-ic{ color:var(--ultra); }
+.mobile-pwa-tab.on::before{ content:""; position:absolute; top:0; left:22%; right:22%; height:2px; background:var(--ultra); }
+.mobile-pwa-tab-av{ width:18px; height:18px; flex:0 0 18px; font-size:7.5px; }
+
+/* tab glyphs drawn with borders (token-pure, no images) */
+.mobile-pwa-ic-docs{ width:14px; height:16px; border:var(--rule-2) solid currentColor; }
+.mobile-pwa-ic-docs::after{ content:""; position:absolute; left:3px; right:3px; top:5px; height:var(--rule); background:currentColor; box-shadow:0 4px 0 currentColor; }
+.mobile-pwa-ic-search{ width:13px; height:13px; border:var(--rule-2) solid currentColor; border-radius:50%; }
+.mobile-pwa-ic-search::after{ content:""; position:absolute; right:-3px; bottom:-2px; width:5px; height:var(--rule-2); background:currentColor; transform:rotate(45deg); }
+.mobile-pwa-ic-act{ width:14px; height:14px; border:var(--rule-2) solid currentColor; }
+.mobile-pwa-badge{
+  position:absolute; top:-7px; right:-9px; min-width:13px; height:13px; padding:0 3px;
+  display:grid; place-items:center; background:var(--agent); color:var(--agent-ink);
+  font-family:var(--mono); font-size:8px; font-weight:700; border-radius:var(--radius-chip);
+}
+
+/* —— documents list —— */
+.mobile-pwa-segwrap{ padding:12px 14px; border-bottom:var(--rule) solid var(--hair); background:var(--surface); flex:0 0 auto; }
+.mobile-pwa-seg{ width:100%; }
+.mobile-pwa-seg button{ flex:1; padding:8px 6px; font-size:9.5px; }
+.mobile-pwa-doc{
+  display:flex; align-items:center; gap:11px; padding:13px 14px;
+  border-bottom:var(--rule) solid var(--hair); min-height:60px; cursor:pointer; background:var(--surface);
+}
+.mobile-pwa-doc:active{ background:var(--paper); }
+.mobile-pwa-doc .ord{ width:18px; flex:0 0 18px; }
+.mobile-pwa-doc-bd{ display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; }
+.mobile-pwa-doc-nm{ font-weight:600; font-size:13.5px; color:var(--ink); letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mobile-pwa-doc-mt{ font-size:9.5px; color:var(--steel-2); }
+.mobile-pwa-doc-side{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex:0 0 auto; }
+.mobile-pwa-doc-side .editors-stack .av{ width:20px; height:20px; flex:0 0 20px; font-size:8px; }
+
+/* floating action button */
+.mobile-pwa-fab{
+  position:absolute; right:16px; bottom:18px; width:52px; height:52px; min-width:52px;
+  padding:0; display:grid; place-items:center; border-radius:var(--radius);
+  box-shadow:3px 3px 0 var(--ultra-ink); z-index:5;
+}
+.mobile-pwa-fab-plus{ font-size:24px; line-height:1; color:#fff; }
+
+/* —— reading view —— */
+.mobile-pwa-readbar{
+  display:flex; align-items:center; gap:10px; padding:9px 12px;
+  border-bottom:var(--rule) solid var(--hair); background:var(--surface); flex:0 0 auto; min-height:50px;
+}
+.mobile-pwa-readbar .crumb{ flex:1; min-width:0; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mobile-pwa-readbar .av{ width:30px; height:30px; flex:0 0 30px; }
+.mobile-pwa-readtag{ align-self:flex-start; }
+.mobile-pwa-read-h1{ font-family:var(--display); font-weight:700; font-size:30px; line-height:1.04; letter-spacing:-0.04em; margin:12px 0 12px; }
+.mobile-pwa-read-h1 .z{ color:var(--ultra-ink); }
+.mobile-pwa-readmeta{ display:flex; flex-wrap:wrap; gap:8px 16px; padding-bottom:16px; margin-bottom:18px; border-bottom:var(--rule) solid var(--ink); }
+.mobile-pwa-readmeta-i{ display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--ink-1); }
+.mobile-pwa-readmeta-i .av{ width:18px; height:18px; flex:0 0 18px; font-size:8px; }
+.mobile-pwa-lede2{ font-size:15px; line-height:1.6; color:var(--ink-1); margin:0 0 8px; }
+.mobile-pwa-read-h2{ font-family:var(--display); font-weight:600; font-size:16px; letter-spacing:-0.02em; display:flex; align-items:baseline; gap:10px; margin:24px 0 9px; padding-top:16px; border-top:var(--rule) solid var(--hair); }
+.mobile-pwa-read-p{ font-size:14px; line-height:1.7; color:var(--ink-1); margin:0 0 13px; }
+.mobile-pwa-read-p code{ font-family:var(--mono); font-size:11.5px; background:var(--surface-2); padding:1px 5px; border:var(--rule) solid var(--hair); }
+.mobile-pwa-callout{ margin:14px 0; padding:13px 14px; }
+.mobile-pwa-callout .tx{ font-size:12.5px; line-height:1.5; }
+.mobile-pwa-read-ul{ list-style:none; padding:0; margin:0 0 10px; }
+.mobile-pwa-read-ul li{ position:relative; padding-left:22px; margin-bottom:8px; font-size:13.5px; line-height:1.55; color:var(--ink-1); }
+.mobile-pwa-read-ul li::before{ content:"\2014"; position:absolute; left:0; color:var(--ultra); font-family:var(--mono); }
+
+/* —— editor —— */
+.mobile-pwa-presence-m{ display:flex; gap:6px; flex:1; min-width:0; overflow:hidden; }
+.mobile-pwa-presence-m .pchip{ padding:2px 7px 2px 3px; font-size:9px; }
+.mobile-pwa-presence-m .pchip .av{ width:16px; height:16px; flex:0 0 16px; font-size:7px; }
+.mobile-pwa-save{ display:flex; align-items:center; gap:5px; font-size:9.5px; color:var(--steel); flex:0 0 auto; }
+.mobile-pwa-ed-h1{ font-family:var(--display); font-weight:700; font-size:27px; letter-spacing:-0.035em; line-height:1.06; color:var(--ink); }
+.mobile-pwa-ed-h1 .z{ color:var(--ultra-ink); }
+.mobile-pwa-ed-p{ font-size:14px; line-height:1.7; color:var(--ink-1); }
+.mobile-pwa-ed-p code{ font-family:var(--mono); font-size:11.5px; background:var(--surface-2); padding:1px 5px; border:var(--rule) solid var(--hair); }
+.mobile-pwa-agentline{ position:relative; }
+
+/* tap-to-review bottom sheet */
+.mobile-pwa-sheet{
+  position:absolute; left:0; right:0; bottom:48px; z-index:7;
+  background:var(--surface); border-top:var(--rule-2) solid var(--agent);
+  box-shadow:0 -4px 0 var(--agent-wash);
+}
+.mobile-pwa-grab{ width:34px; height:4px; background:var(--hair-strong); margin:7px auto 4px; border-radius:var(--radius-chip); }
+.mobile-pwa-sheet-h{ display:flex; align-items:center; gap:9px; padding:8px 14px; border-bottom:var(--rule) solid var(--agent-edge); background:var(--agent-wash); }
+.mobile-pwa-sheet-h .av{ width:20px; height:20px; flex:0 0 20px; font-size:8px; }
+.mobile-pwa-sheet-nm{ font-size:10px; font-weight:700; color:var(--agent-ink); letter-spacing:0.04em; }
+.mobile-pwa-sheet-ord{ margin-left:auto; color:var(--agent-ink); }
+.mobile-pwa-sheet-bd{ padding:12px 14px; }
+.mobile-pwa-sheet-qt{ font-size:12.5px; line-height:1.55; color:var(--ink-1); margin:0; }
+.mobile-pwa-sheet-qt .add{ color:var(--agent-ink); background:var(--agent-wash); padding:0 2px; box-shadow:inset 0 -2px 0 var(--agent); }
+.mobile-pwa-sheet-qt .rm{ color:var(--steel); text-decoration:line-through; text-decoration-color:var(--agent); text-decoration-thickness:1.5px; }
+.mobile-pwa-sheet-why{ margin:10px 0 0; padding-top:10px; border-top:var(--rule) solid var(--hair); font-size:10.5px; line-height:1.5; color:var(--steel); }
+.mobile-pwa-sheet-act{ display:flex; border-top:var(--rule) solid var(--agent-edge); }
+.mobile-pwa-sheet-btn{
+  flex:1; padding:14px; min-height:48px; font-family:var(--mono); font-size:11px;
+  letter-spacing:0.06em; text-transform:uppercase; cursor:pointer; border:0; background:var(--surface);
+}
+.mobile-pwa-sheet-btn.acc{ background:var(--agent); color:var(--agent-ink); font-weight:700; }
+.mobile-pwa-sheet-btn.rej{ color:var(--steel); border-right:var(--rule) solid var(--agent-edge); }
+.mobile-pwa-sheet-btn.rej:active{ color:var(--ink); }
+
+/* bottom touch format bar */
+.mobile-pwa-fmtbar{
+  position:absolute; left:0; right:0; bottom:0; z-index:8;
+  display:flex; align-items:stretch; gap:0;
+  background:var(--surface); border-top:var(--rule) solid var(--ink);
+  padding-bottom:0;
+}
+.mobile-pwa-fmtbar .fb{
+  flex:1; min-width:44px; height:48px; border-right:var(--rule) solid var(--hair);
+  font-size:14px; color:var(--ink-1);
+}
+.mobile-pwa-fmtbar .fb:last-child{ border-right:0; }
+.mobile-pwa-fmtbar .fb:active{ background:var(--surface-2); }
+.mobile-pwa-fb-ai{ flex:1.4; color:var(--agent-ink); font-size:10px; gap:5px; letter-spacing:0.04em; background:var(--agent-wash); }
+.mobile-pwa-fb-ai:active{ background:var(--agent-edge); }
+
+/* —— offline / sync —— */
+.mobile-pwa-offbanner{
+  display:flex; align-items:center; gap:11px; padding:11px 14px 11px 0;
+  background:var(--warn-wash); border-bottom:var(--rule) solid var(--hair-strong); flex:0 0 auto;
+}
+.mobile-pwa-offrail{ width:3px; align-self:stretch; background:var(--warn-ink); flex:0 0 3px; }
+.mobile-pwa-offic{ font-size:14px; color:var(--warn-ink); }
+.mobile-pwa-offtx{ display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.mobile-pwa-offt{ font-family:var(--display); font-weight:600; font-size:13px; color:var(--warn-ink); }
+.mobile-pwa-offs{ font-size:9.5px; color:var(--warn-ink); line-height:1.4; opacity:0.9; }
+.mobile-pwa-offq{
+  flex:0 0 auto; min-width:24px; height:24px; padding:0 6px; display:grid; place-items:center;
+  background:var(--warn-ink); color:var(--warn-wash); font-size:11px; font-weight:700; border-radius:var(--radius-chip);
+}
+.mobile-pwa-q{ display:flex; align-items:center; gap:11px; padding:11px 0; border-bottom:var(--rule) solid var(--hair); }
+.mobile-pwa-q-rail{ width:3px; align-self:stretch; flex:0 0 3px; min-height:30px; }
+.mobile-pwa-q-rail.u{ background:var(--ultra); }
+.mobile-pwa-q-rail.ag{ background:var(--agent); }
+.mobile-pwa-q-bd{ display:flex; flex-direction:column; gap:3px; flex:1; min-width:0; }
+.mobile-pwa-q-ln{ font-size:12.5px; color:var(--ink-1); font-weight:500; }
+.mobile-pwa-q-mt{ font-size:9px; color:var(--steel-2); letter-spacing:0.02em; }
+.mobile-pwa-q-st{ flex:0 0 auto; }
+.mobile-pwa-synced-hr{ margin:16px 0 14px; }
+.mobile-pwa-syncedbar{
+  display:flex; align-items:center; gap:9px; padding:12px 13px;
+  border:var(--rule) solid #a7d9bf; background:#e4f4eb;
+}
+.mobile-pwa-syncedbar .dot{ flex:0 0 8px; width:8px; height:8px; }
+.mobile-pwa-synced-t{ font-family:var(--display); font-weight:600; font-size:13px; color:var(--ok); }
+.mobile-pwa-synced-s{ font-size:9.5px; color:var(--ok); margin-left:auto; opacity:0.85; }
+
+/* —— install sheet —— */
+.mobile-pwa-screen--dim{ position:relative; }
+.mobile-pwa-dimbg{ flex:1; opacity:0.4; pointer-events:none; display:flex; flex-direction:column; }
+.mobile-pwa-dim-rows{ display:flex; flex-direction:column; gap:12px; padding:18px 14px; }
+.mobile-pwa-dim-row{ height:46px; background:var(--surface); border:var(--rule) solid var(--hair); }
+.mobile-pwa-screen--dim::after{ content:""; position:absolute; inset:30px 0 0; background:var(--ink); opacity:0.32; z-index:2; }
+.mobile-pwa-install{
+  position:absolute; left:0; right:0; bottom:0; z-index:9;
+  background:var(--surface); border-top:var(--rule-2) solid var(--ink);
+  box-shadow:0 -5px 0 var(--surface-sunk); padding:0 16px 18px;
+}
+.mobile-pwa-install-hero{ display:flex; align-items:center; gap:13px; padding:6px 0 14px; border-bottom:var(--rule) solid var(--hair); }
+.mobile-pwa-install-icon{
+  position:relative; width:54px; height:54px; flex:0 0 54px; color:var(--ultra);
+  border:var(--rule-2) solid var(--ink); background:var(--surface);
+}
+.mobile-pwa-install-icon .cross{ position:absolute; inset:0; width:100%; height:100%; }
+.mobile-pwa-install-icon .cross-ring{ inset:13px; }
+.mobile-pwa-install-meta{ display:flex; flex-direction:column; gap:4px; }
+.mobile-pwa-install-nm{ font-family:var(--display); font-weight:700; font-size:18px; letter-spacing:-0.02em; color:var(--ink); }
+.mobile-pwa-install-host{ font-size:10px; color:var(--steel); letter-spacing:0.02em; }
+.mobile-pwa-install-tx{ font-size:13px; line-height:1.55; color:var(--ink-1); margin:14px 0 12px; }
+.mobile-pwa-install-feat{ list-style:none; padding:0; margin:0 0 16px; display:flex; flex-direction:column; gap:9px; }
+.mobile-pwa-install-feat li{ display:flex; align-items:center; gap:9px; font-family:var(--mono); font-size:11px; color:var(--ink-1); }
+.mobile-pwa-install-feat .dot{ width:7px; height:7px; flex:0 0 7px; }
+.mobile-pwa-install-act{ display:flex; gap:9px; }
+.mobile-pwa-install-later{ flex:0 0 auto; min-height:46px; }
+.mobile-pwa-install-go{ flex:1; min-height:46px; justify-content:center; }
+
+/* —— splash —— */
+.mobile-pwa-splash{ background:var(--ink); position:relative; align-items:center; justify-content:center; }
+.mobile-pwa-splash-grid{
+  position:absolute; inset:0; opacity:0.5;
+  background-image:linear-gradient(var(--ink-1) var(--rule), transparent var(--rule)), linear-gradient(90deg, var(--ink-1) var(--rule), transparent var(--rule));
+  background-size:40px 40px; background-position:center;
+}
+.mobile-pwa-splash-center{ position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; gap:18px; }
+.mobile-pwa-splash-mark{ position:relative; width:74px; height:74px; color:var(--ultra); }
+.mobile-pwa-splash-mark .cross{ width:74px; height:74px; }
+.mobile-pwa-splash-mark .cross::before,
+.mobile-pwa-splash-mark .cross::after{ background:var(--ultra); }
+.mobile-pwa-splash-mark .cross-ring{ inset:16px; border-color:var(--ultra); border-width:var(--rule-2); }
+.mobile-pwa-splash-word{ font-family:var(--display); font-weight:700; font-size:26px; letter-spacing:-0.03em; color:var(--paper); }
+.mobile-pwa-splash-word b{ font-weight:700; }
+.mobile-pwa-splash-word .z{ color:var(--agent); }
+.mobile-pwa-splash-tag{ font-size:10px; letter-spacing:0.22em; color:var(--steel-2); }
+.mobile-pwa-splash-foot{
+  position:absolute; left:0; right:0; bottom:0; z-index:2;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:14px 18px 18px;
+}
+.mobile-pwa-splash-ver, .mobile-pwa-splash-org{ font-size:9px; color:var(--steel-2); letter-spacing:0.05em; }
+.mobile-pwa-splash-load{ position:relative; width:64px; height:3px; background:var(--ink-1); overflow:hidden; }
+.mobile-pwa-splash-load i{ position:absolute; left:0; top:0; bottom:0; width:42%; background:var(--ultra); animation:mobile-pwa-load 1.4s ease-in-out infinite; }
+
+.mobile-pwa-credit{ margin-top:30px; padding-top:16px; border-top:var(--rule) solid var(--hair); }
+
+/* —— animation —— */
+@keyframes mobile-pwa-load{
+  0%{ transform:translateX(-110%); }
+  100%{ transform:translateX(260%); }
+}
+@media (prefers-reduced-motion: reduce){
+  .mobile-pwa-splash-load i{ animation:none; width:62%; }
+}
+
+/* ============================================================
+   RESPONSIVE — real phone (the gallery itself)
+   ============================================================ */
+@media (max-width:900px){
+  .mobile-pwa-gallery{ grid-template-columns:repeat(auto-fill, minmax(280px, 340px)); gap:26px 22px; }
+}
+@media (max-width:640px){
+  .mobile-pwa-page{ padding:18px 14px 40px; }
+  .mobile-pwa-head{ flex-direction:column; align-items:flex-start; gap:10px; }
+  .mobile-pwa-head-meta{ align-items:flex-start; }
+  .mobile-pwa-title{ font-size:27px; }
+  .mobile-pwa-lede{ font-size:14px; }
+  .mobile-pwa-intro{ padding:16px 0 18px; margin-bottom:18px; }
+
+  /* one phone per row, near full width, capped so bezel stays phone-like */
+  .mobile-pwa-gallery{ grid-template-columns:1fr; gap:24px; justify-items:center; }
+  .mobile-pwa-frame{ width:100%; max-width:360px; }
+  .mobile-pwa-device{ box-shadow:4px 4px 0 var(--surface-sunk); }
+
+  .mobile-pwa-credit{ flex-direction:column; align-items:flex-start; gap:8px; }
+  .mobile-pwa-credit .ms{ flex-wrap:wrap; gap:8px 14px; }
+}
+@media (max-width:380px){
+  .mobile-pwa-legend{ gap:8px 14px; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<div class="mobile-pwa-page">
+
+  <header class="mobile-pwa-head">
+    <div class="logo">
+      <span class="mark"><span class="cross"></span><span class="cross-ring"></span></span>
+      <span class="word"><b>editor</b><span class="zero">zero</span></span>
+    </div>
+    <div class="mobile-pwa-head-meta">
+      <span class="kicker kicker--ultra">Surface · Mobile / PWA</span>
+      <span class="ord">REF 0007 · 375&#215;812</span>
+    </div>
+  </header>
+
+  <div class="mobile-pwa-intro">
+    <h1 class="mobile-pwa-title">Pocket <span class="z">zero</span>.</h1>
+    <p class="mobile-pwa-lede">The full capability layer on a phone &mdash; install to home screen, edit offline, review agent suggestions by tap. Humans and agents co-edit at parity, anywhere.</p>
+    <div class="mobile-pwa-legend">
+      <span class="mobile-pwa-leg"><span class="av av--u" aria-hidden="true">NA</span> Human principal</span>
+      <span class="mobile-pwa-leg"><span class="av av--agent" aria-hidden="true">AI</span> Agent principal</span>
+      <span class="mobile-pwa-leg"><span class="dot dot--ultra"></span> Local-first &middot; CRDT sync</span>
+    </div>
+  </div>
+
+  <div class="mobile-pwa-gallery">
+
+    <!-- (a) INSTALLED HOME + BOTTOM TAB BAR -->
+    <figure class="mobile-pwa-frame">
+      <figcaption class="mobile-pwa-cap"><span class="ord">A</span> Installed &middot; Home</figcaption>
+      <div class="mobile-pwa-device">
+        <div class="mobile-pwa-notch" aria-hidden="true"></div>
+        <div class="mobile-pwa-screen">
+
+          <div class="mobile-pwa-status" aria-hidden="true">
+            <span class="mobile-pwa-stime mono">9:41</span>
+            <span class="mobile-pwa-sicons mono">5G &middot; &#9679;&#9679;&#9679; &middot; 84%</span>
+          </div>
+
+          <div class="mobile-pwa-appbar">
+            <div class="logo">
+              <span class="mark mobile-pwa-mark-sm"><span class="cross"></span><span class="cross-ring"></span></span>
+              <span class="word"><b>editor</b><span class="zero">zero</span></span>
+            </div>
+            <div class="mobile-pwa-appbar-r">
+              <button class="mobile-pwa-iconbtn" aria-label="Search"><span class="mono">&#8981;</span></button>
+              <span class="av av--agent" aria-hidden="true">AI</span>
+              <span class="av av--u" aria-hidden="true">NA</span>
+            </div>
+          </div>
+
+          <div class="mobile-pwa-scroll">
+            <div class="mobile-pwa-greet">
+              <span class="kicker">Atlas Org &middot; Product</span>
+              <h2 class="mobile-pwa-greet-h">Good morning, Nomi</h2>
+            </div>
+
+            <div class="mobile-pwa-stat2">
+              <div class="stat stat--ultra">
+                <div class="k">Open docs</div>
+                <div class="v">128</div>
+                <div class="d"><span class="up">&#9650; 6</span> this week</div>
+              </div>
+              <div class="stat">
+                <div class="k">Agent edits</div>
+                <div class="v" style="color:var(--agent-ink)">42</div>
+                <div class="d"><span class="dot dot--agent"></span> 3 pending review</div>
+              </div>
+            </div>
+
+            <div class="panel mobile-pwa-panel">
+              <div class="ph"><span class="t">Continue</span><span class="r"><span class="dot dot--agent live"></span><span class="mono mobile-pwa-livelbl">2 live</span></span></div>
+              <a class="mobile-pwa-row">
+                <span class="ord">01</span>
+                <span class="mobile-pwa-row-bd">
+                  <span class="mobile-pwa-row-nm">Q3 Launch Brief</span>
+                  <span class="mobile-pwa-row-pth mono">product / launches</span>
+                </span>
+                <span class="editors-stack">
+                  <span class="av av--u" aria-hidden="true">NA</span>
+                  <span class="av av--agent" aria-hidden="true">AI</span>
+                </span>
+              </a>
+              <a class="mobile-pwa-row">
+                <span class="ord">02</span>
+                <span class="mobile-pwa-row-bd">
+                  <span class="mobile-pwa-row-nm">API Parity Matrix</span>
+                  <span class="mobile-pwa-row-pth mono">eng / specs</span>
+                </span>
+                <span class="status-tag st-rev">Review</span>
+              </a>
+              <a class="mobile-pwa-row">
+                <span class="ord">03</span>
+                <span class="mobile-pwa-row-bd">
+                  <span class="mobile-pwa-row-nm">Onboarding Runbook</span>
+                  <span class="mobile-pwa-row-pth mono">ops / handbook</span>
+                </span>
+                <span class="status-tag st-draft">Draft</span>
+              </a>
+            </div>
+
+            <div class="panel mobile-pwa-panel">
+              <div class="ph"><span class="t">Activity</span></div>
+              <div class="feed">
+                <div class="fe">
+                  <span class="rail ag"></span>
+                  <span class="t">2m</span>
+                  <span class="ax"><b>Scribe</b> proposed <span class="ev ag">3 edits</span> on Q3 Launch Brief</span>
+                </div>
+                <div class="fe">
+                  <span class="rail u"></span>
+                  <span class="t">17m</span>
+                  <span class="ax"><b>Dana K.</b> <span class="ev">published</span> Pricing v2</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <nav class="mobile-pwa-tabbar" aria-label="Primary">
+            <a class="mobile-pwa-tab on" aria-current="page">
+              <span class="mobile-pwa-tab-ic" aria-hidden="true"><span class="cross"></span><span class="cross-ring"></span></span>
+              <span class="mobile-pwa-tab-l">Home</span>
+            </a>
+            <a class="mobile-pwa-tab">
+              <span class="mobile-pwa-tab-ic mobile-pwa-ic-docs" aria-hidden="true"></span>
+              <span class="mobile-pwa-tab-l">Docs</span>
+            </a>
+            <a class="mobile-pwa-tab">
+              <span class="mobile-pwa-tab-ic mobile-pwa-ic-search" aria-hidden="true"></span>
+              <span class="mobile-pwa-tab-l">Search</span>
+            </a>
+            <a class="mobile-pwa-tab">
+              <span class="mobile-pwa-tab-ic mobile-pwa-ic-act" aria-hidden="true"><span class="mobile-pwa-badge">3</span></span>
+              <span class="mobile-pwa-tab-l">Activity</span>
+            </a>
+            <a class="mobile-pwa-tab">
+              <span class="mobile-pwa-tab-ic" aria-hidden="true"><span class="av av--u mobile-pwa-tab-av">NA</span></span>
+              <span class="mobile-pwa-tab-l">Account</span>
+            </a>
+          </nav>
+        </div>
+      </div>
+    </figure>
+
+    <!-- (b) DOCUMENTS LIST -->
+    <figure class="mobile-pwa-frame">
+      <figcaption class="mobile-pwa-cap"><span class="ord">B</span> Documents</figcaption>
+      <div class="mobile-pwa-device">
+        <div class="mobile-pwa-notch" aria-hidden="true"></div>
+        <div class="mobile-pwa-screen">
+          <div class="mobile-pwa-status" aria-hidden="true">
+            <span class="mobile-pwa-stime mono">9:41</span>
+            <span class="mobile-pwa-sicons mono">5G &middot; &#9679;&#9679;&#9679; &middot; 84%</span>
+          </div>
+
+          <div class="mobile-pwa-appbar mobile-pwa-appbar--title">
+            <div class="mobile-pwa-titleblock">
+              <span class="kicker">Product</span>
+              <h2 class="mobile-pwa-greet-h">Documents <span class="mono mobile-pwa-count">128</span></h2>
+            </div>
+            <button class="mobile-pwa-iconbtn" aria-label="New document"><span class="mono">+</span></button>
+          </div>
+
+          <div class="mobile-pwa-segwrap">
+            <div class="seg mobile-pwa-seg">
+              <button class="on">All</button>
+              <button>Mine</button>
+              <button>Agents</button>
+              <button>Shared</button>
+            </div>
+          </div>
+
+          <div class="mobile-pwa-scroll mobile-pwa-scroll--list">
+            <a class="mobile-pwa-doc">
+              <span class="ord">01</span>
+              <span class="mobile-pwa-doc-bd">
+                <span class="mobile-pwa-doc-nm">Q3 Launch Brief</span>
+                <span class="mobile-pwa-doc-mt mono">launches &middot; edited 2m</span>
+              </span>
+              <span class="mobile-pwa-doc-side">
+                <span class="status-tag st-rev">Review</span>
+                <span class="editors-stack"><span class="av av--u" aria-hidden="true">NA</span><span class="av av--agent" aria-hidden="true">AI</span></span>
+              </span>
+            </a>
+            <a class="mobile-pwa-doc">
+              <span class="ord">02</span>
+              <span class="mobile-pwa-doc-bd">
+                <span class="mobile-pwa-doc-nm">API Parity Matrix</span>
+                <span class="mobile-pwa-doc-mt mono">specs &middot; edited 1h</span>
+              </span>
+              <span class="mobile-pwa-doc-side">
+                <span class="status-tag st-pub">Live</span>
+                <span class="editors-stack"><span class="av av--u3" aria-hidden="true">DK</span></span>
+              </span>
+            </a>
+            <a class="mobile-pwa-doc">
+              <span class="ord">03</span>
+              <span class="mobile-pwa-doc-bd">
+                <span class="mobile-pwa-doc-nm">Onboarding Runbook</span>
+                <span class="mobile-pwa-doc-mt mono">handbook &middot; edited 3h</span>
+              </span>
+              <span class="mobile-pwa-doc-side">
+                <span class="status-tag st-draft">Draft</span>
+                <span class="editors-stack"><span class="av av--u2" aria-hidden="true">JM</span></span>
+              </span>
+            </a>
+            <a class="mobile-pwa-doc">
+              <span class="ord">04</span>
+              <span class="mobile-pwa-doc-bd">
+                <span class="mobile-pwa-doc-nm">Pricing v2</span>
+                <span class="mobile-pwa-doc-mt mono">gtm &middot; edited 5h</span>
+              </span>
+              <span class="mobile-pwa-doc-side">
+                <span class="status-tag st-pub">Live</span>
+                <span class="editors-stack"><span class="av av--u" aria-hidden="true">NA</span></span>
+              </span>
+            </a>
+            <a class="mobile-pwa-doc">
+              <span class="ord">05</span>
+              <span class="mobile-pwa-doc-bd">
+                <span class="mobile-pwa-doc-nm">Threat Model &mdash; Sync</span>
+                <span class="mobile-pwa-doc-mt mono">security &middot; edited 1d</span>
+              </span>
+              <span class="mobile-pwa-doc-side">
+                <span class="status-tag st-rev">Review</span>
+                <span class="editors-stack"><span class="av av--agent" aria-hidden="true">AI</span></span>
+              </span>
+            </a>
+            <a class="mobile-pwa-doc">
+              <span class="ord">06</span>
+              <span class="mobile-pwa-doc-bd">
+                <span class="mobile-pwa-doc-nm">Changelog 0.4</span>
+                <span class="mobile-pwa-doc-mt mono">release &middot; edited 2d</span>
+              </span>
+              <span class="mobile-pwa-doc-side">
+                <span class="status-tag st-draft">Draft</span>
+                <span class="editors-stack"><span class="av av--u3" aria-hidden="true">DK</span></span>
+              </span>
+            </a>
+          </div>
+
+          <button class="btn btn--ultra mobile-pwa-fab" aria-label="New document"><span class="mono mobile-pwa-fab-plus">+</span></button>
+        </div>
+      </div>
+    </figure>
+
+    <!-- (c) READING VIEW -->
+    <figure class="mobile-pwa-frame">
+      <figcaption class="mobile-pwa-cap"><span class="ord">C</span> Reading</figcaption>
+      <div class="mobile-pwa-device">
+        <div class="mobile-pwa-notch" aria-hidden="true"></div>
+        <div class="mobile-pwa-screen">
+          <div class="mobile-pwa-status" aria-hidden="true">
+            <span class="mobile-pwa-stime mono">9:41</span>
+            <span class="mobile-pwa-sicons mono">5G &middot; &#9679;&#9679;&#9679; &middot; 84%</span>
+          </div>
+
+          <div class="mobile-pwa-readbar">
+            <button class="mobile-pwa-iconbtn" aria-label="Back"><span class="mono">&#8592;</span></button>
+            <span class="crumb mono">launches <span class="sep">/</span> <b>Q3 Brief</b></span>
+            <button class="mobile-pwa-iconbtn" aria-label="More"><span class="mono">&#8943;</span></button>
+          </div>
+
+          <div class="mobile-pwa-scroll mobile-pwa-scroll--read">
+            <span class="status-tag st-pub mobile-pwa-readtag">Published</span>
+            <h1 class="mobile-pwa-read-h1">Q3 Launch <span class="z">Brief</span></h1>
+            <div class="mobile-pwa-readmeta mono">
+              <span class="mobile-pwa-readmeta-i"><span class="av av--u" aria-hidden="true">NA</span> Nomi A.</span>
+              <span class="mobile-pwa-readmeta-i"><span class="av av--agent" aria-hidden="true">AI</span> Scribe</span>
+              <span class="mobile-pwa-readmeta-i">8 min</span>
+            </div>
+            <p class="mobile-pwa-lede2">A self-hostable launch where humans and agents co-author the narrative, the spec, and the rollout plan in one CRDT-backed doc.</p>
+
+            <h2 class="mobile-pwa-read-h2"><span class="ord">01</span> Positioning</h2>
+            <p class="mobile-pwa-read-p">We ship <code>editorzero</code> as the AI-native docs platform you can run on your own metal &mdash; no SaaS lock-in, full audit trail, agents as peer principals.</p>
+
+            <div class="callout mobile-pwa-callout">
+              <span class="b"></span>
+              <span class="tx"><b>Invariant.</b> Every mutation writes exactly one audit entry &mdash; the log alone reconstructs final state.</span>
+            </div>
+
+            <h2 class="mobile-pwa-read-h2"><span class="ord">02</span> Rollout</h2>
+            <ul class="mobile-pwa-read-ul">
+              <li>Self-host beta to 12 design partners</li>
+              <li>Agent capability scopes locked behind review</li>
+              <li>Public AGPL repo with DCO on every commit</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- (d) EDITOR + BOTTOM FORMAT BAR + REVIEW BOTTOM SHEET -->
+    <figure class="mobile-pwa-frame mobile-pwa-frame--wide">
+      <figcaption class="mobile-pwa-cap"><span class="ord">D</span> Editor &middot; tap-to-review suggestion</figcaption>
+      <div class="mobile-pwa-device">
+        <div class="mobile-pwa-notch" aria-hidden="true"></div>
+        <div class="mobile-pwa-screen">
+          <div class="mobile-pwa-status" aria-hidden="true">
+            <span class="mobile-pwa-stime mono">9:41</span>
+            <span class="mobile-pwa-sicons mono">5G &middot; &#9679;&#9679;&#9679; &middot; 84%</span>
+          </div>
+
+          <div class="mobile-pwa-readbar">
+            <button class="mobile-pwa-iconbtn" aria-label="Back"><span class="mono">&#8592;</span></button>
+            <span class="mobile-pwa-presence-m">
+              <span class="pchip u"><span class="av av--u" aria-hidden="true">NA</span>You</span>
+              <span class="pchip ag"><span class="av av--agent" aria-hidden="true">AI</span>Scribe</span>
+            </span>
+            <span class="mobile-pwa-save mono"><span class="dot dot--ok"></span>Saved</span>
+          </div>
+
+          <div class="mobile-pwa-scroll mobile-pwa-scroll--edit">
+            <h1 class="mobile-pwa-ed-h1">Q3 Launch <span class="z">Brief</span></h1>
+            <p class="mobile-pwa-ed-p">We ship <code>editorzero</code> as the AI-native docs platform you can run on your own metal<span class="caret-u"></span></p>
+            <p class="mobile-pwa-ed-p">Agents are <span class="sugg-del">just tools</span><span class="sugg-ins">first-class peer principals</span> with scopes, rate limits, and full audit attribution.</p>
+            <p class="mobile-pwa-ed-p mobile-pwa-agentline">The rollout begins with <span class="agent-typing">twelve design partners</span><span class="agent-caret" aria-hidden="true"><span class="flag"><span class="pulse"></span>Scribe</span></span></p>
+          </div>
+
+          <!-- tap-to-review BOTTOM SHEET -->
+          <div class="mobile-pwa-sheet" role="dialog" aria-label="Review agent suggestion">
+            <div class="mobile-pwa-grab" aria-hidden="true"></div>
+            <div class="mobile-pwa-sheet-h">
+              <span class="av av--agent" aria-hidden="true">AI</span>
+              <span class="mobile-pwa-sheet-nm mono">Scribe &middot; suggestion</span>
+              <span class="ord mobile-pwa-sheet-ord">1 / 3</span>
+            </div>
+            <div class="mobile-pwa-sheet-bd">
+              <p class="mobile-pwa-sheet-qt">Agents are <span class="rm">just tools</span> <span class="add">first-class peer principals</span> with scopes, rate limits, and full audit attribution.</p>
+              <p class="mobile-pwa-sheet-why">Aligns with invariant 8 &mdash; agents are peer principals, not tools. Strengthens the positioning claim.</p>
+            </div>
+            <div class="mobile-pwa-sheet-act">
+              <button class="mobile-pwa-sheet-btn rej">Reject</button>
+              <button class="mobile-pwa-sheet-btn acc">Accept</button>
+            </div>
+          </div>
+
+          <!-- bottom touch format bar (peeks above the sheet context) -->
+          <div class="mobile-pwa-fmtbar" aria-label="Formatting">
+            <button class="fb ai mobile-pwa-fb-ai"><span class="dot dot--agent"></span>Ask</button>
+            <button class="fb"><b>B</b></button>
+            <button class="fb"><i>I</i></button>
+            <button class="fb mono">&#8220;</button>
+            <button class="fb mono">&#8226;</button>
+            <button class="fb mono">&lt;/&gt;</button>
+            <button class="fb mono">+</button>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- (e) OFFLINE BANNER + SYNC STATE -->
+    <figure class="mobile-pwa-frame">
+      <figcaption class="mobile-pwa-cap"><span class="ord">E</span> Offline &rarr; Sync</figcaption>
+      <div class="mobile-pwa-device">
+        <div class="mobile-pwa-notch" aria-hidden="true"></div>
+        <div class="mobile-pwa-screen">
+          <div class="mobile-pwa-status mobile-pwa-status--off" aria-hidden="true">
+            <span class="mobile-pwa-stime mono">9:43</span>
+            <span class="mobile-pwa-sicons mono">&#9888; OFFLINE &middot; 83%</span>
+          </div>
+
+          <div class="mobile-pwa-readbar">
+            <button class="mobile-pwa-iconbtn" aria-label="Back"><span class="mono">&#8592;</span></button>
+            <span class="crumb mono">launches <span class="sep">/</span> <b>Q3 Brief</b></span>
+            <span class="av av--u" aria-hidden="true">NA</span>
+          </div>
+
+          <!-- offline banner -->
+          <div class="mobile-pwa-offbanner" role="status">
+            <span class="mobile-pwa-offrail" aria-hidden="true"></span>
+            <span class="mobile-pwa-offic mono" aria-hidden="true">&#9888;</span>
+            <span class="mobile-pwa-offtx">
+              <span class="mobile-pwa-offt">Offline</span>
+              <span class="mobile-pwa-offs mono">3 edits saved locally &middot; will sync when reconnected</span>
+            </span>
+            <span class="mobile-pwa-offq mono">3</span>
+          </div>
+
+          <div class="mobile-pwa-scroll mobile-pwa-scroll--sync">
+            <span class="kicker">Sync queue</span>
+
+            <div class="mobile-pwa-q">
+              <span class="mobile-pwa-q-rail u" aria-hidden="true"></span>
+              <span class="mobile-pwa-q-bd">
+                <span class="mobile-pwa-q-ln">Edited &ldquo;Positioning&rdquo; paragraph</span>
+                <span class="mobile-pwa-q-mt mono">you &middot; 9:42 &middot; local</span>
+              </span>
+              <span class="chip chip--ghost mobile-pwa-q-st">Queued</span>
+            </div>
+            <div class="mobile-pwa-q">
+              <span class="mobile-pwa-q-rail u" aria-hidden="true"></span>
+              <span class="mobile-pwa-q-bd">
+                <span class="mobile-pwa-q-ln">Reordered Rollout list</span>
+                <span class="mobile-pwa-q-mt mono">you &middot; 9:42 &middot; local</span>
+              </span>
+              <span class="chip chip--ghost mobile-pwa-q-st">Queued</span>
+            </div>
+            <div class="mobile-pwa-q">
+              <span class="mobile-pwa-q-rail ag" aria-hidden="true"></span>
+              <span class="mobile-pwa-q-bd">
+                <span class="mobile-pwa-q-ln">Accepted Scribe suggestion</span>
+                <span class="mobile-pwa-q-mt mono">agent &middot; 9:41 &middot; local</span>
+              </span>
+              <span class="chip chip--ghost mobile-pwa-q-st">Queued</span>
+            </div>
+
+            <div class="hr mobile-pwa-synced-hr"></div>
+
+            <!-- reconnected / synced state -->
+            <div class="mobile-pwa-syncedbar" role="status">
+              <span class="dot dot--ok"></span>
+              <span class="mobile-pwa-synced-t">Synced</span>
+              <span class="mobile-pwa-synced-s mono">3 edits &middot; merged via CRDT &middot; just now</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- (f) INSTALL / ADD-TO-HOME-SCREEN SHEET -->
+    <figure class="mobile-pwa-frame">
+      <figcaption class="mobile-pwa-cap"><span class="ord">F</span> Add to Home Screen</figcaption>
+      <div class="mobile-pwa-device">
+        <div class="mobile-pwa-notch" aria-hidden="true"></div>
+        <div class="mobile-pwa-screen mobile-pwa-screen--dim">
+          <div class="mobile-pwa-status" aria-hidden="true">
+            <span class="mobile-pwa-stime mono">9:41</span>
+            <span class="mobile-pwa-sicons mono">5G &middot; &#9679;&#9679;&#9679; &middot; 84%</span>
+          </div>
+
+          <div class="mobile-pwa-dimbg" aria-hidden="true">
+            <div class="mobile-pwa-appbar">
+              <div class="logo"><span class="mark mobile-pwa-mark-sm"><span class="cross"></span><span class="cross-ring"></span></span><span class="word"><b>editor</b><span class="zero">zero</span></span></div>
+            </div>
+            <div class="mobile-pwa-dim-rows">
+              <span class="mobile-pwa-dim-row"></span>
+              <span class="mobile-pwa-dim-row"></span>
+              <span class="mobile-pwa-dim-row"></span>
+            </div>
+          </div>
+
+          <div class="mobile-pwa-install">
+            <div class="mobile-pwa-grab" aria-hidden="true"></div>
+            <div class="mobile-pwa-install-hero">
+              <span class="mobile-pwa-install-icon" aria-hidden="true">
+                <span class="cross"></span><span class="cross-ring"></span>
+              </span>
+              <span class="mobile-pwa-install-meta">
+                <span class="mobile-pwa-install-nm">editorzero</span>
+                <span class="mobile-pwa-install-host mono">atlas.editorzero.dev</span>
+              </span>
+            </div>
+            <p class="mobile-pwa-install-tx">Install editorzero to your home screen for full-screen, offline-first editing &mdash; humans and agents, anywhere.</p>
+            <ul class="mobile-pwa-install-feat">
+              <li><span class="dot dot--ultra"></span> Works offline &middot; local-first CRDT</li>
+              <li><span class="dot dot--agent"></span> Agent suggestions &amp; live presence</li>
+              <li><span class="dot dot--ok"></span> No app store &middot; self-hosted</li>
+            </ul>
+            <div class="mobile-pwa-install-act">
+              <button class="btn btn--ghost mobile-pwa-install-later">Not now</button>
+              <button class="btn btn--ultra mobile-pwa-install-go">Add to Home Screen</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- (g) SPLASH / LAUNCH SCREEN -->
+    <figure class="mobile-pwa-frame">
+      <figcaption class="mobile-pwa-cap"><span class="ord">G</span> Splash &middot; launch</figcaption>
+      <div class="mobile-pwa-device">
+        <div class="mobile-pwa-notch" aria-hidden="true"></div>
+        <div class="mobile-pwa-screen mobile-pwa-splash">
+          <div class="mobile-pwa-splash-grid" aria-hidden="true"></div>
+          <div class="mobile-pwa-splash-center">
+            <span class="mobile-pwa-splash-mark" aria-hidden="true">
+              <span class="cross"></span>
+              <span class="cross-ring"></span>
+            </span>
+            <span class="mobile-pwa-splash-word"><b>editor</b><span class="z">zero</span></span>
+            <span class="mobile-pwa-splash-tag mono">ORIGIN &middot; 0,0</span>
+          </div>
+          <div class="mobile-pwa-splash-foot">
+            <span class="mono mobile-pwa-splash-ver">v0.4.0 &middot; self-hosted</span>
+            <span class="mobile-pwa-splash-load" aria-hidden="true"><i></i></span>
+            <span class="mono mobile-pwa-splash-org">Atlas Org</span>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+  </div>
+
+  <footer class="credit mobile-pwa-credit">
+    <span>Meridian Zero &middot; Mobile / PWA surface</span>
+    <span class="ms"><span>375&#215;812 baseline</span><span>&#8805;44px touch</span><span>token-pure</span></span>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Documents list — Engineering space</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   DOCUMENTS LIST — Engineering space (screen-specific only)
+   Composes Meridian Zero tokens + atoms; no token is hard-coded.
+   ============================================================ */
+
+/* edge-to-edge app frame: override the centered demo viewport */
+.documents-vp{
+  max-width:none;
+  margin:0;
+  padding:0;
+  min-height:100vh;
+  min-height:100dvh;
+  display:flex;
+  flex-direction:column;
+  background:var(--paper);
+}
+.documents-vp .screen{ margin:0; border:0; flex:1 1 auto; display:flex; flex-direction:column; }
+.documents-vp .win{ flex:1 1 auto; min-height:0; }
+
+/* sub-meta under page title: live-editing note in cyan */
+.documents-livenote{ display:inline-flex; align-items:center; gap:6px; color:var(--agent-ink); }
+.documents-livenote .dot{ box-shadow:0 0 0 2px var(--agent-wash); }
+
+/* search becomes a real input, keep .search chrome from the sheet */
+.documents-searchfield{
+  flex:1 1 auto; min-width:0; border:0; background:transparent;
+  font-family:var(--mono); font-size:11px; color:var(--ink-1);
+  letter-spacing:0.02em; padding:0;
+}
+.documents-searchfield::placeholder{ color:var(--steel); }
+.documents-searchfield:focus{ outline:none; }
+.bar .search:focus-within{ border-color:var(--ultra); }
+
+/* sort control matches the .filt chip register */
+.documents-sort{
+  font-family:var(--mono); font-size:10px; letter-spacing:0.04em;
+  color:var(--steel); background:transparent; border:0; cursor:pointer;
+  display:inline-flex; align-items:center; gap:5px; text-transform:uppercase;
+}
+.documents-sort:hover{ color:var(--ink); }
+.documents-sortdir{ color:var(--ultra-ink); }
+.toolbar2 .chip{ cursor:pointer; gap:6px; }
+.toolbar2 .chip:hover{ border-color:var(--ink); color:var(--ink); }
+
+/* ---- bulk-select action bar (visible when rows selected) ---- */
+.documents-bulkbar{
+  display:flex; align-items:center; gap:14px;
+  padding:9px 14px; margin-bottom:14px;
+  border:var(--rule) solid var(--ultra-edge);
+  background:var(--ultra-wash);
+  box-shadow:inset 2px 0 0 var(--ultra);
+}
+.documents-bulkall{ display:flex; align-items:center; gap:10px; cursor:pointer; }
+.documents-selcount{ font-size:11px; color:var(--ultra-ink); letter-spacing:0.04em; }
+.documents-selcount b{ font-weight:700; }
+.documents-bulkactions{ margin-left:auto; display:flex; align-items:center; gap:7px; }
+.documents-danger{ color:var(--warn-ink); border-color:var(--hair-strong); }
+.documents-danger:hover{ border-color:var(--warn-ink); }
+.documents-clearsel{
+  font-family:var(--mono); font-size:10px; letter-spacing:0.05em; text-transform:uppercase;
+  color:var(--ultra-ink); background:transparent; border:0; cursor:pointer; padding:4px 6px;
+}
+.documents-clearsel:hover{ text-decoration:underline; }
+
+/* ---- table: square cobalt checkboxes, size column ---- */
+.documents-tablewrap{ border:var(--rule) solid var(--hair-strong); }
+.documents-tablewrap .documents-tt{ border:0; }
+
+.documents-cbcol{ width:38px; padding-left:14px !important; padding-right:0 !important; }
+.documents-tt thead th{ vertical-align:middle; }
+
+.documents-check{
+  appearance:none; -webkit-appearance:none;
+  width:14px; height:14px; flex:0 0 14px; margin:0; cursor:pointer; display:inline-block;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface);
+  border-radius:var(--radius); position:relative; vertical-align:middle;
+}
+.documents-check:hover{ border-color:var(--ink); }
+.documents-check:checked{ background:var(--ultra); border-color:var(--ultra); }
+.documents-check:checked::after{
+  content:""; position:absolute; left:4px; top:1px; width:4px; height:8px;
+  border:solid #fff; border-width:0 1.5px 1.5px 0; transform:rotate(42deg);
+}
+.documents-check:focus-visible{ outline:var(--rule-2) solid var(--ultra); outline-offset:2px; }
+
+/* selected rows get a faint cobalt wash + edge marker */
+.documents-tt tbody tr:has(.documents-check:checked) td{ background:var(--ultra-wash); }
+.documents-tt tbody tr:has(.documents-check:checked) td:first-child{ box-shadow:inset 2px 0 0 var(--ultra); }
+.documents-tt tbody tr:hover td{ background:var(--paper); }
+.documents-tt tbody tr:has(.documents-check:checked):hover td{ background:var(--ultra-wash); }
+
+/* size column: steel tabular figure */
+.documents-tt td.tnum{ color:var(--ink-2); font-family:var(--mono); font-size:11px; }
+
+/* ---- live-agent row: an agent is editing right now ---- */
+.documents-rowlive td{ background:var(--agent-wash) !important; }
+.documents-rowlive td:first-child{ box-shadow:inset 2px 0 0 var(--agent); }
+.documents-rowlive:hover td{ background:var(--agent-wash) !important; }
+.documents-liveflag{
+  display:inline-flex; align-items:center; gap:5px; margin-left:8px;
+  font-family:var(--mono); font-size:9px; font-weight:500; letter-spacing:0.05em; text-transform:uppercase;
+  color:var(--agent-ink); border:var(--rule) solid var(--agent-edge); background:var(--surface);
+  padding:1px 6px; border-radius:var(--radius-chip); vertical-align:middle;
+}
+.documents-liveflag .dot{ box-shadow:0 0 0 2px var(--agent-wash); }
+.documents-avlive{ box-shadow:0 0 0 var(--rule-2) var(--surface), 0 0 0 3px var(--agent); }
+.documents-whenlive{ color:var(--agent-ink) !important; font-weight:600; }
+
+/* ---- footer strip: legend + pager ---- */
+.documents-foot{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:14px; margin-top:14px; flex-wrap:wrap;
+}
+.documents-legend{ font-size:10px; color:var(--steel); letter-spacing:0.05em; }
+.documents-pager{ display:flex; gap:6px; }
+
+/* hamburger + mobile tab bar hidden on desktop */
+.documents-burger{ display:none; }
+.documents-tabbar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+/* tablet: sheet already drops .side at <=1120; reclaim crumb burger */
+@media (max-width:1120px){
+  .documents-burger{ display:inline-flex; }
+  .bar .search{ width:auto; flex:1 1 160px; }
+  /* off-canvas drawer for the collections tree */
+  .documents-vp .side{
+    display:flex; position:fixed; z-index:40; inset:0 auto 0 0;
+    width:min(86vw,300px); transform:translateX(-101%);
+    transition:transform .18s ease; box-shadow:6px 0 0 rgba(11,14,20,.06);
+  }
+  .documents-vp .side:target{ transform:translateX(0); }
+}
+
+/* phones */
+@media (max-width:640px){
+  .bar{ flex-wrap:wrap; padding:11px 14px; gap:10px; min-height:0; }
+  .bar .crumb{ order:2; width:100%; font-size:10px; }
+  .documents-burger{ order:1; }
+  .bar .search{ order:1; flex:1 1 auto; }
+  .bar .btn--ultra{ order:1; }
+  .body{ padding:16px 14px 96px; }
+
+  .page-h h1{ font-size:24px; }
+  .page-h .sub{ flex-wrap:wrap; gap:8px 14px; }
+
+  /* toolbar: view toggle full width, filters scroll horizontally */
+  .toolbar2{ flex-wrap:wrap; gap:10px; }
+  .toolbar2 .seg{ width:100%; }
+  .toolbar2 .seg button{ flex:1; padding:9px 11px; }
+  .toolbar2 .filt{
+    margin-left:0; width:100%; gap:7px; overflow-x:auto;
+    -webkit-overflow-scrolling:touch; padding-bottom:2px;
+  }
+  .toolbar2 .filt > *{ flex:0 0 auto; min-height:34px; }
+
+  /* bulk bar wraps; actions get >=44px touch targets */
+  .documents-bulkbar{ flex-wrap:wrap; gap:10px; padding:10px 12px; }
+  .documents-bulkactions{ margin-left:0; width:100%; flex-wrap:wrap; }
+  .documents-bulkactions .btn{ flex:1 1 auto; min-height:44px; justify-content:center; }
+  .documents-clearsel{ flex:0 0 auto; min-height:44px; }
+
+  /* TABLE -> stacked cards: keep <table> semantics, repaint as blocks */
+  .documents-tablewrap{ border:0; }
+  .documents-tt, .documents-tt tbody, .documents-tt tr, .documents-tt td{ display:block; width:100%; }
+  .documents-tt thead{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .documents-tt tr{
+    position:relative; border:var(--rule) solid var(--hair-strong);
+    background:var(--surface); margin-bottom:10px; padding:12px 14px 12px 44px;
+  }
+  .documents-tt tr:hover td,
+  .documents-tt tbody tr:has(.documents-check:checked) td{ background:transparent; }
+  .documents-tt tbody tr:has(.documents-check:checked){ border-color:var(--ultra-edge); box-shadow:inset 3px 0 0 var(--ultra); background:var(--ultra-wash); }
+  .documents-rowlive{ border-color:var(--agent-edge) !important; box-shadow:inset 3px 0 0 var(--agent); }
+  .documents-rowlive td{ background:transparent !important; }
+
+  .documents-tt td{ border:0 !important; padding:0 !important; box-shadow:none !important; }
+  /* checkbox floats to the reserved left gutter, 44px hit area */
+  .documents-cbcol{ position:absolute; left:0; top:0; bottom:0; width:44px !important; display:flex; align-items:center; justify-content:center; }
+  .documents-tt .doc{ margin-bottom:9px; }
+  .documents-tt .doc .ord{ width:auto; margin-right:2px; }
+
+  /* status + editors share a row; updated/size on the meta line */
+  .documents-tt td:nth-child(3){ display:inline-block; width:auto; margin-bottom:8px; }
+  .documents-tt td:nth-child(4){ display:inline-block; width:auto; margin:0 0 8px 10px; }
+  .documents-tt td.when::before{ content:"Updated "; color:var(--steel-2); }
+  .documents-tt td.tnum::before{ content:" \00B7  "; color:var(--hair-strong); }
+  .documents-tt td.when, .documents-tt td.tnum{ display:inline-block; width:auto; text-align:left; }
+  .documents-whenlive::before{ color:var(--agent-ink) !important; }
+
+  .documents-foot{ gap:12px; }
+  .documents-pager{ width:100%; }
+  .documents-pager .btn{ flex:1; min-height:44px; justify-content:center; }
+
+  /* bottom tab bar */
+  .documents-tabbar{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:45;
+    background:var(--surface); border-top:var(--rule) solid var(--hair-strong);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .documents-tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    min-height:56px; padding:7px 4px; color:var(--steel);
+    font-family:var(--mono); font-size:9px; letter-spacing:0.05em; text-transform:uppercase;
+    border:0; background:transparent; cursor:pointer;
+  }
+  .documents-tabic{ font-size:16px; line-height:1; }
+  .documents-tab.on{ color:var(--ultra-ink); }
+  .documents-tab.on .documents-tabic{ color:var(--ultra); }
+  .documents-tabic--agent{ color:var(--agent); }
+  .documents-tab--new{ color:var(--ultra-ink); }
+  .documents-tab--new .documents-tabic{
+    width:30px; height:30px; display:grid; place-items:center;
+    background:var(--ultra); color:#fff; font-size:18px;
+  }
+}
+
+/* respect reduced-motion: kill the live pulse + drawer slide */
+@media (prefers-reduced-motion:reduce){
+  .documents-vp .live,
+  .documents-rowlive .live{ animation:none; }
+  .documents-vp .side{ transition:none; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<div class="viewport documents-vp">
+  <div class="screen">
+    <div class="screen-tab">
+      <div class="id"><span class="ord">SCR.B</span><span class="big">Documents &middot; Engineering</span></div>
+      <div class="meta"><span>COLLECTIONS</span><span>HUMAN + AGENT EDITORS</span><span>TABLE</span></div>
+    </div>
+
+    <div class="win">
+      <!-- ============ SIDEBAR: collections tree ============ -->
+      <aside class="side" id="documents-side">
+        <div class="top">
+          <div class="kicker">Space</div>
+          <button class="ws" type="button" aria-label="Switch space — Engineering">
+            <span class="av av--u3" style="background:var(--ultra)">E</span>
+            <div style="min-width:0;">
+              <div class="nm">Engineering</div>
+              <div class="sub">214 docs &middot; SP&middot;04</div>
+            </div>
+            <span class="car" aria-hidden="true">&#9662;</span>
+          </button>
+        </div>
+
+        <div class="nav-h kicker">Collections</div>
+        <nav class="tree" aria-label="Collections in Engineering">
+          <a class="row" href="#"><span class="tw" aria-hidden="true">&#9662;</span><span class="ic" aria-hidden="true">&#9707;</span> Architecture <span class="ct">42</span></a>
+          <a class="row ind" href="#"><span class="ic" aria-hidden="true">&#9636;</span> Runtime topology <span class="ct">11</span></a>
+          <a class="row ind" href="#"><span class="ic" aria-hidden="true">&#9636;</span> Sync &amp; CRDT <span class="ct">13</span></a>
+          <a class="row ind" href="#"><span class="ic" aria-hidden="true">&#9636;</span> Data &amp; storage <span class="ct">18</span></a>
+          <a class="row on" href="#" aria-current="page"><span class="tw" aria-hidden="true">&#9662;</span><span class="ic" aria-hidden="true">&#9707;</span> Capabilities <span class="ct">37</span></a>
+          <a class="row ind2" href="#"><span class="ic" aria-hidden="true">&#9636;</span> Registry <span class="ct">24</span></a>
+          <a class="row ind2" href="#"><span class="ic" aria-hidden="true">&#9636;</span> Surface adapters <span class="ct">13</span></a>
+          <a class="row" href="#"><span class="tw" aria-hidden="true">&#9656;</span><span class="ic" aria-hidden="true">&#9707;</span> Security <span class="ct">29</span></a>
+          <a class="row" href="#"><span class="tw" aria-hidden="true">&#9656;</span><span class="ic" aria-hidden="true">&#9707;</span> Observability <span class="ct">22</span></a>
+          <a class="row" href="#"><span class="tw" aria-hidden="true">&#9656;</span><span class="ic" aria-hidden="true">&#9707;</span> Operations <span class="ct">20</span></a>
+          <a class="row" href="#"><span class="tw" aria-hidden="true">&#9656;</span><span class="ic" aria-hidden="true">&#9707;</span> RFCs &amp; ADRs <span class="ct">31</span></a>
+        </nav>
+
+        <div class="nav-h kicker">Agents &middot; live</div>
+        <nav class="nav" aria-label="Live agents">
+          <a href="#"><span class="dot dot--agent live" style="margin:0 3px" aria-hidden="true"></span> archivist <span class="ct">editor</span></a>
+          <a href="#"><span class="dot dot--agent" style="margin:0 3px" aria-hidden="true"></span> linter-bot <span class="ct">author</span></a>
+          <a href="#"><span class="dot" style="margin:0 3px" aria-hidden="true"></span> summariser <span class="ct">r-only</span></a>
+        </nav>
+
+        <div class="foot">
+          <span class="av av--u">NA</span>
+          <div><div class="nm">Nadia A.</div><div class="rl">ADMIN &middot; #001</div></div>
+        </div>
+      </aside>
+
+      <!-- ================= MAIN COLUMN ================= -->
+      <div class="main">
+        <div class="bar">
+          <button class="documents-burger btn btn--ghost btn--sm" type="button" aria-label="Open collections" aria-controls="documents-side">&#9776;</button>
+          <nav class="crumb" aria-label="Breadcrumb">
+            <span class="cross" style="width:13px;height:13px;color:var(--ultra)" aria-hidden="true"></span>
+            <b>Engineering</b> <span class="sep" aria-hidden="true">/</span>
+            <b>Architecture</b> <span class="sep" aria-hidden="true">/</span> Capabilities
+          </nav>
+          <div class="search" role="search">
+            <span aria-hidden="true">&#8981;</span>
+            <input class="documents-searchfield" type="search" placeholder="Filter in collection&hellip;" aria-label="Filter documents in collection" />
+            <span class="k" aria-hidden="true">/</span>
+          </div>
+          <button class="btn btn--ultra btn--sm" type="button">+ New doc</button>
+        </div>
+
+        <div class="body">
+          <div class="page-h" style="margin-bottom:16px;">
+            <div class="lhs">
+              <div class="kicker kicker--ultra">&#9707; COLLECTION &middot; SP&middot;04 / ARCHITECTURE</div>
+              <h1>Capabilities</h1>
+              <div class="sub">
+                <span>37 documents</span>
+                <span>4 in review</span>
+                <span class="documents-livenote"><span class="dot dot--agent live" aria-hidden="true"></span> 1 editing now</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- toolbar: view toggle + filters + sort -->
+          <div class="toolbar2">
+            <div class="seg" role="tablist" aria-label="View mode">
+              <button class="on" role="tab" aria-selected="true">List</button>
+              <button role="tab" aria-selected="false">Board</button>
+            </div>
+            <div class="filt">
+              <button class="chip chip--ghost" type="button">STATUS &middot; ALL <span aria-hidden="true">&#9662;</span></button>
+              <button class="chip chip--ghost" type="button">EDITOR &middot; ANY <span aria-hidden="true">&#9662;</span></button>
+              <button class="chip chip--ghost" type="button">TYPE &middot; ANY <span aria-hidden="true">&#9662;</span></button>
+              <button class="documents-sort" type="button">SORT <span class="documents-sortdir" aria-hidden="true">&#8595;</span> UPDATED</button>
+            </div>
+          </div>
+
+          <!-- bulk-selection action bar (shown when rows selected) -->
+          <div class="documents-bulkbar" role="region" aria-label="Bulk actions">
+            <label class="documents-bulkall">
+              <input type="checkbox" class="documents-check" checked aria-label="Select all rows" />
+              <span class="documents-selcount mono"><b>3</b> selected</span>
+            </label>
+            <div class="documents-bulkactions">
+              <button class="btn btn--ghost btn--sm" type="button">Move&hellip;</button>
+              <button class="btn btn--ghost btn--sm" type="button">Set status</button>
+              <button class="btn btn--ghost btn--sm" type="button">Export</button>
+              <button class="btn btn--ghost btn--sm documents-danger" type="button">Trash</button>
+              <button class="documents-clearsel mono" type="button">Clear</button>
+            </div>
+          </div>
+
+          <!-- documents table -->
+          <div class="documents-tablewrap">
+            <table class="tt documents-tt">
+              <thead>
+                <tr>
+                  <th class="documents-cbcol" scope="col">
+                    <input type="checkbox" class="documents-check" aria-label="Select all documents" />
+                  </th>
+                  <th scope="col">Title</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Editors</th>
+                  <th class="num" scope="col">Updated</th>
+                  <th class="num" scope="col">Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- LIVE: an agent is editing this doc right now -->
+                <tr class="documents-rowlive">
+                  <td class="documents-cbcol"><input type="checkbox" class="documents-check" aria-label="Select Registry resolution order" /></td>
+                  <td>
+                    <div class="doc">
+                      <span class="ord">01</span>
+                      <div>
+                        <div class="nm">Registry resolution order
+                          <span class="documents-liveflag"><span class="dot dot--agent live" aria-hidden="true"></span> archivist editing</span>
+                        </div>
+                        <div class="pth">capabilities / registry / resolution-order</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="status-tag st-rev">In review</span></td>
+                  <td>
+                    <div class="who">
+                      <div class="editors-stack">
+                        <span class="av av--u" title="Nadia A. (human)">NA</span>
+                        <span class="av av--agent documents-avlive" title="archivist (AI) — editing now">AR</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num when documents-whenlive">now</td>
+                  <td class="num tnum">2,410 w</td>
+                </tr>
+
+                <tr>
+                  <td class="documents-cbcol"><input type="checkbox" class="documents-check" checked aria-label="Select Capability schema SSOT" /></td>
+                  <td>
+                    <div class="doc">
+                      <span class="ord">02</span>
+                      <div>
+                        <div class="nm">Capability schema as single source of truth</div>
+                        <div class="pth">capabilities / registry / schema-ssot</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="status-tag st-pub">Published</span></td>
+                  <td>
+                    <div class="who">
+                      <div class="editors-stack">
+                        <span class="av av--u" title="Nadia A. (human)">NA</span>
+                        <span class="av av--u2" title="Jonah K. (human)">JK</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num when">3h</td>
+                  <td class="num tnum">3,120 w</td>
+                </tr>
+
+                <tr>
+                  <td class="documents-cbcol"><input type="checkbox" class="documents-check" checked aria-label="Select Surface adapter parity matrix" /></td>
+                  <td>
+                    <div class="doc">
+                      <span class="ord">03</span>
+                      <div>
+                        <div class="nm">Surface adapter parity matrix</div>
+                        <div class="pth">capabilities / adapters / parity-matrix</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="status-tag st-rev">In review</span></td>
+                  <td>
+                    <div class="who">
+                      <div class="editors-stack">
+                        <span class="av av--agent" title="summariser (AI)">SM</span>
+                        <span class="av av--u" title="Nadia A. (human)">NA</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num when">5h</td>
+                  <td class="num tnum">1,455 w</td>
+                </tr>
+
+                <tr>
+                  <td class="documents-cbcol"><input type="checkbox" class="documents-check" checked aria-label="Select Validation at capability boundary" /></td>
+                  <td>
+                    <div class="doc">
+                      <span class="ord">04</span>
+                      <div>
+                        <div class="nm">Validation at the capability boundary</div>
+                        <div class="pth">capabilities / registry / boundary-validation</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="status-tag st-draft">Draft</span></td>
+                  <td>
+                    <div class="who">
+                      <div class="editors-stack">
+                        <span class="av av--agent" title="linter-bot (AI)">LB</span>
+                      </div>
+                      <span class="lbl">linter-bot</span>
+                    </div>
+                  </td>
+                  <td class="num when">1d</td>
+                  <td class="num tnum">642 w</td>
+                </tr>
+
+                <tr>
+                  <td class="documents-cbcol"><input type="checkbox" class="documents-check" aria-label="Select MCP tool generation" /></td>
+                  <td>
+                    <div class="doc">
+                      <span class="ord">05</span>
+                      <div>
+                        <div class="nm">MCP tool generation from registry</div>
+                        <div class="pth">capabilities / adapters / mcp-codegen</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="status-tag st-pub">Published</span></td>
+                  <td>
+                    <div class="who">
+                      <div class="editors-stack">
+                        <span class="av av--u3" title="Rae P. (human)">RP</span>
+                        <span class="av av--agent" title="archivist (AI)">AR</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num when">2d</td>
+                  <td class="num tnum">980 w</td>
+                </tr>
+
+                <tr>
+                  <td class="documents-cbcol"><input type="checkbox" class="documents-check" aria-label="Select CLI flag parsing" /></td>
+                  <td>
+                    <div class="doc">
+                      <span class="ord">06</span>
+                      <div>
+                        <div class="nm">CLI flag parsing &amp; coercion</div>
+                        <div class="pth">capabilities / adapters / cli-flags</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="status-tag st-pub">Published</span></td>
+                  <td>
+                    <div class="who">
+                      <div class="editors-stack">
+                        <span class="av av--u2" title="Jonah K. (human)">JK</span>
+                        <span class="av av--u3" title="Theo M. (human)">TM</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num when">2d</td>
+                  <td class="num tnum">1,884 w</td>
+                </tr>
+
+                <tr>
+                  <td class="documents-cbcol"><input type="checkbox" class="documents-check" aria-label="Select Metadata-only capabilities" /></td>
+                  <td>
+                    <div class="doc">
+                      <span class="ord">07</span>
+                      <div>
+                        <div class="nm">Metadata-only capabilities &amp; dispatcher tx</div>
+                        <div class="pth">capabilities / registry / metadata-only</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><span class="status-tag st-draft">Draft</span></td>
+                  <td>
+                    <div class="who">
+                      <div class="editors-stack">
+                        <span class="av av--u3" title="Rae P. (human)">RP</span>
+                        <span class="av av--agent" title="archivist (AI)">AR</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num when">4d</td>
+                  <td class="num tnum">1,209 w</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- footer: rows count + legend + pager -->
+          <div class="documents-foot">
+            <span class="mono documents-legend">ROWS 01&ndash;07 / 37 &middot; HUMAN &#9724; ULTRAMARINE &middot; AGENT &#9699; CYAN</span>
+            <div class="documents-pager">
+              <button class="btn btn--ghost btn--sm" type="button">&lsaquo; Prev</button>
+              <button class="btn btn--ghost btn--sm" type="button">Next &rsaquo;</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========= MOBILE BOTTOM TAB BAR (phones only) ========= -->
+  <nav class="documents-tabbar" aria-label="Primary">
+    <a href="#" class="documents-tab on" aria-current="page"><span class="documents-tabic" aria-hidden="true">&#9636;</span><span>Docs</span></a>
+    <a href="#" class="documents-tab"><span class="documents-tabic" aria-hidden="true">&#9707;</span><span>Spaces</span></a>
+    <button type="button" class="documents-tab documents-tab--new"><span class="documents-tabic" aria-hidden="true">+</span><span>New</span></button>
+    <a href="#" class="documents-tab"><span class="documents-tabic documents-tabic--agent" aria-hidden="true">&#9699;</span><span>Agents</span></a>
+    <a href="#" class="documents-tab"><span class="documents-tabic" aria-hidden="true">&#9776;</span><span>More</span></a>
+  </nav>
+</div>
+</body>
+</html>

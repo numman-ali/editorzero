@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Org settings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   SCR.F — ORG SETTINGS  (prefix: settings-)
+   token-pure · composes Meridian Zero atoms
+   ============================================================ */
+
+/* sidebar nav ordinal + danger entry */
+.settings-navord{ margin-left:auto; color:var(--steel-2); }
+.settings-nav a .ic{ font-family:var(--mono); }
+.settings-navdanger{ color:var(--warn-ink) !important; }
+.settings-navdanger .ic{ color:var(--warn-ink) !important; }
+.settings-navdanger:hover{ background:var(--warn-wash) !important; }
+
+/* save-state pill in page header */
+.settings-savestate{
+  display:flex; align-items:center; gap:7px;
+  font-size:10px; letter-spacing:0.08em; color:var(--ink-2);
+  border:var(--rule) solid var(--hair-strong); padding:6px 10px; background:var(--surface);
+  white-space:nowrap;
+}
+
+/* every section is a panel; give vertical rhythm */
+.settings-section{ margin-bottom:20px; scroll-margin-top:20px; }
+.settings-danger{ margin-bottom:20px; scroll-margin-top:20px;
+  border:var(--rule-2) solid var(--warn-ink); background:var(--surface); }
+
+/* ---- field rows (key/value editing) ---- */
+.settings-fieldset{ display:flex; flex-direction:column; }
+.settings-field{
+  display:grid; grid-template-columns:1fr 360px; gap:24px; align-items:center;
+  padding:15px; border-bottom:var(--rule) solid var(--hair);
+}
+.settings-field:last-child{ border-bottom:0; }
+.settings-subfield{ background:var(--paper); }
+.settings-flabel{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+.settings-fname{ font-weight:600; font-size:13px; color:var(--ink); letter-spacing:-0.01em; }
+.settings-fhint{ font-size:11.5px; color:var(--ink-2); line-height:1.45; max-width:52ch; }
+.settings-fctl{ display:flex; justify-content:flex-end; align-items:center; }
+
+/* inputs */
+.settings-input{
+  width:100%; font-family:var(--text); font-size:13px; color:var(--ink);
+  background:var(--surface); border:var(--rule) solid var(--hair-strong);
+  padding:9px 11px; border-radius:var(--radius); transition:border-color .12s, box-shadow .12s;
+}
+.settings-input::placeholder{ color:var(--steel-2); }
+.settings-input:focus{ outline:none; border-color:var(--ultra); box-shadow:inset 0 0 0 1px var(--ultra); }
+.settings-input--mono{ font-family:var(--mono); font-size:12px; letter-spacing:0.01em; }
+.settings-inputwrap{ display:flex; align-items:stretch; border:var(--rule) solid var(--hair-strong); background:var(--surface); width:100%; }
+.settings-inputwrap:focus-within{ border-color:var(--ultra); box-shadow:inset 0 0 0 1px var(--ultra); }
+.settings-inputwrap .settings-input{ border:0; }
+.settings-inputwrap .settings-input:focus{ box-shadow:none; }
+.settings-iprefix{
+  display:flex; align-items:center; padding:0 9px; font-size:11px; color:var(--steel);
+  background:var(--surface-2); border-right:var(--rule) solid var(--hair); white-space:nowrap;
+}
+
+/* ---- cold-swiss toggle (square switch) ---- */
+.settings-toggle{
+  position:relative; width:42px; height:22px; flex:0 0 42px;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface-sunk);
+  border-radius:var(--radius); cursor:pointer; padding:0;
+  transition:background .14s, border-color .14s;
+}
+.settings-tknob{
+  position:absolute; top:2px; left:2px; width:16px; height:16px;
+  background:var(--steel); transition:transform .14s, background .14s;
+}
+.settings-toggle.is-on{ background:var(--ultra-wash); border-color:var(--ultra); }
+.settings-toggle.is-on .settings-tknob{ transform:translateX(20px); background:var(--ultra); }
+.settings-toggle--agent.is-on{ background:var(--agent-wash); border-color:var(--agent); }
+.settings-toggle--agent.is-on .settings-tknob{ background:var(--agent); }
+.settings-toggle:focus-visible{ outline:var(--rule-2) solid var(--ink); outline-offset:2px; }
+
+/* ---- instance / region motif ---- */
+.settings-instance{ display:grid; grid-template-columns:280px 1fr; gap:0; }
+.settings-coord{
+  position:relative; padding:18px 18px 20px; border-right:var(--rule) solid var(--hair);
+  background:var(--paper); overflow:hidden;
+}
+.settings-coordval{ margin-top:12px; font-size:13px; color:var(--ink); display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; }
+.settings-cnum{ font-size:22px; font-weight:500; letter-spacing:-0.02em; color:var(--ultra-ink); }
+.settings-cax{ font-size:9px; letter-spacing:0.14em; color:var(--steel); margin-left:2px; }
+.settings-csep{ color:var(--steel-2); }
+.settings-coordloc{ margin-top:9px; font-size:10px; letter-spacing:0.1em; color:var(--steel); }
+.settings-crosshair{ position:absolute; right:14px; top:14px; width:46px; height:46px; opacity:.9; }
+.settings-instgrid{
+  display:grid; grid-template-columns:1fr 1fr; gap:0 22px;
+  padding:14px 18px; align-content:start;
+}
+.settings-instgrid .kv{ border-bottom:var(--rule) solid var(--hair); padding:8px 0; }
+
+/* ---- API & Agents key table ---- */
+.settings-keyhead{
+  padding:10px 15px; font-size:9.5px; letter-spacing:0.08em; color:var(--steel);
+  background:var(--paper); border-bottom:var(--rule) solid var(--hair);
+}
+.settings-keytbl{ border:0; }
+.settings-keytbl th{ border-top:0; }
+.settings-key{ display:flex; flex-direction:column; gap:2px; }
+.settings-keymono{ font-size:12px; color:var(--ink); letter-spacing:0.01em; }
+.settings-keymeta{ font-size:9.5px; color:var(--steel-2); letter-spacing:0.03em; }
+.settings-revoke{
+  font-family:var(--mono); font-size:9.5px; letter-spacing:0.06em; text-transform:uppercase;
+  padding:4px 9px; cursor:pointer; background:var(--surface);
+  border:var(--rule) solid var(--hair-strong); color:var(--warn-ink); border-radius:var(--radius);
+  transition:background .12s, border-color .12s, color .12s;
+}
+.settings-revoke:hover{ background:var(--warn-wash); border-color:var(--warn-ink); }
+.settings-revoke--neutral{ color:var(--ultra-ink); }
+.settings-revoke--neutral:hover{ background:var(--ultra-wash); border-color:var(--ultra); }
+.settings-keyfoot{
+  display:flex; align-items:center; justify-content:space-between; gap:14px;
+  padding:13px 15px; border-top:var(--rule) solid var(--hair); flex-wrap:wrap;
+}
+.settings-keyfoot-l{ font-size:10px; letter-spacing:0.05em; color:var(--steel); }
+.settings-keyfoot-a{ display:flex; gap:6px; flex-wrap:wrap; }
+
+/* ---- integrations cards ---- */
+.settings-integrations{ display:grid; grid-template-columns:repeat(3,1fr); }
+.settings-int{ border-right:var(--rule) solid var(--hair); }
+.settings-int:last-child{ border-right:0; }
+.settings-int-h{ display:flex; align-items:center; gap:11px; padding:14px 15px; border-bottom:var(--rule) solid var(--hair); }
+.settings-int-ic{
+  width:30px; height:30px; flex:0 0 30px; display:grid; place-items:center; font-size:14px;
+  border:var(--rule) solid var(--hair-strong); color:var(--ink-1); background:var(--surface);
+}
+.settings-int-id{ min-width:0; }
+.settings-int-nm{ font-weight:600; font-size:13px; letter-spacing:-0.01em; }
+.settings-int-sub{ font-size:9.5px; color:var(--steel); letter-spacing:0.04em; margin-top:2px; }
+.settings-int-h .settings-toggle{ margin-left:auto; }
+.settings-int-body{ padding:13px 15px; }
+.settings-int-body .kv{ padding:5px 0; }
+.settings-int-empty, .settings-int-body .settings-int-empty{
+  font-size:10px; color:var(--steel); line-height:1.5; margin-top:8px;
+  padding-top:8px; border-top:var(--rule) solid var(--hair); letter-spacing:0.02em;
+}
+.settings-int--off{ background:var(--paper); }
+.settings-int--off .settings-int-nm{ color:var(--ink-2); }
+
+/* ---- domains ---- */
+.settings-domtbl{ border:0; }
+.settings-domtbl th{ border-top:0; }
+.settings-dom{ font-size:12.5px; color:var(--ink); font-weight:500; }
+.settings-domadd{ display:flex; gap:8px; align-items:stretch; padding:14px 15px; border-top:var(--rule) solid var(--hair); }
+.settings-tlsnote{
+  padding:10px 15px; font-size:10px; color:var(--steel); letter-spacing:0.03em; line-height:1.5;
+  border-top:var(--rule) solid var(--hair); background:var(--paper);
+}
+.settings-tlsnote b{ color:var(--ink-1); }
+
+/* ---- backup ---- */
+.settings-backup{ display:grid; grid-template-columns:1fr; }
+.settings-bkstats{ display:grid; grid-template-columns:repeat(3,1fr); border-bottom:var(--rule) solid var(--hair); }
+.settings-bkstat{ padding:15px; border-right:var(--rule) solid var(--hair); }
+.settings-bkstat:last-child{ border-right:0; }
+.settings-bkstat .k{ font-size:10px; letter-spacing:0.1em; color:var(--steel); }
+.settings-bkv{ font-family:var(--display); font-weight:700; font-size:24px; line-height:1.1; letter-spacing:-0.03em; margin-top:8px; color:var(--ink); }
+.settings-bku{ font-size:11px; color:var(--steel-2); font-weight:500; }
+.settings-bkv--agent{ color:var(--agent-ink); }
+.settings-bkd{ margin-top:8px; font-size:10px; color:var(--steel); display:flex; align-items:center; gap:6px; letter-spacing:0.02em; }
+.settings-bkactions{ padding:15px; }
+.settings-bkbtns{ display:flex; gap:6px; flex-wrap:wrap; padding-top:14px; border-top:var(--rule) solid var(--hair); }
+
+/* ---- theme picker ---- */
+.settings-themes{ display:grid; grid-template-columns:repeat(4,1fr); }
+.settings-theme{
+  display:flex; flex-direction:column; align-items:flex-start; gap:10px;
+  padding:15px; border-right:var(--rule) solid var(--hair); border-bottom:var(--rule) solid var(--hair);
+  background:var(--surface); cursor:pointer; text-align:left; position:relative;
+  transition:background .12s;
+}
+.settings-themes .settings-theme:nth-child(4n){ border-right:0; }
+.settings-theme:hover{ background:var(--paper); }
+.settings-theme.is-on{ background:var(--ultra-wash); }
+.settings-theme.is-on::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--ultra); }
+.settings-swatches{ display:flex; gap:0; border:var(--rule) solid var(--hair-strong); }
+.settings-swatches i{ width:20px; height:20px; display:block; border-right:var(--rule) solid var(--surface); }
+.settings-swatches i:last-child{ border-right:0; }
+.settings-themenm{ font-weight:600; font-size:13px; color:var(--ink); letter-spacing:-0.01em; }
+.settings-themetag{ font-size:9px; letter-spacing:0.08em; color:var(--steel); }
+.settings-theme--new{ align-items:flex-start; justify-content:center; }
+.settings-theme-plus{ font-size:20px; color:var(--ultra-ink); line-height:1; font-family:var(--mono); }
+.settings-themehint{
+  padding:11px 15px; font-size:10px; color:var(--steel); letter-spacing:0.03em; line-height:1.5;
+  border-top:var(--rule) solid var(--hair); background:var(--paper);
+}
+.settings-themehint b{ color:var(--ultra-ink); }
+
+/* ---- danger zone ---- */
+.settings-danger-ph{ background:var(--warn-wash); border-bottom:var(--rule) solid var(--warn-ink); }
+.settings-danger-ph .ord{ color:var(--warn-ink); }
+.settings-danger-ph .t{ color:var(--warn-ink); }
+.settings-danger-tag{
+  font-size:9.5px; letter-spacing:0.1em; color:var(--warn-ink);
+  border:var(--rule) solid var(--warn-ink); padding:2px 7px; background:var(--surface);
+}
+.settings-dangerset{ display:flex; flex-direction:column; }
+.settings-dangerrow{
+  display:flex; align-items:center; justify-content:space-between; gap:20px;
+  padding:15px; border-bottom:var(--rule) solid var(--hair);
+}
+.settings-dangerrow:last-child{ border-bottom:0; }
+.settings-dangerinfo{ min-width:0; }
+.settings-dangername{ font-weight:600; font-size:13px; color:var(--ink); letter-spacing:-0.01em; }
+.settings-dangername--del{ color:var(--warn-ink); }
+.settings-dangerrow--final{ background:var(--warn-wash); align-items:flex-start; }
+.settings-dangerbtn{ border-color:var(--warn-ink); color:var(--warn-ink); white-space:nowrap; }
+.settings-dangerbtn:hover{ background:var(--warn-ink); color:var(--paper); border-color:var(--warn-ink); }
+.settings-confirm{ margin-top:10px; font-size:10px; color:var(--warn-ink); letter-spacing:0.03em; }
+.settings-confirm b{ color:var(--ink); background:var(--surface); padding:1px 5px; border:var(--rule) solid var(--hair-strong); }
+.settings-delconfirm{ display:flex; gap:6px; align-items:stretch; flex:0 0 auto; }
+.settings-delinput{ width:150px; }
+.settings-delinput:focus{ border-color:var(--warn-ink); box-shadow:inset 0 0 0 1px var(--warn-ink); }
+.settings-deletebtn{
+  background:var(--warn-ink); color:var(--paper); border-color:var(--warn-ink); white-space:nowrap;
+}
+.settings-deletebtn:disabled{ background:var(--surface-sunk); color:var(--steel-2); border-color:var(--hair-strong); cursor:not-allowed; }
+
+/* ---- mobile-only nav primitives: hidden on desktop ---- */
+.settings-mobilenav{ display:none; }
+.settings-tabbar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+/* mid: tighten the two-column field layout before the sidebar collapses */
+@media (max-width:1120px){
+  .settings-field{ grid-template-columns:1fr 300px; gap:18px; }
+  .settings-instance{ grid-template-columns:1fr; }
+  .settings-coord{ border-right:0; border-bottom:var(--rule) solid var(--hair); }
+  .settings-integrations{ grid-template-columns:1fr 1fr; }
+  .settings-int:nth-child(2n){ border-right:0; }
+  .settings-int:first-child{ border-bottom:var(--rule) solid var(--hair); }
+  .settings-themes{ grid-template-columns:repeat(2,1fr); }
+  .settings-themes .settings-theme:nth-child(2n){ border-right:0; }
+
+  /* sidebar is hidden by the shared sheet at <=1120px -> provide a horizontal section switcher */
+  .settings-mobilenav{
+    display:flex; gap:0; overflow-x:auto; -webkit-overflow-scrolling:touch;
+    border-bottom:var(--rule) solid var(--hair); background:var(--paper);
+    scrollbar-width:none;
+  }
+  .settings-mobilenav::-webkit-scrollbar{ display:none; }
+  .settings-mobilenav a{
+    flex:0 0 auto; padding:12px 15px; font-family:var(--mono); font-size:10.5px;
+    letter-spacing:0.06em; text-transform:uppercase; color:var(--steel);
+    border-right:var(--rule) solid var(--hair); white-space:nowrap; position:relative;
+  }
+  .settings-mobilenav a.on{ color:var(--ink); background:var(--surface); }
+  .settings-mobilenav a.on::after{ content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--ultra); }
+  .settings-mn-danger{ color:var(--warn-ink); margin-left:auto; }
+}
+
+/* phone */
+@media (max-width:640px){
+  .bar{ flex-wrap:wrap; padding:11px 15px; gap:10px; }
+  .bar .search{ order:3; width:100%; margin-left:0; min-height:44px; }
+  .bar .btn--sm{ margin-left:auto; min-height:40px; }
+  .body{ padding:15px; padding-bottom:84px; }       /* clear the bottom tab bar */
+  .page-h{ flex-direction:column; align-items:flex-start; gap:12px; }
+  .settings-savestate{ width:100%; justify-content:center; }
+
+  /* stack every field row; controls go full-width and tap-friendly */
+  .settings-field{ grid-template-columns:1fr; gap:10px; }
+  .settings-fctl{ justify-content:flex-start; }
+  .settings-fctl .role-sel{ min-height:44px; }
+  .settings-input{ padding:12px 11px; }             /* >=44px target */
+  .settings-toggle{ width:48px; height:26px; flex-basis:48px; }
+  .settings-tknob{ width:20px; height:20px; }
+  .settings-toggle.is-on .settings-tknob{ transform:translateX(22px); }
+
+  .settings-instgrid{ grid-template-columns:1fr; gap:0; }
+  .settings-integrations{ grid-template-columns:1fr; }
+  .settings-int{ border-right:0; border-bottom:var(--rule) solid var(--hair); }
+  .settings-int:last-child{ border-bottom:0; }
+  .settings-themes{ grid-template-columns:1fr; }
+  .settings-themes .settings-theme{ border-right:0; }
+
+  .settings-keyfoot, .settings-bkbtns, .settings-keyfoot-a{ flex-direction:column; align-items:stretch; }
+  .settings-keyfoot-a .btn, .settings-bkbtns .btn{ justify-content:center; min-height:44px; }
+  .settings-bkstats{ grid-template-columns:1fr; }
+  .settings-bkstat{ border-right:0; border-bottom:var(--rule) solid var(--hair); }
+  .settings-bkstat:last-child{ border-bottom:0; }
+
+  .settings-domadd{ flex-direction:column; }
+  .settings-domadd .btn{ justify-content:center; min-height:44px; }
+
+  .settings-dangerrow{ flex-direction:column; align-items:flex-start; gap:12px; }
+  .settings-dangerrow--final{ align-items:stretch; }
+  .settings-delconfirm{ width:100%; }
+  .settings-delinput{ flex:1; }
+  .settings-dangerbtn, .settings-deletebtn{ min-height:44px; }
+
+  /* collapse the wide mobile section switcher in favour of the bottom tab bar */
+  .settings-mobilenav{ display:none; }
+
+  /* fixed bottom tab bar — the primary mobile nav */
+  .settings-tabbar{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:40;
+    background:var(--surface); border-top:var(--rule) solid var(--ink);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .settings-tabbar a{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:9px 4px; min-height:54px; justify-content:center; color:var(--steel);
+    border-right:var(--rule) solid var(--hair);
+  }
+  .settings-tabbar a:last-child{ border-right:0; }
+  .settings-tbic{ font-family:var(--mono); font-size:15px; line-height:1; }
+  .settings-tbl{ font-family:var(--mono); font-size:8.5px; letter-spacing:0.06em; text-transform:uppercase; }
+  .settings-tabbar a.on{ color:var(--ultra-ink); }
+  .settings-tabbar a.on .settings-tbic{ color:var(--ultra); }
+  .settings-tb-danger{ color:var(--warn-ink) !important; }
+}
+
+/* reduced motion: kill every transition/animation this screen introduces */
+@media (prefers-reduced-motion: reduce){
+  .settings-input, .settings-inputwrap, .settings-toggle, .settings-tknob,
+  .settings-revoke, .settings-theme{ transition:none !important; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<section class="screen">
+  <div class="screen-tab">
+    <div class="id"><span class="ord">SCR.F</span><span class="big">Admin · Org settings</span></div>
+    <div class="meta"><span>GENERAL</span><span>API · AGENTS</span><span>DOMAINS</span><span>DANGER</span></div>
+  </div>
+
+  <div class="win">
+    <!-- settings sidebar -->
+    <aside class="side">
+      <div class="top">
+        <div class="kicker">Administration</div>
+        <div class="ws">
+          <span class="av av--u3">N</span>
+          <div style="min-width:0;">
+            <div class="nm">Northwind Eng</div>
+            <div class="sub">self-hosted · v0.1.0</div>
+          </div>
+          <span class="car">▾</span>
+        </div>
+      </div>
+      <div class="nav-h kicker">Org settings</div>
+      <nav class="nav settings-nav">
+        <a class="on" href="#general"><span class="ic">⊹</span> General <span class="ord settings-navord">01</span></a>
+        <a href="#members"><span class="ic">◑</span> Members <span class="ct">38</span></a>
+        <a href="#spaces"><span class="ic">▦</span> Spaces <span class="ct">06</span></a>
+        <a href="#integrations"><span class="ic">⇄</span> Integrations <span class="ct">03</span></a>
+        <a href="#api"><span class="ic">✦</span> API &amp; Agents <span class="ct">07</span></a>
+        <a href="#domains"><span class="ic">◌</span> Domains &amp; TLS <span class="ct">02</span></a>
+        <a href="#backup"><span class="ic">⤓</span> Backup &amp; Export</a>
+        <a href="#theme"><span class="ic">◧</span> Theme</a>
+        <a href="#danger" class="settings-navdanger"><span class="ic">⚠</span> Danger Zone</a>
+      </nav>
+      <div class="nav-h kicker">Agents · live</div>
+      <nav class="nav">
+        <a href="#"><span class="dot dot--agent live" style="margin:0 3px"></span> provisioner <span class="ct">admin</span></a>
+        <a href="#"><span class="dot dot--agent" style="margin:0 3px"></span> backup-bot <span class="ct">author</span></a>
+      </nav>
+      <div class="foot">
+        <span class="av av--u">NA</span>
+        <div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div>
+      </div>
+    </aside>
+
+    <!-- main -->
+    <div class="main">
+      <div class="bar">
+        <div class="crumb"><span class="cross" style="width:13px;height:13px;color:var(--ultra)"></span> <b>Administration</b> <span class="sep">/</span> Org settings <span class="sep">/</span> <b>General</b></div>
+        <div class="search"><span>⌕</span> Find a setting… <span class="k">⌘K</span></div>
+        <button class="btn btn--ultra btn--sm">Save changes</button>
+      </div>
+
+      <!-- mobile section switcher (off-canvas alternative) -->
+      <nav class="settings-mobilenav" aria-label="Settings sections">
+        <a class="on" href="#general">General</a>
+        <a href="#integrations">Integrations</a>
+        <a href="#api">API &amp; Agents</a>
+        <a href="#domains">Domains</a>
+        <a href="#backup">Backup</a>
+        <a href="#theme">Theme</a>
+        <a href="#danger" class="settings-mn-danger">Danger</a>
+      </nav>
+
+      <div class="body">
+        <div class="page-h" style="margin-bottom:18px;">
+          <div class="lhs">
+            <div class="kicker kicker--ultra">⊹ INSTANCE CONFIGURATION</div>
+            <h1>Organisation settings<span class="z">.</span></h1>
+            <div class="sub"><span>1 ORG</span><span>·</span><span>6 SPACES</span><span>·</span><span>SELF-HOSTED</span><span>·</span><span>v0.1.0</span></div>
+          </div>
+          <div class="settings-savestate mono"><span class="dot dot--ok"></span> ALL CHANGES SAVED · 2m AGO</div>
+        </div>
+
+        <!-- ===================== GENERAL ===================== -->
+        <div class="panel settings-section" id="general">
+          <div class="ph"><span class="ord">01</span><span class="t">General</span><div class="r"><span class="chip chip--ghost">ORG IDENTITY</span></div></div>
+          <div class="settings-fieldset">
+            <div class="settings-field">
+              <div class="settings-flabel"><label class="settings-fname" for="settings-orgname">Organisation name</label><span class="settings-fhint">Shown in the workspace switcher and audit log.</span></div>
+              <div class="settings-fctl"><input class="settings-input" id="settings-orgname" type="text" value="Northwind Eng" /></div>
+            </div>
+            <div class="settings-field">
+              <div class="settings-flabel"><label class="settings-fname" for="settings-slug">Org slug</label><span class="settings-fhint">URL identifier. Lowercase, used in API paths.</span></div>
+              <div class="settings-fctl">
+                <div class="settings-inputwrap"><span class="settings-iprefix mono">/o/</span><input class="settings-input settings-input--mono" id="settings-slug" type="text" value="northwind-eng" /></div>
+              </div>
+            </div>
+            <div class="settings-field">
+              <div class="settings-flabel"><span class="settings-fname">Default space</span><span class="settings-fhint">Where new members land on first sign-in.</span></div>
+              <div class="settings-fctl"><span class="role-sel">Platform <span class="car">▾</span></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== INSTANCE / REGION ===================== -->
+        <div class="panel settings-section">
+          <div class="ph"><span class="ord">02</span><span class="t">Self-hosted instance</span><div class="r"><span class="chip chip--ghost">RUNTIME · LIVE</span></div></div>
+          <div class="settings-instance">
+            <div class="settings-coord">
+              <div class="kicker">Region · origin</div>
+              <div class="settings-coordval mono"><span class="settings-cnum">52.3676</span><span class="settings-cax">LAT</span> <span class="settings-csep">·</span> <span class="settings-cnum">4.9041</span><span class="settings-cax">LON</span></div>
+              <div class="settings-coordloc mono">EU-WEST · AMS1 · SELF-MANAGED</div>
+              <span class="settings-crosshair" aria-hidden="true"><span class="cross" style="width:46px;height:46px;color:var(--ultra-edge)"></span><span class="cross-ring" style="inset:13px;color:var(--ultra)"></span></span>
+            </div>
+            <div class="settings-instgrid">
+              <div class="kv"><span class="k">version</span><span class="v mono">v0.1.0 <span class="chip chip--ultra" style="padding:0 5px;margin-left:4px">stable</span></span></div>
+              <div class="kv"><span class="k">build</span><span class="v mono">2026.05.31·e3f0a1</span></div>
+              <div class="kv"><span class="k">db backend</span><span class="v mono" style="color:var(--ok)">postgres · 17.4</span></div>
+              <div class="kv"><span class="k">crdt sync</span><span class="v mono" style="color:var(--ok)">converged</span></div>
+              <div class="kv"><span class="k">uptime</span><span class="v mono tnum">34d 06h</span></div>
+              <div class="kv"><span class="k">license</span><span class="v mono">AGPL-3.0-only</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== AUTHENTICATION ===================== -->
+        <div class="panel settings-section">
+          <div class="ph"><span class="ord">03</span><span class="t">Authentication</span><div class="r"><span class="chip chip--ghost">ACCESS CONTROL</span></div></div>
+          <div class="settings-fieldset">
+            <div class="settings-field settings-field--toggle">
+              <div class="settings-flabel"><span class="settings-fname">SSO · OIDC</span><span class="settings-fhint">Single sign-on via your identity provider. Overrides password login.</span></div>
+              <div class="settings-fctl">
+                <button class="settings-toggle is-on" role="switch" aria-checked="true" aria-label="Toggle SSO / OIDC"><span class="settings-tknob"></span></button>
+              </div>
+            </div>
+            <div class="settings-field settings-subfield">
+              <div class="settings-flabel"><label class="settings-fname" for="settings-issuer">Issuer URL</label><span class="settings-fhint">OIDC discovery endpoint.</span></div>
+              <div class="settings-fctl"><input class="settings-input settings-input--mono" id="settings-issuer" type="text" value="https://id.northwind.eng/.well-known" /></div>
+            </div>
+            <div class="settings-field settings-field--toggle">
+              <div class="settings-flabel"><span class="settings-fname">Enforce 2FA</span><span class="settings-fhint">Require a second factor for all human principals.</span></div>
+              <div class="settings-fctl">
+                <button class="settings-toggle is-on" role="switch" aria-checked="true" aria-label="Enforce two-factor"><span class="settings-tknob"></span></button>
+              </div>
+            </div>
+            <div class="settings-field settings-field--toggle">
+              <div class="settings-flabel"><span class="settings-fname">Allow agent API tokens</span><span class="settings-fhint">Agents are first-class principals. Tokens are scoped, rate-limited and revocable.</span></div>
+              <div class="settings-fctl">
+                <button class="settings-toggle is-on settings-toggle--agent" role="switch" aria-checked="true" aria-label="Allow agent API tokens"><span class="settings-tknob"></span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== API & AGENTS ===================== -->
+        <div class="panel settings-section" id="api">
+          <div class="ph">
+            <span class="ord">04</span><span class="t">API &amp; Agents</span>
+            <div class="r"><span class="chip chip--agent"><span class="dot dot--agent live"></span> 4 AGENTS</span><span class="link">Manage scopes →</span></div>
+          </div>
+          <div class="settings-keyhead mono">ACTIVE KEYS · 07 · LAST ROTATED 6D AGO · ROTATION DUE EVERY 90D</div>
+          <table class="mtbl settings-keytbl">
+            <thead><tr><th>Key</th><th>Principal</th><th>Scope</th><th class="r">Rate limit</th><th class="r">Last used</th><th class="r"></th></tr></thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div class="settings-key">
+                    <span class="settings-keymono mono">ez_live_·a7c1…9f4d</span>
+                    <span class="settings-keymeta mono">created 06 May · by Nadia A.</span>
+                  </div>
+                </td>
+                <td><div class="person"><span class="av av--agent">PR</span><div><div class="nm">provisioner</div><div class="em">agent · #a7c1</div></div></div></td>
+                <td>
+                  <span class="role-sel" style="border-color:var(--agent-edge);color:var(--agent-ink)">Admin <span class="car">▾</span></span>
+                  <div class="scope-bar" title="read · author · edit · admin"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
+                </td>
+                <td class="r mono" style="font-size:11px">600/min</td>
+                <td class="r when" style="color:var(--agent-ink)">active now</td>
+                <td class="r"><button class="settings-revoke">Revoke</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="settings-key">
+                    <span class="settings-keymono mono">ez_live_·3f02…b18c</span>
+                    <span class="settings-keymeta mono">created 19 Apr · by Jo K.</span>
+                  </div>
+                </td>
+                <td><div class="person"><span class="av av--agent">BB</span><div><div class="nm">backup-bot</div><div class="em">agent · #3f02</div></div></div></td>
+                <td>
+                  <span class="role-sel" style="border-color:var(--agent-edge);color:var(--agent-ink)">Author <span class="car">▾</span></span>
+                  <div class="scope-bar"><i class="on"></i><i class="on"></i><i></i><i></i></div>
+                </td>
+                <td class="r mono" style="font-size:11px">120/min</td>
+                <td class="r when">09:30</td>
+                <td class="r"><button class="settings-revoke">Revoke</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="settings-key">
+                    <span class="settings-keymono mono">ez_live_·9d4e…22a0</span>
+                    <span class="settings-keymeta mono">created 02 Apr · by Nadia A.</span>
+                  </div>
+                </td>
+                <td><div class="person"><span class="av av--u">NA</span><div><div class="nm">Nadia Ahmadi</div><div class="em">human · CI deploy</div></div></div></td>
+                <td>
+                  <span class="role-sel">Editor <span class="car">▾</span></span>
+                  <div class="scope-bar"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+                </td>
+                <td class="r mono" style="font-size:11px">300/min</td>
+                <td class="r when">2h</td>
+                <td class="r"><button class="settings-revoke">Revoke</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="settings-keyfoot">
+            <span class="mono settings-keyfoot-l">SCOPE TIERS · READ → AUTHOR → EDITOR → ADMIN · EVERY KEY AUDITED PER CALL</span>
+            <div class="settings-keyfoot-a">
+              <button class="btn btn--ghost btn--sm">⤓ Export keys</button>
+              <button class="btn btn--ghost btn--sm" style="border-color:var(--agent);color:var(--agent-ink)">＋ Provision agent token</button>
+              <button class="btn btn--ultra btn--sm">＋ New API key</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== INTEGRATIONS ===================== -->
+        <div class="panel settings-section" id="integrations">
+          <div class="ph"><span class="ord">05</span><span class="t">Integrations</span><div class="r"><span class="chip chip--ghost">EXPORT · ARCHIVE</span></div></div>
+          <div class="settings-integrations">
+            <div class="settings-int">
+              <div class="settings-int-h">
+                <span class="settings-int-ic mono">⎇</span>
+                <div class="settings-int-id"><div class="settings-int-nm">Git mirror</div><div class="settings-int-sub mono">Markdown export → remote</div></div>
+                <button class="settings-toggle is-on" role="switch" aria-checked="true" aria-label="Toggle Git mirror"><span class="settings-tknob"></span></button>
+              </div>
+              <div class="settings-int-body">
+                <div class="kv"><span class="k">remote</span><span class="v mono">git@northwind:docs.git</span></div>
+                <div class="kv"><span class="k">branch</span><span class="v mono">main</span></div>
+                <div class="kv"><span class="k">last push</span><span class="v"><span class="status-tag st-pub">synced · 11m</span></span></div>
+                <div class="kv"><span class="k">pushed by</span><span class="v mono" style="color:var(--agent-ink)"><span class="dot dot--agent"></span> backup-bot</span></div>
+              </div>
+            </div>
+            <div class="settings-int">
+              <div class="settings-int-h">
+                <span class="settings-int-ic mono">▤</span>
+                <div class="settings-int-id"><div class="settings-int-nm">S3 archive</div><div class="settings-int-sub mono">Cold object storage</div></div>
+                <button class="settings-toggle is-on" role="switch" aria-checked="true" aria-label="Toggle S3 archive"><span class="settings-tknob"></span></button>
+              </div>
+              <div class="settings-int-body">
+                <div class="kv"><span class="k">bucket</span><span class="v mono">ez-archive-ams1</span></div>
+                <div class="kv"><span class="k">region</span><span class="v mono">eu-west-1</span></div>
+                <div class="kv"><span class="k">objects</span><span class="v mono tnum">48,210</span></div>
+                <div class="kv"><span class="k">last sync</span><span class="v"><span class="status-tag st-pub">ok · 04:00</span></span></div>
+              </div>
+            </div>
+            <div class="settings-int settings-int--off">
+              <div class="settings-int-h">
+                <span class="settings-int-ic mono">⌬</span>
+                <div class="settings-int-id"><div class="settings-int-nm">Webhooks</div><div class="settings-int-sub mono">Mutation event stream</div></div>
+                <button class="settings-toggle" role="switch" aria-checked="false" aria-label="Toggle Webhooks"><span class="settings-tknob"></span></button>
+              </div>
+              <div class="settings-int-body">
+                <div class="kv"><span class="k">endpoint</span><span class="v mono" style="color:var(--steel-2)">— not set —</span></div>
+                <div class="kv"><span class="k">events</span><span class="v mono" style="color:var(--steel-2)">disabled</span></div>
+                <div class="settings-int-empty mono">Emit one audit-backed event per mutation to an external sink.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== DOMAINS & TLS ===================== -->
+        <div class="panel settings-section" id="domains">
+          <div class="ph"><span class="ord">06</span><span class="t">Domains &amp; TLS</span><div class="r"><span class="chip chip--ghost">NETWORK</span></div></div>
+          <table class="mtbl settings-domtbl">
+            <thead><tr><th>Domain</th><th>Type</th><th>Certificate</th><th class="r">Expires</th><th class="r"></th></tr></thead>
+            <tbody>
+              <tr>
+                <td><span class="settings-dom mono">docs.northwind.eng</span></td>
+                <td><span class="kind kind-h">Primary</span></td>
+                <td><span class="status-tag st-pub">● Valid · Let's Encrypt</span></td>
+                <td class="r mono" style="font-size:11px">in 71d</td>
+                <td class="r"><button class="settings-revoke settings-revoke--neutral">Renew</button></td>
+              </tr>
+              <tr>
+                <td><span class="settings-dom mono">eng.northwind.eng</span></td>
+                <td><span class="chip chip--ghost" style="border-color:var(--hair-strong)">Alias</span></td>
+                <td><span class="status-tag st-rev">◐ Provisioning · ACME challenge</span></td>
+                <td class="r mono" style="font-size:11px;color:var(--steel-2)">—</td>
+                <td class="r"><button class="settings-revoke settings-revoke--neutral">Check</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="settings-domadd">
+            <div class="settings-inputwrap" style="flex:1;"><span class="settings-iprefix mono">https://</span><input class="settings-input settings-input--mono" type="text" placeholder="add a custom domain…" aria-label="Add a custom domain" /></div>
+            <button class="btn btn--ultra btn--sm">＋ Add &amp; verify</button>
+          </div>
+          <div class="settings-tlsnote mono">⊹ TLS auto-renews via ACME. Add a CNAME record pointing to <b>ams1.edge.northwind.eng</b> before verifying.</div>
+        </div>
+
+        <!-- ===================== BACKUP & EXPORT ===================== -->
+        <div class="panel settings-section" id="backup">
+          <div class="ph">
+            <span class="ord">07</span><span class="t">Backup &amp; Export</span>
+            <div class="r"><span class="chip chip--ghost">DATA</span></div>
+          </div>
+          <div class="settings-backup">
+            <div class="settings-bkstats">
+              <div class="settings-bkstat">
+                <div class="k mono">LAST SNAPSHOT</div>
+                <div class="settings-bkv">04:00<span class="settings-bku"> UTC</span></div>
+                <div class="settings-bkd mono"><span class="dot dot--ok"></span> 2.4 GB · verified</div>
+              </div>
+              <div class="settings-bkstat">
+                <div class="k mono">SCHEDULE</div>
+                <div class="settings-bkv">Daily</div>
+                <div class="settings-bkd mono">retain 30 days · 30 kept</div>
+              </div>
+              <div class="settings-bkstat">
+                <div class="k mono">RUN BY</div>
+                <div class="settings-bkv settings-bkv--agent">backup-bot</div>
+                <div class="settings-bkd mono" style="color:var(--agent-ink)"><span class="dot dot--agent"></span> agent · audited</div>
+              </div>
+            </div>
+            <div class="settings-bkactions">
+              <div class="settings-field settings-field--toggle" style="border:0;padding:0 0 12px;">
+                <div class="settings-flabel"><span class="settings-fname">Automated daily backup</span><span class="settings-fhint">Snapshot DB + object store, then push to S3 archive.</span></div>
+                <div class="settings-fctl"><button class="settings-toggle is-on" role="switch" aria-checked="true" aria-label="Automated backup"><span class="settings-tknob"></span></button></div>
+              </div>
+              <div class="settings-bkbtns">
+                <button class="btn btn--ghost btn--sm">⤓ Export full org (.zip)</button>
+                <button class="btn btn--ghost btn--sm">⤓ Export as Markdown</button>
+                <button class="btn btn--primary btn--sm">↯ Run backup now</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== THEME ===================== -->
+        <div class="panel settings-section" id="theme">
+          <div class="ph"><span class="ord">08</span><span class="t">Theme</span><div class="r"><span class="chip chip--ghost">APPEARANCE · TOKENS</span></div></div>
+          <div class="settings-themes">
+            <button class="settings-theme is-on" aria-pressed="true">
+              <span class="settings-swatches"><i style="background:var(--paper)"></i><i style="background:var(--ink)"></i><i style="background:var(--ultra)"></i><i style="background:var(--agent)"></i></span>
+              <span class="settings-themenm">Meridian Zero</span>
+              <span class="settings-themetag mono">DEFAULT · LIGHT</span>
+            </button>
+            <button class="settings-theme" aria-pressed="false">
+              <span class="settings-swatches"><i style="background:var(--ink)"></i><i style="background:var(--ink-1)"></i><i style="background:var(--ultra-edge)"></i><i style="background:var(--agent-edge)"></i></span>
+              <span class="settings-themenm">Meridian Dark</span>
+              <span class="settings-themetag mono">TOKEN OVERRIDE</span>
+            </button>
+            <button class="settings-theme" aria-pressed="false">
+              <span class="settings-swatches"><i style="background:var(--surface-2)"></i><i style="background:var(--ink-2)"></i><i style="background:var(--ultra-ink)"></i><i style="background:var(--agent-ink)"></i></span>
+              <span class="settings-themenm">High Contrast</span>
+              <span class="settings-themetag mono">WCAG AAA</span>
+            </button>
+            <button class="settings-theme settings-theme--new" aria-label="Author a new theme">
+              <span class="settings-theme-plus" aria-hidden="true">＋</span>
+              <span class="settings-themenm">Author theme</span>
+              <span class="settings-themetag mono">EDIT :root TOKENS</span>
+            </button>
+          </div>
+          <div class="settings-themehint mono">⊹ A theme is an override of the <b>:root</b> token globals — every colour, space and size references a variable. Authoring opens the token editor.</div>
+        </div>
+
+        <!-- ===================== DANGER ZONE ===================== -->
+        <div class="panel settings-danger" id="danger">
+          <div class="ph settings-danger-ph"><span class="ord">09</span><span class="t">Danger Zone</span><div class="r"><span class="settings-danger-tag mono">IRREVERSIBLE</span></div></div>
+          <div class="settings-dangerset">
+            <div class="settings-dangerrow">
+              <div class="settings-dangerinfo">
+                <div class="settings-dangername">Transfer ownership</div>
+                <div class="settings-fhint">Hand the org over to another admin principal. You lose owner rights.</div>
+              </div>
+              <button class="btn btn--ghost btn--sm settings-dangerbtn">Transfer →</button>
+            </div>
+            <div class="settings-dangerrow">
+              <div class="settings-dangerinfo">
+                <div class="settings-dangername">Purge soft-deleted documents</div>
+                <div class="settings-fhint">Permanently remove 07 trashed docs. Recovery becomes impossible.</div>
+              </div>
+              <button class="btn btn--ghost btn--sm settings-dangerbtn">Purge 07 →</button>
+            </div>
+            <div class="settings-dangerrow settings-dangerrow--final">
+              <div class="settings-dangerinfo">
+                <div class="settings-dangername settings-dangername--del">Delete this organisation</div>
+                <div class="settings-fhint">Tears down all spaces, documents, members, agents and audit logs. This cannot be undone.</div>
+                <div class="settings-confirm mono">Type <b>northwind-eng</b> to confirm</div>
+              </div>
+              <div class="settings-delconfirm">
+                <input class="settings-input settings-input--mono settings-delinput" type="text" placeholder="org slug" aria-label="Type org slug to confirm deletion" />
+                <button class="btn btn--sm settings-deletebtn" disabled>Delete org</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- mobile bottom tab bar -->
+<nav class="settings-tabbar" aria-label="Primary">
+  <a href="#general" class="on"><span class="settings-tbic">⊹</span><span class="settings-tbl">General</span></a>
+  <a href="#api"><span class="settings-tbic">✦</span><span class="settings-tbl">API</span></a>
+  <a href="#domains"><span class="settings-tbic">◌</span><span class="settings-tbl">Domains</span></a>
+  <a href="#backup"><span class="settings-tbic">⤓</span><span class="settings-tbl">Backup</span></a>
+  <a href="#danger" class="settings-tb-danger"><span class="settings-tbic">⚠</span><span class="settings-tbl">Danger</span></a>
+</nav>
+
+<!-- credit -->
+<div class="credit">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span class="logo" style="gap:7px;"><span class="mark" style="width:16px;height:16px;"><span class="cross" style="width:16px;height:16px;"></span><span class="cross-ring" style="inset:3px;"></span></span><span class="word" style="font-size:12px;">editor<b>zero</b></span></span>
+  </div>
+  <div class="ms"><span>MERIDIAN ZERO</span><span>ORG SETTINGS · SCR.F</span><span>WCAG 2.1 AA</span><span>SELF-HOSTED</span></div>
+</div>
+</body>
+</html>

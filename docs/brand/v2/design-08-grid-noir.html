@@ -1,0 +1,933 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero — GRID NOIR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Expanded:wght@600;700;800;900&family=Spline+Sans+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   GRID NOIR — editorial-maximal design system for editorzero
+   Swiss/brutalist type-foundry specimen. Ink black, acid lime,
+   ultramarine ink. Everything themeable via CSS custom props.
+   ============================================================ */
+:root{
+  /* ---- palette: confident non-earth ---- */
+  --paper:#F4F4EF;          /* near-white, faint warm-grey, NOT cream */
+  --paper-2:#EAEAE3;        /* panel grey */
+  --ink:#111113;            /* near-black text */
+  --ink-soft:#56564E;       /* secondary graphite */
+  --hair:#111113;           /* hairline rules = ink, brutalist */
+  --hair-soft:#C9C9C0;      /* faint dividers */
+  --acid:#D6FF3F;           /* ELECTRIC CHARTREUSE — the signal colour */
+  --acid-deep:#2C3300;      /* readable text ON acid (AA) */
+  --blue:#1D2BFF;           /* ULTRAMARINE INK — human links/marks */
+  --blue-ink:#0A1180;       /* darker ultramarine for text on paper (AA) */
+  --machine:#0A6E63;        /* AGENT channel — deep teal-green ink (AA on paper) */
+  --machine-bg:#D6F2EC;     /* agent tint surface */
+  --flag:#FF3D2E;           /* destructive / vermillion */
+  --flag-ink:#A4170C;
+  /* ---- type ---- */
+  --display:"Archivo Expanded","Archivo",system-ui,sans-serif;
+  --sans:"Archivo",system-ui,-apple-system,sans-serif;
+  --mono:"Spline Sans Mono",ui-monospace,monospace;
+  /* ---- system ---- */
+  --gut:24px;
+  --rule:1.5px;
+  --maxw:1240px;
+}
+*{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--sans);font-size:15px;line-height:1.4;
+  background-image:linear-gradient(90deg,rgba(17,17,19,.035) 1px,transparent 1px);
+  background-size:calc((100% ) / 12) 100%;
+}
+/* the page rail */
+.pagehead{
+  max-width:var(--maxw);margin:0 auto;padding:40px 28px 0;
+}
+.pagehead .kick{font-family:var(--mono);font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--ink-soft)}
+.pagehead h1{
+  font-family:var(--display);font-weight:900;font-size:clamp(40px,8vw,104px);
+  line-height:.84;letter-spacing:-.02em;margin:10px 0 0;text-transform:uppercase;
+}
+.pagehead h1 em{font-style:normal;color:var(--blue)}
+.pagehead .sub{max-width:720px;margin:16px 0 0;color:var(--ink-soft);font-size:15px;line-height:1.5}
+.pagehead .sub b{color:var(--ink)}
+.rail{max-width:var(--maxw);margin:34px auto 0;padding:0 28px}
+
+/* screen frame */
+.screen{margin:0 auto 64px;max-width:var(--maxw);padding:0 28px}
+.screen-tag{
+  display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+  border-bottom:3px solid var(--ink);padding-bottom:10px;margin-bottom:0;
+}
+.screen-tag .lhs{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.screen-tag .num{font-family:var(--display);font-weight:900;font-size:46px;line-height:.8;letter-spacing:-.03em}
+.screen-tag .ttl{font-family:var(--display);font-weight:800;font-size:21px;letter-spacing:.01em;text-transform:uppercase}
+.screen-tag .meta{font-family:var(--mono);font-size:11px;color:var(--ink-soft);letter-spacing:.08em;text-transform:uppercase}
+
+/* ===== the application chrome (shared) ===== */
+.app{
+  border:var(--rule) solid var(--ink);background:var(--paper);
+  margin-top:18px;overflow:hidden;box-shadow:10px 10px 0 0 rgba(17,17,19,.92);
+}
+.topbar{
+  display:flex;align-items:stretch;border-bottom:var(--rule) solid var(--ink);
+  background:var(--ink);color:var(--paper);
+}
+.brand{
+  display:flex;align-items:center;gap:0;padding:0;
+  font-family:var(--display);font-weight:900;letter-spacing:-.01em;text-transform:lowercase;
+}
+.brand .zero{
+  background:var(--acid);color:var(--ink);font-size:22px;line-height:1;
+  padding:14px 14px;display:flex;align-items:center;border-right:var(--rule) solid var(--ink);
+}
+.brand .word{padding:0 18px;font-size:19px;display:flex;align-items:center}
+.topnav{display:flex;align-items:stretch;margin-left:6px}
+.topnav a{
+  display:flex;align-items:center;padding:0 16px;color:var(--paper);text-decoration:none;
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;
+  border-left:1px solid #2a2a2c;opacity:.72;
+}
+.topnav a.on{background:#222226;opacity:1;color:#fff}
+.topbar .right{margin-left:auto;display:flex;align-items:stretch}
+.kbar{
+  display:flex;align-items:center;gap:10px;padding:0 16px;border-left:1px solid #2a2a2c;
+  font-family:var(--mono);font-size:11.5px;color:#bdbdb6;letter-spacing:.06em;
+}
+.kbar kbd{border:1px solid #44443f;border-radius:3px;padding:1px 6px;color:#e8e8df;font-size:10px}
+.whoami{display:flex;align-items:center;gap:8px;padding:0 16px;border-left:1px solid #2a2a2c;font-family:var(--mono);font-size:11px;letter-spacing:.04em}
+.av{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:11px}
+.av.human{background:var(--blue);color:#fff}
+.av.you{background:var(--acid);color:var(--ink)}
+
+/* ====== running ticker ====== */
+.ticker{
+  border-bottom:var(--rule) solid var(--ink);background:var(--acid);color:var(--acid-deep);
+  overflow:hidden;white-space:nowrap;font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;
+}
+.ticker .run{display:inline-block;padding:7px 0;animation:scroll 34s linear infinite}
+.ticker .run span{padding:0 26px;text-transform:uppercase}
+.ticker .run b{color:var(--ink)}
+@keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* ===================== (A) DASHBOARD ===================== */
+.dash{display:grid;grid-template-columns:1.55fr 1fr}
+.dash .col{padding:0}
+.dash .hero{padding:30px 30px 26px;border-right:var(--rule) solid var(--ink)}
+.hero .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-soft)}
+.hero h2{font-family:var(--display);font-weight:900;font-size:clamp(34px,5.5vw,66px);line-height:.86;letter-spacing:-.025em;margin:8px 0 0;text-transform:uppercase}
+.hero h2 mark{background:none;color:var(--blue)}
+.hero .lede{max-width:480px;margin:16px 0 22px;color:var(--ink-soft);line-height:1.5}
+.statgrid{display:grid;grid-template-columns:repeat(3,1fr);border-top:var(--rule) solid var(--ink)}
+.stat{padding:16px 16px 14px;border-right:1px solid var(--hair-soft)}
+.stat:last-child{border-right:none}
+.stat .n{font-family:var(--display);font-weight:900;font-size:40px;line-height:.9;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.stat .n.acidpill{display:inline-block;background:var(--acid);padding:0 8px}
+.stat .l{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);margin-top:6px}
+.recent{margin-top:0}
+.recent .rh{display:flex;align-items:center;justify-content:space-between;border-top:var(--rule) solid var(--ink);border-bottom:1px solid var(--hair-soft);padding:12px 30px;background:var(--paper-2)}
+.recent .rh h3{font-family:var(--display);font-weight:800;font-size:14px;letter-spacing:.04em;text-transform:uppercase;margin:0}
+.recent .rh .all{font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--ink-soft);text-decoration:none}
+.docrow{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:14px;padding:14px 30px;border-bottom:1px solid var(--hair-soft);text-decoration:none;color:inherit;transition:background .12s}
+.docrow:hover{background:var(--acid)}
+.docrow:hover .doc-up,.docrow:hover .byline{color:var(--ink)}
+.docrow .idx{font-family:var(--mono);font-size:13px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.docrow:hover .idx{color:var(--ink)}
+.docrow .doc-t{font-family:var(--sans);font-weight:600;font-size:16px;line-height:1.15}
+.docrow .byline{font-family:var(--mono);font-size:11px;color:var(--ink-soft);margin-top:3px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.docrow .doc-up{font-family:var(--mono);font-size:11px;color:var(--ink-soft);text-align:right;white-space:nowrap}
+
+/* editor chips: human vs machine */
+.who{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;padding:1px 7px 1px 5px;border:1px solid var(--ink);border-radius:2px}
+.who .pip{width:8px;height:8px;border-radius:50%}
+.who.human{background:transparent;color:var(--ink)}
+.who.human .pip{background:var(--blue)}
+.who.agent{background:var(--machine-bg);color:var(--machine);border-color:var(--machine)}
+.who.agent .pip{background:var(--machine)}
+.who.agent::before{content:"▷";font-size:9px;margin-right:-2px}
+.live-pip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;font-weight:600;color:var(--flag-ink);letter-spacing:.1em}
+.live-pip::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--flag);animation:pulse 1.3s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+
+/* right column: spaces + activity */
+.dash .side{background:var(--paper-2)}
+.side .blockhead{font-family:var(--display);font-weight:800;font-size:14px;letter-spacing:.04em;text-transform:uppercase;padding:14px 24px;border-bottom:var(--rule) solid var(--ink);background:var(--paper)}
+.space{display:block;text-decoration:none;color:inherit;padding:16px 24px;border-bottom:1px solid var(--hair-soft);position:relative}
+.space:hover{background:var(--paper)}
+.space .row1{display:flex;align-items:baseline;justify-content:space-between}
+.space .nm{font-family:var(--display);font-weight:800;font-size:17px;letter-spacing:-.01em}
+.space .ct{font-family:var(--mono);font-size:11px;color:var(--ink-soft)}
+.space .bar{height:6px;background:var(--hair-soft);margin-top:10px;position:relative;overflow:hidden}
+.space .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ink)}
+.space .bar i.a{background:var(--machine)}
+.space .legend{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:7px;display:flex;gap:14px}
+.actfeed{padding:6px 24px 18px}
+.actrow{display:flex;gap:10px;padding:9px 0;border-bottom:1px dotted var(--hair-soft);font-size:12.5px;line-height:1.35}
+.actrow:last-child{border-bottom:none}
+.actrow .t{font-family:var(--mono);font-size:10px;color:var(--ink-soft);white-space:nowrap;padding-top:2px;width:40px;flex:none}
+.actrow .x b{font-weight:700}
+.actrow .x .agp{color:var(--machine);font-family:var(--mono);font-size:11.5px}
+.actrow .x .hup{color:var(--blue-ink);font-family:var(--mono);font-size:11.5px}
+
+/* ===================== (B) DOCUMENTS LIST ===================== */
+.docs{display:grid;grid-template-columns:248px 1fr}
+.tree{border-right:var(--rule) solid var(--ink);background:var(--paper-2)}
+.tree .th{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);padding:14px 18px 8px}
+.tnode{display:flex;align-items:center;gap:8px;padding:7px 18px;font-size:13.5px;text-decoration:none;color:var(--ink);cursor:default}
+.tnode .tw{font-family:var(--mono);color:var(--ink-soft);width:12px;display:inline-block;text-align:center}
+.tnode .ico{width:14px;text-align:center;color:var(--ink-soft)}
+.tnode.depth1{padding-left:34px}
+.tnode.depth2{padding-left:52px}
+.tnode .ct{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink-soft)}
+.tnode.on{background:var(--acid);font-weight:700}
+.tnode.on .tw,.tnode.on .ico,.tnode.on .ct{color:var(--acid-deep)}
+.tnode:hover:not(.on){background:var(--paper)}
+.tree .addc{font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding:12px 18px;border-top:1px solid var(--hair-soft);margin-top:6px}
+
+.docs .pane{min-width:0}
+.docpane-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;padding:22px 26px 16px;border-bottom:var(--rule) solid var(--ink)}
+.docpane-head .crumbs{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft)}
+.docpane-head h2{font-family:var(--display);font-weight:900;font-size:40px;line-height:.85;letter-spacing:-.025em;margin:8px 0 0;text-transform:uppercase}
+.docpane-head .tools{display:flex;gap:8px;align-items:center}
+.seg{display:inline-flex;border:1.5px solid var(--ink)}
+.seg button{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;background:var(--paper);border:none;border-right:1.5px solid var(--ink);padding:7px 11px;cursor:pointer;color:var(--ink)}
+.seg button:last-child{border-right:none}
+.seg button.on{background:var(--ink);color:var(--paper)}
+
+.btn{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;border:1.5px solid var(--ink);padding:8px 14px;cursor:pointer;background:var(--paper);color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:7px}
+.btn.primary{background:var(--acid);color:var(--acid-deep);border-color:var(--ink)}
+.btn.primary:hover{background:var(--ink);color:var(--acid)}
+.btn.ink{background:var(--ink);color:var(--paper)}
+.btn.flag{background:var(--paper);color:var(--flag-ink);border-color:var(--flag)}
+.btn.flag:hover{background:var(--flag);color:#fff}
+
+.dtable{width:100%;border-collapse:collapse;font-size:14px}
+.dtable thead td{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);padding:11px 26px;border-bottom:var(--rule) solid var(--ink);background:var(--paper-2)}
+.dtable tbody tr{border-bottom:1px solid var(--hair-soft);cursor:default}
+.dtable tbody tr:hover{background:var(--acid)}
+.dtable tbody tr:hover .sub,.dtable tbody tr:hover .up,.dtable tbody tr:hover .who.human{color:var(--ink)}
+.dtable td{padding:14px 26px;vertical-align:middle}
+.dtable .tcell{font-weight:600;font-size:15.5px;display:flex;align-items:center;gap:10px}
+.dtable .tcell .sub{font-family:var(--mono);font-size:11px;color:var(--ink-soft);font-weight:400}
+.dtable .doctype{font-family:var(--mono);font-size:9px;letter-spacing:.1em;border:1px solid var(--ink);padding:1px 5px;text-transform:uppercase;flex:none}
+.dtable .editors{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dtable .up{font-family:var(--mono);font-size:12px;color:var(--ink-soft);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stack{display:inline-flex}
+.stack .av{width:24px;height:24px;border:1.5px solid var(--paper);margin-left:-7px;box-shadow:0 0 0 1.5px var(--ink)}
+.stack .av:first-child{margin-left:0}
+.stack .av.m{background:var(--machine);color:#fff}
+.stack .av.h{background:var(--blue);color:#fff}
+
+/* ===================== (C) READING VIEW ===================== */
+.read{display:grid;grid-template-columns:1fr;background:var(--paper)}
+.read .reading-top{border-bottom:var(--rule) solid var(--ink);padding:14px 0;background:var(--paper-2)}
+.read .inner{max-width:760px;margin:0 auto;padding:0 32px}
+.read .reading-top .inner{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.read .reading-top .crumbs{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft)}
+.read .reading-top .acts{display:flex;gap:8px}
+.docart{padding:50px 0 60px}
+.docart .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--blue-ink)}
+.docart h1{font-family:var(--display);font-weight:900;font-size:clamp(38px,6vw,64px);line-height:.9;letter-spacing:-.025em;margin:14px 0 0;text-transform:uppercase}
+.docart .standfirst{font-size:20px;line-height:1.45;color:var(--ink);margin:20px 0 0;font-weight:500;border-left:5px solid var(--acid);padding-left:18px}
+.docmeta{display:flex;flex-wrap:wrap;gap:18px 26px;margin:26px 0 0;padding:16px 0;border-top:var(--rule) solid var(--ink);border-bottom:1px solid var(--hair-soft)}
+.docmeta .m{display:flex;flex-direction:column;gap:3px}
+.docmeta .m .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+.docmeta .m .v{font-family:var(--mono);font-size:12.5px;display:flex;align-items:center;gap:7px}
+.prose{font-size:17px;line-height:1.62;margin-top:30px}
+.prose h2{font-family:var(--display);font-weight:800;font-size:26px;letter-spacing:-.01em;margin:38px 0 12px;text-transform:uppercase;line-height:1}
+.prose h2 .sec{font-family:var(--mono);font-size:13px;color:var(--blue);margin-right:10px;letter-spacing:0}
+.prose p{margin:0 0 18px}
+.prose a{color:var(--blue-ink);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:2px}
+.prose strong{font-weight:700}
+.prose code{font-family:var(--mono);font-size:14px;background:var(--paper-2);padding:1px 6px;border:1px solid var(--hair-soft)}
+.prose blockquote{margin:24px 0;padding:18px 22px;background:var(--ink);color:var(--paper);font-family:var(--display);font-weight:600;font-size:21px;line-height:1.3;letter-spacing:-.01em}
+.prose .callout{margin:24px 0;border:1.5px solid var(--ink);background:var(--machine-bg);padding:0}
+.prose .callout .ch{display:flex;align-items:center;gap:8px;background:var(--machine);color:#fff;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;padding:7px 14px}
+.prose .callout .cb{padding:14px 16px;font-size:15px;line-height:1.5}
+.prose ul{margin:0 0 18px;padding-left:0;list-style:none}
+.prose ul li{position:relative;padding-left:26px;margin:0 0 8px}
+.prose ul li::before{content:"—";position:absolute;left:0;color:var(--blue);font-weight:700}
+.endmark{font-family:var(--display);font-weight:900;font-size:18px;color:var(--acid-deep);background:var(--acid);width:26px;height:26px;display:inline-grid;place-items:center;margin-top:8px}
+
+/* ===================== (D) EDITOR — THE HERO ===================== */
+.editor-wrap{display:grid;grid-template-columns:1fr 280px}
+.ed-main{min-width:0;border-right:var(--rule) solid var(--ink)}
+/* toolbar */
+.toolbar{display:flex;align-items:stretch;border-bottom:var(--rule) solid var(--ink);background:var(--paper);overflow:hidden}
+.tgrp{display:flex;align-items:stretch;border-right:1px solid var(--hair-soft)}
+.tbtn{font-family:var(--display);font-weight:800;font-size:14px;min-width:38px;display:grid;place-items:center;background:var(--paper);border:none;border-right:1px solid var(--hair-soft);padding:0 10px;cursor:pointer;color:var(--ink);height:42px}
+.tbtn:last-child{border-right:none}
+.tbtn.on{background:var(--ink);color:var(--acid)}
+.tbtn .i{font-style:normal;font-weight:600;font-family:var(--mono);font-size:12px}
+.tbtn.b{font-weight:900}.tbtn.i{font-style:italic;font-family:var(--display)}.tbtn.s{text-decoration:line-through}
+.tbtn.code{font-family:var(--mono);font-size:12px}
+.tselect{display:flex;align-items:center;gap:8px;padding:0 14px;font-family:var(--display);font-weight:700;font-size:13px;border-right:1px solid var(--hair-soft);cursor:pointer}
+.tselect .ar{font-family:var(--mono);font-size:9px;color:var(--ink-soft)}
+.toolbar .livewith{margin-left:auto;display:flex;align-items:center;gap:8px;padding:0 16px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:var(--ink-soft);text-transform:uppercase;border-left:1px solid var(--hair-soft)}
+.facepile{display:inline-flex}
+.facepile .av{width:24px;height:24px;font-size:10px;margin-left:-7px;box-shadow:0 0 0 1.5px var(--ink),0 0 0 3px var(--paper)}
+.facepile .av:first-child{margin-left:0}
+.facepile .av.m{background:var(--machine);color:#fff}
+
+.canvas{padding:40px 56px 60px;position:relative}
+.doc-title-edit{font-family:var(--display);font-weight:900;font-size:46px;line-height:.92;letter-spacing:-.03em;text-transform:uppercase;outline:none;border:none;width:100%;background:transparent;color:var(--ink)}
+.doc-sub-edit{font-size:18px;color:var(--ink-soft);margin-top:12px;line-height:1.4}
+
+/* a block with hover handle */
+.block{position:relative;margin:20px 0;padding-left:4px}
+.block .handle{position:absolute;left:-44px;top:2px;display:flex;gap:2px;opacity:0;transition:opacity .12s}
+.block:hover .handle{opacity:1}
+.block .handle .h{width:18px;height:22px;display:grid;place-items:center;border:1.5px solid var(--ink);background:var(--paper);font-family:var(--mono);font-size:13px;cursor:grab;color:var(--ink)}
+.block .handle .h.plus{background:var(--acid)}
+.block p{margin:0;font-size:17px;line-height:1.62}
+.block.h2 h2{font-family:var(--display);font-weight:800;font-size:26px;text-transform:uppercase;margin:0;line-height:1;letter-spacing:-.01em}
+.block .sec{font-family:var(--mono);font-size:13px;color:var(--blue);margin-right:8px}
+
+/* the caret + human selection */
+.caret{display:inline-block;width:2px;height:1.05em;background:var(--blue);vertical-align:text-bottom;animation:blink 1.05s steps(1) infinite;margin:0 1px;position:relative}
+@keyframes blink{50%{opacity:0}}
+.sel{background:rgba(29,43,255,.18);border-radius:1px}
+
+/* ===== THE SIGNATURE: live AGENT co-editor ===== */
+/* agent remote caret w/ flag */
+.agent-caret{display:inline-block;position:relative;width:2.5px;height:1.15em;background:var(--machine);vertical-align:text-bottom;margin:0 1px}
+.agent-caret::after{
+  content:"⟁ agent:claude";position:absolute;top:-22px;left:-2px;white-space:nowrap;
+  background:var(--machine);color:#fff;font-family:var(--mono);font-size:10px;font-weight:600;
+  padding:2px 7px;letter-spacing:.04em;border-radius:2px 2px 2px 0;
+}
+.agent-caret::before{content:"";position:absolute;top:0;left:0;width:2.5px;height:100%;background:var(--machine);animation:pulse 1.3s infinite}
+
+/* tracked agent suggestion (insertion) — prosemirror-changeset style */
+.ins{background:var(--machine-bg);color:var(--machine);text-decoration:underline;text-decoration-style:solid;text-decoration-thickness:2px;text-underline-offset:3px;border-radius:1px;box-shadow:inset 0 0 0 1px rgba(10,110,99,.35)}
+.del{color:var(--flag-ink);text-decoration:line-through;text-decoration-thickness:2px;opacity:.75}
+
+/* the suggestion review card pinned in the gutter */
+.suggestion{
+  margin:22px 0;border:1.5px solid var(--machine);background:var(--paper);position:relative;
+}
+.suggestion::before{content:"";position:absolute;left:-4px;top:-4px;right:-4px;bottom:-4px;border:1.5px dashed var(--machine);opacity:.3;pointer-events:none}
+.suggestion .sh{display:flex;align-items:center;gap:8px;background:var(--machine);color:#fff;padding:8px 14px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.suggestion .sh .badge{background:#fff;color:var(--machine);padding:1px 6px;font-weight:700;border-radius:2px}
+.suggestion .sh .when{margin-left:auto;opacity:.85;font-size:10px}
+.suggestion .sbody{padding:14px 16px;font-size:15.5px;line-height:1.55}
+.suggestion .sbody .ins{font-size:15.5px}
+.suggestion .why{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);padding:0 16px 12px;line-height:1.5}
+.suggestion .why b{color:var(--machine)}
+.suggestion .sactions{display:flex;gap:0;border-top:1.5px solid var(--machine)}
+.suggestion .sactions button{flex:1;font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;border:none;border-right:1.5px solid var(--machine);padding:10px;cursor:pointer;background:var(--paper);color:var(--ink)}
+.suggestion .sactions button:last-child{border-right:none}
+.suggestion .sactions button.accept{background:var(--acid);color:var(--acid-deep)}
+.suggestion .sactions button.accept:hover{background:var(--ink);color:var(--acid)}
+.suggestion .sactions button.reject:hover{background:var(--flag);color:#fff}
+
+/* slash menu floating */
+.slash{position:absolute;left:56px;bottom:54px;width:280px;border:1.5px solid var(--ink);background:var(--paper);box-shadow:8px 8px 0 rgba(17,17,19,.9);z-index:5}
+.slash .sl-h{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);padding:9px 14px;border-bottom:1px solid var(--hair-soft);display:flex;justify-content:space-between}
+.slash .sl-i{display:flex;align-items:center;gap:12px;padding:9px 14px;font-size:13.5px;cursor:pointer}
+.slash .sl-i .k{width:24px;height:24px;border:1.5px solid var(--ink);display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:13px;flex:none}
+.slash .sl-i .desc{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:1px}
+.slash .sl-i.on{background:var(--acid)}
+.slash .sl-i.ai{border-top:1px solid var(--hair-soft)}
+.slash .sl-i.ai .k{background:var(--machine);color:#fff;border-color:var(--machine)}
+.slash .sl-i.ai .nm{color:var(--machine);font-weight:700}
+
+/* editor right rail: collaborators + version */
+.ed-side{background:var(--paper-2);min-width:0}
+.ed-side .sect{border-bottom:var(--rule) solid var(--ink)}
+.ed-side .sh{font-family:var(--display);font-weight:800;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;padding:12px 18px;display:flex;justify-content:space-between;align-items:center}
+.ed-side .sh .ct{font-family:var(--mono);font-size:10px;color:var(--ink-soft)}
+.collab{display:flex;align-items:center;gap:10px;padding:11px 18px;border-top:1px solid var(--hair-soft);font-size:13px}
+.collab:first-of-type{border-top:none}
+.collab .av{width:28px;height:28px;font-size:12px;flex:none}
+.collab .av.m{background:var(--machine);color:#fff}
+.collab .nm{font-weight:600;font-size:13.5px}
+.collab .st{font-family:var(--mono);font-size:10px;color:var(--ink-soft);margin-top:1px}
+.collab .st.editing{color:var(--machine);font-weight:600}
+.collab .dotnow{margin-left:auto;width:9px;height:9px;border-radius:50%;background:var(--flag);animation:pulse 1.3s infinite}
+.versions{padding:6px 0}
+.vrow{display:flex;gap:12px;padding:9px 18px;border-top:1px solid var(--hair-soft);font-size:12px;align-items:flex-start}
+.vrow:first-child{border-top:none}
+.vrow .vt{font-family:var(--mono);font-size:10px;color:var(--ink-soft);width:42px;flex:none;padding-top:2px}
+.vrow .vx b{font-weight:700}
+.vrow .vx .who.agent{margin-top:4px}
+.vrow.cur{background:var(--acid)}
+.vrow.cur .vt{color:var(--acid-deep)}
+
+/* status footer of editor */
+.ed-foot{grid-column:1/-1;display:flex;align-items:center;gap:18px;border-top:var(--rule) solid var(--ink);background:var(--ink);color:#bdbdb6;padding:9px 18px;font-family:var(--mono);font-size:11px;letter-spacing:.05em}
+.ed-foot .saved{color:var(--acid)}
+.ed-foot .right{margin-left:auto;display:flex;gap:18px}
+.ed-foot b{color:#fff}
+
+/* ===================== (E) ADMIN / MEMBERS ===================== */
+.admin{display:grid;grid-template-columns:220px 1fr}
+.admin .anav{border-right:var(--rule) solid var(--ink);background:var(--ink);color:var(--paper)}
+.admin .anav .ah{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#7a7a72;padding:16px 18px 8px}
+.admin .anav a{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;color:#cfcfc8;text-decoration:none;font-family:var(--sans);font-weight:600;font-size:13.5px;border-left:4px solid transparent}
+.admin .anav a .c{font-family:var(--mono);font-size:10px;color:#7a7a72}
+.admin .anav a.on{background:var(--acid);color:var(--acid-deep);border-left-color:var(--ink)}
+.admin .anav a.on .c{color:var(--acid-deep)}
+.admin .anav a:hover:not(.on){background:#222226;color:#fff}
+
+.admin .apane{min-width:0}
+.apane-head{padding:22px 26px 18px;border-bottom:var(--rule) solid var(--ink);display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
+.apane-head .eg{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft)}
+.apane-head h2{font-family:var(--display);font-weight:900;font-size:38px;line-height:.85;letter-spacing:-.025em;margin:8px 0 0;text-transform:uppercase}
+.apane-head h2 b{color:var(--blue)}
+.tabs{display:flex;border-bottom:var(--rule) solid var(--ink);background:var(--paper-2)}
+.tabs button{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;background:transparent;border:none;border-right:1px solid var(--hair-soft);padding:12px 18px;cursor:pointer;color:var(--ink-soft);font-weight:600}
+.tabs button.on{background:var(--ink);color:var(--acid)}
+
+.mtable{width:100%;border-collapse:collapse;font-size:14px}
+.mtable thead td{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);padding:11px 26px;border-bottom:1.5px solid var(--ink)}
+.mtable tbody tr{border-bottom:1px solid var(--hair-soft)}
+.mtable tbody tr:hover{background:var(--paper-2)}
+.mtable td{padding:13px 26px;vertical-align:middle}
+.mcell{display:flex;align-items:center;gap:12px}
+.mcell .av{width:34px;height:34px;font-size:13px;flex:none}
+.mcell .av.m{background:var(--machine);color:#fff}
+.mcell .nm{font-weight:600;font-size:14.5px}
+.mcell .em{font-family:var(--mono);font-size:11px;color:var(--ink-soft);margin-top:1px}
+.tag{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border:1.5px solid var(--ink);display:inline-block;font-weight:600}
+.tag.human{background:var(--paper)}
+.tag.agent{background:var(--machine);color:#fff;border-color:var(--machine)}
+.role{font-family:var(--mono);font-size:12px}
+.role .rsel{border:1.5px solid var(--ink);padding:5px 10px;display:inline-flex;align-items:center;gap:8px;background:var(--paper);font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.06em}
+.role .rsel.admin{background:var(--acid);color:var(--acid-deep)}
+.role .rsel .ar{color:var(--ink-soft);font-size:9px}
+.scopes{display:flex;gap:5px;flex-wrap:wrap}
+.scopes .sc{font-family:var(--mono);font-size:9.5px;border:1px solid var(--hair-soft);padding:1px 5px;color:var(--ink-soft)}
+.rl{font-family:var(--mono);font-size:11px;color:var(--ink-soft)}
+.rl b{color:var(--ink)}
+.rowact{display:flex;gap:8px;justify-content:flex-end}
+.iconbtn{width:30px;height:30px;border:1.5px solid var(--ink);background:var(--paper);display:grid;place-items:center;cursor:pointer;font-family:var(--mono);font-size:13px;color:var(--ink)}
+.iconbtn:hover{background:var(--ink);color:var(--paper)}
+.iconbtn.flag:hover{background:var(--flag);border-color:var(--flag);color:#fff}
+
+.invite{display:flex;align-items:center;gap:0;margin:0;border-top:var(--rule) solid var(--ink)}
+.invite .field{flex:1;display:flex;align-items:center;gap:10px;padding:0 20px;border-right:1.5px solid var(--ink)}
+.invite .field .lab{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft)}
+.invite .field .ph{color:var(--ink-soft);font-size:14px}
+.invite .field.kind{flex:none}
+.invite .field.kind .tag.agent{cursor:pointer}
+.invite .go{padding:16px 24px}
+
+/* footer of whole spec */
+.specfoot{max-width:var(--maxw);margin:30px auto 70px;padding:0 28px}
+.specfoot .row{border-top:3px solid var(--ink);padding-top:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
+.specfoot h4{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 10px}
+.specfoot .sws{display:flex;flex-direction:column;gap:7px}
+.specfoot .swr{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px}
+.specfoot .swr .chip{width:18px;height:18px;border:1.5px solid var(--ink)}
+.specfoot .swr .hx{margin-left:auto;color:var(--ink-soft)}
+.specfoot p{font-size:13px;line-height:1.55;color:var(--ink-soft);margin:0}
+.specfoot p b{color:var(--ink)}
+.bigzero{font-family:var(--display);font-weight:900;font-size:clamp(80px,18vw,230px);line-height:.7;letter-spacing:-.04em;margin:40px 0 0;text-transform:uppercase}
+.bigzero .o{color:var(--paper);-webkit-text-stroke:3px var(--ink);background:none}
+.bigzero .acidword{background:var(--acid);padding:0 .08em}
+
+@media(max-width:980px){
+  body{background-image:none}
+  .dash,.docs,.editor-wrap,.admin,.read{grid-template-columns:1fr}
+  .dash .hero,.tree,.ed-main,.admin .anav{border-right:none;border-bottom:var(--rule) solid var(--ink)}
+  .specfoot .row{grid-template-columns:1fr 1fr}
+  .canvas{padding:30px 24px 50px}
+  .block .handle{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="pagehead">
+  <div class="kick">EDITORZERO · DESIGN SYSTEM Nº 02 · LIGHT</div>
+  <h1>GRID <em>NOIR</em></h1>
+  <p class="sub">An <b>editorial-maximal</b> system for an AI-native docs platform. A type-foundry specimen, not a dashboard: hard hairline grids, oversized grotesk display, ink-black on bare paper, one acid-lime signal and an ultramarine ink. <b>Humans set in graphite-and-blue; agents set in machine-green</b> — two co-editors, two inks, one page. Five surfaces follow.</p>
+</header>
+
+<!-- ============================ (A) DASHBOARD ============================ -->
+<section class="screen">
+  <div class="screen-tag">
+    <div class="lhs"><span class="num">A</span><span class="ttl">Dashboard / Home</span></div>
+    <span class="meta">workspace overview · recent · spaces</span>
+  </div>
+  <div class="app">
+    <div class="topbar">
+      <div class="brand"><span class="zero">0</span><span class="word">editorzero</span></div>
+      <nav class="topnav">
+        <a href="#" class="on">Home</a><a href="#">Spaces</a><a href="#">Drafts</a><a href="#">Activity</a>
+      </nav>
+      <div class="right">
+        <div class="kbar"><kbd>⌘</kbd><kbd>K</kbd> Search the workspace</div>
+        <div class="whoami"><span class="av human">N</span> nomi · owner</div>
+      </div>
+    </div>
+    <div class="ticker"><div class="run">
+      <span>● <b>agent:claude</b> is editing “Write-Path Atomicity”</span><span><b>+128</b> blocks today</span><span><b>agent:codex</b> opened 3 suggestions</span><span><b>49</b> docs · <b>3</b> spaces · <b>12</b> principals</span><span>● <b>agent:claude</b> is editing “Write-Path Atomicity”</span><span><b>+128</b> blocks today</span><span><b>agent:codex</b> opened 3 suggestions</span><span><b>49</b> docs · <b>3</b> spaces · <b>12</b> principals</span>
+    </div></div>
+    <div class="dash">
+      <div class="col">
+        <div class="hero">
+          <div class="eyebrow">Engineering workspace · 2026-05-31</div>
+          <h2>Forty-nine<br>documents,<br>twelve <mark>minds.</mark></h2>
+          <p class="lede">Four of those minds are agents. They draft, refactor and review alongside you — every edit attributed, every keystroke in the audit log.</p>
+          <div class="statgrid">
+            <div class="stat"><div class="n">49</div><div class="l">Documents</div></div>
+            <div class="stat"><div class="n acidpill">04</div><div class="l">Agent principals</div></div>
+            <div class="stat"><div class="n">128<span style="font-size:18px">▲</span></div><div class="l">Blocks · 24h</div></div>
+          </div>
+        </div>
+        <div class="recent">
+          <div class="rh"><h3>Recently touched</h3><a class="all" href="#">ALL DOCUMENTS →</a></div>
+          <a class="docrow" href="#">
+            <span class="idx">01</span>
+            <span><span class="doc-t">Write-Path Atomicity</span><span class="byline"><span class="live-pip">EDITING NOW</span><span class="who agent"><span class="pip"></span>agent:claude</span> with <span class="who human"><span class="pip"></span>nomi</span></span></span>
+            <span class="doc-up">just now</span>
+          </a>
+          <a class="docrow" href="#">
+            <span class="idx">02</span>
+            <span><span class="doc-t">CRDT Convergence Notes</span><span class="byline"><span class="who agent"><span class="pip"></span>agent:codex</span> · 6 revisions</span></span>
+            <span class="doc-up">2h ago</span>
+          </a>
+          <a class="docrow" href="#">
+            <span class="idx">03</span>
+            <span><span class="doc-t">Audit Log Shape & Replay</span><span class="byline"><span class="who human"><span class="pip"></span>nomi</span> · published</span></span>
+            <span class="doc-up">5h ago</span>
+          </a>
+          <a class="docrow" href="#">
+            <span class="idx">04</span>
+            <span><span class="doc-t">Capability Registry — parity matrix</span><span class="byline"><span class="who agent"><span class="pip"></span>agent:claude</span> + <span class="who human"><span class="pip"></span>dani</span></span></span>
+            <span class="doc-up">yesterday</span>
+          </a>
+        </div>
+      </div>
+      <aside class="col side">
+        <div class="blockhead">Spaces · 3</div>
+        <a class="space" href="#">
+          <div class="row1"><span class="nm">Engineering</span><span class="ct">24 docs</span></div>
+          <div class="bar"><i style="width:62%"></i><i class="a" style="left:62%;width:23%"></i></div>
+          <div class="legend"><span>■ human 62%</span><span style="color:var(--machine)">■ agent 23%</span><span>□ idle</span></div>
+        </a>
+        <a class="space" href="#">
+          <div class="row1"><span class="nm">Product</span><span class="ct">11 docs</span></div>
+          <div class="bar"><i style="width:48%"></i><i class="a" style="left:48%;width:34%"></i></div>
+          <div class="legend"><span>■ human 48%</span><span style="color:var(--machine)">■ agent 34%</span><span>□ idle</span></div>
+        </a>
+        <a class="space" href="#">
+          <div class="row1"><span class="nm">API Reference</span><span class="ct">8 docs</span></div>
+          <div class="bar"><i style="width:20%"></i><i class="a" style="left:20%;width:71%"></i></div>
+          <div class="legend"><span>■ human 20%</span><span style="color:var(--machine)">■ agent 71%</span><span>□ idle</span></div>
+        </a>
+        <div class="blockhead" style="border-top:var(--rule) solid var(--ink)">Live activity</div>
+        <div class="actfeed">
+          <div class="actrow"><span class="t">now</span><span class="x"><span class="agp">agent:claude</span> inserted a paragraph in <b>Write-Path Atomicity</b></span></div>
+          <div class="actrow"><span class="t">3m</span><span class="x"><span class="hup">nomi</span> accepted a suggestion from <span class="agp">agent:codex</span></span></div>
+          <div class="actrow"><span class="t">18m</span><span class="x"><span class="agp">agent:codex</span> renamed <b>Audit Log v2 → Audit Log Shape</b></span></div>
+          <div class="actrow"><span class="t">1h</span><span class="x"><span class="hup">dani</span> created space <b>API Reference</b></span></div>
+          <div class="actrow"><span class="t">2h</span><span class="x"><span class="hup">nomi</span> published <b>CRDT Convergence Notes</b></span></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ (B) DOCUMENTS LIST ============================ -->
+<section class="screen">
+  <div class="screen-tag">
+    <div class="lhs"><span class="num">B</span><span class="ttl">Documents in a Space</span></div>
+    <span class="meta">collections tree · human + agent editors</span>
+  </div>
+  <div class="app">
+    <div class="topbar">
+      <div class="brand"><span class="zero">0</span><span class="word">editorzero</span></div>
+      <nav class="topnav"><a href="#">Home</a><a href="#" class="on">Spaces</a><a href="#">Drafts</a><a href="#">Activity</a></nav>
+      <div class="right"><div class="kbar"><kbd>⌘</kbd><kbd>K</kbd> Search</div><div class="whoami"><span class="av human">N</span> nomi</div></div>
+    </div>
+    <div class="docs">
+      <aside class="tree">
+        <div class="th">Space</div>
+        <div class="tnode"><span class="tw">▾</span><span class="ico">◆</span> Engineering <span class="ct">43</span></div>
+        <div class="th" style="padding-top:14px">Collections</div>
+        <div class="tnode depth1"><span class="tw">▾</span><span class="ico">▦</span> Architecture <span class="ct">11</span></div>
+        <div class="tnode depth2 on"><span class="tw"> </span><span class="ico">▤</span> Write-Path <span class="ct">7</span></div>
+        <div class="tnode depth2"><span class="tw"> </span><span class="ico">▤</span> CRDT &amp; Sync <span class="ct">4</span></div>
+        <div class="tnode depth1"><span class="tw">▸</span><span class="ico">▦</span> Capabilities <span class="ct">9</span></div>
+        <div class="tnode depth1"><span class="tw">▸</span><span class="ico">▦</span> API Reference <span class="ct">8</span></div>
+        <div class="tnode depth1"><span class="tw">▸</span><span class="ico">▦</span> Runbooks <span class="ct">6</span></div>
+        <div class="tnode depth1"><span class="tw"> </span><span class="ico" style="color:var(--flag-ink)">⌫</span> Trash <span class="ct">3</span></div>
+        <div class="addc">+ NEW COLLECTION</div>
+      </aside>
+      <div class="pane">
+        <div class="docpane-head">
+          <div>
+            <div class="crumbs">Engineering / Architecture / <b style="color:var(--ink)">Write-Path</b></div>
+            <h2>Write-Path</h2>
+          </div>
+          <div class="tools">
+            <div class="seg"><button class="on">LIST</button><button>BOARD</button></div>
+            <a class="btn primary" href="#">+ NEW DOC</a>
+          </div>
+        </div>
+        <table class="dtable">
+          <thead><tr><td style="width:46%">Title</td><td>Editors</td><td>Updated</td><td style="text-align:right">Status</td></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="tcell"><span class="doctype">DOC</span> Write-Path Atomicity<span class="sub">/ atomicity-v3</span></div></td>
+              <td><div class="editors"><span class="stack"><span class="av m">C</span><span class="av h">N</span></span><span class="who agent"><span class="pip"></span>agent:claude</span></div></td>
+              <td class="up">just now</td>
+              <td style="text-align:right"><span class="live-pip">LIVE</span></td>
+            </tr>
+            <tr>
+              <td><div class="tcell"><span class="doctype">DOC</span> Rollback &amp; Eviction Path<span class="sub">/ rollback-eviction</span></div></td>
+              <td><div class="editors"><span class="stack"><span class="av m">X</span></span><span class="who agent"><span class="pip"></span>agent:codex</span></div></td>
+              <td class="up">2h ago</td>
+              <td style="text-align:right"><span class="tag human" style="font-size:9px">DRAFT</span></td>
+            </tr>
+            <tr>
+              <td><div class="tcell"><span class="doctype">DOC</span> Dispatcher Tx Boundaries<span class="sub">/ dispatcher-tx</span></div></td>
+              <td><div class="editors"><span class="stack"><span class="av h">N</span><span class="av h">D</span></span><span class="who human"><span class="pip"></span>nomi · dani</span></div></td>
+              <td class="up">yesterday</td>
+              <td style="text-align:right"><span class="tag" style="font-size:9px;background:var(--blue);color:#fff;border-color:var(--blue)">LIVE PUB</span></td>
+            </tr>
+            <tr>
+              <td><div class="tcell"><span class="doctype">SPEC</span> Outbox &amp; Cache Invalidation<span class="sub">/ outbox-cache</span></div></td>
+              <td><div class="editors"><span class="stack"><span class="av m">C</span><span class="av h">N</span></span><span class="who agent"><span class="pip"></span>agent:claude</span> +1</div></td>
+              <td class="up">2d ago</td>
+              <td style="text-align:right"><span class="tag human" style="font-size:9px">DRAFT</span></td>
+            </tr>
+            <tr>
+              <td><div class="tcell"><span class="doctype">DOC</span> Crash-Fuzz Findings<span class="sub">/ crash-fuzz</span></div></td>
+              <td><div class="editors"><span class="stack"><span class="av m">X</span><span class="av m">C</span></span><span class="who agent"><span class="pip"></span>2 agents</span></div></td>
+              <td class="up">3d ago</td>
+              <td style="text-align:right"><span class="tag human" style="font-size:9px">DRAFT</span></td>
+            </tr>
+            <tr>
+              <td><div class="tcell"><span class="doctype">DOC</span> Property Test Harness<span class="sub">/ prop-harness</span></div></td>
+              <td><div class="editors"><span class="stack"><span class="av h">D</span></span><span class="who human"><span class="pip"></span>dani</span></div></td>
+              <td class="up">1w ago</td>
+              <td style="text-align:right"><span class="tag human" style="font-size:9px">DRAFT</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ (C) READING VIEW ============================ -->
+<section class="screen">
+  <div class="screen-tag">
+    <div class="lhs"><span class="num">C</span><span class="ttl">Reading View</span></div>
+    <span class="meta">finished document · published</span>
+  </div>
+  <div class="app">
+    <div class="topbar">
+      <div class="brand"><span class="zero">0</span><span class="word">editorzero</span></div>
+      <nav class="topnav"><a href="#">Home</a><a href="#" class="on">Spaces</a><a href="#">Drafts</a><a href="#">Activity</a></nav>
+      <div class="right"><div class="kbar"><kbd>⌘</kbd><kbd>K</kbd> Search</div><div class="whoami"><span class="av human">N</span> nomi</div></div>
+    </div>
+    <div class="read">
+      <div class="reading-top">
+        <div class="inner">
+          <span class="crumbs">Engineering / Architecture / <b style="color:var(--ink)">Write-Path Atomicity</b></span>
+          <span class="acts"><a class="btn" href="#">↗ PUBLIC LINK</a><a class="btn ink" href="#">✎ EDIT</a></span>
+        </div>
+      </div>
+      <article class="docart inner">
+        <div class="kicker">Architecture · Nº 014</div>
+        <h1>Write-Path Atomicity</h1>
+        <p class="standfirst">Every content mutation and its audit entry commit as one transaction — or neither does. The audit log alone can reconstruct final state.</p>
+        <div class="docmeta">
+          <div class="m"><span class="k">Authored by</span><span class="v"><span class="who human"><span class="pip"></span>nomi</span></span></div>
+          <div class="m"><span class="k">Last edit</span><span class="v"><span class="who agent"><span class="pip"></span>agent:claude</span></span></div>
+          <div class="m"><span class="k">Revisions</span><span class="v">32 · 7 by agents</span></div>
+          <div class="m"><span class="k">Status</span><span class="v" style="color:var(--blue-ink)">● PUBLISHED · /write-path</span></div>
+          <div class="m"><span class="k">Read time</span><span class="v">6 min</span></div>
+        </div>
+        <div class="prose">
+          <p>A content mutation flows through <code>ctx.transact(doc_id, fn)</code>. Inside that boundary the dispatcher persists the encoded <code>doc_updates</code>, appends exactly one audit row, and — for visibility changes — enqueues an outbox event. The invariant is binary: <strong>all five rows commit, or none do</strong>.</p>
+          <h2><span class="sec">01</span>The boundary</h2>
+          <p>The resident <code>Y.Doc</code> is the source of truth in memory; SQLite (or Postgres) is the durable floor. When a transaction aborts, <code>BoundSyncService.rollback</code> evicts the resident doc so the next reader rehydrates from the last committed bytes — never from a phantom edit.</p>
+          <blockquote>“The audit log is not a side-effect. It is the document’s second body — lose the bytes, replay the log.”</blockquote>
+          <h2><span class="sec">02</span>Why agents make this load-bearing</h2>
+          <p>When an agent and a human edit the same block within the same tick, the CRDT converges the bytes — but attribution must stay exact. Each principal’s contribution is a distinct, signed audit entry, so <a href="#">“who wrote this clause”</a> is always answerable, human or machine.</p>
+          <div class="callout">
+            <div class="ch">▷ AGENT NOTE · agent:claude</div>
+            <div class="cb">Crash-fuzz sweeps every in-transaction query position across cold and warm paths (32 cases). The reject arm verifies visibility is unchanged, zero audit rows leak, and the error-audit survives in its own transaction.</div>
+          </div>
+          <h2><span class="sec">03</span>Guarantees</h2>
+          <ul>
+            <li>One mutation → exactly one audit entry.</li>
+            <li>Rollback evicts the resident <code>Y.Doc</code>; no phantom state survives.</li>
+            <li>Metadata-only mutations are dispatcher-tx-only.</li>
+            <li>Replay from the audit log alone reconstructs the final document.</li>
+          </ul>
+          <p>This is the floor every surface — API, CLI, MCP, Web UI — sits on. None of them re-implement it. <span class="endmark">0</span></p>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ (D) EDITOR — THE HERO ============================ -->
+<section class="screen">
+  <div class="screen-tag">
+    <div class="lhs"><span class="num">D</span><span class="ttl">Document Editor</span></div>
+    <span class="meta">Tiptap v3 · live agent co-editor · tracked suggestion</span>
+  </div>
+  <div class="app">
+    <div class="topbar">
+      <div class="brand"><span class="zero">0</span><span class="word">editorzero</span></div>
+      <nav class="topnav"><a href="#">Home</a><a href="#" class="on">Spaces</a><a href="#">Drafts</a><a href="#">Activity</a></nav>
+      <div class="right">
+        <div class="kbar" style="color:var(--acid)"><span style="width:7px;height:7px;border-radius:50%;background:var(--flag);display:inline-block;animation:pulse 1.3s infinite"></span> 2 editing · synced</div>
+        <div class="whoami"><span class="av you">N</span> nomi</div>
+      </div>
+    </div>
+    <div class="editor-wrap">
+      <div class="ed-main">
+        <div class="toolbar">
+          <div class="tselect">Heading 2 <span class="ar">▾</span></div>
+          <div class="tgrp">
+            <button class="tbtn b on">B</button>
+            <button class="tbtn i">I</button>
+            <button class="tbtn s">S</button>
+            <button class="tbtn code">&lt;/&gt;</button>
+          </div>
+          <div class="tgrp">
+            <button class="tbtn"><span class="i">“ ”</span></button>
+            <button class="tbtn"><span class="i">•—</span></button>
+            <button class="tbtn"><span class="i">1.</span></button>
+            <button class="tbtn"><span class="i">↗</span></button>
+          </div>
+          <div class="tgrp">
+            <button class="tbtn" style="background:var(--machine);color:#fff"><span class="i">▷ ASK</span></button>
+          </div>
+          <div class="livewith">
+            LIVE WITH
+            <span class="facepile"><span class="av human">N</span><span class="av m">C</span></span>
+          </div>
+        </div>
+        <div class="canvas">
+          <div class="doc-title-edit" contenteditable="false">Write-Path Atomicity</div>
+          <div class="doc-sub-edit">Every mutation and its audit entry commit as one transaction — or neither does.</div>
+
+          <div class="block">
+            <div class="handle"><span class="h">⋮⋮</span><span class="h plus">+</span></div>
+            <p>A content mutation flows through <code style="font-family:var(--mono);font-size:15px;background:var(--paper-2);padding:0 5px;border:1px solid var(--hair-soft)">ctx.transact(doc_id, fn)</code>. Inside that boundary the dispatcher persists the encoded updates and appends <span class="sel">exactly one audit row</span><span class="caret"></span>.</p>
+          </div>
+
+          <div class="block h2">
+            <div class="handle"><span class="h">⋮⋮</span><span class="h plus">+</span></div>
+            <h2><span class="sec">02</span>Why agents make this load-bearing</h2>
+          </div>
+
+          <div class="block">
+            <div class="handle"><span class="h">⋮⋮</span><span class="h plus">+</span></div>
+            <p>When an agent and a human edit the same block within the same tick, the CRDT converges the bytes — but attribution must stay exact, so <span class="ins">every principal’s contribution is a distinct, signed audit entry<span class="agent-caret"></span></span> that survives replay.</p>
+          </div>
+
+          <!-- THE SIGNATURE: a tracked agent suggestion, pending review -->
+          <div class="suggestion">
+            <div class="sh">▷ SUGGESTED EDIT <span class="badge">agent:claude</span> <span class="when">12s ago · insertion</span></div>
+            <div class="sbody">
+              Add a worked example so the boundary is concrete: <span class="ins">“Consider two writers in one tick — the human types a clause, the agent appends a citation. Both land inside the same <code style="font-family:var(--mono);font-size:14px;background:#fff;padding:0 4px">transact</code> call; the audit log records two entries, one per principal.”</span>
+            </div>
+            <div class="why">▷ <b>Rationale:</b> Section 02 asserts attribution stays exact but shows no example. A concrete two-writer case makes the guarantee legible to readers. Cites <code style="font-family:var(--mono);font-size:11px">writepath-atomicity.test.ts</code>.</div>
+            <div class="sactions">
+              <button class="accept">✓ ACCEPT &amp; ATTRIBUTE</button>
+              <button>EDIT INLINE</button>
+              <button class="reject">✕ DISMISS</button>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="handle"><span class="h">⋮⋮</span><span class="h plus">+</span></div>
+            <p style="color:var(--ink-soft)">Type <code style="font-family:var(--mono);font-size:15px;background:var(--paper-2);padding:0 5px;border:1px solid var(--hair-soft)">/</code> for blocks, or <code style="font-family:var(--mono);font-size:15px;background:var(--machine-bg);color:var(--machine);padding:0 5px;border:1px solid var(--machine)">▷ ask</code> to bring in an agent…</p>
+          </div>
+
+          <!-- slash command menu floating -->
+          <div class="slash">
+            <div class="sl-h"><span>INSERT BLOCK</span><span>/he</span></div>
+            <div class="sl-i on"><span class="k">H2</span><span><div class="nm">Heading 2</div><div class="desc">Section title</div></span></div>
+            <div class="sl-i"><span class="k">¶</span><span><div class="nm">Paragraph</div><div class="desc">Body text</div></span></div>
+            <div class="sl-i"><span class="k">“</span><span><div class="nm">Quote</div><div class="desc">Pull-quote block</div></span></div>
+            <div class="sl-i"><span class="k">&lt;&gt;</span><span><div class="nm">Code</div><div class="desc">Fenced block</div></span></div>
+            <div class="sl-i ai"><span class="k">▷</span><span><div class="nm">Ask an agent…</div><div class="desc">Draft, refactor or cite — tracked</div></span></div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="ed-side">
+        <div class="sect">
+          <div class="sh">Co-editors <span class="ct">● LIVE</span></div>
+          <div class="collab">
+            <span class="av you">N</span>
+            <span><div class="nm">nomi <span style="font-family:var(--mono);font-size:9px;color:var(--ink-soft)">(you)</span></div><div class="st">caret in §01</div></span>
+          </div>
+          <div class="collab">
+            <span class="av m">C</span>
+            <span><div class="nm">agent:claude</div><div class="st editing">▷ inserting in §02</div></span>
+            <span class="dotnow"></span>
+          </div>
+          <div class="collab">
+            <span class="av" style="background:var(--blue);color:#fff">D</span>
+            <span><div class="nm">dani</div><div class="st">viewing · idle</div></span>
+          </div>
+        </div>
+        <div class="sect">
+          <div class="sh">Suggestions <span class="ct">1 OPEN</span></div>
+          <div class="collab" style="background:var(--machine-bg)">
+            <span class="av m">C</span>
+            <span><div class="nm" style="font-size:12.5px">Worked example in §02</div><div class="st editing">insertion · awaiting review</div></span>
+          </div>
+        </div>
+        <div class="sect">
+          <div class="sh">Version history <span class="ct">YJS SNAPSHOTS</span></div>
+          <div class="versions">
+            <div class="vrow cur"><span class="vt">now</span><span class="vx"><b>Working copy</b> — unsaved tracked edits<div class="who agent" style="margin-top:4px"><span class="pip"></span>agent:claude</div></span></div>
+            <div class="vrow"><span class="vt">3m</span><span class="vx">Accepted suggestion<div class="who human" style="margin-top:4px"><span class="pip"></span>nomi</div></span></div>
+            <div class="vrow"><span class="vt">2h</span><span class="vx">Rewrote §02<div class="who agent" style="margin-top:4px"><span class="pip"></span>agent:codex</div></span></div>
+            <div class="vrow"><span class="vt">5h</span><span class="vx">Published v1<div class="who human" style="margin-top:4px"><span class="pip"></span>nomi</div></span></div>
+          </div>
+        </div>
+      </aside>
+      <div class="ed-foot">
+        <span class="saved">● ALL CHANGES SAVED</span>
+        <span>doc <b>atomicity-v3</b></span>
+        <span class="right">
+          <span>CRDT <b>converged</b></span>
+          <span>audit <b>+32</b></span>
+          <span><b>1,284</b> words</span>
+        </span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ (E) ADMIN / MEMBERS ============================ -->
+<section class="screen">
+  <div class="screen-tag">
+    <div class="lhs"><span class="num">E</span><span class="ttl">Admin · Members</span></div>
+    <span class="meta">users · teams · spaces · agents as principals</span>
+  </div>
+  <div class="app">
+    <div class="topbar">
+      <div class="brand"><span class="zero">0</span><span class="word">editorzero</span></div>
+      <nav class="topnav"><a href="#">Home</a><a href="#">Spaces</a><a href="#">Drafts</a><a href="#" class="on">Admin</a></nav>
+      <div class="right"><div class="kbar"><kbd>⌘</kbd><kbd>K</kbd> Search</div><div class="whoami"><span class="av human">N</span> nomi · owner</div></div>
+    </div>
+    <div class="admin">
+      <aside class="anav">
+        <div class="ah">Administer</div>
+        <a href="#" class="on">Members <span class="c">12</span></a>
+        <a href="#">Teams <span class="c">3</span></a>
+        <a href="#">Spaces <span class="c">3</span></a>
+        <a href="#">Agents <span class="c">4</span></a>
+        <a href="#">Audit log <span class="c">∞</span></a>
+        <div class="ah" style="margin-top:14px">Instance</div>
+        <a href="#">Settings</a>
+        <a href="#">Tokens &amp; keys</a>
+        <a href="#">Backups</a>
+      </aside>
+      <div class="apane">
+        <div class="apane-head">
+          <div>
+            <div class="eg">Engineering instance · self-hosted</div>
+            <h2>Members <b>×</b> Agents</h2>
+          </div>
+          <a class="btn primary" href="#">+ INVITE</a>
+        </div>
+        <div class="tabs">
+          <button class="on">ALL · 12</button><button>HUMANS · 8</button><button>AGENTS · 4</button><button>INVITED · 1</button>
+        </div>
+        <table class="mtable">
+          <thead><tr><td style="width:34%">Principal</td><td>Type</td><td>Role</td><td>Rate limit</td><td style="text-align:right">Manage</td></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="mcell"><span class="av human">N</span><span><div class="nm">nomi</div><div class="em">numman@editorzero.dev</div></span></div></td>
+              <td><span class="tag human">Human</span></td>
+              <td class="role"><span class="rsel admin">Owner <span class="ar">▾</span></span></td>
+              <td class="rl">—</td>
+              <td><div class="rowact"><button class="iconbtn">✎</button></div></td>
+            </tr>
+            <tr>
+              <td><div class="mcell"><span class="av m">C</span><span><div class="nm">agent:claude</div><div class="em">svc · opus-4.8 · token ••a91f</div></span></div></td>
+              <td><span class="tag agent">▷ Agent</span></td>
+              <td class="role"><span class="rsel">Editor <span class="ar">▾</span></span><div class="scopes"><span class="sc">doc:write</span><span class="sc">suggest</span><span class="sc">audit:read</span></div></td>
+              <td class="rl"><b>600</b>/min · burst 60</td>
+              <td><div class="rowact"><button class="iconbtn">✎</button><button class="iconbtn flag" title="revoke">⊘</button></div></td>
+            </tr>
+            <tr>
+              <td><div class="mcell"><span class="av m">X</span><span><div class="nm">agent:codex</div><div class="em">svc · gpt · token ••7b20</div></span></div></td>
+              <td><span class="tag agent">▷ Agent</span></td>
+              <td class="role"><span class="rsel">Reviewer <span class="ar">▾</span></span><div class="scopes"><span class="sc">doc:read</span><span class="sc">suggest</span></div></td>
+              <td class="rl"><b>300</b>/min · burst 30</td>
+              <td><div class="rowact"><button class="iconbtn">✎</button><button class="iconbtn flag" title="revoke">⊘</button></div></td>
+            </tr>
+            <tr>
+              <td><div class="mcell"><span class="av" style="background:var(--blue);color:#fff">D</span><span><div class="nm">dani</div><div class="em">dani@editorzero.dev</div></span></div></td>
+              <td><span class="tag human">Human</span></td>
+              <td class="role"><span class="rsel">Admin <span class="ar">▾</span></span></td>
+              <td class="rl">—</td>
+              <td><div class="rowact"><button class="iconbtn">✎</button><button class="iconbtn flag">⊘</button></div></td>
+            </tr>
+            <tr>
+              <td><div class="mcell"><span class="av m">R</span><span><div class="nm">agent:reviewer-bot</div><div class="em">svc · haiku · token ••0c4d</div></span></div></td>
+              <td><span class="tag agent">▷ Agent</span></td>
+              <td class="role"><span class="rsel">Viewer <span class="ar">▾</span></span><div class="scopes"><span class="sc">doc:read</span></div></td>
+              <td class="rl"><b>120</b>/min</td>
+              <td><div class="rowact"><button class="iconbtn">✎</button><button class="iconbtn flag">⊘</button></div></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="invite">
+          <div class="field"><span class="lab">Email / Service ID</span><span class="ph">new.member@editorzero.dev</span></div>
+          <div class="field kind"><span class="lab">As</span><span class="tag agent">▷ Agent ▾</span></div>
+          <div class="field"><span class="lab">Role</span><span class="ph" style="color:var(--ink)">Editor</span></div>
+          <div class="go"><a class="btn ink" href="#">SEND INVITE →</a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="specfoot">
+  <div class="row">
+    <div>
+      <h4>Human ink</h4>
+      <div class="sws">
+        <div class="swr"><span class="chip" style="background:var(--ink)"></span> Ink / text <span class="hx">#111113</span></div>
+        <div class="swr"><span class="chip" style="background:var(--blue)"></span> Ultramarine <span class="hx">#1D2BFF</span></div>
+        <div class="swr"><span class="chip" style="background:var(--paper);"></span> Paper <span class="hx">#F4F4EF</span></div>
+      </div>
+    </div>
+    <div>
+      <h4>Machine ink + signal</h4>
+      <div class="sws">
+        <div class="swr"><span class="chip" style="background:var(--acid)"></span> Acid lime <span class="hx">#D6FF3F</span></div>
+        <div class="swr"><span class="chip" style="background:var(--machine)"></span> Agent green <span class="hx">#0A6E63</span></div>
+        <div class="swr"><span class="chip" style="background:var(--flag)"></span> Vermillion <span class="hx">#FF3D2E</span></div>
+      </div>
+    </div>
+    <div>
+      <h4>Type</h4>
+      <p><b>Archivo Expanded</b> — display / headlines.<br><b>Archivo</b> — UI + body.<br><b>Spline Sans Mono</b> — system, agents, IDs, metadata.<br><span style="font-size:11px">All SIL OFL 1.1.</span></p>
+    </div>
+    <div>
+      <h4>Thesis</h4>
+      <p>A type-foundry specimen, not a dashboard. <b>Zero is the origin glyph</b>; the acid channel is the signal; <b>agents are a first-class ink, not an afterthought.</b> No cream, no serif-as-tasteful, no SaaS default.</p>
+    </div>
+  </div>
+  <div class="bigzero">EDITOR<span class="acidword" style="color:var(--acid-deep)">ZER</span><span class="o">0</span></div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero — KONSTRUKT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   KONSTRUKT — a constructivist / Bauhaus-restrained system
+   for editorzero. The "zero" is a perfect circle: logo, agent
+   presence, framing arc. Humans are SQUARES, agents are CIRCLES.
+   Hard edges, thick rules, solid offset shadows — no soft blur,
+   no earth tones, no warm paper. Everything token-driven.
+   ============================================================ */
+
+:root{
+  /* --- structural palette (Bauhaus primaries, AA-tuned) --- */
+  --paper:        #F4F3EE;   /* cool bright off-white, NOT cream */
+  --paper-2:      #FFFFFF;   /* card surface */
+  --ink:          #14130F;   /* near-black */
+  --ink-soft:     #4A4843;   /* secondary text (>=4.5:1 on paper) */
+  --line:         #14130F;   /* the rule colour == ink. structural. */
+  --hair:         #DAD8CF;   /* faint grid line */
+
+  --cobalt:       #1B2A8F;   /* ultramarine — primary action / agents */
+  --cobalt-ink:   #0E1654;   /* darker cobalt for text-on-light */
+  --cobalt-wash:  #E4E6F4;   /* tint fill */
+  --vermilion:    #E23A1E;   /* red — destructive / live accent */
+  --vermilion-dk: #B3260F;   /* AA text variant */
+  --vermilion-wash:#FBE3DD;
+  --chrome:       #F6C400;   /* chrome yellow — highlight / human */
+  --chrome-ink:   #5A4600;   /* text on/near yellow */
+
+  --grid:         24px;
+  --rule:         2.5px;     /* default structural stroke */
+  --rule-bold:    4px;
+  --shadow:       6px 6px 0 var(--ink);   /* solid offset block-shadow */
+  --shadow-sm:    4px 4px 0 var(--ink);
+  --shadow-cobalt:6px 6px 0 var(--cobalt);
+
+  --sans:    "Archivo", system-ui, sans-serif;
+  --display: "Space Grotesk", "Archivo", system-ui, sans-serif;
+  --mono:    "IBM Plex Mono", ui-monospace, monospace;
+}
+
+*{box-sizing:border-box}
+html{ -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility }
+body{
+  margin:0;
+  font-family:var(--sans);
+  color:var(--ink);
+  /* page chrome: a constructivist scaffold the screens sit on */
+  background:
+    linear-gradient(90deg, transparent 0 calc(var(--grid)*2 - 1px), var(--hair) calc(var(--grid)*2 - 1px) calc(var(--grid)*2), transparent calc(var(--grid)*2)) 0 0/ calc(var(--grid)*2) 100%,
+    #ECEAE2;
+}
+
+/* ---------- harness scaffolding (the page that holds the screens) ---------- */
+.page{ max-width:1240px; margin:0 auto; padding:0 28px 120px }
+.masthead{ padding:44px 0 30px; position:relative }
+.masthead .barcode{ display:flex; gap:5px; align-items:flex-end; height:30px; margin-bottom:22px }
+.masthead .barcode i{ display:block; width:5px; background:var(--ink) }
+.brandline{ display:flex; align-items:center; gap:16px; flex-wrap:wrap }
+.glyph0{ position:relative; width:46px; height:46px; flex:none }
+.glyph0::before{ /* the zero ring */
+  content:""; position:absolute; inset:0; border-radius:50%;
+  border:var(--rule-bold) solid var(--ink);
+}
+.glyph0::after{ /* cobalt quarter, the agentic spark */
+  content:""; position:absolute; right:-3px; top:-3px; width:22px; height:22px;
+  background:var(--cobalt); border-radius:0 0 0 22px;
+}
+.masthead h1{
+  font-family:var(--display); font-weight:700; font-size:40px; letter-spacing:-.02em;
+  margin:0; line-height:1;
+}
+.masthead h1 b{ color:var(--cobalt); font-weight:700 }
+.masthead .sub{
+  margin:14px 0 0; max-width:760px; color:var(--ink-soft); line-height:1.55; font-size:15px;
+}
+.masthead .meta-strip{
+  display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; font-family:var(--mono); font-size:11px;
+}
+.tag{ border:var(--rule) solid var(--ink); padding:4px 9px; background:var(--paper-2); letter-spacing:.02em }
+.tag.fill-c{ background:var(--cobalt); color:#fff; border-color:var(--cobalt) }
+.tag.fill-y{ background:var(--chrome); color:var(--chrome-ink); border-color:var(--ink) }
+.tag.fill-r{ background:var(--vermilion); color:#fff; border-color:var(--vermilion) }
+
+/* screen label plate */
+.plate{ display:flex; align-items:stretch; gap:0; margin:64px 0 18px }
+.plate .no{
+  font-family:var(--mono); font-weight:600; font-size:13px; background:var(--ink); color:var(--paper);
+  display:flex; align-items:center; padding:0 14px; letter-spacing:.04em;
+}
+.plate .lbl{
+  border:var(--rule) solid var(--ink); border-left:none; padding:9px 16px;
+  font-family:var(--display); font-weight:600; font-size:16px; letter-spacing:-.01em;
+  background:var(--paper-2); display:flex; align-items:center; gap:10px; flex:1;
+}
+.plate .lbl small{ font-family:var(--sans); font-weight:500; color:var(--ink-soft); font-size:12.5px; letter-spacing:0 }
+.plate .shape{ width:42px; border:var(--rule) solid var(--ink); border-left:none; background:var(--chrome) }
+.plate .shape.c{ background:var(--cobalt) }
+.plate .shape.r{ background:var(--vermilion) }
+
+/* ===========================================================
+   SHARED APP SHELL  (the product itself — token-driven)
+   =========================================================== */
+.app{
+  background:var(--paper);
+  border:var(--rule-bold) solid var(--ink);
+  box-shadow:var(--shadow);
+  overflow:hidden;
+}
+
+/* top app bar */
+.topbar{
+  display:flex; align-items:center; gap:18px;
+  padding:0 18px; height:54px;
+  background:var(--paper-2);
+  border-bottom:var(--rule-bold) solid var(--ink);
+}
+.wordmark{ display:flex; align-items:center; gap:10px; font-family:var(--display); font-weight:700; font-size:17px; letter-spacing:-.01em }
+.wordmark .ring{ position:relative; width:20px; height:20px; flex:none }
+.wordmark .ring::before{ content:""; position:absolute; inset:0; border-radius:50%; border:3px solid var(--ink) }
+.wordmark .ring::after{ content:""; position:absolute; right:-1px; top:-1px; width:9px; height:9px; background:var(--cobalt); border-radius:0 0 0 9px }
+.wordmark b{ color:var(--cobalt) }
+.spacepick{
+  font-family:var(--mono); font-size:12px; border:var(--rule) solid var(--ink);
+  padding:5px 12px; background:var(--paper); display:flex; align-items:center; gap:8px;
+}
+.spacepick .sq{ width:11px; height:11px; background:var(--vermilion) }
+.cmdk{
+  margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--ink-soft);
+  border:var(--rule) solid var(--ink); background:var(--paper-2);
+  padding:6px 12px; display:flex; align-items:center; gap:10px; min-width:230px;
+}
+.cmdk kbd{ font-family:var(--mono); font-size:10px; border:1.5px solid var(--ink); padding:1px 5px; background:var(--paper); color:var(--ink) }
+.who{ display:flex; align-items:center; gap:7px }
+/* THE core motif: human=square, agent=circle */
+.tok{ width:24px; height:24px; flex:none; display:grid; place-items:center; font-family:var(--mono); font-size:10px; font-weight:600 }
+.tok.human{ background:var(--chrome); color:var(--chrome-ink); border:var(--rule) solid var(--ink) }                 /* square */
+.tok.agent{ background:var(--cobalt); color:#fff; border-radius:50%; border:var(--rule) solid var(--ink) }            /* circle */
+.tok.sm{ width:18px; height:18px; font-size:8px }
+.tok.lg{ width:34px; height:34px; font-size:13px }
+
+/* app body: rail + canvas */
+.body{ display:grid; grid-template-columns:232px 1fr; min-height:560px }
+.rail{ border-right:var(--rule-bold) solid var(--ink); background:var(--paper); padding:18px 0 }
+.rail .grp{ padding:0 16px; margin-bottom:22px }
+.rail .eyebrow{
+  font-family:var(--mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--ink-soft); margin:0 0 10px; display:flex; align-items:center; gap:8px;
+}
+.rail .eyebrow::before{ content:""; width:10px; height:10px; background:var(--vermilion); flex:none }
+.rail .eyebrow.c::before{ background:var(--cobalt) }
+.rail .eyebrow.y::before{ background:var(--chrome) }
+.navitem{
+  display:flex; align-items:center; gap:10px; padding:8px 10px; font-size:13.5px; font-weight:500;
+  color:var(--ink); cursor:default; position:relative; border:var(--rule) solid transparent;
+}
+.navitem .ico{ width:14px; height:14px; flex:none; border:2px solid var(--ink) }
+.navitem .ico.disc{ border-radius:50% }
+.navitem .n{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-soft) }
+.navitem.on{ background:var(--chrome); border:var(--rule) solid var(--ink); box-shadow:var(--shadow-sm); font-weight:600 }
+.navitem.on .ico{ background:var(--ink) }
+.navitem.on .n{ color:var(--chrome-ink) }
+
+/* canvas */
+.canvas{ padding:26px 30px 34px; position:relative; overflow:hidden }
+.canvas::before{ /* faint structural grid inside canvas */
+  content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
+  background:
+    linear-gradient(var(--hair) 1px, transparent 1px) 0 0 / 100% var(--grid),
+    linear-gradient(90deg, var(--hair) 1px, transparent 1px) 0 0 / var(--grid) 100%;
+  mask:linear-gradient(#000,#000);
+}
+.canvas > *{ position:relative }
+
+.canvas-h{ display:flex; align-items:flex-end; gap:16px; margin-bottom:22px }
+.canvas-h .kick{ font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--cobalt); font-weight:600; margin:0 0 6px }
+.canvas-h h2{ font-family:var(--display); font-weight:700; font-size:30px; letter-spacing:-.02em; margin:0; line-height:1 }
+.spacer{ flex:1 }
+
+/* buttons */
+.btn{
+  font-family:var(--display); font-weight:600; font-size:13px; letter-spacing:-.01em;
+  border:var(--rule) solid var(--ink); padding:8px 15px; background:var(--paper-2); color:var(--ink);
+  cursor:pointer; display:inline-flex; align-items:center; gap:8px; box-shadow:var(--shadow-sm);
+  transition:transform .08s ease, box-shadow .08s ease;
+}
+.btn:hover{ transform:translate(-1px,-1px); box-shadow:5px 5px 0 var(--ink) }
+.btn:active{ transform:translate(2px,2px); box-shadow:2px 2px 0 var(--ink) }
+.btn.pri{ background:var(--cobalt); color:#fff; border-color:var(--ink); box-shadow:5px 5px 0 var(--ink) }
+.btn.warn{ background:var(--chrome); color:var(--chrome-ink) }
+.btn.danger{ background:var(--vermilion); color:#fff }
+.btn .plus{ font-family:var(--mono); font-weight:600 }
+
+/* ---------- (a) DASHBOARD ---------- */
+.dash-grid{ display:grid; grid-template-columns:1.15fr 1fr; gap:18px }
+.stat-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:18px }
+.stat{
+  border:var(--rule) solid var(--ink); padding:14px; background:var(--paper-2); position:relative; overflow:hidden;
+}
+.stat .num{ font-family:var(--display); font-weight:700; font-size:34px; line-height:1; letter-spacing:-.03em }
+.stat .lab{ font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft); margin-top:6px }
+.stat .corner{ position:absolute; right:-14px; top:-14px; width:40px; height:40px; border-radius:50%; }
+.stat.c .corner{ background:var(--cobalt) }
+.stat.y .corner{ background:var(--chrome) }
+.stat.r .corner{ background:var(--vermilion) }
+.stat .frac{ font-family:var(--mono); font-size:11px; color:var(--cobalt-ink); font-weight:600 }
+
+.panel{ border:var(--rule) solid var(--ink); background:var(--paper-2) }
+.panel-h{
+  display:flex; align-items:center; gap:10px; padding:11px 14px; border-bottom:var(--rule) solid var(--ink);
+  font-family:var(--display); font-weight:600; font-size:14px;
+}
+.panel-h .dot{ width:12px; height:12px; flex:none }
+.panel-h .dot.sq{ background:var(--chrome) } .panel-h .dot.ci{ background:var(--cobalt); border-radius:50% }
+.panel-h .more{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-soft) }
+
+.doc-line{ display:flex; align-items:center; gap:12px; padding:11px 14px; border-bottom:1.5px solid var(--hair) }
+.doc-line:last-child{ border-bottom:none }
+.doc-line .ttl{ font-weight:600; font-size:13.5px }
+.doc-line .ttl small{ display:block; font-family:var(--mono); font-weight:400; font-size:10.5px; color:var(--ink-soft); margin-top:2px }
+.doc-line .when{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-soft); white-space:nowrap }
+.live{ display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; font-weight:600; color:var(--vermilion-dk) }
+.live .pulse{ width:9px; height:9px; border-radius:50%; background:var(--vermilion); animation:pulse 1.4s ease-in-out infinite }
+@keyframes pulse{ 0%,100%{ transform:scale(1); opacity:1 } 50%{ transform:scale(.55); opacity:.45 } }
+
+.space-card{ display:flex; align-items:center; gap:13px; padding:13px 14px; border-bottom:1.5px solid var(--hair) }
+.space-card:last-child{ border-bottom:none }
+.space-glyph{ width:34px; height:34px; flex:none; border:var(--rule) solid var(--ink) }
+.space-glyph.s1{ background:var(--cobalt) }
+.space-glyph.s2{ background:var(--chrome); border-radius:50% }
+.space-glyph.s3{ background:var(--vermilion); clip-path:polygon(0 0,100% 0,0 100%) }
+.space-card .nm{ font-weight:600; font-size:13.5px }
+.space-card .mt{ font-family:var(--mono); font-size:10.5px; color:var(--ink-soft); margin-top:2px }
+.space-card .cnt{ margin-left:auto; font-family:var(--display); font-weight:700; font-size:20px }
+
+/* activity feed with constructivist timeline */
+.feed{ position:relative; padding:6px 14px 12px 14px }
+.feed .ev{ display:flex; gap:11px; padding:9px 0; align-items:flex-start }
+.feed .ev .meta{ font-size:12.5px; line-height:1.45 }
+.feed .ev .meta b{ font-weight:700 }
+.feed .ev .meta .t{ font-family:var(--mono); font-size:10px; color:var(--ink-soft); display:block; margin-top:2px }
+.feed .ev .meta .badge{ font-family:var(--mono); font-size:10px; padding:1px 6px; border:1.5px solid var(--ink) }
+.badge.add{ background:var(--cobalt-wash); color:var(--cobalt-ink) }
+.badge.edit{ background:var(--chrome); color:var(--chrome-ink) }
+
+/* ---------- (b) DOCUMENTS LIST ---------- */
+.split{ display:grid; grid-template-columns:218px 1fr; gap:0; border:var(--rule) solid var(--ink); background:var(--paper-2) }
+.tree{ border-right:var(--rule) solid var(--ink); padding:14px 0 }
+.tree .th{ font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-soft); padding:0 14px 8px }
+.tnode{ display:flex; align-items:center; gap:9px; padding:7px 14px; font-size:13px; cursor:default }
+.tnode .car{ font-family:var(--mono); font-size:10px; color:var(--ink-soft); width:8px }
+.tnode .fld{ width:13px; height:13px; border:2px solid var(--ink); flex:none }
+.tnode.disc .fld{ border-radius:50% }
+.tnode .ct{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--ink-soft) }
+.tnode.sub{ padding-left:30px; font-size:12.5px; color:var(--ink-soft) }
+.tnode.on{ background:var(--cobalt); color:#fff }
+.tnode.on .fld{ border-color:#fff; background:#fff } .tnode.on .ct{ color:#cdd2f0 } .tnode.on .car{ color:#cdd2f0 }
+
+table.docs{ width:100%; border-collapse:collapse; font-size:13px }
+table.docs thead td{
+  font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft);
+  font-weight:600; padding:11px 14px; border-bottom:var(--rule) solid var(--ink); background:var(--paper);
+}
+table.docs td{ padding:12px 14px; border-bottom:1.5px solid var(--hair); vertical-align:middle }
+table.docs tbody tr:hover{ background:var(--paper) }
+.dt-title{ font-weight:600; display:flex; align-items:center; gap:10px }
+.dt-title .ft{ width:14px; height:14px; border:2px solid var(--ink); flex:none } /* doc = square mark */
+.dt-id{ font-family:var(--mono); font-size:10px; color:var(--ink-soft) }
+.editors{ display:flex; align-items:center }
+.editors .tok{ margin-right:-7px; box-shadow:0 0 0 2px var(--paper-2) }
+.editors .tok.agent{ box-shadow:0 0 0 2px var(--paper-2) }
+.editors .extra{ margin-left:13px; font-family:var(--mono); font-size:11px; color:var(--ink-soft) }
+.chip{ font-family:var(--mono); font-size:10px; padding:2px 7px; border:1.5px solid var(--ink); display:inline-block }
+.chip.pub{ background:var(--cobalt); color:#fff } .chip.draft{ background:var(--paper) } .chip.rev{ background:var(--chrome); color:var(--chrome-ink) }
+
+/* ---------- (c) READING VIEW ---------- */
+.read-wrap{ display:grid; grid-template-columns:1fr 256px; gap:0; border:var(--rule) solid var(--ink); background:var(--paper-2) }
+.read{ padding:40px 48px 52px; max-width:none; position:relative }
+.read .doc-kick{ font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--cobalt); font-weight:600 }
+.read h1.title{ font-family:var(--display); font-weight:700; font-size:42px; line-height:1.02; letter-spacing:-.025em; margin:12px 0 18px }
+.read .lede{ font-size:16.5px; line-height:1.6; color:var(--ink); border-left:var(--rule-bold) solid var(--cobalt); padding-left:18px; margin:0 0 26px }
+.read h2{ font-family:var(--display); font-weight:600; font-size:21px; letter-spacing:-.01em; margin:30px 0 10px; display:flex; align-items:center; gap:10px }
+.read h2::before{ content:""; width:16px; height:16px; background:var(--chrome); flex:none }
+.read h2.c::before{ background:var(--cobalt); border-radius:50% }
+.read p{ font-size:15px; line-height:1.68; margin:0 0 14px; max-width:62ch }
+.read p code, .read li code{ font-family:var(--mono); font-size:12.5px; background:var(--paper); border:1.5px solid var(--hair); padding:1px 5px }
+.read ul{ margin:0 0 16px; padding-left:0; list-style:none; max-width:62ch }
+.read ul li{ font-size:15px; line-height:1.6; padding-left:24px; position:relative; margin-bottom:7px }
+.read ul li::before{ content:""; position:absolute; left:0; top:8px; width:9px; height:9px; background:var(--vermilion) }
+.read .callout{
+  border:var(--rule) solid var(--ink); background:var(--cobalt-wash); padding:14px 16px; margin:20px 0;
+  font-size:14px; line-height:1.55; box-shadow:var(--shadow-sm); position:relative;
+}
+.read .callout .ct{ font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--cobalt-ink); font-weight:600; margin-bottom:5px; display:block }
+.read pre.code{ font-family:var(--mono); font-size:12.5px; line-height:1.6; background:var(--ink); color:#EDEBE3; padding:16px 18px; margin:18px 0; overflow:auto; border:var(--rule) solid var(--ink); box-shadow:var(--shadow-sm) }
+.read pre.code .k{ color:var(--chrome) } .read pre.code .s{ color:#8FB7FF } .read pre.code .c{ color:#7E7C72 }
+
+.read-meta{ border-left:var(--rule) solid var(--ink); padding:24px 18px; background:var(--paper) }
+.read-meta .mh{ font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-soft); margin:0 0 14px; padding-bottom:8px; border-bottom:1.5px solid var(--hair) }
+.read-meta .mh.t2{ margin-top:26px }
+.mrow{ display:flex; align-items:center; gap:10px; margin-bottom:13px; font-size:12.5px }
+.mrow .ml{ font-family:var(--mono); font-size:10.5px; color:var(--ink-soft); width:62px; flex:none }
+.mrow .mv{ font-weight:500 }
+.contrib{ display:flex; align-items:center; gap:9px; margin-bottom:10px; font-size:12.5px }
+.contrib .nm{ font-weight:600 } .contrib .rl{ font-family:var(--mono); font-size:10px; color:var(--ink-soft); display:block }
+.toc{ list-style:none; margin:0; padding:0; font-size:12.5px }
+.toc li{ padding:6px 0 6px 14px; border-left:2px solid var(--hair); color:var(--ink-soft) }
+.toc li.on{ border-left:2px solid var(--cobalt); color:var(--ink); font-weight:600 }
+
+/* ---------- (d) EDITOR (hero) ---------- */
+.editor-shell{ border:var(--rule) solid var(--ink); background:var(--paper-2); overflow:hidden }
+.toolbar{
+  display:flex; align-items:center; gap:6px; padding:8px 12px; border-bottom:var(--rule) solid var(--ink);
+  background:var(--paper); flex-wrap:wrap;
+}
+.tgrp{ display:flex; align-items:center; gap:0; border:var(--rule) solid var(--ink); background:var(--paper-2); box-shadow:var(--shadow-sm) }
+.tbtn{ font-family:var(--display); font-weight:600; font-size:13px; min-width:32px; height:30px; display:grid; place-items:center; border-right:1.5px solid var(--ink); padding:0 9px; cursor:pointer }
+.tbtn:last-child{ border-right:none }
+.tbtn:hover{ background:var(--chrome) }
+.tbtn.on{ background:var(--ink); color:var(--paper) }
+.tbtn .i{ font-style:normal }
+.tbtn .b{ font-weight:800 } .tbtn .it{ font-style:italic } .tbtn .u{ text-decoration:underline } .tbtn .st{ text-decoration:line-through }
+.tbtn.mono{ font-family:var(--mono); font-size:11px }
+.tbar-status{ margin-left:auto; display:flex; align-items:center; gap:12px; font-family:var(--mono); font-size:11px; color:var(--ink-soft) }
+.tbar-status .saved{ display:inline-flex; align-items:center; gap:6px; color:var(--cobalt-ink); font-weight:600 }
+.tbar-status .saved .d{ width:8px; height:8px; border-radius:50%; background:var(--cobalt) }
+.copresence{ display:flex; align-items:center; }
+.copresence .tok{ margin-right:-6px; box-shadow:0 0 0 2px var(--paper) }
+
+.editor-body{ display:grid; grid-template-columns:1fr; }
+.doc-canvas{ padding:34px 46px 240px; position:relative; min-height:470px }  /* bottom room for the open slash menu */
+
+/* block + drag handle */
+.eblock{ position:relative; padding:3px 0; }
+.eblock .handle{
+  position:absolute; left:-34px; top:5px; display:flex; gap:3px; align-items:center; opacity:.0; transition:opacity .12s;
+}
+.eblock:hover .handle{ opacity:1 }
+.eblock .handle .grip{ font-family:var(--mono); color:var(--ink-soft); cursor:grab; font-size:13px; line-height:1 }
+.eblock .handle .add{ width:16px; height:16px; border:var(--rule) solid var(--ink); display:grid; place-items:center; font-size:11px; font-family:var(--mono); background:var(--paper-2); cursor:pointer }
+.eh1{ font-family:var(--display); font-weight:700; font-size:38px; letter-spacing:-.025em; line-height:1.05; margin:0 }
+.ep{ font-size:15.5px; line-height:1.7; margin:0; max-width:64ch }
+.eh2{ font-family:var(--display); font-weight:600; font-size:20px; letter-spacing:-.01em; margin:0; display:flex; align-items:center; gap:9px }
+.eh2::before{ content:""; width:14px; height:14px; background:var(--chrome); flex:none }
+.caret{ display:inline-block; width:2px; height:1.05em; background:var(--ink); vertical-align:-2px; margin-left:1px; animation:blink 1.05s steps(1) infinite }
+@keyframes blink{ 50%{ opacity:0 } }
+
+/* selection highlight */
+.sel{ background:var(--chrome); box-shadow:0 0 0 1px var(--ink); padding:0 1px }
+
+/* === AGENT CO-EDITING — the signature === */
+.agent-line{ position:relative; margin-top:30px }   /* clear room above for the agent flag */
+.agent-caret{ display:inline-block; width:2.5px; height:1.15em; background:var(--cobalt); vertical-align:-3px; position:relative; animation:blink 1.05s steps(1) infinite }
+.agent-flag{
+  position:absolute; top:-22px; left:-2px; font-family:var(--mono); font-size:10px; font-weight:600;
+  background:var(--cobalt); color:#fff; padding:2px 8px 2px 6px; white-space:nowrap; display:flex; align-items:center; gap:6px;
+  box-shadow:3px 3px 0 var(--ink);
+}
+.agent-flag::after{ content:""; position:absolute; left:0; bottom:-5px; width:2.5px; height:5px; background:var(--cobalt) }
+.agent-flag .rc{ width:8px; height:8px; border-radius:50%; border:1.5px solid #fff }
+.agent-flag .rc.solid{ background:#fff }
+
+/* the tracked SUGGESTION block from the agent */
+.suggestion{
+  position:relative; margin:6px 0 6px; border:var(--rule) solid var(--cobalt);
+  background:var(--cobalt-wash); padding:0; box-shadow:var(--shadow-cobalt);
+}
+.suggestion .sh{
+  display:flex; align-items:center; gap:9px; padding:7px 12px; background:var(--cobalt); color:#fff;
+  font-family:var(--mono); font-size:11px;
+}
+.suggestion .sh .who2{ display:flex; align-items:center; gap:7px; font-weight:600 }
+.suggestion .sh .who2 .rc{ width:14px; height:14px; border-radius:50%; background:#fff; color:var(--cobalt); display:grid; place-items:center; font-size:8px; font-weight:700 }
+.suggestion .sh .ago{ margin-left:auto; opacity:.85 }
+.suggestion .sbody{ padding:13px 14px; font-size:14.5px; line-height:1.6 }
+.suggestion .sbody ins{ text-decoration:none; background:#fff; box-shadow:0 0 0 1.5px var(--cobalt); padding:0 2px }
+.suggestion .sbody del{ color:var(--vermilion-dk); text-decoration:line-through; opacity:.7 }
+.suggestion .sfoot{ display:flex; gap:8px; padding:0 14px 13px }
+.sbtn{ font-family:var(--display); font-weight:600; font-size:12px; padding:6px 13px; border:var(--rule) solid var(--ink); cursor:pointer; box-shadow:var(--shadow-sm); display:inline-flex; gap:6px; align-items:center }
+.sbtn.acc{ background:var(--cobalt); color:#fff } .sbtn.acc:hover{ background:var(--cobalt-ink) }
+.sbtn.rej{ background:var(--paper-2) }
+.sbtn.add{ margin-left:auto; background:var(--paper-2); font-family:var(--mono); font-size:11px; font-weight:500 }
+
+/* slash menu */
+.slash{ position:absolute; left:0; top:30px; width:268px; border:var(--rule) solid var(--ink); background:var(--paper-2); box-shadow:var(--shadow); z-index:5 }
+.slash-anchor{ position:relative }
+.slash-anchor .cmd{ font-family:var(--mono); font-size:15.5px; color:var(--cobalt-ink) }
+.slash-anchor .cmd b{ background:var(--cobalt-wash); box-shadow:0 0 0 1px var(--cobalt); padding:0 2px; font-weight:600 }
+.slash .sg{ font-family:var(--mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-soft); padding:9px 12px 5px; border-bottom:1.5px solid var(--hair) }
+.slash .si{ display:flex; align-items:center; gap:11px; padding:9px 12px; font-size:13px; cursor:default }
+.slash .si .ki{ width:24px; height:24px; flex:none; border:var(--rule) solid var(--ink); display:grid; place-items:center; font-family:var(--display); font-weight:700; font-size:12px; background:var(--paper) }
+.slash .si.on{ background:var(--cobalt); color:#fff } .slash .si.on .ki{ background:#fff; color:var(--ink); border-color:#fff }
+.slash .si .kb{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--ink-soft) } .slash .si.on .kb{ color:#cdd2f0 }
+.slash .si .ki.r{ background:var(--vermilion); color:#fff; border-color:var(--ink) }
+.slash .si .ki.y{ background:var(--chrome); color:var(--chrome-ink) }
+
+/* ---------- (e) ADMIN / MEMBERS ---------- */
+.admin-tabs{ display:flex; gap:0; margin-bottom:0 }
+.atab{ font-family:var(--display); font-weight:600; font-size:13px; padding:9px 16px; border:var(--rule) solid var(--ink); border-bottom:none; background:var(--paper); cursor:pointer; margin-right:-2.5px }
+.atab.on{ background:var(--ink); color:var(--paper) }
+.admin-panel{ border:var(--rule) solid var(--ink); background:var(--paper-2) }
+table.members{ width:100%; border-collapse:collapse; font-size:13px }
+table.members thead td{ font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft); font-weight:600; padding:12px 16px; border-bottom:var(--rule) solid var(--ink); background:var(--paper) }
+table.members td{ padding:13px 16px; border-bottom:1.5px solid var(--hair) }
+table.members tbody tr:hover{ background:var(--paper) }
+.mname{ display:flex; align-items:center; gap:12px }
+.mname .nm{ font-weight:600 } .mname .em{ font-family:var(--mono); font-size:10.5px; color:var(--ink-soft) }
+.kind{ font-family:var(--mono); font-size:10px; padding:2px 8px; border:1.5px solid var(--ink); display:inline-flex; align-items:center; gap:6px }
+.kind.h{ background:var(--chrome); color:var(--chrome-ink) } .kind.h .m{ width:8px; height:8px; background:var(--ink) }
+.kind.a{ background:var(--cobalt); color:#fff } .kind.a .m{ width:8px; height:8px; border-radius:50%; background:#fff }
+.role{ font-weight:600; font-size:12.5px } .role small{ display:block; font-family:var(--mono); font-weight:400; font-size:10px; color:var(--ink-soft) }
+.teams-chips{ display:flex; gap:5px; flex-wrap:wrap }
+.tchip{ font-family:var(--mono); font-size:10px; padding:2px 7px; border:1.5px solid var(--ink); background:var(--paper) }
+.lim{ font-family:var(--mono); font-size:11px }
+.lim b{ color:var(--cobalt-ink) }
+.rev{ font-family:var(--display); font-weight:600; font-size:11px; padding:5px 11px; border:var(--rule) solid var(--ink); background:var(--paper-2); cursor:pointer; box-shadow:var(--shadow-sm) }
+.rev:hover{ background:var(--vermilion); color:#fff; border-color:var(--vermilion) }
+
+.admin-aside{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:18px }
+.acard{ border:var(--rule) solid var(--ink); padding:15px; background:var(--paper-2); position:relative; overflow:hidden }
+.acard .at{ font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft) }
+.acard .av{ font-family:var(--display); font-weight:700; font-size:30px; margin-top:6px; line-height:1 }
+.acard .arc{ position:absolute; right:-16px; bottom:-16px; width:50px; height:50px }
+.acard.c .arc{ border:var(--rule-bold) solid var(--cobalt); border-radius:50% }
+.acard.y .arc{ background:var(--chrome) }
+.acard.r .arc{ background:var(--vermilion); clip-path:polygon(0 0,100% 100%,0 100%) }
+
+/* footer note */
+.foot{ margin-top:60px; padding-top:22px; border-top:var(--rule) solid var(--ink); font-family:var(--mono); font-size:11px; color:var(--ink-soft); display:flex; gap:18px; flex-wrap:wrap; align-items:center }
+.foot .sw{ display:inline-flex; align-items:center; gap:6px }
+.foot .sw i{ width:14px; height:14px; border:1.5px solid var(--ink); display:inline-block }
+.foot .sw i.ci{ border-radius:50% }
+
+@media (max-width:880px){
+  .dash-grid,.split,.read-wrap{ grid-template-columns:1fr }
+  .body{ grid-template-columns:1fr }
+  .rail{ display:none }
+  .stat-row,.admin-aside,.admin-tabs{ grid-template-columns:1fr 1fr }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ===== MASTHEAD ===== -->
+  <header class="masthead">
+    <div class="barcode" aria-hidden="true">
+      <i style="height:30px"></i><i style="height:14px"></i><i style="height:30px;background:var(--cobalt)"></i><i style="height:20px"></i><i style="height:30px;background:var(--vermilion)"></i><i style="height:10px"></i><i style="height:24px"></i><i style="height:30px;background:var(--chrome)"></i><i style="height:16px"></i><i style="height:30px"></i><i style="height:12px"></i><i style="height:30px;background:var(--cobalt)"></i><i style="height:22px"></i>
+    </div>
+    <div class="brandline">
+      <span class="glyph0" aria-hidden="true"></span>
+      <h1>editor<b>zero</b> — KONSTRUKT</h1>
+    </div>
+    <p class="sub">A constructivist design language for an AI-native docs platform. The <b style="color:var(--ink)">zero is a circle</b>; humans are <b style="color:var(--ink)">squares</b>, agents are <b style="color:var(--ink)">circles</b>, and that shape-opposition is the whole identity — carried through structure, not decoration. Bauhaus primaries on cool paper, thick black rules, solid offset shadows. Five product screens follow.</p>
+    <div class="meta-strip">
+      <span class="tag fill-c">cobalt — action / agent</span>
+      <span class="tag fill-y">chrome — highlight / human</span>
+      <span class="tag fill-r">vermilion — live / destructive</span>
+      <span class="tag">Space Grotesk · Archivo · IBM Plex Mono</span>
+      <span class="tag">light mode · WCAG AA · fully tokenised</span>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       (a) DASHBOARD
+       ============================================================ -->
+  <div class="plate">
+    <span class="no">a</span>
+    <span class="lbl">Dashboard / Home <small>— overview, recent docs, spaces, activity</small></span>
+    <span class="shape c"></span>
+  </div>
+
+  <section class="app">
+    <div class="topbar">
+      <div class="wordmark"><span class="ring" aria-hidden="true"></span>editor<b>zero</b></div>
+      <div class="spacepick"><span class="sq" aria-hidden="true"></span> Acme&nbsp;Robotics&nbsp;▾</div>
+      <div class="cmdk"><span>Search docs, people, spaces…</span><kbd>⌘ K</kbd></div>
+      <div class="who"><span class="tok human" title="you (human)">N</span></div>
+    </div>
+    <div class="body">
+      <!-- rail -->
+      <aside class="rail">
+        <div class="grp">
+          <p class="eyebrow c">Workspace</p>
+          <div class="navitem on"><span class="ico" aria-hidden="true"></span> Home</div>
+          <div class="navitem"><span class="ico disc" aria-hidden="true"></span> All documents <span class="n">312</span></div>
+          <div class="navitem"><span class="ico" aria-hidden="true"></span> Shared with me <span class="n">28</span></div>
+          <div class="navitem"><span class="ico disc" aria-hidden="true"></span> Drafts <span class="n">9</span></div>
+        </div>
+        <div class="grp">
+          <p class="eyebrow">Spaces</p>
+          <div class="navitem"><span class="ico" style="background:var(--cobalt);border-color:var(--cobalt)" aria-hidden="true"></span> Engineering <span class="n">142</span></div>
+          <div class="navitem"><span class="ico disc" style="background:var(--chrome);border-color:var(--ink)" aria-hidden="true"></span> Product <span class="n">88</span></div>
+          <div class="navitem"><span class="ico" style="background:var(--vermilion);border-color:var(--vermilion)" aria-hidden="true"></span> Operations <span class="n">54</span></div>
+        </div>
+        <div class="grp">
+          <p class="eyebrow y">Admin</p>
+          <div class="navitem"><span class="ico" aria-hidden="true"></span> Members</div>
+          <div class="navitem"><span class="ico disc" aria-hidden="true"></span> Agents &amp; tokens</div>
+          <div class="navitem"><span class="ico" aria-hidden="true"></span> Settings</div>
+        </div>
+      </aside>
+
+      <!-- canvas -->
+      <main class="canvas">
+        <div class="canvas-h">
+          <div>
+            <p class="kick">Tuesday · good morning</p>
+            <h2>Welcome back, Nomi</h2>
+          </div>
+          <span class="spacer"></span>
+          <button class="btn pri"><span class="plus">＋</span> New document</button>
+        </div>
+
+        <div class="dash-grid">
+          <div>
+            <div class="stat-row">
+              <div class="stat c"><span class="corner" aria-hidden="true"></span><div class="num">312</div><div class="lab">Documents</div></div>
+              <div class="stat y"><span class="corner" aria-hidden="true"></span><div class="num">3</div><div class="lab">Spaces</div></div>
+              <div class="stat r"><span class="corner" aria-hidden="true"></span><div class="num">18</div><div class="lab">Principals · <span class="frac">5 agents</span></div></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-h"><span class="dot sq" aria-hidden="true"></span> Recent documents <span class="more">edited by you &amp; your agents</span></div>
+              <div class="doc-line">
+                <span class="tok agent sm" title="agent">◐</span>
+                <div class="ttl">Write-Path Atomicity <small>engineering · spec</small></div>
+                <span class="live"><span class="pulse" aria-hidden="true"></span> agent live</span>
+              </div>
+              <div class="doc-line">
+                <span class="tok human sm" title="human">N</span>
+                <div class="ttl">Q3 Platform Roadmap <small>product · planning</small></div>
+                <span class="when">2h ago · you</span>
+              </div>
+              <div class="doc-line">
+                <span class="tok agent sm" title="agent">⬡</span>
+                <div class="ttl">CRDT Convergence Notes <small>engineering · research</small></div>
+                <span class="when">5h ago · agent:claude</span>
+              </div>
+              <div class="doc-line">
+                <span class="tok human sm" title="human">RP</span>
+                <div class="ttl">Incident 1147 Postmortem <small>operations · review</small></div>
+                <span class="when">yesterday · rai</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="panel" style="margin-bottom:18px">
+              <div class="panel-h"><span class="dot ci" aria-hidden="true"></span> Your spaces <span class="more">3 active</span></div>
+              <div class="space-card"><span class="space-glyph s1" aria-hidden="true"></span><div><div class="nm">Engineering</div><div class="mt">142 docs · 8 members · 3 agents</div></div><span class="cnt">142</span></div>
+              <div class="space-card"><span class="space-glyph s2" aria-hidden="true"></span><div><div class="nm">Product</div><div class="mt">88 docs · 6 members · 1 agent</div></div><span class="cnt">88</span></div>
+              <div class="space-card"><span class="space-glyph s3" aria-hidden="true"></span><div><div class="nm">Operations</div><div class="mt">54 docs · 4 members · 1 agent</div></div><span class="cnt">54</span></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-h"><span class="dot sq" style="background:var(--vermilion)" aria-hidden="true"></span> Live activity</div>
+              <div class="feed">
+                <div class="ev"><span class="tok agent sm">◐</span><div class="meta"><b>agent:claude</b> proposed an edit <span class="badge add">+ suggest</span> on Write-Path Atomicity<span class="t">just now</span></div></div>
+                <div class="ev"><span class="tok human sm">N</span><div class="meta"><b>you</b> published <span class="badge edit">publish</span> Q3 Platform Roadmap<span class="t">2h ago</span></div></div>
+                <div class="ev"><span class="tok agent sm">⬡</span><div class="meta"><b>agent:codex</b> created CRDT Convergence Notes<span class="t">5h ago</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       (b) DOCUMENTS LIST  — tree + table, human & agent editors
+       ============================================================ -->
+  <div class="plate">
+    <span class="no">b</span>
+    <span class="lbl">Documents in a space <small>— collections tree + document table, human &amp; agent editors</small></span>
+    <span class="shape"></span>
+  </div>
+
+  <section class="app">
+    <div class="topbar">
+      <div class="wordmark"><span class="ring" aria-hidden="true"></span>editor<b>zero</b></div>
+      <div class="spacepick"><span class="sq" style="background:var(--cobalt)" aria-hidden="true"></span> Engineering&nbsp;▾</div>
+      <div class="cmdk"><span>Filter this space…</span><kbd>/</kbd></div>
+      <div class="who"><span class="tok agent sm" title="agent online">◐</span><span class="tok human" title="you">N</span></div>
+    </div>
+    <div class="canvas" style="padding:26px 30px 32px">
+      <div class="canvas-h">
+        <div><p class="kick">Engineering · collection</p><h2>Architecture</h2></div>
+        <span class="spacer"></span>
+        <button class="btn warn">⌗ Group</button>
+        <button class="btn pri" style="margin-left:8px"><span class="plus">＋</span> New doc</button>
+      </div>
+
+      <div class="split">
+        <!-- collections tree -->
+        <nav class="tree">
+          <div class="th">Collections</div>
+          <div class="tnode"><span class="car">▸</span><span class="fld" aria-hidden="true"></span> Product Specs<span class="ct">24</span></div>
+          <div class="tnode on"><span class="car">▾</span><span class="fld" aria-hidden="true"></span> Architecture<span class="ct">11</span></div>
+          <div class="tnode sub"><span class="car"></span> Sync &amp; CRDT<span class="ct">5</span></div>
+          <div class="tnode sub"><span class="car"></span> Storage<span class="ct">3</span></div>
+          <div class="tnode sub"><span class="car"></span> Permissions<span class="ct">3</span></div>
+          <div class="tnode"><span class="car">▸</span><span class="fld disc" aria-hidden="true"></span> API Reference<span class="ct">8</span></div>
+          <div class="tnode"><span class="car">▸</span><span class="fld" aria-hidden="true"></span> Runbooks<span class="ct">6</span></div>
+          <div class="tnode"><span class="car">▸</span><span class="fld disc" aria-hidden="true"></span> RFCs<span class="ct">14</span></div>
+        </nav>
+
+        <!-- document table -->
+        <div>
+          <table class="docs">
+            <thead><tr><td style="width:42%">Document</td><td>Editors</td><td>Status</td><td>Updated</td></tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="dt-title"><span class="ft" aria-hidden="true"></span> Write-Path Atomicity</div><div class="dt-id">doc_a1f · spec</div></td>
+                <td><div class="editors"><span class="tok human sm">N</span><span class="tok agent sm" title="agent:claude — editing now">◐</span><span class="extra">live</span></div></td>
+                <td><span class="chip rev">in review</span></td>
+                <td class="dt-id"><span class="live"><span class="pulse" aria-hidden="true"></span>now</span></td>
+              </tr>
+              <tr>
+                <td><div class="dt-title"><span class="ft" style="background:var(--cobalt)" aria-hidden="true"></span> CRDT Convergence Notes</div><div class="dt-id">doc_b73 · research</div></td>
+                <td><div class="editors"><span class="tok agent sm">⬡</span><span class="tok human sm">N</span><span class="tok human sm" style="background:var(--paper-2)">RP</span><span class="extra">+1</span></div></td>
+                <td><span class="chip draft">draft</span></td>
+                <td class="dt-id">5h ago</td>
+              </tr>
+              <tr>
+                <td><div class="dt-title"><span class="ft" aria-hidden="true"></span> Storage Engine Tradeoffs</div><div class="dt-id">doc_c20 · spec</div></td>
+                <td><div class="editors"><span class="tok human sm">RP</span></div></td>
+                <td><span class="chip pub">published</span></td>
+                <td class="dt-id">2d ago</td>
+              </tr>
+              <tr>
+                <td><div class="dt-title"><span class="ft" style="border-radius:50%" aria-hidden="true"></span> Permission Resolution Order</div><div class="dt-id">doc_d04 · spec</div></td>
+                <td><div class="editors"><span class="tok human sm">N</span><span class="tok agent sm">◐</span></div></td>
+                <td><span class="chip pub">published</span></td>
+                <td class="dt-id">3d ago</td>
+              </tr>
+              <tr>
+                <td><div class="dt-title"><span class="ft" aria-hidden="true"></span> Snapshot &amp; Restore Design</div><div class="dt-id">doc_e55 · research</div></td>
+                <td><div class="editors"><span class="tok agent sm">⬡</span><span class="extra">agent:codex</span></div></td>
+                <td><span class="chip draft">draft</span></td>
+                <td class="dt-id">4d ago</td>
+              </tr>
+              <tr>
+                <td><div class="dt-title"><span class="ft" style="background:var(--chrome)" aria-hidden="true"></span> Observability Spans</div><div class="dt-id">doc_f81 · spec</div></td>
+                <td><div class="editors"><span class="tok human sm">N</span><span class="tok human sm" style="background:var(--paper-2)">RP</span></div></td>
+                <td><span class="chip rev">in review</span></td>
+                <td class="dt-id">6d ago</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       (c) READING VIEW
+       ============================================================ -->
+  <div class="plate">
+    <span class="no">c</span>
+    <span class="lbl">Document — reading view <small>— finished doc: title, rich body, metadata</small></span>
+    <span class="shape r"></span>
+  </div>
+
+  <section class="app">
+    <div class="topbar">
+      <div class="wordmark"><span class="ring" aria-hidden="true"></span>editor<b>zero</b></div>
+      <div class="spacepick"><span class="sq" style="background:var(--cobalt)" aria-hidden="true"></span> Engineering ▸ Architecture</div>
+      <div class="cmdk" style="min-width:auto"><span>Reading</span></div>
+      <div class="who"><button class="btn warn" style="box-shadow:3px 3px 0 var(--ink);padding:6px 12px">Edit</button><button class="btn pri" style="box-shadow:3px 3px 0 var(--ink);padding:6px 12px;margin-left:8px">Publish</button></div>
+    </div>
+    <div class="read-wrap">
+      <article class="read">
+        <p class="doc-kick">Engineering · Architecture · Specification</p>
+        <h1 class="title">Write-Path Atomicity</h1>
+        <p class="lede">Every content mutation flows through a single transactional seam, <code>ctx.transact(doc_id, fn)</code>, so that human keystrokes and agent edits land as one ordered, audited, convergent stream — never a partial write.</p>
+
+        <h2 class="c">Why a single seam</h2>
+        <p>The platform treats humans and AI agents as peer co-editors. That peerage is only real if both write through the same path with the same guarantees. A second mutation door — a faster, looser one for agents — is how convergence quietly rots and the audit log stops being a faithful record.</p>
+        <p>We therefore route <em>all</em> content writes through one function. Metadata mutations take the dispatcher transaction; content mutations take the document transaction. The boundary between them is enforced by <code>METADATA_ONLY_CAPABILITIES</code>, not by convention.</p>
+
+        <h2>The three guarantees</h2>
+        <ul>
+          <li><strong>Atomic.</strong> A capability either commits whole or not at all — no half-applied block trees.</li>
+          <li><strong>Ordered.</strong> Concurrent edits serialise into one CRDT history that every replica reconstructs identically.</li>
+          <li><strong>Audited.</strong> Exactly one audit entry per mutation; the log alone replays initial → final state.</li>
+        </ul>
+
+        <div class="callout">
+          <span class="ct">Invariant · property-tested</span>
+          Any set of concurrent edits from any mix of human and agent clients converges to the same state across replicas — and the audit log alone can reconstruct that final state.
+        </div>
+
+        <h2 class="c">Shape of the seam</h2>
+        <p>Surfaces never reach into storage. They call a capability; the capability runs inside the transaction and emits its audit entry as part of the same commit.</p>
+        <pre class="code"><span class="c">// content mutations are transaction-scoped</span>
+<span class="k">await</span> ctx.<span class="k">transact</span>(docId, (doc) =&gt; {
+  doc.<span class="k">insertBlocks</span>(afterId, blocks);
+  <span class="c">// audit entry is part of THIS commit — never after</span>
+  ctx.<span class="k">audit</span>(<span class="s">"block.insert"</span>, { docId, blocks });
+});</pre>
+        <p>Because the audit write shares the commit, there is no window in which a mutation exists without its record. Crash between the two? Neither happened.</p>
+      </article>
+
+      <aside class="read-meta">
+        <p class="mh">Metadata</p>
+        <div class="mrow"><span class="ml">doc id</span><span class="mv" style="font-family:var(--mono);font-size:11.5px">doc_a1f93c</span></div>
+        <div class="mrow"><span class="ml">status</span><span class="mv"><span class="chip rev">in review</span></span></div>
+        <div class="mrow"><span class="ml">tier</span><span class="mv">Markdown · strict</span></div>
+        <div class="mrow"><span class="ml">version</span><span class="mv">v14 · 2026-05-30</span></div>
+
+        <p class="mh t2">Contributors</p>
+        <div class="contrib"><span class="tok human sm">N</span><div><span class="nm">Nomi</span><span class="rl">human · owner</span></div></div>
+        <div class="contrib"><span class="tok agent sm">◐</span><div><span class="nm">agent:claude</span><span class="rl">agent · co-editor · live</span></div></div>
+        <div class="contrib"><span class="tok human sm" style="background:var(--paper-2)">RP</span><div><span class="nm">Rai P.</span><span class="rl">human · reviewer</span></div></div>
+
+        <p class="mh t2">On this page</p>
+        <ul class="toc">
+          <li class="on">Why a single seam</li>
+          <li>The three guarantees</li>
+          <li>Shape of the seam</li>
+        </ul>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       (d) EDITOR  — THE HERO. Tiptap-style + live agent co-editor
+       ============================================================ -->
+  <div class="plate">
+    <span class="no">d</span>
+    <span class="lbl">Document editor <small>— Tiptap-style toolbar + slash menu, block handles, a LIVE agent co-editor &amp; tracked suggestion</small></span>
+    <span class="shape c"></span>
+  </div>
+
+  <section class="app">
+    <div class="topbar">
+      <div class="wordmark"><span class="ring" aria-hidden="true"></span>editor<b>zero</b></div>
+      <div class="spacepick"><span class="sq" style="background:var(--cobalt)" aria-hidden="true"></span> Engineering ▸ Write-Path Atomicity</div>
+      <div class="copresence" style="margin-left:auto" title="co-editing now">
+        <span class="tok human sm" title="Nomi (you)">N</span>
+        <span class="tok agent sm" title="agent:claude — editing">◐</span>
+        <span class="tok human sm" style="background:var(--paper-2)" title="Rai P.">RP</span>
+      </div>
+      <div class="who" style="margin-left:16px"><button class="btn warn" style="box-shadow:3px 3px 0 var(--ink);padding:6px 12px">Share</button></div>
+    </div>
+
+    <div class="editor-shell">
+      <!-- formatting toolbar -->
+      <div class="toolbar">
+        <div class="tgrp">
+          <span class="tbtn mono">¶ Text ▾</span>
+        </div>
+        <div class="tgrp">
+          <span class="tbtn on"><span class="i b">B</span></span>
+          <span class="tbtn"><span class="i it">I</span></span>
+          <span class="tbtn"><span class="i u">U</span></span>
+          <span class="tbtn"><span class="i st">S</span></span>
+        </div>
+        <div class="tgrp">
+          <span class="tbtn mono">&lt;/&gt;</span>
+          <span class="tbtn">🔗</span>
+          <span class="tbtn mono">"</span>
+        </div>
+        <div class="tgrp">
+          <span class="tbtn mono">H1</span>
+          <span class="tbtn mono">H2</span>
+          <span class="tbtn mono">•</span>
+          <span class="tbtn mono">1.</span>
+        </div>
+        <div class="tgrp">
+          <span class="tbtn" title="comment">💬</span>
+          <span class="tbtn" title="ask an agent" style="font-family:var(--mono);font-size:11px">◐ Ask</span>
+        </div>
+        <div class="tbar-status">
+          <span>v14 · doc_a1f</span>
+          <span class="saved"><span class="d" aria-hidden="true"></span> synced · CRDT</span>
+        </div>
+      </div>
+
+      <!-- editable body -->
+      <div class="editor-body">
+        <div class="doc-canvas">
+
+          <div class="eblock">
+            <div class="handle" aria-hidden="true"><span class="add">＋</span><span class="grip">⠿</span></div>
+            <h1 class="eh1" contenteditable="false">Write-Path Atomicity</h1>
+          </div>
+
+          <div class="eblock">
+            <div class="handle" aria-hidden="true"><span class="add">＋</span><span class="grip">⠿</span></div>
+            <p class="ep" contenteditable="false">Every content mutation flows through one transactional seam, <code style="font-family:var(--mono);font-size:13px;background:var(--paper);border:1.5px solid var(--hair);padding:0 4px">ctx.transact(doc_id, fn)</code>, so human keystrokes and <span class="sel">agent edits land as one ordered</span>, audited stream.</p>
+          </div>
+
+          <div class="eblock">
+            <div class="handle" aria-hidden="true"><span class="add">＋</span><span class="grip">⠿</span></div>
+            <h2 class="eh2" contenteditable="false">The three guarantees</h2>
+          </div>
+
+          <!-- the line the AGENT is editing live -->
+          <div class="eblock agent-line">
+            <div class="handle" aria-hidden="true"><span class="add">＋</span><span class="grip">⠿</span></div>
+            <p class="ep" contenteditable="false">Atomic: a capability commits whole or not at all. Ordered: concurrent edits serialise into one history<span class="agent-caret" aria-hidden="true"><span class="agent-flag">◐ agent:claude<span class="rc solid" aria-hidden="true"></span></span></span> that every replica reconstructs identically.</p>
+          </div>
+
+          <!-- tracked SUGGESTION from the agent (peer co-editor, gated) -->
+          <div class="suggestion" role="group" aria-label="Suggestion from agent:claude">
+            <div class="sh">
+              <span class="who2"><span class="rc">◐</span> agent:claude suggests an edit</span>
+              <span class="ago">12s ago · awaiting review</span>
+            </div>
+            <div class="sbody">
+              Audited: exactly one audit entry per mutation <ins>— and the log alone replays initial&nbsp;→&nbsp;final state</ins><del>, written shortly after the commit</del>. Because the audit write shares the commit, no mutation exists without its record.
+            </div>
+            <div class="sfoot">
+              <button class="sbtn acc">✓ Accept</button>
+              <button class="sbtn rej">✕ Dismiss</button>
+              <button class="sbtn add">↳ Reply in thread</button>
+            </div>
+          </div>
+
+          <div class="eblock">
+            <div class="handle" aria-hidden="true"><span class="add">＋</span><span class="grip">⠿</span></div>
+            <p class="ep" contenteditable="false" style="color:var(--ink-soft)">Crash between mutation and record? Neither happened.</p>
+          </div>
+
+          <!-- trailing block where the human is typing a slash command; menu opens beneath it -->
+          <div class="eblock slash-anchor">
+            <div class="handle" aria-hidden="true"><span class="add">＋</span><span class="grip">⠿</span></div>
+            <p class="ep"><span class="cmd"><b>/h</b></span><span class="caret" aria-hidden="true"></span></p>
+            <!-- slash menu (block insert), anchored to this block in clear space -->
+            <div class="slash" role="menu" aria-label="Insert block">
+              <div class="sg">Blocks  ·  filter “/h”</div>
+              <div class="si on" role="menuitem"><span class="ki">H1</span> Heading 1 <span class="kb">#</span></div>
+              <div class="si" role="menuitem"><span class="ki">¶</span> Text <span class="kb">⏎</span></div>
+              <div class="si" role="menuitem"><span class="ki y">"</span> Quote <span class="kb">&gt;</span></div>
+              <div class="si" role="menuitem"><span class="ki">&lt;/&gt;</span> Code block <span class="kb">```</span></div>
+              <div class="sg">AI</div>
+              <div class="si" role="menuitem"><span class="ki r">◐</span> Ask agent to draft <span class="kb">⌘ J</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       (e) ADMIN / MEMBERS
+       ============================================================ -->
+  <div class="plate">
+    <span class="no">e</span>
+    <span class="lbl">Admin — members <small>— users, teams &amp; spaces; agents as first-class principals</small></span>
+    <span class="shape"></span>
+  </div>
+
+  <section class="app">
+    <div class="topbar">
+      <div class="wordmark"><span class="ring" aria-hidden="true"></span>editor<b>zero</b></div>
+      <div class="spacepick"><span class="sq" style="background:var(--vermilion)" aria-hidden="true"></span> Acme Robotics · Admin</div>
+      <div class="cmdk"><span>Find a member or agent…</span><kbd>⌘ K</kbd></div>
+      <div class="who"><span class="tok human" title="admin">N</span></div>
+    </div>
+
+    <div class="canvas" style="padding:26px 30px 32px">
+      <div class="canvas-h">
+        <div><p class="kick">Organisation administration</p><h2>Members &amp; Agents</h2></div>
+        <span class="spacer"></span>
+        <button class="btn warn">＋ Invite human</button>
+        <button class="btn pri" style="margin-left:8px"><span class="plus">◐</span> Provision agent</button>
+      </div>
+
+      <div class="admin-aside">
+        <div class="acard c"><span class="arc" aria-hidden="true"></span><div class="at">Total principals</div><div class="av">18</div></div>
+        <div class="acard y"><span class="arc" aria-hidden="true"></span><div class="at">Human members</div><div class="av">13</div></div>
+        <div class="acard r"><span class="arc" aria-hidden="true"></span><div class="at">Active agents</div><div class="av">5</div></div>
+      </div>
+
+      <div class="admin-tabs">
+        <span class="atab on">Members</span>
+        <span class="atab">Teams</span>
+        <span class="atab">Spaces</span>
+        <span class="atab">Settings</span>
+      </div>
+
+      <div class="admin-panel">
+        <table class="members">
+          <thead><tr><td style="width:30%">Principal</td><td>Kind</td><td>Role</td><td>Teams</td><td>Rate limit</td><td></td></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="mname"><span class="tok human lg">N</span><div><div class="nm">Nomi</div><div class="em">nomi@acme.dev</div></div></div></td>
+              <td><span class="kind h"><span class="m" aria-hidden="true"></span> human</span></td>
+              <td><div class="role">Owner<small>full access</small></div></td>
+              <td><div class="teams-chips"><span class="tchip">Eng</span><span class="tchip">Product</span></div></td>
+              <td><span class="lim">—</span></td>
+              <td><button class="rev">Manage</button></td>
+            </tr>
+            <tr>
+              <td><div class="mname"><span class="tok agent lg">◐</span><div><div class="nm">agent:claude</div><div class="em">token ··· 9f3a · rotated 4d</div></div></div></td>
+              <td><span class="kind a"><span class="m" aria-hidden="true"></span> agent</span></td>
+              <td><div class="role">Co-editor<small>write · suggest</small></div></td>
+              <td><div class="teams-chips"><span class="tchip">Eng</span></div></td>
+              <td><span class="lim"><b>240</b>/min · <b>OK</b></span></td>
+              <td><button class="rev">Revoke</button></td>
+            </tr>
+            <tr>
+              <td><div class="mname"><span class="tok agent lg">⬡</span><div><div class="nm">agent:codex</div><div class="em">token ··· c711 · rotated 1d</div></div></div></td>
+              <td><span class="kind a"><span class="m" aria-hidden="true"></span> agent</span></td>
+              <td><div class="role">Co-editor<small>write · suggest</small></div></td>
+              <td><div class="teams-chips"><span class="tchip">Eng</span><span class="tchip">Ops</span></div></td>
+              <td><span class="lim"><b>120</b>/min · <b>OK</b></span></td>
+              <td><button class="rev">Revoke</button></td>
+            </tr>
+            <tr>
+              <td><div class="mname"><span class="tok human lg" style="background:var(--paper-2)">RP</span><div><div class="nm">Rai Patel</div><div class="em">rai@acme.dev</div></div></div></td>
+              <td><span class="kind h"><span class="m" aria-hidden="true"></span> human</span></td>
+              <td><div class="role">Editor<small>write</small></div></td>
+              <td><div class="teams-chips"><span class="tchip">Eng</span></div></td>
+              <td><span class="lim">—</span></td>
+              <td><button class="rev">Manage</button></td>
+            </tr>
+            <tr>
+              <td><div class="mname"><span class="tok agent lg" style="background:var(--vermilion);">◑</span><div><div class="nm">agent:indexer</div><div class="em">token ··· 02bd · rotated 9d</div></div></div></td>
+              <td><span class="kind a"><span class="m" aria-hidden="true"></span> agent</span></td>
+              <td><div class="role">Reader<small>read-only · embeddings</small></div></td>
+              <td><div class="teams-chips"><span class="tchip">All</span></div></td>
+              <td><span class="lim"><b>600</b>/min · <b>OK</b></span></td>
+              <td><button class="rev">Revoke</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- footer / token legend -->
+  <footer class="foot">
+    <span>KONSTRUKT · editorzero brand exploration · geometric-blocks territory</span>
+    <span class="sw"><i style="background:var(--chrome)" aria-hidden="true"></i> human = square</span>
+    <span class="sw"><i class="ci" style="background:var(--cobalt)" aria-hidden="true"></i> agent = circle</span>
+    <span class="sw"><i style="background:var(--vermilion)" aria-hidden="true"></i> live / destructive</span>
+    <span>type: Space Grotesk · Archivo · IBM Plex Mono — all OFL/Apache</span>
+  </footer>
+
+</div>
+</body>
+</html>

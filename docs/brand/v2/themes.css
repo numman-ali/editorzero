@@ -1,0 +1,39 @@
+/* Meridian Zero — curated alternate themes.
+   PROOF of the token model: a theme is ONLY a set of :root token overrides.
+   Default (Meridian Zero) lives in meridian-zero.css :root. These blocks
+   re-skin the entire app by overriding tokens on html[data-theme="…"].
+   A user authors their own the same way — override the globals, no rebuild. */
+
+/* ── Graphite Dark — cold dark mode ───────────────────────────── */
+html[data-theme="dark"]{
+  --paper:#0c0e13; --surface:#14171d; --surface-2:#1b1f27; --surface-sunk:#090b0f; --bg-hover:#10141b;
+  --ink:#e8edf3; --ink-1:#c5ced8; --ink-2:#9aa6b4; --ink-3:#717d8c;
+  --steel:#8b97a6; --steel-2:#697482; --hair:#242b34; --hair-strong:#333c47; --grid-line:#1a2028;
+  --ultra:#5570ff; --ultra-ink:#a9b8ff; --ultra-wash:#16213f; --ultra-edge:#2d3d6e;
+  --agent:#1fd6e2; --agent-ink:#82ecf2; --agent-wash:#0b2b2f; --agent-edge:#1b5158;
+  --ok:#33c07e; --warn-ink:#e0ad4e; --warn-wash:#2a2410;
+}
+html[data-theme="dark"] body{ background:var(--paper); color:var(--ink); }
+
+/* ── High Contrast — accessibility-first, black/white + strong rules ── */
+html[data-theme="contrast"]{
+  --paper:#ffffff; --surface:#ffffff; --surface-2:#f2f2f2; --surface-sunk:#e6e6e6;
+  --ink:#000000; --ink-1:#0a0a0a; --ink-2:#1a1a1a; --ink-3:#2e2e2e;
+  --steel:#262626; --steel-2:#444444; --hair:#000000; --hair-strong:#000000; --grid-line:#bcbcbc;
+  --ultra:#0a18d6; --ultra-ink:#0a18d6; --ultra-wash:#dde1ff; --ultra-edge:#0a18d6;
+  --agent:#006a73; --agent-ink:#00474e; --agent-wash:#d2f3f5; --agent-edge:#006a73;
+  --ok:#0a6b3d; --warn-ink:#7a4d00; --warn-wash:#fff0cf;
+  --rule:1.5px; --rule-2:2px;
+}
+
+/* ── Ultraviolet — same neutrals, accent swap only (violet + magenta agent).
+      Demonstrates accent re-theming by changing ~8 tokens. ───────── */
+html[data-theme="ultraviolet"]{
+  --ultra:#6b2bff; --ultra-ink:#4a14b8; --ultra-wash:#efe6ff; --ultra-edge:#cdb4ff;
+  --agent:#ff3d9a; --agent-ink:#a8004f; --agent-wash:#ffe0ee; --agent-edge:#ffb3d4;
+}
+
+/* Honour reduced-motion globally regardless of theme (mocks may animate). */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{ animation:none !important; transition:none !important; }
+}

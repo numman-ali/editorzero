@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Document reading view</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ===== Document reading view — screen-specific + responsive ===== */
+
+/* sidebar top: logo above workspace switcher (mock had only kicker) */
+.reading-win .side .top .logo{ margin-bottom:12px; }
+.reading-win .side .ws{ margin-top:0; }
+
+/* bar refinements */
+.reading-bar-actions{ margin-left:auto; display:flex; gap:8px; align-items:center; }
+.reading-menu-btn{
+  display:none; align-items:center; justify-content:center;
+  width:36px; height:36px; flex:0 0 36px; padding:0;
+  background:var(--surface); border:var(--rule) solid var(--hair-strong);
+  color:var(--ink-1); font-size:15px; cursor:pointer; border-radius:var(--radius);
+}
+.reading-menu-btn:hover{ border-color:var(--ink); }
+
+/* reading-progress hairline under the bar (engineering-drawing measure) */
+.reading-progress{
+  height:var(--rule-2); background:var(--surface-sunk);
+  position:relative; overflow:hidden;
+}
+.reading-progress i{ display:block; height:100%; background:var(--ultra); transition:width .2s linear; }
+
+/* keep meta strip below the lede in the canonical flow but tighten the eyebrow */
+.reading-eyebrow{ margin-bottom:14px; }
+
+/* authors meta: overlapping stack + "+ agent" tail, mono and cold */
+.reading-stack{ margin-right:8px; }
+.reading-stack .av{ border:var(--rule-2) solid var(--surface); }
+.reading-plusone{ color:var(--agent-ink); }
+
+/* inline document-end footer — calm editorial close with brand crosshair */
+.reading-foot{
+  display:flex; align-items:center; gap:10px;
+  margin-top:34px; padding-top:16px;
+  border-top:var(--rule) solid var(--ink);
+  font-family:var(--mono); font-size:10.5px; color:var(--steel);
+  letter-spacing:0.03em;
+}
+.reading-foot-mark{
+  position:relative; display:inline-block; width:16px; height:16px; flex:0 0 16px; color:var(--ultra);
+}
+.reading-foot-tx b{ color:var(--ink-1); font-weight:600; }
+
+/* right rail: version tags + provenance kv (compose with .toc/.ver/.kv) */
+.reading-vtag{ margin-left:auto; font-family:var(--mono); font-size:9px; color:var(--steel-2); letter-spacing:0.04em; }
+.reading-vmore{ color:var(--steel-2); }
+.reading-vmore .ord{ margin-right:6px; }
+.reading-kv{ padding:4px 0; }
+.reading-kv .v{ text-align:right; }
+
+/* second .ver block already has a top border from .toc .ver; tighten spacing */
+.reading-toc .ver + .ver{ margin-top:14px; }
+
+/* ===== mobile bottom tab bar (hidden on desktop) ===== */
+.reading-tabbar{ display:none; }
+
+/* =========================================================
+   RESPONSIVE
+   The shared sheet collapses .side/.toc and stacks the grid
+   at <=1120px. We add: mobile nav affordances, a phone tab
+   bar, and <=640px editorial reflow + 44px touch targets.
+   ========================================================= */
+
+/* tablet / collapsed-rail band: rails hidden by shared sheet.
+   Surface the hamburger so the sidebar is still reachable, and
+   center the reader column. */
+@media (max-width:1120px){
+  .reading-menu-btn{ display:inline-flex; }
+  /* off-canvas sidebar when toggled (no JS dependency for layout) */
+  .reading-win .side{
+    display:flex; position:fixed; inset:0 auto 0 0; z-index:40;
+    width:284px; max-width:86vw; transform:translateX(-102%);
+    transition:transform .22s ease; box-shadow:2px 0 0 var(--hair-strong);
+    overflow-y:auto;
+  }
+  .reading-win .side:target{ transform:translateX(0); }
+  .reading-body{ padding:20px 18px; }
+}
+
+/* phone: bottom tab bar replaces chrome; editorial reflow */
+@media (max-width:640px){
+  /* free the screen frame edge-to-edge on phones */
+  .screen{ border-left:0; border-right:0; margin-bottom:0; }
+  .screen-tab .meta{ display:none; }
+
+  /* sticky top bar; wrap actions; drop heavier buttons */
+  .reading-bar{
+    position:sticky; top:0; z-index:30; background:var(--surface);
+    gap:10px; padding:10px 14px; min-height:48px;
+    flex-wrap:wrap;
+  }
+  .reading-bar .crumb{ font-size:10px; order:2; flex-basis:100%; }
+  .reading-bar-actions{ order:1; gap:6px; }
+  .reading-hide-sm{ display:none; }
+  .reading-bar-actions .btn{ min-height:38px; }
+
+  /* sticky progress under the (sticky) bar */
+  .reading-progress{ position:sticky; top:48px; z-index:29; }
+
+  /* reader column: full-bleed, larger comfortable measure */
+  .reader{ max-width:100%; padding:4px 0 26px; }
+  .reading-body{ padding:16px 16px 96px; } /* bottom pad clears tab bar */
+  .read-h1{ font-size:30px; line-height:1.04; }
+  .read-lede{ font-size:15px; }
+  .doc-body{ font-size:15px; }                 /* >=15px body for phone reading */
+  .doc-body p, .doc-body ul li{ max-width:none; }
+  .doc-body h2{ margin-top:24px; }
+  .codeblock pre{ font-size:11.5px; }
+
+  /* meta strip stacks into a compact two-up grid */
+  .read-meta{ gap:12px 18px; margin-bottom:22px; }
+  .read-meta .mi{ min-width:38%; }
+  .reading-plusone{ display:inline; }
+
+  /* ===== bottom tab bar ===== */
+  .reading-tabbar{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:50;
+    background:var(--surface); border-top:var(--rule) solid var(--ink);
+    /* respect iOS home indicator on the installed PWA */
+    padding-bottom:env(safe-area-inset-bottom, 0);
+  }
+  .reading-tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    min-height:56px; padding:8px 4px; background:var(--surface);
+    border:0; border-right:var(--rule) solid var(--hair); cursor:pointer;
+    color:var(--steel); font-family:var(--mono);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .reading-tab:last-child{ border-right:0; }
+  .reading-tab-ic{ font-size:16px; line-height:1; }
+  .reading-tab-lbl{ font-size:9px; letter-spacing:0.08em; text-transform:uppercase; }
+  .reading-tab.on{ color:var(--ultra-ink); }
+  .reading-tab.on .reading-tab-ic{ color:var(--ultra); }
+
+  /* TOC + versions reachable as a bottom sheet via :target.
+     Shared sheet sets .toc{display:none}; re-show only when targeted. */
+  .reading-toc{ display:none; }
+  .reading-toc:target{
+    display:block; position:fixed; left:0; right:0; bottom:56px; z-index:49;
+    max-height:62vh; overflow-y:auto;
+    border-left:0; border-top:var(--rule-2) solid var(--ink);
+    box-shadow:0 -3px 0 var(--surface-sunk);
+    padding:18px 18px calc(18px + env(safe-area-inset-bottom, 0));
+  }
+  .reading-toc a, .reading-toc .vrow{ padding-top:9px; padding-bottom:9px; } /* 44px-ish touch rows */
+  .reading-toc .vrow{ min-height:30px; }
+}
+
+/* ===== motion: disable all animation when requested ===== */
+@media (prefers-reduced-motion: reduce){
+  .reading-win .side{ transition:none; }
+  .reading-progress i{ transition:none; }
+  .reading-tab{ transition:none; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<section class="screen">
+  <div class="screen-tab">
+    <div class="id"><span class="ord">SCR.C</span><span class="big">Document &middot; Reading view</span></div>
+    <div class="meta"><span>PUBLISHED</span><span>RICH BODY</span><span>TOC + VERSIONS</span></div>
+  </div>
+
+  <div class="win win--reader reading-win">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="side">
+      <div class="top">
+        <a class="logo" href="#" aria-label="editorzero home">
+          <span class="mark"><span class="cross"></span><span class="cross-ring"></span></span>
+          <span class="word">editor<b class="zero">0</b></span>
+        </a>
+        <div class="ws" role="button" tabindex="0">
+          <span class="av av--u">P</span>
+          <div style="min-width:0;"><div class="nm">Platform</div><div class="sub">SP&middot;01 / Topology</div></div>
+          <span class="car">&#9662;</span>
+        </div>
+      </div>
+      <div class="nav-h kicker">In this collection</div>
+      <div class="tree">
+        <div class="row on"><span class="ic">&#9636;</span> Runtime topology <span class="ct">&#8614;</span></div>
+        <div class="row"><span class="ic">&#9636;</span> Co-hosting &amp; auth</div>
+        <div class="row"><span class="ic">&#9636;</span> WebSocket upgrade</div>
+        <div class="row"><span class="ic">&#9636;</span> Same-origin auth</div>
+        <div class="row ind"><span class="tw">&#9492;</span><span class="ic">&#9636;</span> Cookie resolver <span class="ct">draft</span></div>
+        <div class="row"><span class="ic">&#9636;</span> Revocation freshness</div>
+      </div>
+      <div class="nav-h kicker">Contributors</div>
+      <nav class="nav">
+        <a href="#"><span class="dot dot--ultra" style="margin:0 3px"></span> Nadia A. <span class="ct">author</span></a>
+        <a href="#"><span class="dot dot--ultra" style="margin:0 3px"></span> Jo K. <span class="ct">editor</span></a>
+        <a href="#"><span class="dot dot--agent" style="margin:0 3px"></span> archivist <span class="ct" style="color:var(--agent-ink)">AI</span></a>
+      </nav>
+      <div class="foot">
+        <span class="av av--u">NA</span>
+        <div><div class="nm">Nadia A.</div><div class="rl">ADMIN &middot; #001</div></div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN / READER ============ -->
+    <div class="main">
+      <div class="bar reading-bar">
+        <button class="reading-menu-btn" aria-label="Open navigation" type="button">&#9776;</button>
+        <div class="crumb"><b>Platform</b> <span class="sep">/</span> Architecture <span class="sep">/</span> <b>Runtime topology</b></div>
+        <div class="reading-bar-actions">
+          <span class="status-tag st-pub">Published</span>
+          <button class="btn btn--ghost btn--sm reading-hide-sm">&#8617; History</button>
+          <button class="btn btn--ghost btn--sm">&#10548; Share</button>
+          <button class="btn btn--primary btn--sm">&#9998; Edit</button>
+        </div>
+      </div>
+
+      <!-- reading progress hairline -->
+      <div class="reading-progress" aria-hidden="true"><i style="width:34%"></i></div>
+
+      <div class="body reading-body">
+        <article class="reader">
+          <div class="kicker kicker--ultra reading-eyebrow">&#8761; RFC &middot; PLATFORM / ARCHITECTURE &middot; DOC #0a1e</div>
+          <h1 class="read-h1">Runtime topology<br>&amp; co-hosting<span class="z">.</span></h1>
+          <p class="read-lede">The Hono trunk is the top-level server: it hosts the SPA as static assets, the JSON-RPC capability surface, auth, MCP, and an embedded collaboration server &mdash; all on one owned port. This document fixes that decision and the four production-attach blockers it leaves open.</p>
+
+          <!-- META STRIP: authors incl. an AI contributor, version, reading-time, published -->
+          <div class="read-meta">
+            <div class="mi">
+              <span class="k">Authors</span>
+              <span class="v">
+                <span class="editors-stack reading-stack">
+                  <span class="av av--u" style="width:18px;height:18px;flex:0 0 18px">NA</span>
+                  <span class="av av--u2" style="width:18px;height:18px;flex:0 0 18px">JK</span>
+                  <span class="av av--agent" style="width:18px;height:18px;flex:0 0 18px" title="AI contributor">AR</span>
+                </span>
+                Nadia A., Jo K. <span class="reading-plusone">+ archivist</span>
+              </span>
+            </div>
+            <div class="mi">
+              <span class="k">Agent contributor</span>
+              <span class="v"><span class="av av--agent" style="width:16px;height:16px;flex:0 0 16px">AR</span> archivist &middot; AI</span>
+            </div>
+            <div class="mi"><span class="k">Published</span><span class="v">2026&middot;05&middot;31</span></div>
+            <div class="mi"><span class="k">Version</span><span class="v">v14 &middot; snapshot</span></div>
+            <div class="mi"><span class="k">Read time</span><span class="v tnum">9 min &middot; 2,410 w</span></div>
+          </div>
+
+          <!-- BODY -->
+          <div class="doc-body">
+            <h2 id="s1"><span class="ord">01</span> Decision</h2>
+            <p>Adopt a single-process trunk. The HTTP server, the static SPA assets, the <code>/auth</code> and <code>/mcp</code> mounts, the event-rendered published HTML, and the embedded Hocuspocus collaboration server co-host on one <code>http.Server</code> instance. No second framework hosts the collaboration WebSocket, and no reverse proxy is required for the surfaces to share a principal.</p>
+
+            <div class="callout">
+              <div class="b"></div>
+              <div class="tx"><b>Invariant.</b> The WebSocket upgrade authenticates the principal from the same-origin cookie before any document is reachable; per-document authorization runs at <code>onAuthenticate</code>. A rolled-back SQL transaction must never leave a mutation resident in the live Y.Doc once clients attach.</div>
+            </div>
+
+            <h2 id="s2"><span class="ord">02</span> Co-hosting mechanism</h2>
+            <p>The trunk owns the server; raw <code>ws</code> in <code>noServer</code> mode receives the upgrade and hands the connection to Hocuspocus. Static assets are served from the SPA build directory; everything else routes through the capability surface, so one origin and one cookie carry every principal &mdash; human or agent.</p>
+            <div class="codeblock">
+              <div class="ch"><span>server.ts &middot; upgrade handoff</span><span>TS</span></div>
+<pre><span class="cm">// one owned http.Server — all surfaces co-host</span>
+server.<span class="kw">on</span>(<span class="st">"upgrade"</span>, <span class="kw">async</span> (req, socket, head) =&gt; {
+  <span class="kw">const</span> principal = <span class="kw">await</span> resolver.fromCookie(req);
+  <span class="kw">if</span> (!principal) <span class="kw">return</span> socket.destroy();
+  ws.handleUpgrade(req, socket, head, (conn) =&gt;
+    hocuspocus.handleConnection(conn, req, { principal })
+  );
+});</pre>
+            </div>
+
+            <h2 id="s3"><span class="ord">03</span> Principals on one origin</h2>
+            <p>Both humans and AI agents authenticate against the same cookie session and arrive as typed principals. An agent carries its own rate limit, capability scope, and audit attribution &mdash; the upgrade path does not special-case it beyond resolving the principal kind.</p>
+            <ul>
+              <li><b>Human</b> &mdash; session cookie, interactive scopes, presence shown as a square ultramarine marker.</li>
+              <li><b>Agent</b> &mdash; scoped API key bridged to a session, distinct rate limit, notched-cyan presence and audit attribution.</li>
+              <li>Every mutation from either principal writes exactly one audit entry; the log alone reconstructs final state.</li>
+            </ul>
+
+            <h2 id="s4"><span class="ord">04</span> Open blockers</h2>
+            <p>Four production-attach blockers remain before this topology is hardened for untrusted networks:</p>
+            <ul>
+              <li>Role-aware read / write at <code>onAuthenticate</code>, not the tenant-only floor.</li>
+              <li>An <code>Origin</code> check on the WebSocket upgrade to reject cross-site sockets.</li>
+              <li>Revocation freshness on the upgrade-time principal snapshot.</li>
+              <li>Enforce the <code>onAuthenticate</code> invariant by construction, not by convention.</li>
+            </ul>
+
+            <!-- inline footer: editorial close + agent attribution -->
+            <div class="reading-foot">
+              <span class="reading-foot-mark"><span class="cross"></span><span class="cross-ring"></span></span>
+              <span class="reading-foot-tx">End of document &middot; <span class="mono">DOC #0a1e</span> &middot; last edited by <span class="av av--agent" style="width:14px;height:14px;flex:0 0 14px;vertical-align:-2px">AR</span> <b>archivist</b> on 2026&middot;05&middot;31</span>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <!-- ============ RIGHT RAIL: TOC + VERSIONS ============ -->
+    <aside class="toc reading-toc">
+      <div class="h">On this page</div>
+      <a class="on" href="#s1"><span class="ord">01</span> Decision</a>
+      <a href="#s2"><span class="ord">02</span> Co-hosting mechanism</a>
+      <a href="#s3"><span class="ord">03</span> Principals on one origin</a>
+      <a href="#s4"><span class="ord">04</span> Open blockers</a>
+
+      <div class="ver">
+        <div class="h">Version trail</div>
+        <div class="vrow"><span class="dot dot--ultra"></span> v14 &middot; current <span class="reading-vtag">Nadia A.</span></div>
+        <div class="vrow"><span class="dot dot--agent"></span> v13 &middot; archivist <span class="reading-vtag" style="color:var(--agent-ink)">AI</span></div>
+        <div class="vrow"><span class="dot"></span> v12 &middot; Nadia A.</div>
+        <div class="vrow"><span class="dot"></span> v11 &middot; Jo K.</div>
+        <div class="vrow reading-vmore"><span class="ord">+10</span> earlier revisions</div>
+      </div>
+
+      <div class="ver">
+        <div class="h">Provenance</div>
+        <div class="kv reading-kv"><span class="k">Tier</span><span class="v mono">RFC / accepted</span></div>
+        <div class="kv reading-kv"><span class="k">Audit</span><span class="v mono">218 entries</span></div>
+        <div class="kv reading-kv"><span class="k">License</span><span class="v mono">AGPL-3.0</span></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ MOBILE BOTTOM TAB BAR (phones only) ============ -->
+<nav class="reading-tabbar" aria-label="Primary">
+  <a href="#" class="reading-tab on"><span class="reading-tab-ic">&#9636;</span><span class="reading-tab-lbl">Doc</span></a>
+  <button type="button" class="reading-tab" data-target="toc"><span class="reading-tab-ic">&#9776;</span><span class="reading-tab-lbl">Contents</span></button>
+  <button type="button" class="reading-tab" data-target="ver"><span class="reading-tab-ic">&#9201;</span><span class="reading-tab-lbl">Versions</span></button>
+  <a href="#" class="reading-tab"><span class="reading-tab-ic">&#9998;</span><span class="reading-tab-lbl">Edit</span></a>
+</nav>
+</body>
+</html>

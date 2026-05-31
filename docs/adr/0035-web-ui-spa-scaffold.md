@@ -1,8 +1,10 @@
 # ADR 0035 — Web UI SPA scaffold: app layout, dev-loop, router mode, and frontend supply-chain posture
 
-**Status:** Accepted (2026-05-31)
+**Status:** Accepted (2026-05-31) — **editor pins amended 2026-05-31, see below**
 **Date:** 2026-05-31
 **Deciders:** Claude Opus 4.8 (scaffolding specifics, delegated per AGENTS.md); @numman (frontend supply-chain posture)
+
+> **Amendment (2026-05-31).** The scaffolding decisions (1–5: `apps/app`, the same-origin dev proxy, `apps/app/dist`, file-based routing, and the pin + lockfile + cooldown supply-chain posture) all stand unchanged. **Only the editor substrate changed:** ADR 0038 drops the BlockNote Phase-1 bootstrap and adopts Tiptap v3 directly, and ADR 0037 makes the design system **Base UI, not Mantine**. So the `@blocknote/*` + `@mantine/*` pins in the table (item 6) and the BlockNote client shape (item 7) are **superseded** — the editor/shell/PWA pins now live in **ADR 0038** (Tiptap), **ADR 0037** (Base UI + its mandatory `date-fns` / `@date-fns/tz` peer-deps), and **ADR 0039** (`vite-plugin-pwa` + `workbox-*`). The supply-chain posture (item 5) **extends to all of those** new dependencies.
 
 ## Context
 
@@ -63,8 +65,8 @@ Decided with @numman (he selected **pin + lockfile + cooldown** over pin-only an
    | `@tanstack/react-router-devtools` | `1.170.x` | align to the router release train |
    | `@tanstack/router-plugin` | `1.168.13` | Vite plugin (dev); `tanstackRouter` from `/vite` |
    | `@tanstack/react-query` | current 5.x | the one data idiom (ADR 0028) |
-   | `@blocknote/core`, `@blocknote/react`, `@blocknote/mantine` | `0.51.3` | versioned in lockstep; React 19 supported (no React-18 cap) |
-   | `@mantine/core`, `@mantine/hooks` | current 9.x | BlockNote view peer |
+   | ~~`@blocknote/core`, `@blocknote/react`, `@blocknote/mantine`~~ | ~~`0.51.3`~~ | **SUPERSEDED by ADR 0038** — editor is Tiptap v3 (`@tiptap/* 3.24.0`), not BlockNote. |
+   | ~~`@mantine/core`, `@mantine/hooks`~~ | ~~current 9.x~~ | **SUPERSEDED by ADR 0037** — design system is Base UI (`@base-ui/react 1.5.0` + `date-fns`/`@date-fns/tz` peer-deps), not Mantine. |
    | `vite` | `8.0.14` | Vite 8 (Rolldown); config-transparent for a plain SPA |
    | `@vitejs/plugin-react-swc` | current v4 | SWC Fast Refresh; no Babel (React Compiler not adopted) |
    | `@types/react`, `@types/react-dom` | `19.2.x` | — |
@@ -72,7 +74,7 @@ Decided with @numman (he selected **pin + lockfile + cooldown** over pin-only an
 
    The two dev-tooling pins left as "current" (swc plugin patch, devtools patch) are confirmed against the registry at scaffold time and captured exactly in the lockfile.
 
-7. **BlockNote client shape (Phase 1):** `useCreateBlockNote` from `@blocknote/react`, `BlockNoteView` from `@blocknote/mantine` (the view moved out of `@blocknote/react`); **both** CSS imports required (`@blocknote/core/fonts/inter.css` + `@blocknote/mantine/style.css`). `ssr: false` makes BlockNote's SSR caveat a non-issue. The doc body is the live Yjs CRDT over the collab WS (not Query state), per 0028.
+7. ~~**BlockNote client shape (Phase 1):**~~ **SUPERSEDED by ADR 0038.** The editor is an owned thin block layer over Tiptap v3 adopted directly (no BlockNote bootstrap); its client/server shape and the DOM-free write path are defined in ADR 0038. The doc body remains the live Yjs CRDT over the collab WS (not Query state), per 0028 — that part is unchanged.
 
 ## Consequences
 
@@ -92,6 +94,7 @@ Decided with @numman (he selected **pin + lockfile + cooldown** over pin-only an
 
 ## Cross-references
 
-- **Depends on / implements** ADR 0027 (SPA-as-static-assets, `serveStatic`, the production attach pass), ADR 0028 (TanStack Router library mode + the `packages/api-client` seam + one data idiom), ADR 0030 (same-origin Lax cookies — the dev proxy preserves them), ADR 0031 (BlockNote Phase-1 editor).
+- **Depends on / implements** ADR 0027 (SPA-as-static-assets, `serveStatic`, the production attach pass), ADR 0028 (TanStack Router library mode + the `packages/api-client` seam + one data idiom), ADR 0030 (same-origin Lax cookies — the dev proxy preserves them).
+- **Amended by** ADR 0037 (design system = Base UI, retiring the Mantine pins), ADR 0038 (editor = Tiptap v3 adopted directly, retiring the BlockNote pins + client shape), ADR 0039 (PWA layer — `vite-plugin-pwa` + `workbox-*`, under this ADR's supply-chain posture).
 - **Informs** the ADR 0027 production WS/static attach pass (the SPA-fallback + `serveStatic` root resolution + the four deferred collab hardening blockers in ADR 0030).
 - **Research:** Opus sub-agent ADR-coverage + library-version passes (2026-05-31); supply-chain verification against [GHSA-g7cv-rxg3-hmpx](https://github.com/advisories/GHSA-g7cv-rxg3-hmpx) + the [TanStack postmortem](https://tanstack.com/blog/npm-supply-chain-compromise-postmortem).

@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Document editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   EDITOR SCREEN — screen-specific + responsive only.
+   All themeable values reference Meridian Zero tokens.
+   New classes prefixed "editor-".
+   ============================================================ */
+
+/* full-bleed app frame: override the centered .viewport for an
+   edge-to-edge application shell that fills the viewport */
+.editor-vp{
+  max-width:none;
+  margin:0;
+  padding:calc(var(--u) * 2);
+  min-height:100vh;
+  min-height:100dvh;
+}
+.editor-screen{ margin-bottom:0; }
+
+/* tall, full-height editor window */
+.editor-win{ min-height:calc(100vh - var(--u) * 4); min-height:calc(100dvh - var(--u) * 4); }
+
+/* main column scrolls independently; canvas keeps engineering whitespace */
+.editor-main{ min-height:0; }
+.editor-body{ overflow:visible; flex:1; min-height:0; }
+.editor-canvas{ max-width:680px; }
+
+/* keep the floating toolbar from being clipped by the block gutter */
+.editor-bar{ gap:12px; }
+.editor-baractions{ margin-left:auto; display:flex; gap:10px; align-items:center; }
+.editor-suggcount{ font-size:10px; color:var(--agent-ink); display:flex; align-items:center; gap:6px; }
+
+/* presence row can wrap on narrow desktop without breaking the rule */
+.editor-presence{ flex-wrap:wrap; row-gap:6px; }
+
+/* offset-shadow toolbar may exceed canvas width — allow it to wrap gracefully */
+.editor-fmtbar{ max-width:100%; flex-wrap:wrap; row-gap:4px; }
+
+/* drawer button + mobile-only chrome hidden on desktop */
+.editor-drawer-btn,
+.editor-mbar,
+.editor-sheet,
+.editor-tabbar,
+.editor-scrim{ display:none; }
+
+/* ---- GUTTER accept/reject for the inline tracked suggestion ----
+   sits in the left margin, aligned to the marked line; the primary
+   inline marks (.sugg-ins / .sugg-del) remain the model, this is the
+   per-line quick control wired to the same suggestion as the card. */
+.editor-suggblock{ margin-top:6px; }
+.editor-gutter{
+  position:absolute; left:-46px; top:3px;
+  display:flex; flex-direction:column; gap:2px;
+  opacity:1;
+}
+.editor-gbtn{
+  width:18px; height:18px; display:grid; place-items:center; cursor:pointer;
+  border:var(--rule) solid var(--agent-edge); background:var(--surface);
+  font-family:var(--mono); font-size:10px; line-height:1; padding:0;
+  border-radius:var(--radius-chip); transition:background .12s, color .12s, transform .04s;
+}
+.editor-gbtn:active{ transform:translateY(1px); }
+.editor-gbtn--acc{ color:var(--agent-ink); }
+.editor-gbtn--acc:hover{ background:var(--agent); color:#02363b; border-color:var(--agent); }
+.editor-gbtn--rej{ color:var(--steel); }
+.editor-gbtn--rej:hover{ background:var(--surface-2); color:var(--ink); border-color:var(--hair-strong); }
+
+/* tie the inline insertion visually to its gutter control + card on hover/focus */
+.editor-suggblock:hover .sugg-ins,
+.editor-suggblock:focus-within .sugg-ins{ box-shadow:inset 0 -2px 0 var(--agent), 0 0 0 1px var(--agent-edge); }
+
+/* the empty slash block needs room for the open menu */
+.editor-emptyblock{ min-height:300px; }
+.editor-slash{ width:268px; }
+
+/* ============================================================
+   RESPONSIVE
+   The shared sheet already collapses .side/.toc/.erail and the
+   .sugg-card at <=1120px. Below we add: drawer sidebar, bottom
+   format bar, suggestion bottom sheet, and a bottom tab bar.
+   ============================================================ */
+
+/* --- tablet / collapsed-rail range --- */
+@media (max-width:1120px){
+  .editor-vp{ padding:var(--u); padding-bottom:calc(var(--u) * 9); }
+  .editor-win{ min-height:calc(100dvh - var(--u) * 2); }
+
+  /* sidebar becomes an off-canvas drawer (shared rule sets display:none;
+     re-show as a fixed panel only when toggled .editor-side--open) */
+  .editor-side{
+    display:flex; position:fixed; z-index:40; top:0; bottom:0; left:0;
+    width:min(82vw, 300px);
+    transform:translateX(-102%); transition:transform .22s ease;
+    border-right:var(--rule) solid var(--hair-strong);
+    box-shadow:6px 0 0 rgba(11,14,20,.06);
+  }
+  .editor-side.editor-side--open{ transform:translateX(0); }
+  .editor-scrim{
+    display:block; position:fixed; inset:0; z-index:35;
+    background:rgba(11,14,20,.42);
+  }
+  .editor-scrim[hidden]{ display:none; }
+
+  .editor-drawer-btn{ display:inline-flex; }
+
+  /* the inline gutter control would collide with the now-edgeless canvas;
+     pull it inline above the paragraph instead of into the margin */
+  .editor-suggblock{ padding-left:0; }
+  .editor-gutter{
+    position:static; flex-direction:row; gap:6px;
+    margin:0 0 6px; padding-bottom:6px;
+    border-bottom:var(--rule) dashed var(--agent-edge);
+  }
+  .editor-gbtn{ width:auto; height:26px; padding:0 10px; gap:5px; }
+  .editor-gbtn--acc::after{ content:" ACCEPT"; font-size:9px; letter-spacing:0.06em; }
+  .editor-gbtn--rej::after{ content:" REJECT"; font-size:9px; letter-spacing:0.06em; }
+
+  .editor-emptyblock{ min-height:240px; }
+}
+
+/* --- phone --- */
+@media (max-width:640px){
+  .editor-vp{ padding:0; padding-bottom:calc(var(--u) * 16); }
+  .editor-screen{ border:0; }
+  .editor-win{ min-height:auto; }
+  .editor-hide-sm{ display:none !important; }
+
+  .screen-tab{ position:sticky; top:0; z-index:20; }
+  .screen-tab .id{ padding:9px 12px; gap:8px; }
+  .screen-tab .id .big{ font-size:12px; }
+
+  .editor-bar{ padding:9px 12px; min-height:48px; gap:8px; position:sticky; top:0; z-index:15; background:var(--surface); }
+  /* crumb must shrink/ellipsis so the action cluster never overflows the viewport */
+  .editor-bar .crumb{ min-width:0; flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .editor-baractions{ flex:0 0 auto; }
+  .editor-body{ padding:14px 14px 0; }
+  /* contain the absolutely-positioned agent .flag annotation: on a very
+     narrow line it can sit near the right edge and its label would push
+     the page wider. Clip horizontally — the flag is a decorative presence
+     marker, not content, so clipping its overhang is correct. */
+  .editor-canvas{ padding-top:4px; overflow-x:clip; }
+  .agent-caret .flag{ max-width:60vw; overflow:hidden; text-overflow:ellipsis; }
+
+  .ed-h1{ font-size:26px; }
+
+  /* desktop floating toolbar hidden; bottom bar takes over */
+  .editor-fmtbar{ display:none; }
+
+  .editor-presence{ gap:7px; }
+  .editor-presence .save{ width:100%; margin-left:0; }
+
+  /* card collapses inline (shared rule); style it as a phone review block */
+  .editor-suggcard{ box-shadow:none; border-width:var(--rule); }
+
+  /* touch targets >=44px on the gutter quick-controls */
+  .editor-gbtn{ height:44px; padding:0 14px; font-size:12px; }
+
+  /* --- fixed bottom FORMAT bar --- */
+  .editor-mbar{
+    display:flex; position:fixed; left:0; right:0; z-index:30;
+    bottom:calc(var(--u) * 7);
+    align-items:stretch; gap:0;
+    background:var(--surface); border-top:var(--rule) solid var(--ink);
+    box-shadow:0 -2px 0 var(--surface-sunk);
+  }
+  .editor-mbtn{
+    flex:1; min-height:48px; display:grid; place-items:center;
+    background:transparent; border:0; border-right:var(--rule) solid var(--hair);
+    font-family:var(--mono); font-size:15px; color:var(--ink-1); cursor:pointer;
+  }
+  .editor-mbtn:last-child{ border-right:0; }
+  .editor-mbtn:active{ background:var(--surface-2); }
+  .editor-mbtn--ai{ color:var(--agent-ink); }
+  .editor-mbtn--ai:active{ background:var(--agent-wash); }
+  .editor-mbtn--add{ color:var(--ultra-ink); }
+
+  /* --- suggestion review BOTTOM SHEET --- */
+  .editor-sheet{
+    display:block; position:fixed; left:0; right:0; bottom:0; z-index:50;
+    background:var(--surface);
+    border-top:var(--rule-2) solid var(--agent);
+    box-shadow:0 -6px 0 var(--agent-wash);
+    transform:translateY(calc(100% + 12px)); transition:transform .24s ease;
+    padding-bottom:max(env(safe-area-inset-bottom), 8px);
+  }
+  .editor-sheet.editor-sheet--open{ transform:translateY(0); }
+  .editor-sheet-grab{ width:38px; height:4px; background:var(--hair-strong); margin:8px auto 4px; }
+  .editor-sheet-head{
+    display:flex; align-items:center; gap:9px; padding:9px 14px;
+    border-bottom:var(--rule) solid var(--agent-edge); background:var(--agent-wash);
+  }
+  .editor-sheet-head .av{ width:20px; height:20px; flex:0 0 20px; }
+  .editor-sheet-title{ font-family:var(--mono); font-size:11px; color:var(--agent-ink); }
+  .editor-sheet-title b{ font-weight:700; }
+  .editor-sheet-body{ padding:14px; }
+  .editor-sheet-qt{ font-size:14px; line-height:1.55; color:var(--ink-1); }
+  .editor-sheet-qt .rm{ color:var(--steel); text-decoration:line-through; text-decoration-color:var(--agent); }
+  .editor-sheet-qt .add{ color:var(--agent-ink); background:var(--agent-wash); box-shadow:inset 0 -2px 0 var(--agent); padding:0 2px; }
+  .editor-sheet-why{
+    margin-top:12px; padding-top:11px; border-top:var(--rule) solid var(--hair);
+    font-size:12px; line-height:1.55; color:var(--steel);
+  }
+  .editor-sheet-foot{ display:flex; gap:8px; padding:0 14px 14px; }
+  .editor-sheet-foot .btn{ flex:1; min-height:44px; justify-content:center; }
+  .editor-sheet-acc{ border-color:var(--agent); color:var(--agent-ink); background:var(--agent-wash); }
+  .editor-sheet-acc:hover{ background:var(--agent); color:#02363b; border-color:var(--agent); }
+
+  /* --- bottom TAB bar (primary nav) --- */
+  .editor-tabbar{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:25;
+    background:var(--surface); border-top:var(--rule) solid var(--hair-strong);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .editor-tab{
+    flex:1; min-height:calc(var(--u) * 7);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    font-family:var(--mono); font-size:9px; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--steel); position:relative;
+  }
+  .editor-tab-ic{ font-size:16px; line-height:1; }
+  .editor-tab--on{ color:var(--ultra-ink); }
+  .editor-tab--on::before{ content:""; position:absolute; top:0; left:18%; right:18%; height:2px; background:var(--ultra); }
+  .editor-tab--chg .editor-tab-ic{ color:var(--agent-ink); }
+  .editor-tab-badge{
+    position:absolute; top:6px; left:calc(50% + 9px);
+    min-width:14px; height:14px; padding:0 3px; display:grid; place-items:center;
+    font-size:8px; font-weight:700; color:#02363b; background:var(--agent);
+    border-radius:var(--radius-chip);
+  }
+}
+
+/* respect reduced-motion: disable transitions added here AND the shared
+   sheet's keyframe animations that surface on this screen (the DS does not
+   wrap them, so we neutralise them within the editor screen scope). */
+@media (prefers-reduced-motion: reduce){
+  .editor-side,
+  .editor-sheet,
+  .editor-gbtn,
+  .editor-mbtn,
+  .editor-scrim{ transition:none; }
+  .editor-screen .live,
+  .editor-screen .caret-u::after,
+  .editor-screen .dot--agent.live{ animation:none; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<div class="viewport editor-vp">
+  <section class="screen editor-screen">
+    <!-- engineering-drawing coordinate header -->
+    <div class="screen-tab">
+      <div class="id">
+        <span class="ord" style="color:var(--agent-ink)">SCR.D</span>
+        <span class="big">Document · Editor</span>
+        <span class="chip chip--agent editor-hide-sm" style="margin-left:4px"><span class="dot dot--agent live"></span> AGENT CO-EDITING LIVE</span>
+      </div>
+      <div class="meta editor-hide-sm"><span>SLASH MENU</span><span>BLOCK HANDLES</span><span>TRACKED SUGGESTION</span></div>
+    </div>
+
+    <div class="win win--editor editor-win">
+
+      <!-- ============ LEFT SIDEBAR ============ -->
+      <aside class="side editor-side" id="editor-side">
+        <div class="top">
+          <div class="kicker">Space</div>
+          <div class="ws">
+            <span class="av av--u3" style="background:var(--ultra)">P</span>
+            <div style="min-width:0;">
+              <div class="nm">Platform</div>
+              <div class="sub">SP·01 / Topology</div>
+            </div>
+            <span class="car">▾</span>
+          </div>
+        </div>
+
+        <div class="nav-h kicker">Collection</div>
+        <div class="tree">
+          <div class="row on"><span class="tw">▸</span><span class="ic">✎</span> Runtime topology</div>
+          <div class="row ind"><span class="ic">▤</span> Co-hosting &amp; auth <span class="ct">v9</span></div>
+          <div class="row ind"><span class="ic">▤</span> WS upgrade path <span class="ct">v3</span></div>
+          <div class="row"><span class="tw">▸</span><span class="ic">▦</span> Dispatcher <span class="ct">12</span></div>
+        </div>
+
+        <div class="nav-h kicker">Co-editors · live</div>
+        <nav class="nav">
+          <a href="#"><span class="dot dot--ultra" style="margin:0 3px"></span> Nadia A. <span class="ct">you</span></a>
+          <a href="#"><span class="dot dot--agent live" style="margin:0 3px"></span> archivist <span class="ct" style="color:var(--agent-ink)">writing…</span></a>
+          <a href="#"><span class="dot" style="margin:0 3px"></span> Jo K. <span class="ct">idle</span></a>
+        </nav>
+
+        <div class="foot">
+          <span class="av av--u">NA</span>
+          <div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div>
+        </div>
+      </aside>
+
+      <!-- ============ EDITOR CANVAS (centre) ============ -->
+      <div class="main editor-main">
+        <!-- top bar: crumb + live counters + actions -->
+        <div class="bar editor-bar">
+          <button class="btn btn--ghost btn--sm editor-drawer-btn" aria-label="Open navigation" aria-expanded="false">☰</button>
+          <div class="crumb"><b>Platform</b> <span class="sep">/</span> Topology <span class="sep">/</span> <b>Runtime topology</b></div>
+          <div class="editor-baractions">
+            <span class="mono editor-suggcount"><span class="dot dot--agent live"></span> 1 SUGGESTION</span>
+            <button class="btn btn--ghost btn--sm editor-hide-sm">⌫ History</button>
+            <button class="btn btn--primary btn--sm">⤴ Share</button>
+          </div>
+        </div>
+
+        <div class="body editor-body">
+
+          <!-- live presence row -->
+          <div class="presence editor-presence">
+            <span class="lbl">Live</span>
+            <span class="pchip u"><span class="av av--u">NA</span> Nadia A.</span>
+            <span class="pchip ag"><span class="av av--agent">AR</span> archivist · editing <span class="dot dot--agent live"></span></span>
+            <span class="save"><span class="dot dot--ok"></span> Synced · CRDT converged · v14</span>
+          </div>
+
+          <!-- floating format / slash toolbar (offset shadow) -->
+          <div class="fmtbar editor-fmtbar">
+            <div class="grp"><button class="fb" title="Paragraph">¶</button><button class="fb on" title="Heading 2">H2</button><button class="fb" title="Heading 3">H3</button></div>
+            <div class="grp"><button class="fb"><b>B</b></button><button class="fb"><i>I</i></button><button class="fb"><span style="text-decoration:underline">U</span></button><button class="fb"><span style="text-decoration:line-through">S</span></button><button class="fb mono">&lt;/&gt;</button></div>
+            <div class="grp"><button class="fb">•</button><button class="fb">1.</button><button class="fb">"</button><button class="fb" style="color:var(--ultra-ink)" title="Link">⛓</button></div>
+            <div class="grp"><button class="fb ai" title="Ask an agent">✦ ASK AGENT</button></div>
+          </div>
+
+          <div class="edcanvas editor-canvas">
+
+            <!-- title -->
+            <div class="eblock">
+              <div class="handle"><span class="h" title="Drag">⠿</span><span class="h" title="Add block">+</span></div>
+              <div class="ed-h1">Runtime topology &amp; co-hosting<span class="z">.</span></div>
+            </div>
+
+            <!-- paragraph with HUMAN caret + selection -->
+            <div class="eblock">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+              <div class="ed-p">The Hono trunk is the top-level server: it hosts the <span class="sel-u">SPA as static assets</span><span class="caret-u"></span>, the JSON-RPC capability surface, auth, MCP, and an embedded collaboration server — all on one owned port.</div>
+            </div>
+
+            <!-- section heading -->
+            <div class="eblock">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+              <div class="ed-h2">01 — Decision</div>
+            </div>
+
+            <!-- paragraph being LIVE-TYPED BY THE AGENT (caret + flag + typing highlight) -->
+            <div class="eblock agentline">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+              <div class="ed-p">Adopt a single-process trunk. The HTTP server, static SPA assets, <span class="agent-typing">the&nbsp;<code>/auth</code>&nbsp;and&nbsp;<code>/mcp</code>&nbsp;mounts</span><span class="agent-caret"><span class="flag"><span class="pulse live"></span>archivist</span></span> </div>
+            </div>
+
+            <!-- paragraph carrying a TRACKED SUGGESTION: inline ins+del + GUTTER accept/reject + margin card -->
+            <div class="eblock editor-suggblock" id="editor-sugg-01">
+              <div class="handle"><span class="h">⠿</span><span class="h">+</span></div>
+
+              <!-- gutter accept/reject control, tied to the inline mark -->
+              <div class="editor-gutter" role="group" aria-label="Review archivist suggestion SG·01">
+                <button class="editor-gbtn editor-gbtn--acc" title="Accept suggestion" aria-label="Accept suggestion SG·01">✓</button>
+                <button class="editor-gbtn editor-gbtn--rej" title="Reject suggestion" aria-label="Reject suggestion SG·01">✕</button>
+              </div>
+
+              <div class="ed-p">
+                A rolled-back SQL transaction must
+                <span class="sugg-del">not break the</span><span class="sugg-ins">never leave a mutation resident in the</span>
+                live Y.Doc once WebSocket clients attach.
+
+                <!-- pinned margin review card (the reviewer affordance) -->
+                <div class="sugg-card editor-suggcard">
+                  <div class="sh"><span class="av av--agent">AR</span><span class="nm">archivist</span><span class="ord">SG·01</span></div>
+                  <div class="sc">
+                    <div class="qt"><span class="rm">not break the</span> <span class="add">never leave a mutation resident in the</span> live Y.Doc…</div>
+                    <div class="why">Tightens the invariant wording per ADR 0030 — “resident in the live Y.Doc” matches the rollback-eviction guarantee.</div>
+                  </div>
+                  <div class="sf"><button class="acc">✓ Accept</button><button class="rej">✕ Reject</button></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- empty block with the SLASH MENU open -->
+            <div class="eblock editor-emptyblock">
+              <div class="handle"><span class="h">⠿</span><span class="h" style="color:var(--ultra);border-color:var(--ultra-edge)">+</span></div>
+              <div class="ed-p" style="color:var(--steel-2)">Type <span class="mono" style="color:var(--ultra-ink)">/</span> for blocks, <span class="mono" style="color:var(--agent-ink)">✦</span> to ask an agent…</div>
+              <div class="slash editor-slash" style="top:30px;" role="listbox" aria-label="Insert block">
+                <div class="sht"><span>BLOCKS</span><span style="margin-left:auto">/co</span></div>
+                <div class="si on" role="option" aria-selected="true"><span class="ic">¶</span> Text <span class="key">⏎</span></div>
+                <div class="si" role="option"><span class="ic">H2</span> Heading 2 <span class="key">##</span></div>
+                <div class="si" role="option"><span class="ic">&lt;&gt;</span> Code block <span class="key">```</span></div>
+                <div class="si" role="option"><span class="ic">▤</span> Table</div>
+                <div class="si" role="option"><span class="ic">"</span> Callout</div>
+                <div class="sht"><span>AGENT ACTIONS</span></div>
+                <div class="si ai" role="option"><span class="ic">✦</span> Ask agent to draft <span class="key">⌘↵</span></div>
+                <div class="si ai" role="option"><span class="ic">↻</span> Summarise selection</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ RIGHT CONTEXT / CHANGES RAIL ============ -->
+      <aside class="erail editor-erail">
+        <div class="es">
+          <div class="h">Properties <span class="ord">D·01</span></div>
+          <div class="kv"><span class="k">doc.id</span><span class="v mono">0a1e·c7</span></div>
+          <div class="kv"><span class="k">status</span><span class="v"><span class="status-tag st-rev" style="font-size:8.5px">In review</span></span></div>
+          <div class="kv"><span class="k">version</span><span class="v mono">v14</span></div>
+          <div class="kv"><span class="k">crdt</span><span class="v mono" style="color:var(--ok)">converged</span></div>
+          <div class="kv"><span class="k">words</span><span class="v mono tnum">2,410</span></div>
+        </div>
+
+        <div class="es" style="flex:1;">
+          <div class="h">Tracked changes <span class="ord">2 OPEN</span></div>
+          <div class="chg">
+            <div class="rail ag"></div>
+            <div class="bd"><div class="ln"><b>archivist</b> · insertion</div><div class="mt">SG·01 · invariant wording · 09:41</div></div>
+            <span class="st pend">pending</span>
+          </div>
+          <div class="chg">
+            <div class="rail u"></div>
+            <div class="bd"><div class="ln"><b>Nadia A.</b> · edit</div><div class="mt">block 02 · live · now</div></div>
+            <span class="st acc">live</span>
+          </div>
+          <div class="chg">
+            <div class="rail ag"></div>
+            <div class="bd"><div class="ln"><b>linter-bot</b> · normalised</div><div class="mt">4 blocks · 09:30 · accepted</div></div>
+            <span class="st acc">done</span>
+          </div>
+          <div style="margin-top:14px;display:flex;gap:6px;">
+            <button class="btn btn--sm" style="flex:1;border-color:var(--agent);color:var(--agent-ink);background:var(--agent-wash)">Accept all</button>
+            <button class="btn btn--ghost btn--sm" style="flex:1;">Review →</button>
+          </div>
+        </div>
+
+        <div class="es" style="border-bottom:0;">
+          <div class="h">Agent access <span class="ord">SCOPE</span></div>
+          <div class="kv"><span class="k">archivist</span><span class="v mono" style="color:var(--agent-ink)">editor</span></div>
+          <div class="scope-bar"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===== MOBILE: scrim for sidebar drawer ===== -->
+  <div class="editor-scrim" id="editor-scrim" hidden></div>
+
+  <!-- ===== MOBILE: fixed bottom format bar (replaces fmtbar on phone) ===== -->
+  <div class="editor-mbar" role="toolbar" aria-label="Formatting">
+    <button class="editor-mbtn" aria-label="Block type">¶</button>
+    <button class="editor-mbtn"><b>B</b></button>
+    <button class="editor-mbtn"><i>I</i></button>
+    <button class="editor-mbtn">•</button>
+    <button class="editor-mbtn" style="color:var(--ultra-ink)">⛓</button>
+    <button class="editor-mbtn editor-mbtn--ai" aria-label="Ask an agent">✦</button>
+    <button class="editor-mbtn editor-mbtn--add" aria-label="Insert block">+</button>
+  </div>
+
+  <!-- ===== MOBILE: suggestion review bottom sheet ===== -->
+  <div class="editor-sheet" id="editor-sheet" role="dialog" aria-modal="true" aria-label="Review suggestion SG·01">
+    <div class="editor-sheet-grab"></div>
+    <div class="editor-sheet-head">
+      <span class="av av--agent">AR</span>
+      <div class="editor-sheet-title"><b>archivist</b> · insertion</div>
+      <span class="ord" style="color:var(--agent-ink);margin-left:auto">SG·01</span>
+    </div>
+    <div class="editor-sheet-body">
+      <div class="editor-sheet-qt"><span class="rm">not break the</span> <span class="add">never leave a mutation resident in the</span> live Y.Doc once WebSocket clients attach.</div>
+      <div class="editor-sheet-why">Tightens the invariant wording per ADR 0030 — “resident in the live Y.Doc” matches the rollback-eviction guarantee.</div>
+    </div>
+    <div class="editor-sheet-foot">
+      <button class="btn btn--sm editor-sheet-acc">✓ Accept</button>
+      <button class="btn btn--ghost btn--sm editor-sheet-rej">✕ Reject</button>
+    </div>
+  </div>
+
+  <!-- ===== MOBILE: bottom tab bar ===== -->
+  <nav class="editor-tabbar" aria-label="Primary">
+    <a href="#" class="editor-tab"><span class="editor-tab-ic">▦</span><span>Docs</span></a>
+    <a href="#" class="editor-tab editor-tab--on"><span class="editor-tab-ic">✎</span><span>Edit</span></a>
+    <a href="#" class="editor-tab editor-tab--chg"><span class="editor-tab-ic">⇄</span><span>Changes</span><span class="editor-tab-badge">1</span></a>
+    <a href="#" class="editor-tab"><span class="editor-tab-ic">✦</span><span>Agents</span></a>
+  </nav>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,1082 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>editorzero — NULLSTATE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   NULLSTATE — neo-brutalist design system for editorzero
+   All colour/space/border via tokens. Light mode canonical.
+   ============================================================ */
+:root{
+  /* structural neutrals — cool paper, NOT warm cream */
+  --paper:#ECECE4;        /* page ground */
+  --panel:#F7F7F2;        /* raised block fill */
+  --panel-2:#E2E2D8;      /* recessed fill */
+  --ink:#0A0A0A;          /* near-black, all borders + text */
+  --ink-2:#454540;        /* secondary text */
+  --ink-3:#7C7C72;        /* tertiary / coordinate labels */
+
+  /* TWO loud flats */
+  --volt:#D6FF3F;         /* electric lime — HUMAN, primary action */
+  --ultra:#2B2BFF;        /* ultramarine — AGENT, second voice */
+  --volt-ink:#0A0A0A;     /* text on lime */
+  --ultra-ink:#F7F7F2;    /* text on blue */
+
+  /* support */
+  --alert:#FF4D2E;        /* hard orange-red, destructive */
+  --ok:#0A0A0A;
+
+  /* structure */
+  --bd:2.5px;             /* canonical hard border */
+  --bd-hair:1.5px;        /* grid hairline */
+  --gap:18px;
+  --off:6px;              /* hard offset-block distance */
+  --rad:0px;              /* brutalist: no radius, ever */
+
+  --sans:'Space Grotesk',system-ui,sans-serif;
+  --body:'Inter Tight',system-ui,sans-serif;
+  --mono:'Space Mono',ui-monospace,monospace;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--paper);
+  /* the ORIGIN GRID — hairline crosshair plane behind everything */
+  background-image:
+    linear-gradient(var(--paper),var(--paper)),
+    repeating-linear-gradient(0deg, transparent 0 47px, rgba(10,10,10,.05) 47px 48px),
+    repeating-linear-gradient(90deg, transparent 0 47px, rgba(10,10,10,.05) 47px 48px);
+  background-blend-mode:normal;
+  color:var(--ink);
+  font-family:var(--body);
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:inherit}
+
+/* ---- shared atoms ---- */
+.mono{font-family:var(--mono)}
+.tnum{font-variant-numeric:tabular-nums}
+.up{text-transform:uppercase;letter-spacing:.08em}
+
+/* the zero logotype — slashed hard zero in a box */
+.zero{
+  font-family:var(--sans);font-weight:700;
+  display:inline-grid;place-items:center;
+  width:1.55em;height:1.55em;
+  border:var(--bd) solid var(--ink);
+  background:var(--volt);
+  position:relative;line-height:1;
+}
+.zero::after{ /* the slash through the zero */
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(135deg,transparent calc(50% - 1.2px),var(--ink) calc(50% - 1.2px) calc(50% + 1.2px),transparent calc(50% + 1.2px));
+}
+.wordmark{font-family:var(--sans);font-weight:700;letter-spacing:-.02em;font-size:17px;display:flex;align-items:center;gap:9px}
+.wordmark .z0{font-family:var(--mono);font-weight:700;background:var(--ink);color:var(--volt);padding:0 5px;transform:translateY(-1px)}
+
+/* hard offset block wrapper: a solid shape sitting --off behind */
+.slab{position:relative;background:var(--panel);border:var(--bd) solid var(--ink)}
+.slab.shadow::before{
+  content:"";position:absolute;inset:0;
+  transform:translate(var(--off),var(--off));
+  background:var(--ink);z-index:-1;
+}
+.slab.shadow.volt::before{background:var(--volt)}
+.slab.shadow.ultra::before{background:var(--ultra)}
+
+/* tags / chips */
+.tag{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;border:var(--bd-hair) solid var(--ink);padding:2px 6px;background:var(--panel);white-space:nowrap}
+.tag.volt{background:var(--volt)}
+.tag.ultra{background:var(--ultra);color:var(--ultra-ink);border-color:var(--ink)}
+.tag.ink{background:var(--ink);color:var(--volt)}
+
+/* avatars — square, bordered, peer human/agent */
+.av{width:26px;height:26px;border:var(--bd) solid var(--ink);display:grid;place-items:center;
+  font-family:var(--mono);font-weight:700;font-size:11px;background:var(--panel);flex:none}
+.av.human{background:var(--volt);color:var(--volt-ink)}
+.av.agent{background:var(--ultra);color:var(--ultra-ink)}
+.av.agent::after{content:"";position:absolute}
+
+/* buttons */
+.btn{font-family:var(--sans);font-weight:600;font-size:13px;border:var(--bd) solid var(--ink);
+  background:var(--panel);padding:8px 14px;cursor:pointer;line-height:1;display:inline-flex;
+  align-items:center;gap:8px;transition:transform .08s ease, box-shadow .08s ease;color:var(--ink)}
+.btn:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--ink)}
+.btn:active{transform:translate(1px,1px);box-shadow:none}
+.btn.primary{background:var(--volt)}
+.btn.agent{background:var(--ultra);color:var(--ultra-ink);border-color:var(--ink)}
+.btn.ghost{background:transparent}
+.btn.sm{padding:5px 9px;font-size:12px;border-width:var(--bd-hair)}
+
+/* ============================================================
+   PAGE FRAME / showcase scaffolding
+   ============================================================ */
+.deck{max-width:1180px;margin:0 auto;padding:40px 26px 120px}
+.masthead{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:34px;
+  border-bottom:var(--bd) solid var(--ink);padding-bottom:22px;flex-wrap:wrap}
+.masthead h1{font-family:var(--sans);font-weight:700;font-size:46px;letter-spacing:-.03em;margin:0;line-height:.95}
+.masthead h1 small{display:block;font-family:var(--mono);font-size:12px;font-weight:400;letter-spacing:.05em;color:var(--ink-3);margin-top:10px;text-transform:uppercase}
+.masthead .meta{font-family:var(--mono);font-size:11px;line-height:1.7;text-align:right;color:var(--ink-2)}
+.masthead .meta b{background:var(--volt);padding:1px 5px}
+
+.screen-label{display:flex;align-items:center;gap:14px;margin:44px 0 16px}
+.screen-label .n{font-family:var(--mono);font-weight:700;font-size:13px;background:var(--ink);color:var(--volt);padding:4px 9px}
+.screen-label h2{font-family:var(--sans);font-weight:700;font-size:19px;letter-spacing:-.01em;margin:0}
+.screen-label .rule{flex:1;height:var(--bd);background:var(--ink)}
+.screen-label .desc{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+
+/* a "viewport" frame each screen sits in */
+.vp{border:var(--bd) solid var(--ink);background:var(--paper);overflow:hidden;
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0 31px, rgba(10,10,10,.045) 31px 32px),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgba(10,10,10,.045) 31px 32px);}
+.chrome{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:var(--bd) solid var(--ink);background:var(--ink)}
+.chrome .dot{width:11px;height:11px;border:var(--bd-hair) solid var(--volt)}
+.chrome .dot.f{background:var(--volt)}
+.chrome .u{margin-left:10px;font-family:var(--mono);font-size:11px;color:var(--volt);letter-spacing:.04em}
+.chrome .u b{color:var(--panel)}
+.chrome .right{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:#8f8f86}
+
+/* ============================================================
+   APP SHELL (used by several screens)
+   ============================================================ */
+.shell{display:grid;grid-template-columns:230px 1fr;min-height:560px}
+.shell.with-tree{grid-template-columns:248px 1fr}
+.topbar{grid-column:1 / -1;display:flex;align-items:center;gap:16px;padding:11px 16px;border-bottom:var(--bd) solid var(--ink);background:var(--panel)}
+.topbar .search{margin-left:auto;display:flex;align-items:center;gap:8px;border:var(--bd) solid var(--ink);background:var(--paper);padding:6px 11px;font-family:var(--mono);font-size:12px;color:var(--ink-3);min-width:230px}
+.topbar .search kbd{margin-left:auto;font-family:var(--mono);font-size:10px;border:var(--bd-hair) solid var(--ink);padding:1px 5px;background:var(--panel)}
+.topbar .me{display:flex;align-items:center;gap:9px}
+.topbar .me .nm{font-family:var(--mono);font-size:11px;line-height:1.2}
+.topbar .me .nm b{font-family:var(--body);font-weight:600;font-size:12px}
+
+/* sidebar */
+.side{border-right:var(--bd) solid var(--ink);background:var(--panel);padding:14px 0;display:flex;flex-direction:column;gap:2px}
+.side .grp{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--ink-3);padding:14px 16px 6px;text-transform:uppercase}
+.side a{display:flex;align-items:center;gap:11px;padding:8px 16px;font-weight:500;font-size:13.5px;border-left:4px solid transparent;text-decoration:none;color:var(--ink)}
+.side a .ic{width:16px;height:16px;border:var(--bd-hair) solid var(--ink);flex:none}
+.side a.on{background:var(--volt);border-left-color:var(--ink);font-weight:600}
+.side a:hover:not(.on){background:var(--panel-2)}
+.side a .ct{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink-3)}
+.side .foot{margin-top:auto;padding:14px 16px 4px;font-family:var(--mono);font-size:10px;color:var(--ink-3);line-height:1.6;border-top:var(--bd-hair) solid var(--ink)}
+.side .foot b{color:var(--ink)}
+
+/* main scroll area */
+.main{padding:24px;overflow:auto}
+
+/* ============================================================
+   (A) DASHBOARD
+   ============================================================ */
+.dash-hero{display:grid;grid-template-columns:1.4fr 1fr;gap:var(--gap);margin-bottom:var(--gap)}
+.hero-l{padding:26px;display:flex;flex-direction:column;gap:14px}
+.hero-l .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--ink-3);text-transform:uppercase}
+.hero-l h3{font-family:var(--sans);font-weight:700;font-size:30px;line-height:1.02;letter-spacing:-.02em;margin:0}
+.hero-l h3 mark{background:var(--volt);padding:0 4px}
+.hero-l p{margin:0;max-width:46ch;color:var(--ink-2);font-size:14px}
+.hero-l .row{display:flex;gap:10px;margin-top:4px}
+.hero-r{padding:0;display:flex;flex-direction:column}
+.hero-r .hr-h{padding:12px 16px;border-bottom:var(--bd) solid var(--ink);font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;background:var(--ink);color:var(--volt)}
+.metrics{display:grid;grid-template-columns:1fr 1fr;flex:1}
+.metric{padding:16px;border-bottom:var(--bd-hair) solid var(--ink)}
+.metric:nth-child(odd){border-right:var(--bd-hair) solid var(--ink)}
+.metric .v{font-family:var(--sans);font-weight:700;font-size:34px;line-height:1;letter-spacing:-.02em}
+.metric .k{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-top:6px}
+.metric .v small{font-size:14px;color:var(--ink-3)}
+.spark{display:flex;gap:3px;align-items:flex-end;height:22px;margin-top:10px}
+.spark i{width:7px;background:var(--ink);display:block}
+.spark i.hot{background:var(--ultra)}
+
+.dash-grid{display:grid;grid-template-columns:1.55fr 1fr;gap:var(--gap)}
+.block-h{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:var(--bd) solid var(--ink);background:var(--panel)}
+.block-h .lab{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.block-h .lab b{color:var(--ink-3)}
+.block-h .more{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+
+/* recent docs list */
+.rdoc{display:grid;grid-template-columns:34px 1fr auto;gap:13px;align-items:center;padding:13px 14px;border-bottom:var(--bd-hair) solid var(--ink);text-decoration:none;color:var(--ink)}
+.rdoc:last-child{border-bottom:0}
+.rdoc:hover{background:var(--volt)}
+.rdoc .idx{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--ink-3);border:var(--bd-hair) solid var(--ink);width:30px;height:30px;display:grid;place-items:center;background:var(--paper)}
+.rdoc:hover .idx{background:var(--ink);color:var(--volt)}
+.rdoc .ti{font-weight:600;font-size:14.5px;letter-spacing:-.01em}
+.rdoc .sub{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:3px;display:flex;gap:8px;align-items:center}
+.rdoc .who{display:flex;align-items:center}
+.rdoc .who .av{width:22px;height:22px;font-size:9px;margin-left:-6px;border-width:var(--bd-hair)}
+.rdoc .who .av:first-child{margin-left:0}
+.rdoc .ts{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-align:right;white-space:nowrap}
+
+/* spaces grid */
+.spaces{padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.space{border:var(--bd) solid var(--ink);background:var(--panel);padding:13px;display:flex;flex-direction:column;gap:9px;text-decoration:none;color:var(--ink);transition:transform .08s ease, box-shadow .08s ease}
+.space:hover{transform:translate(-2px,-2px);box-shadow:4px 4px 0 var(--ink)}
+.space .glyph{width:30px;height:30px;border:var(--bd) solid var(--ink);display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:13px}
+.space .nm{font-family:var(--sans);font-weight:700;font-size:15px;letter-spacing:-.01em}
+.space .st{font-family:var(--mono);font-size:10px;color:var(--ink-3);display:flex;justify-content:space-between;border-top:var(--bd-hair) solid var(--ink);padding-top:8px}
+.space.s1 .glyph{background:var(--volt)}
+.space.s2 .glyph{background:var(--ultra);color:var(--ultra-ink)}
+.space.s3 .glyph{background:var(--ink);color:var(--volt)}
+.space.s4 .glyph{background:var(--paper)}
+
+/* activity ticker */
+.tick{padding:0}
+.tick .row{display:flex;gap:11px;align-items:flex-start;padding:11px 14px;border-bottom:var(--bd-hair) solid var(--ink);font-size:12.5px}
+.tick .row:last-child{border-bottom:0}
+.tick .row .av{width:22px;height:22px;font-size:9px;border-width:var(--bd-hair)}
+.tick .row .tx b{font-weight:600}
+.tick .row .tx{line-height:1.35}
+.tick .row .tx .t{font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-top:2px}
+
+/* ============================================================
+   (B) DOCUMENTS LIST + COLLECTIONS TREE
+   ============================================================ */
+.tree{padding:10px 0;font-size:13px;border-right:var(--bd) solid var(--ink);background:var(--panel);overflow:auto}
+.tree .th{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--ink-3);padding:12px 16px 8px;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+.tnode{display:flex;align-items:center;gap:8px;padding:6px 16px;cursor:default;border-left:4px solid transparent}
+.tnode:hover{background:var(--panel-2)}
+.tnode.on{background:var(--volt);border-left-color:var(--ink);font-weight:600}
+.tnode .tw{width:11px;font-family:var(--mono);font-size:10px;color:var(--ink-3);text-align:center}
+.tnode .fi{width:14px;height:14px;border:var(--bd-hair) solid var(--ink);flex:none}
+.tnode.coll .fi{background:var(--ink)}
+.tnode .ct{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.tnode.lvl1{padding-left:30px}
+.tnode.lvl2{padding-left:46px}
+
+/* doc table */
+.doc-head{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.doc-head .crumb{font-family:var(--mono);font-size:11px;color:var(--ink-3);display:flex;gap:7px;align-items:center}
+.doc-head .crumb b{color:var(--ink)}
+.doc-head h3{font-family:var(--sans);font-weight:700;font-size:24px;letter-spacing:-.02em;margin:0}
+.filters{display:flex;gap:8px;margin:0 0 14px;align-items:center;flex-wrap:wrap}
+.filters .seg{display:flex;border:var(--bd) solid var(--ink)}
+.filters .seg button{border:0;border-right:var(--bd-hair) solid var(--ink);background:var(--panel);font-family:var(--mono);font-size:11px;padding:6px 11px;cursor:pointer;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.filters .seg button:last-child{border-right:0}
+.filters .seg button.on{background:var(--ink);color:var(--volt)}
+
+table.docs{width:100%;border-collapse:separate;border-spacing:0;border:var(--bd) solid var(--ink);background:var(--panel);font-size:13.5px}
+table.docs th{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;text-align:left;
+  padding:10px 13px;background:var(--ink);color:var(--volt);border-right:var(--bd-hair) solid #2c2c2c}
+table.docs th:last-child{border-right:0}
+table.docs td{padding:12px 13px;border-top:var(--bd-hair) solid var(--ink);border-right:var(--bd-hair) solid var(--ink);vertical-align:middle}
+table.docs td:last-child{border-right:0}
+table.docs tbody tr:hover{background:var(--volt)}
+table.docs .doc-ti{font-weight:600;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+table.docs .doc-ti .fi{width:13px;height:16px;border:var(--bd-hair) solid var(--ink);flex:none}
+table.docs .doc-ti .lock{font-family:var(--mono);font-size:9px}
+.editors{display:flex;align-items:center}
+.editors .av{width:24px;height:24px;font-size:9.5px;margin-left:-7px;border-width:var(--bd-hair);position:relative}
+.editors .av:first-child{margin-left:0}
+.editors .more{margin-left:6px;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.stat{font-family:var(--mono);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border:var(--bd-hair) solid var(--ink);padding:2px 6px;display:inline-block}
+.stat.live{background:var(--ultra);color:var(--ultra-ink)}
+.stat.draft{background:var(--panel-2)}
+.stat.pub{background:var(--volt)}
+.tcell{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+
+/* ============================================================
+   (C) READING VIEW
+   ============================================================ */
+.read{display:grid;grid-template-columns:1fr 264px;min-height:560px}
+.read .doc{padding:42px 54px;overflow:auto;background:var(--paper);
+  background-image:repeating-linear-gradient(0deg, transparent 0 31px, rgba(10,10,10,.04) 31px 32px);}
+.read .doc .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-bottom:14px;display:flex;gap:10px;align-items:center}
+.read .doc h1{font-family:var(--sans);font-weight:700;font-size:42px;line-height:1.02;letter-spacing:-.03em;margin:0 0 18px;max-width:18ch}
+.read .doc .lede{font-size:18px;line-height:1.55;color:var(--ink);max-width:62ch;border-left:var(--bd) solid var(--ink);padding-left:18px;margin:0 0 26px}
+.read .doc h2{font-family:var(--sans);font-weight:700;font-size:21px;letter-spacing:-.01em;margin:32px 0 12px;display:flex;align-items:center;gap:10px}
+.read .doc h2 .hn{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-weight:700}
+.read .doc p{max-width:64ch;line-height:1.62;margin:0 0 16px}
+.read .doc p code, .read .doc li code{font-family:var(--mono);font-size:12.5px;background:var(--volt);padding:1px 5px;border:var(--bd-hair) solid var(--ink)}
+.read .doc ul{max-width:64ch;line-height:1.62;padding-left:0;list-style:none;margin:0 0 16px}
+.read .doc ul li{padding-left:26px;position:relative;margin-bottom:7px}
+.read .doc ul li::before{content:"";position:absolute;left:4px;top:8px;width:9px;height:9px;background:var(--ink)}
+.callout{border:var(--bd) solid var(--ink);background:var(--panel);padding:0;margin:24px 0;max-width:64ch}
+.callout .ch{background:var(--ultra);color:var(--ultra-ink);font-family:var(--mono);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:6px 13px;display:flex;align-items:center;gap:8px}
+.callout .cb{padding:13px 15px;font-size:13.5px;line-height:1.55}
+.codeblk{border:var(--bd) solid var(--ink);background:var(--ink);color:#E9E9E2;font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:14px 16px;margin:22px 0;max-width:64ch;overflow:auto}
+.codeblk .c-key{color:var(--volt)}
+.codeblk .c-str{color:#9DB7FF}
+.codeblk .cmt{color:#6f6f68}
+
+.read .rail{border-left:var(--bd) solid var(--ink);background:var(--panel);padding:0;overflow:auto}
+.read .rail .rh{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:13px 16px;border-bottom:var(--bd) solid var(--ink);color:var(--ink-3)}
+.metarow{padding:13px 16px;border-bottom:var(--bd-hair) solid var(--ink)}
+.metarow .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-bottom:6px}
+.metarow .v{font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.contrib{display:flex;align-items:center;gap:9px;padding:9px 16px;border-bottom:var(--bd-hair) solid var(--ink);font-size:12.5px}
+.contrib .av{width:24px;height:24px;font-size:9.5px}
+.contrib .meta{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.contrib .pct{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:700}
+.toc{padding:6px 16px 16px}
+.toc a{display:block;font-size:12px;padding:5px 0 5px 12px;border-left:var(--bd-hair) solid var(--ink);color:var(--ink-2);text-decoration:none}
+.toc a.on{border-left:3px solid var(--ink);color:var(--ink);font-weight:600;background:var(--volt);margin-left:-2px;padding-left:13px}
+
+/* ============================================================
+   (D) EDITOR — the signature screen
+   ============================================================ */
+.editor-wrap{display:grid;grid-template-columns:1fr 270px;min-height:600px}
+.etoolbar{grid-column:1 / -1;display:flex;align-items:center;gap:4px;padding:7px 12px;border-bottom:var(--bd) solid var(--ink);background:var(--panel);flex-wrap:wrap}
+.etoolbar .tg{display:flex;border:var(--bd-hair) solid var(--ink);background:var(--paper)}
+.etoolbar .tg button{border:0;border-right:var(--bd-hair) solid var(--ink);background:transparent;font-family:var(--sans);font-weight:700;font-size:13px;width:32px;height:30px;cursor:pointer;display:grid;place-items:center;color:var(--ink)}
+.etoolbar .tg button:last-child{border-right:0}
+.etoolbar .tg button:hover{background:var(--volt)}
+.etoolbar .tg button.on{background:var(--ink);color:var(--volt)}
+.etoolbar .tg button .i{font-size:11px}
+.etoolbar .sel{font-family:var(--mono);font-size:11px;border:var(--bd-hair) solid var(--ink);background:var(--paper);padding:6px 10px;display:flex;align-items:center;gap:8px;cursor:default}
+.etoolbar .save{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-2);display:flex;align-items:center;gap:7px}
+.etoolbar .save .pulse{width:9px;height:9px;background:var(--ultra);border:var(--bd-hair) solid var(--ink);animation:blink 1.6s steps(2,end) infinite}
+.presence{display:flex;align-items:center;gap:0;margin-right:6px}
+.presence .av{width:25px;height:25px;font-size:10px;margin-left:-6px}
+.presence .av:first-child{margin-left:0}
+.presence .av.agent{animation:agentpulse 2.4s ease-in-out infinite}
+
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.25}}
+@keyframes agentpulse{0%,100%{box-shadow:0 0 0 0 rgba(43,43,255,.0)}50%{box-shadow:0 0 0 3px rgba(43,43,255,.30)}}
+
+.canvas{padding:30px 40px 60px;overflow:auto;background:var(--paper);position:relative;
+  background-image:repeating-linear-gradient(0deg, transparent 0 31px, rgba(10,10,10,.04) 31px 32px);}
+.canvas h1.dt{font-family:var(--sans);font-weight:700;font-size:36px;letter-spacing:-.03em;margin:0 0 22px;outline:none;max-width:24ch}
+
+/* a block with hover handle */
+.blk{position:relative;max-width:62ch;margin:0 0 14px;padding-left:4px}
+.blk .handle{position:absolute;left:-34px;top:1px;display:flex;gap:2px;opacity:0;transition:opacity .12s ease}
+.blk:hover .handle{opacity:1}
+.blk .handle b{width:13px;height:22px;border:var(--bd-hair) solid var(--ink);background:var(--panel);font-family:var(--mono);font-size:11px;display:grid;place-items:center;cursor:grab;line-height:1}
+.blk p{margin:0;line-height:1.62;font-size:15px}
+.blk.h2{font-family:var(--sans);font-weight:700;font-size:20px;letter-spacing:-.01em;margin-top:26px}
+
+/* the live block currently held by the HUMAN — lime caret */
+.blk.editing p{outline:none}
+.caret-h{display:inline-block;width:2.5px;height:1.15em;background:var(--ink);vertical-align:text-bottom;animation:blink 1.05s steps(2,end) infinite;margin:0 1px;transform:translateY(2px)}
+
+/* AGENT presence: a labelled cursor planted in the doc */
+.agent-cursor{position:relative;display:inline-block;width:2.5px;height:1.15em;background:var(--ultra);vertical-align:text-bottom;transform:translateY(2px);margin:0 1px}
+.agent-cursor::before{
+  content:"helix · agent";
+  position:absolute;left:0;top:-21px;white-space:nowrap;
+  font-family:var(--mono);font-size:10px;font-weight:700;
+  background:var(--ultra);color:var(--ultra-ink);
+  border:var(--bd-hair) solid var(--ink);padding:1px 6px;letter-spacing:.03em;
+}
+.agent-cursor::after{content:"";position:absolute;left:0;top:-3px;width:6px;height:6px;background:var(--ultra)}
+
+/* a TRACKED AGENT SUGGESTION inline — insertion + deletion, peer-reviewable */
+.ins{background:rgba(43,43,255,.14);border-bottom:2.5px solid var(--ultra);padding:0 1px;color:var(--ink)}
+.del{background:rgba(255,77,46,.16);text-decoration:line-through;text-decoration-color:var(--alert);text-decoration-thickness:2px;color:var(--ink-2);padding:0 1px}
+
+/* the suggestion review chip docked beside the tracked change */
+.suggest{position:relative;border:var(--bd) solid var(--ink);background:var(--panel);max-width:62ch;margin:6px 0 16px;
+  display:grid;grid-template-columns:auto 1fr;}
+.suggest::before{content:"";position:absolute;left:-7px;top:-7px;right:7px;bottom:7px;background:var(--ultra);z-index:-1}
+.suggest .spine{background:var(--ultra);width:7px}
+.suggest .body{padding:11px 13px}
+.suggest .sh{display:flex;align-items:center;gap:9px;margin-bottom:7px}
+.suggest .sh .who{font-family:var(--mono);font-size:11px;font-weight:700}
+.suggest .sh .who span{color:var(--ink-3);font-weight:400}
+.suggest .sh .time{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.suggest .quote{font-size:13.5px;line-height:1.5;margin-bottom:11px}
+.suggest .acts{display:flex;gap:8px}
+
+/* slash menu floating */
+.slash{position:absolute;left:44px;bottom:40px;width:248px;border:var(--bd) solid var(--ink);background:var(--panel);z-index:5}
+.slash::before{content:"";position:absolute;inset:0;transform:translate(5px,5px);background:var(--ink);z-index:-1}
+.slash .st{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:9px 12px;border-bottom:var(--bd) solid var(--ink);color:var(--ink-3)}
+.slash .si{display:flex;align-items:center;gap:11px;padding:8px 12px;font-size:13px;border-bottom:var(--bd-hair) solid var(--ink);cursor:default}
+.slash .si:last-child{border-bottom:0}
+.slash .si .k{width:24px;height:24px;border:var(--bd-hair) solid var(--ink);display:grid;place-items:center;font-family:var(--sans);font-weight:700;font-size:13px;flex:none}
+.slash .si.on{background:var(--volt)}
+.slash .si.on .k{background:var(--ink);color:var(--volt)}
+.slash .si .kb{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+
+/* editor right rail — collaborators + change feed */
+.erail{border-left:var(--bd) solid var(--ink);background:var(--panel);overflow:auto}
+.erail .rh{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:12px 14px;border-bottom:var(--bd) solid var(--ink);color:var(--ink-3);display:flex;justify-content:space-between;align-items:center}
+.erail .peer{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:var(--bd-hair) solid var(--ink)}
+.erail .peer .av{width:26px;height:26px;font-size:10px}
+.erail .peer .nm{font-size:13px;font-weight:600;line-height:1.2}
+.erail .peer .ro{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em}
+.erail .peer .live-dot{margin-left:auto;font-family:var(--mono);font-size:9px;font-weight:700;display:flex;align-items:center;gap:5px}
+.erail .peer .live-dot i{width:8px;height:8px;background:var(--ultra);border:var(--bd-hair) solid var(--ink)}
+.erail .peer .live-dot.h i{background:var(--volt)}
+.cfeed{padding:4px 0}
+.cfeed .ev{display:grid;grid-template-columns:14px 1fr;gap:10px;padding:9px 14px;font-size:12px;border-bottom:var(--bd-hair) solid var(--ink)}
+.cfeed .ev .ln{position:relative}
+.cfeed .ev .ln i{width:9px;height:9px;border:var(--bd-hair) solid var(--ink);position:absolute;top:3px;left:0}
+.cfeed .ev.h .ln i{background:var(--volt)}
+.cfeed .ev.a .ln i{background:var(--ultra)}
+.cfeed .ev .tx{line-height:1.4}
+.cfeed .ev .tx b{font-weight:700}
+.cfeed .ev .tx .t{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);margin-top:2px}
+
+/* ============================================================
+   (E) ADMIN / MEMBERS
+   ============================================================ */
+.admin-head{display:flex;align-items:flex-end;gap:18px;margin-bottom:20px;flex-wrap:wrap}
+.admin-head h3{font-family:var(--sans);font-weight:700;font-size:26px;letter-spacing:-.02em;margin:0}
+.admin-head .sub{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.admin-tabs{display:flex;gap:0;margin-bottom:20px;border-bottom:var(--bd) solid var(--ink)}
+.admin-tabs a{font-family:var(--sans);font-weight:600;font-size:13px;padding:9px 16px;text-decoration:none;color:var(--ink-2);border:var(--bd) solid transparent;border-bottom:0;margin-bottom:-2.5px;position:relative}
+.admin-tabs a.on{background:var(--volt);border-color:var(--ink);color:var(--ink)}
+.admin-grid{display:grid;grid-template-columns:1fr 280px;gap:var(--gap)}
+
+table.mem{width:100%;border-collapse:separate;border-spacing:0;border:var(--bd) solid var(--ink);background:var(--panel);font-size:13.5px}
+table.mem th{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;text-align:left;padding:10px 13px;background:var(--ink);color:var(--volt);border-right:var(--bd-hair) solid #2c2c2c}
+table.mem th:last-child{border-right:0}
+table.mem td{padding:11px 13px;border-top:var(--bd-hair) solid var(--ink);border-right:var(--bd-hair) solid var(--ink)}
+table.mem td:last-child{border-right:0;text-align:right}
+table.mem tbody tr:hover{background:var(--volt)}
+table.mem .pr{display:flex;align-items:center;gap:11px}
+table.mem .pr .nm{font-weight:600;line-height:1.25}
+table.mem .pr .id{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.role{font-family:var(--mono);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border:var(--bd-hair) solid var(--ink);padding:2px 7px}
+.role.admin{background:var(--ink);color:var(--volt)}
+.role.editor{background:var(--volt)}
+.role.agent{background:var(--ultra);color:var(--ultra-ink)}
+.role.viewer{background:var(--panel-2)}
+.kind{font-family:var(--mono);font-size:10px;font-weight:700;text-transform:uppercase;display:inline-flex;align-items:center;gap:5px}
+.kind i{width:8px;height:8px;border:var(--bd-hair) solid var(--ink)}
+.kind.human i{background:var(--volt)}
+.kind.agent i{background:var(--ultra)}
+
+.aside-card{padding:0}
+.aside-card .ah{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:12px 14px;background:var(--ink);color:var(--volt)}
+.aside-card .ab{padding:14px}
+.team{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:var(--bd-hair) solid var(--ink)}
+.team .gl{width:28px;height:28px;border:var(--bd) solid var(--ink);display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:11px}
+.team .nm{font-weight:600;font-size:13px}
+.team .ct{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.team .stack{margin-left:auto;display:flex}
+.team .stack .av{width:20px;height:20px;font-size:8px;margin-left:-6px;border-width:var(--bd-hair)}
+.team .stack .av:first-child{margin-left:0}
+.invite{padding:14px;display:flex;flex-direction:column;gap:10px}
+.invite label{font-family:var(--mono);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3)}
+.invite .inp{border:var(--bd) solid var(--ink);background:var(--paper);padding:9px 11px;font-family:var(--mono);font-size:12px;color:var(--ink)}
+.invite .inp.placeholder{color:var(--ink-3)}
+.invite .opts{display:flex;gap:8px}
+.invite .opts .o{flex:1;border:var(--bd) solid var(--ink);background:var(--paper);text-align:center;padding:7px;font-family:var(--mono);font-size:11px;font-weight:700;text-transform:uppercase;cursor:pointer}
+.invite .opts .o.on{background:var(--ultra);color:var(--ultra-ink)}
+
+/* footer of the showcase */
+.colophon{margin-top:60px;border-top:var(--bd) solid var(--ink);padding-top:24px;display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.colophon .c h4{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin:0 0 10px}
+.colophon .c p{margin:0;font-size:12px;line-height:1.6;color:var(--ink-2)}
+.swrow{display:flex;gap:0;border:var(--bd) solid var(--ink);margin-top:8px}
+.swrow i{flex:1;height:28px;border-right:var(--bd-hair) solid var(--ink)}
+.swrow i:last-child{border-right:0}
+
+@media (max-width:900px){
+  .dash-hero,.dash-grid,.admin-grid{grid-template-columns:1fr}
+  .shell,.shell.with-tree,.read,.editor-wrap{grid-template-columns:1fr}
+  .colophon{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<div class="deck">
+
+  <!-- ============ MASTHEAD ============ -->
+  <header class="masthead">
+    <div>
+      <div class="wordmark" style="margin-bottom:18px">
+        <span class="zero">0</span>
+        <span>editor<span class="z0">zero</span></span>
+      </div>
+      <h1>NULLSTATE<small>// neo-brutalist system · origin grid · humans + agents as peers</small></h1>
+    </div>
+    <div class="meta">
+      design&nbsp;system&nbsp;<b>v0.0</b><br/>
+      light&nbsp;mode&nbsp;·&nbsp;WCAG&nbsp;AA<br/>
+      space&nbsp;grotesk&nbsp;/&nbsp;space&nbsp;mono<br/>
+      volt&nbsp;#D6FF3F&nbsp;·&nbsp;ultra&nbsp;#2B2BFF
+    </div>
+  </header>
+
+  <!-- ====================================================== -->
+  <!-- (A) DASHBOARD                                          -->
+  <!-- ====================================================== -->
+  <div class="screen-label">
+    <span class="n">A</span><h2>Dashboard</h2>
+    <span class="rule"></span><span class="desc">// home · recent · spaces · activity</span>
+  </div>
+
+  <div class="vp">
+    <div class="chrome">
+      <span class="dot f"></span><span class="dot"></span><span class="dot"></span>
+      <span class="u"><b>app.acme.internal</b>/dashboard</span>
+      <span class="right">self-hosted · build a4f0c1</span>
+    </div>
+    <div class="shell">
+      <!-- topbar -->
+      <div class="topbar">
+        <div class="wordmark"><span class="zero" style="width:1.35em;height:1.35em">0</span><span>editor<span class="z0">zero</span></span></div>
+        <div class="search"><span>⌕</span><span>search docs, spaces, people…</span><kbd>/</kbd></div>
+        <div class="me">
+          <div class="nm up mono" style="text-align:right"><b>Nomi A.</b><br/>admin</div>
+          <span class="av human">NA</span>
+        </div>
+      </div>
+
+      <!-- sidebar -->
+      <nav class="side">
+        <span class="grp">Workspace</span>
+        <a class="on"><span class="ic" style="background:var(--ink)"></span>Dashboard</a>
+        <a><span class="ic"></span>All documents<span class="ct">312</span></a>
+        <a><span class="ic"></span>Recently edited</a>
+        <a><span class="ic"></span>Published<span class="ct">28</span></a>
+        <span class="grp">Spaces</span>
+        <a><span class="ic" style="background:var(--volt)"></span>Engineering<span class="ct">96</span></a>
+        <a><span class="ic" style="background:var(--ultra)"></span>Product<span class="ct">74</span></a>
+        <a><span class="ic" style="background:var(--ink)"></span>Handbook<span class="ct">41</span></a>
+        <a><span class="ic"></span>Research<span class="ct">53</span></a>
+        <span class="grp">Admin</span>
+        <a><span class="ic"></span>Members &amp; teams</a>
+        <a><span class="ic"></span>Settings</a>
+        <div class="foot">node&nbsp;<b>OK</b> · sync&nbsp;<b>live</b><br/>agents online&nbsp;<b>3</b><br/>v0.0 · AGPL-3.0</div>
+      </nav>
+
+      <!-- main -->
+      <main class="main">
+        <div class="dash-hero">
+          <div class="slab shadow volt hero-l">
+            <span class="eyebrow">// origin point — 2026 · week 22</span>
+            <h3>Start from <mark>zero</mark>.<br/>Write with your agents.</h3>
+            <p>Humans and AI agents are peer co-editors here. Every edit is tracked, attributed, and reversible — across API, CLI, MCP and this UI.</p>
+            <div class="row">
+              <button class="btn primary">+ New document</button>
+              <button class="btn agent">⬢ Invite an agent</button>
+              <button class="btn ghost">Import</button>
+            </div>
+          </div>
+          <div class="slab shadow hero-r">
+            <div class="hr-h"><span>// this week</span><span>↗</span></div>
+            <div class="metrics">
+              <div class="metric"><div class="v tnum">312</div><div class="k">documents</div></div>
+              <div class="metric"><div class="v tnum">28</div><div class="k">published</div></div>
+              <div class="metric"><div class="v tnum">1,904</div><div class="k">edits / human</div>
+                <div class="spark"><i style="height:30%"></i><i style="height:55%"></i><i style="height:40%"></i><i style="height:70%"></i><i style="height:90%"></i><i style="height:60%"></i><i style="height:80%"></i></div>
+              </div>
+              <div class="metric"><div class="v tnum" style="color:var(--ultra)">880</div><div class="k">edits / agent</div>
+                <div class="spark"><i class="hot" style="height:20%"></i><i class="hot" style="height:35%"></i><i class="hot" style="height:60%"></i><i class="hot" style="height:45%"></i><i class="hot" style="height:75%"></i><i class="hot" style="height:95%"></i><i class="hot" style="height:70%"></i></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dash-grid">
+          <!-- recent docs -->
+          <div class="slab">
+            <div class="block-h"><span class="lab"><b>//</b> RECENT DOCUMENTS</span><span class="more">view all →</span></div>
+            <a class="rdoc">
+              <span class="idx tnum">01</span>
+              <div><div class="ti">Sync protocol — write-path atomicity</div>
+                <div class="sub"><span>Engineering / Architecture</span><span>·</span><span>v23</span></div></div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <div class="who"><span class="av human">NA</span><span class="av agent">HX</span></div>
+                <span class="ts">4m ago</span></div>
+            </a>
+            <a class="rdoc">
+              <span class="idx tnum">02</span>
+              <div><div class="ti">Capability registry &amp; surface parity</div>
+                <div class="sub"><span>Engineering / Specs</span><span>·</span><span>v11</span></div></div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <div class="who"><span class="av agent">DX</span><span class="av human">KL</span></div>
+                <span class="ts">26m ago</span></div>
+            </a>
+            <a class="rdoc">
+              <span class="idx tnum">03</span>
+              <div><div class="ti">Onboarding handbook — agents as principals</div>
+                <div class="sub"><span>Handbook</span><span>·</span><span>v7</span></div></div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <div class="who"><span class="av human">KL</span></div>
+                <span class="ts">1h ago</span></div>
+            </a>
+            <a class="rdoc">
+              <span class="idx tnum">04</span>
+              <div><div class="ti">Public docs — reader-path projection</div>
+                <div class="sub"><span>Product / Launch</span><span>·</span><span>v4</span></div></div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <div class="who"><span class="av agent">HX</span><span class="av human">NA</span><span class="av human">RS</span></div>
+                <span class="ts">3h ago</span></div>
+            </a>
+          </div>
+
+          <!-- right column: spaces + activity -->
+          <div style="display:flex;flex-direction:column;gap:var(--gap)">
+            <div class="slab">
+              <div class="block-h"><span class="lab"><b>//</b> SPACES</span><span class="more">+ new</span></div>
+              <div class="spaces">
+                <a class="space s1"><span class="glyph">E</span><span class="nm">Engineering</span><span class="st"><span>96 docs</span><span>14 ppl</span></span></a>
+                <a class="space s2"><span class="glyph">P</span><span class="nm">Product</span><span class="st"><span>74 docs</span><span>9 ppl</span></span></a>
+                <a class="space s3"><span class="glyph">H</span><span class="nm">Handbook</span><span class="st"><span>41 docs</span><span>ALL</span></span></a>
+                <a class="space s4"><span class="glyph">R</span><span class="nm">Research</span><span class="st"><span>53 docs</span><span>6 ppl</span></span></a>
+              </div>
+            </div>
+            <div class="slab">
+              <div class="block-h"><span class="lab"><b>//</b> ACTIVITY</span><span class="more">live</span></div>
+              <div class="tick">
+                <div class="row"><span class="av agent">HX</span><div class="tx"><b>helix</b> proposed 3 edits in <b>Sync protocol</b><div class="t">// agent · 4m</div></div></div>
+                <div class="row"><span class="av human">NA</span><div class="tx"><b>Nomi</b> accepted a suggestion<div class="t">// human · 6m</div></div></div>
+                <div class="row"><span class="av human">KL</span><div class="tx"><b>Kai</b> published <b>Onboarding v7</b><div class="t">// human · 1h</div></div></div>
+                <div class="row"><span class="av agent">DX</span><div class="tx"><b>dex</b> created <b>Capability registry</b><div class="t">// agent · 1h</div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- (B) DOCUMENTS LIST + TREE                              -->
+  <!-- ====================================================== -->
+  <div class="screen-label">
+    <span class="n">B</span><h2>Documents in a Space</h2>
+    <span class="rule"></span><span class="desc">// collections tree · human + agent editors</span>
+  </div>
+
+  <div class="vp">
+    <div class="chrome">
+      <span class="dot f"></span><span class="dot"></span><span class="dot"></span>
+      <span class="u"><b>app.acme.internal</b>/spaces/engineering</span>
+      <span class="right">312 docs · 14 members · 4 agents</span>
+    </div>
+    <div class="shell with-tree">
+      <div class="topbar">
+        <div class="wordmark"><span class="zero" style="width:1.35em;height:1.35em">0</span><span>editor<span class="z0">zero</span></span></div>
+        <div class="search"><span>⌕</span><span>filter in Engineering…</span><kbd>/</kbd></div>
+        <div class="me"><div class="nm up mono" style="text-align:right"><b>Nomi A.</b><br/>admin</div><span class="av human">NA</span></div>
+      </div>
+
+      <!-- collections tree -->
+      <nav class="tree">
+        <div class="th"><span>// COLLECTIONS</span><span>+</span></div>
+        <div class="tnode coll on"><span class="tw">▾</span><span class="fi"></span>Engineering<span class="ct">96</span></div>
+        <div class="tnode coll lvl1"><span class="tw">▾</span><span class="fi"></span>Architecture<span class="ct">24</span></div>
+        <div class="tnode lvl2"><span class="tw"></span><span class="fi"></span>Sync protocol<span class="ct">v23</span></div>
+        <div class="tnode lvl2"><span class="tw"></span><span class="fi"></span>Dispatcher<span class="ct">v9</span></div>
+        <div class="tnode lvl2"><span class="tw"></span><span class="fi"></span>CRDT model<span class="ct">v15</span></div>
+        <div class="tnode coll lvl1"><span class="tw">▸</span><span class="fi"></span>Specs<span class="ct">31</span></div>
+        <div class="tnode coll lvl1"><span class="tw">▸</span><span class="fi"></span>Runbooks<span class="ct">18</span></div>
+        <div class="tnode coll lvl1"><span class="tw">▸</span><span class="fi"></span>RFCs<span class="ct">23</span></div>
+        <div class="th" style="margin-top:6px"><span>// VIEWS</span></div>
+        <div class="tnode"><span class="tw"></span><span class="fi" style="background:var(--ultra)"></span>Agent-touched</div>
+        <div class="tnode"><span class="tw"></span><span class="fi" style="background:var(--volt)"></span>My drafts</div>
+        <div class="tnode"><span class="tw"></span><span class="fi"></span>Recently deleted</div>
+      </nav>
+
+      <main class="main">
+        <div class="doc-head">
+          <div>
+            <div class="crumb">Engineering <span>/</span> <b>Architecture</b></div>
+            <h3>Architecture</h3>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:9px">
+            <button class="btn sm agent">⬢ agent run</button>
+            <button class="btn sm primary">+ New doc</button>
+          </div>
+        </div>
+
+        <div class="filters">
+          <div class="seg"><button class="on">ALL</button><button>DRAFTS</button><button>PUBLISHED</button><button>LIVE</button></div>
+          <div class="seg"><button>EDITORS · ALL</button><button class="on">HUMAN + AGENT</button></div>
+          <span class="mono" style="font-size:11px;color:var(--ink-3);margin-left:auto">24 docs · sorted: last edited</span>
+        </div>
+
+        <table class="docs">
+          <thead><tr>
+            <th style="width:38%">Document</th><th>Editors</th><th>Status</th><th>Version</th><th>Last edited</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="doc-ti"><span class="fi"></span>Sync protocol — write-path atomicity</div></td>
+              <td><div class="editors"><span class="av human">NA</span><span class="av agent">HX</span><span class="more">+1</span></div></td>
+              <td><span class="stat live">● live</span></td>
+              <td class="tcell">v23</td>
+              <td class="tcell">4m ago · NA</td>
+            </tr>
+            <tr>
+              <td><div class="doc-ti"><span class="fi"></span>Dispatcher transaction model</div></td>
+              <td><div class="editors"><span class="av agent">DX</span><span class="av human">KL</span></div></td>
+              <td><span class="stat pub">published</span></td>
+              <td class="tcell">v9</td>
+              <td class="tcell">2h ago · DX</td>
+            </tr>
+            <tr>
+              <td><div class="doc-ti"><span class="fi"></span>CRDT convergence proofs</div></td>
+              <td><div class="editors"><span class="av human">RS</span><span class="av agent">HX</span></div></td>
+              <td><span class="stat draft">draft</span></td>
+              <td class="tcell">v15</td>
+              <td class="tcell">1d ago · RS</td>
+            </tr>
+            <tr>
+              <td><div class="doc-ti"><span class="fi"></span>Permission floor &amp; tenant isolation <span class="lock">🔒</span></div></td>
+              <td><div class="editors"><span class="av human">NA</span></div></td>
+              <td><span class="stat pub">published</span></td>
+              <td class="tcell">v6</td>
+              <td class="tcell">2d ago · NA</td>
+            </tr>
+            <tr>
+              <td><div class="doc-ti"><span class="fi"></span>Audit log — single-entry reconstruction</div></td>
+              <td><div class="editors"><span class="av agent">DX</span><span class="av agent">HX</span><span class="av human">KL</span></div></td>
+              <td><span class="stat live">● live</span></td>
+              <td class="tcell">v12</td>
+              <td class="tcell">3d ago · DX</td>
+            </tr>
+            <tr>
+              <td><div class="doc-ti"><span class="fi"></span>Markdown fidelity tiers</div></td>
+              <td><div class="editors"><span class="av human">KL</span></div></td>
+              <td><span class="stat draft">draft</span></td>
+              <td class="tcell">v3</td>
+              <td class="tcell">5d ago · KL</td>
+            </tr>
+          </tbody>
+        </table>
+      </main>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- (C) READING VIEW                                       -->
+  <!-- ====================================================== -->
+  <div class="screen-label">
+    <span class="n">C</span><h2>Reading View</h2>
+    <span class="rule"></span><span class="desc">// finished document · rich body · metadata rail</span>
+  </div>
+
+  <div class="vp">
+    <div class="chrome">
+      <span class="dot f"></span><span class="dot"></span><span class="dot"></span>
+      <span class="u"><b>app.acme.internal</b>/engineering/architecture/sync-protocol</span>
+      <span class="right">read · v23 · published</span>
+    </div>
+    <div class="read">
+      <article class="doc">
+        <div class="kicker"><span class="tag ink">// ARCHITECTURE</span><span class="tag">DOC-0042</span><span>Engineering / Architecture</span></div>
+        <h1>Sync protocol &amp; write-path atomicity</h1>
+        <p class="lede">A mutation either lands in full — five rows, one transaction — or it never happened. The audit log alone reconstructs final state. This is the contract every surface inherits.</p>
+
+        <h2><span class="hn">01</span> The invariant</h2>
+        <p>Content mutations flow through <code>ctx.transact(doc_id, fn)</code>. The dispatcher persists the Y.Doc update, the audit entry, and the outbox event inside a single write-path transaction. If any step throws, the resident Y.Doc is evicted and nothing commits.</p>
+
+        <div class="callout">
+          <div class="ch">⚠ INVARIANT · enforced by property test</div>
+          <div class="cb">Every mutation produces <b>exactly one</b> audit entry. A rolled-back SQL transaction must not leave a mutation resident in the live document once WebSocket clients attach.</div>
+        </div>
+
+        <h2><span class="hn">02</span> Crash-fuzz sweep</h2>
+        <p>We sweep every in-transaction query position across cold and warm paths — 32 cases — asserting the commit is all-or-none. The reject arm verifies document visibility is unchanged and the error-audit survives in a separate transaction.</p>
+
+        <div class="codeblk"><span class="cmt"># property: writepath-atomicity (32 cases)</span>
+<span class="c-key">await</span> ctx.transact(docId, <span class="c-key">async</span> (tx) => {
+  <span class="c-key">await</span> tx.appendUpdate(update)   <span class="cmt">// Y.Doc</span>
+  <span class="c-key">await</span> tx.writeAudit(entry)      <span class="cmt">// exactly one</span>
+  <span class="c-key">await</span> tx.emit(<span class="c-str">"doc.changed"</span>)      <span class="cmt">// outbox</span>
+})  <span class="cmt">// → all-or-none</span></div>
+
+        <h2><span class="hn">03</span> Why it matters</h2>
+        <p>Humans and agents write to the same document concurrently. Atomicity is what lets an agent's tracked suggestion and a human's accept resolve to one convergent state — with a perfect audit trail for both principals.</p>
+      </article>
+
+      <aside class="rail">
+        <div class="rh">// METADATA</div>
+        <div class="metarow"><div class="k">Status</div><div class="v"><span class="stat pub">published</span><span class="tag">v23</span></div></div>
+        <div class="metarow"><div class="k">Space</div><div class="v">Engineering / Architecture</div></div>
+        <div class="metarow"><div class="k">Published</div><div class="v mono" style="font-size:12px">2026-05-29 · 14:02 UTC</div></div>
+        <div class="metarow"><div class="k">Fidelity tier</div><div class="v"><span class="tag volt">TIER&nbsp;1 · round-trip</span></div></div>
+        <div class="rh" style="border-top:var(--bd-hair) solid var(--ink)">// CONTRIBUTORS</div>
+        <div class="contrib"><span class="av human">NA</span><div><div style="font-weight:600">Nomi A.</div><div class="meta">human · owner</div></div><span class="pct">58%</span></div>
+        <div class="contrib"><span class="av agent">HX</span><div><div style="font-weight:600">helix</div><div class="meta">agent · contributor</div></div><span class="pct" style="color:var(--ultra)">31%</span></div>
+        <div class="contrib"><span class="av human">RS</span><div><div style="font-weight:600">Reya S.</div><div class="meta">human · reviewer</div></div><span class="pct">11%</span></div>
+        <div class="rh" style="border-top:var(--bd-hair) solid var(--ink)">// ON THIS PAGE</div>
+        <nav class="toc">
+          <a class="on">01 · The invariant</a>
+          <a>02 · Crash-fuzz sweep</a>
+          <a>03 · Why it matters</a>
+        </nav>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- (D) EDITOR — SIGNATURE SCREEN                          -->
+  <!-- ====================================================== -->
+  <div class="screen-label">
+    <span class="n">D</span><h2>Document Editor · human + agent co-editing live</h2>
+    <span class="rule"></span><span class="desc">// THE signature · agent cursor + tracked suggestion</span>
+  </div>
+
+  <div class="vp">
+    <div class="chrome">
+      <span class="dot f"></span><span class="dot"></span><span class="dot"></span>
+      <span class="u"><b>app.acme.internal</b>/edit/sync-protocol</span>
+      <span class="right">editing · 2 humans · 1 agent · autosaved</span>
+    </div>
+    <div class="editor-wrap">
+      <!-- toolbar -->
+      <div class="etoolbar">
+        <div class="tg">
+          <button class="on" title="Bold"><span style="font-weight:700">B</span></button>
+          <button title="Italic"><span style="font-style:italic;font-family:var(--body)">I</span></button>
+          <button title="Underline"><span style="text-decoration:underline">U</span></button>
+          <button title="Strike"><span style="text-decoration:line-through">S</span></button>
+          <button title="Code"><span class="i mono">&lt;/&gt;</span></button>
+        </div>
+        <div class="tg">
+          <button title="H1"><span class="i mono">H1</span></button>
+          <button title="H2"><span class="i mono">H2</span></button>
+          <button title="List"><span class="i mono">≡</span></button>
+          <button title="Quote"><span class="i mono">"</span></button>
+          <button title="Link"><span class="i mono">↗</span></button>
+        </div>
+        <div class="sel">/ slash to insert · ⌘B bold</div>
+        <div class="presence">
+          <span class="av human" title="Nomi (you)">NA</span>
+          <span class="av human" title="Reya">RS</span>
+          <span class="av agent" title="helix · agent · live">HX</span>
+        </div>
+        <div class="save"><span class="pulse"></span>helix typing · saved v23</div>
+      </div>
+
+      <!-- canvas -->
+      <div class="canvas">
+        <h1 class="dt" contenteditable="false">Sync protocol &amp; write-path atomicity</h1>
+
+        <div class="blk">
+          <div class="handle"><b>⠿</b><b>+</b></div>
+          <p>A mutation either lands in full — five rows, one transaction — or it never happened. The audit log alone reconstructs final state.</p>
+        </div>
+
+        <div class="blk h2">
+          <div class="handle"><b>⠿</b><b>+</b></div>
+          <p>The invariant</p>
+        </div>
+
+        <!-- block the HUMAN is editing, with caret -->
+        <div class="blk editing">
+          <div class="handle"><b>⠿</b><b>+</b></div>
+          <p>Content mutations flow through <code style="font-family:var(--mono);background:var(--volt);padding:0 4px;border:1.5px solid var(--ink)">ctx.transact(doc_id, fn)</code>. The dispatcher persists the update, the audit entry, and the outbox event inside one write-path transaction<span class="caret-h"></span></p>
+        </div>
+
+        <!-- block where the AGENT cursor is planted live -->
+        <div class="blk">
+          <div class="handle"><b>⠿</b><b>+</b></div>
+          <p>If any step throws, the resident document is evicted and <span class="agent-cursor"></span>nothing commits. Convergence is preserved across replicas.</p>
+        </div>
+
+        <!-- TRACKED AGENT SUGGESTION rendered inline -->
+        <div class="blk">
+          <div class="handle"><b>⠿</b><b>+</b></div>
+          <p>This contract is inherited by <del class="del">all four</del> <ins class="ins">every type-compatible</ins> surface — API, CLI, MCP and the Web UI — so parity is guaranteed by construction.</p>
+        </div>
+
+        <!-- the review chip for the suggestion above -->
+        <div class="suggest">
+          <div class="spine"></div>
+          <div class="body">
+            <div class="sh">
+              <span class="av agent" style="width:22px;height:22px;font-size:9px">HX</span>
+              <span class="who">helix <span>· agent suggestion · tracked</span></span>
+              <span class="time">just now</span>
+            </div>
+            <div class="quote">Tightened the parity claim: “<b>every type-compatible</b>” matches the contract-matrix wording in ADR 0009 / 0015 — “all four” undercounts UI-only surfaces.</div>
+            <div class="acts">
+              <button class="btn sm primary">✓ Accept</button>
+              <button class="btn sm">✕ Reject</button>
+              <button class="btn sm ghost">↩ Reply</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="handle"><b>⠿</b><b>+</b></div>
+          <p>Atomicity is what lets an agent's suggestion and a human's accept resolve to one convergent state.</p>
+        </div>
+
+        <!-- floating slash menu -->
+        <div class="slash">
+          <div class="st">// INSERT BLOCK · "/"</div>
+          <div class="si on"><span class="k">H</span>Heading<span class="kb">#</span></div>
+          <div class="si"><span class="k">¶</span>Paragraph<span class="kb">⏎</span></div>
+          <div class="si"><span class="k">≡</span>Bullet list<span class="kb">-</span></div>
+          <div class="si"><span class="k">&lt;&gt;</span>Code block<span class="kb">```</span></div>
+          <div class="si"><span class="k" style="background:var(--ultra);color:var(--ultra-ink)">✦</span>Ask an agent<span class="kb">@</span></div>
+        </div>
+      </div>
+
+      <!-- editor right rail: peers + change feed -->
+      <aside class="erail">
+        <div class="rh"><span>// CO-EDITORS</span><span>3 live</span></div>
+        <div class="peer"><span class="av human">NA</span><div><div class="nm">Nomi A. <span style="font-weight:400;color:var(--ink-3);font-size:11px">(you)</span></div><div class="ro">human · owner</div></div><div class="live-dot h"><i></i>EDITING</div></div>
+        <div class="peer"><span class="av human">RS</span><div><div class="nm">Reya S.</div><div class="ro">human · reviewer</div></div><div class="live-dot h"><i></i>IDLE</div></div>
+        <div class="peer"><span class="av agent">HX</span><div><div class="nm">helix</div><div class="ro">agent · contributor</div></div><div class="live-dot"><i></i>TYPING</div></div>
+
+        <div class="rh" style="border-top:var(--bd-hair) solid var(--ink)"><span>// CHANGE FEED</span><span>v23</span></div>
+        <div class="cfeed">
+          <div class="ev a"><div class="ln"><i></i></div><div class="tx"><b>helix</b> suggested an edit to ¶6<div class="t">// agent · tracked · now</div></div></div>
+          <div class="ev h"><div class="ln"><i></i></div><div class="tx"><b>Nomi</b> is editing ¶3<div class="t">// human · live</div></div></div>
+          <div class="ev a"><div class="ln"><i></i></div><div class="tx"><b>helix</b> moved cursor to ¶4<div class="t">// agent · 12s</div></div></div>
+          <div class="ev h"><div class="ln"><i></i></div><div class="tx"><b>Reya</b> accepted a suggestion<div class="t">// human · 2m</div></div></div>
+          <div class="ev a"><div class="ln"><i></i></div><div class="tx"><b>dex</b> ran <b>lint-pass</b> · 0 changes<div class="t">// agent · 5m</div></div></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- (E) ADMIN / MEMBERS                                    -->
+  <!-- ====================================================== -->
+  <div class="screen-label">
+    <span class="n">E</span><h2>Admin · Members &amp; Teams</h2>
+    <span class="rule"></span><span class="desc">// humans + agents as first-class principals</span>
+  </div>
+
+  <div class="vp">
+    <div class="chrome">
+      <span class="dot f"></span><span class="dot"></span><span class="dot"></span>
+      <span class="u"><b>app.acme.internal</b>/admin/members</span>
+      <span class="right">admin · 14 humans · 4 agents</span>
+    </div>
+    <div class="shell">
+      <div class="topbar">
+        <div class="wordmark"><span class="zero" style="width:1.35em;height:1.35em">0</span><span>editor<span class="z0">zero</span></span></div>
+        <div class="search"><span>⌕</span><span>find a member or agent…</span><kbd>/</kbd></div>
+        <div class="me"><div class="nm up mono" style="text-align:right"><b>Nomi A.</b><br/>admin</div><span class="av human">NA</span></div>
+      </div>
+
+      <nav class="side">
+        <span class="grp">Admin</span>
+        <a class="on"><span class="ic" style="background:var(--ink)"></span>Members &amp; teams</a>
+        <a><span class="ic"></span>Spaces<span class="ct">4</span></a>
+        <a><span class="ic" style="background:var(--ultra)"></span>Agents<span class="ct">4</span></a>
+        <a><span class="ic"></span>Roles &amp; permissions</a>
+        <a><span class="ic"></span>Audit log</a>
+        <span class="grp">Instance</span>
+        <a><span class="ic"></span>Settings</a>
+        <a><span class="ic"></span>Authentication</a>
+        <a><span class="ic"></span>Backups</a>
+        <div class="foot">self-hosted<br/>node&nbsp;<b>healthy</b> · <b>v0.0</b><br/>AGPL-3.0-only</div>
+      </nav>
+
+      <main class="main">
+        <div class="admin-head">
+          <div><h3>Members &amp; teams</h3><div class="sub">// 18 principals — 14 human · 4 agent</div></div>
+          <div style="margin-left:auto;display:flex;gap:9px">
+            <button class="btn sm">＋ Create team</button>
+            <button class="btn sm agent">⬢ Register agent</button>
+            <button class="btn sm primary">＋ Invite member</button>
+          </div>
+        </div>
+
+        <div class="admin-tabs">
+          <a class="on">PEOPLE &amp; AGENTS</a>
+          <a>TEAMS</a>
+          <a>SPACES</a>
+          <a>INVITES</a>
+        </div>
+
+        <div class="admin-grid">
+          <table class="mem">
+            <thead><tr><th style="width:34%">Principal</th><th>Kind</th><th>Teams</th><th>Role</th><th></th></tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="pr"><span class="av human">NA</span><div><div class="nm">Nomi A.</div><div class="id">nomi@acme · usr_01H…</div></div></div></td>
+                <td><span class="kind human"><i></i>HUMAN</span></td>
+                <td class="tcell">Core · Architecture</td>
+                <td><span class="role admin">admin</span></td>
+                <td><button class="btn sm ghost">⋯</button></td>
+              </tr>
+              <tr>
+                <td><div class="pr"><span class="av agent">HX</span><div><div class="nm">helix</div><div class="id">agt_helix · key ••••4f0c</div></div></div></td>
+                <td><span class="kind agent"><i></i>AGENT</span></td>
+                <td class="tcell">Architecture</td>
+                <td><span class="role agent">agent · editor</span></td>
+                <td><button class="btn sm ghost">⋯</button></td>
+              </tr>
+              <tr>
+                <td><div class="pr"><span class="av human">KL</span><div><div class="nm">Kai L.</div><div class="id">kai@acme · usr_02F…</div></div></div></td>
+                <td><span class="kind human"><i></i>HUMAN</span></td>
+                <td class="tcell">Core · Handbook</td>
+                <td><span class="role editor">editor</span></td>
+                <td><button class="btn sm ghost">⋯</button></td>
+              </tr>
+              <tr>
+                <td><div class="pr"><span class="av agent">DX</span><div><div class="nm">dex</div><div class="id">agt_dex · key ••••91a2</div></div></div></td>
+                <td><span class="kind agent"><i></i>AGENT</span></td>
+                <td class="tcell">Specs · RFCs</td>
+                <td><span class="role agent">agent · editor</span></td>
+                <td><button class="btn sm ghost">⋯</button></td>
+              </tr>
+              <tr>
+                <td><div class="pr"><span class="av human">RS</span><div><div class="nm">Reya S.</div><div class="id">reya@acme · usr_04K…</div></div></div></td>
+                <td><span class="kind human"><i></i>HUMAN</span></td>
+                <td class="tcell">Architecture</td>
+                <td><span class="role viewer">reviewer</span></td>
+                <td><button class="btn sm ghost">⋯</button></td>
+              </tr>
+              <tr>
+                <td><div class="pr"><span class="av agent">LN</span><div><div class="nm">lint-bot</div><div class="id">agt_lint · key ••••7c3d</div></div></div></td>
+                <td><span class="kind agent"><i></i>AGENT</span></td>
+                <td class="tcell">ALL · read-only</td>
+                <td><span class="role viewer">agent · viewer</span></td>
+                <td><button class="btn sm ghost">⋯</button></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="display:flex;flex-direction:column;gap:var(--gap)">
+            <div class="slab aside-card">
+              <div class="ah">// TEAMS</div>
+              <div class="team"><span class="gl" style="background:var(--volt)">C</span><div><div class="nm">Core</div><div class="ct">8 members</div></div><div class="stack"><span class="av human">NA</span><span class="av human">KL</span><span class="av agent">HX</span></div></div>
+              <div class="team"><span class="gl" style="background:var(--ultra);color:var(--ultra-ink)">A</span><div><div class="nm">Architecture</div><div class="ct">6 · 2 agents</div></div><div class="stack"><span class="av human">RS</span><span class="av agent">HX</span><span class="av agent">DX</span></div></div>
+              <div class="team"><span class="gl" style="background:var(--ink);color:var(--volt)">H</span><div><div class="nm">Handbook</div><div class="ct">4 members</div></div><div class="stack"><span class="av human">KL</span></div></div>
+            </div>
+
+            <div class="slab aside-card">
+              <div class="ah">// REGISTER AGENT</div>
+              <div class="invite">
+                <div><label>agent name</label><div class="inp">scribe</div></div>
+                <div><label>scope</label><div class="inp placeholder">spaces · teams…</div></div>
+                <div><label>role</label>
+                  <div class="opts"><div class="o">VIEWER</div><div class="o on">EDITOR</div><div class="o">ADMIN</div></div>
+                </div>
+                <button class="btn agent" style="justify-content:center;width:100%">⬢ Mint key &amp; register</button>
+                <div class="mono" style="font-size:10px;color:var(--ink-3);line-height:1.5">distinct rate limits · audit attribution · revocable. Agents are principals — ADR 0016.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============ COLOPHON ============ -->
+  <footer class="colophon">
+    <div class="c">
+      <h4>// system</h4>
+      <p><b>NULLSTATE</b> — a neo-brutalist system for editorzero. Raw structure on display: 2.5px hard borders, zero radius, hard offset blocks instead of soft shadows, an exposed origin grid.</p>
+    </div>
+    <div class="c">
+      <h4>// type</h4>
+      <p>Space Grotesk (display) · Space Mono (system / coordinates) · Inter Tight (body). All OFL / open-source.</p>
+    </div>
+    <div class="c">
+      <h4>// colour</h4>
+      <p>Two loud flats: VOLT lime = human, ULTRA blue = agent — peers, equal weight. Cool structural paper, near-black ink.</p>
+      <div class="swrow"><i style="background:var(--volt)"></i><i style="background:var(--ultra)"></i><i style="background:var(--ink)"></i><i style="background:var(--paper)"></i><i style="background:var(--alert)"></i></div>
+    </div>
+    <div class="c">
+      <h4>// motion</h4>
+      <p>Restrained &amp; mechanical: hard offset-shift on hover (no easing blur), a stepped agent-presence pulse, a stepped caret blink. Motion signals liveness, never decorates.</p>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

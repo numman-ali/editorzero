@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>editorzero — PHOSPHOR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* ——— heritage tokens, all themeable ——— */
+    --slate:#2A2D34; --graphite:#1C1E23;
+    --face:#D9DAD2; --raised:#E6E7DF; --sunken:#CDCEC6;
+    --b-light:#FFFFFF; --b-shadow:#A7A89F; --b-dark:#8C8D85;
+    --ink:#1A1C20; --ink-soft:#4D5058; --ink-faint:#6E7178;
+    --amber:#FFB000; --amber-deep:#C77800; --amber-glow:rgba(255,176,0,.35);
+    --green:#16C172; --green-deep:#0E7A47; --green-glow:rgba(22,193,114,.30);
+    --cyan:#2BB3C0; --red:#D6442E;
+    --stripe:#B9BAB1;
+    --mono:'Space Mono',ui-monospace,monospace;
+    --term:'VT323',monospace;
+    --ui:'IBM Plex Sans',system-ui,sans-serif;
+    --bevel-out: -1px -1px 0 0 var(--b-light) inset, 1px 1px 0 0 var(--b-shadow) inset, -2px -2px 0 0 var(--b-light) inset;
+    --bevel-out-2: inset 1px 1px 0 var(--b-light), inset -1px -1px 0 var(--b-shadow), inset 2px 2px 0 var(--raised);
+    --bevel-in: inset -1px -1px 0 var(--b-light), inset 1px 1px 0 var(--b-dark);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--slate);
+    background-image:
+      linear-gradient(rgba(255,255,255,.015) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.015) 1px,transparent 1px);
+    background-size:4px 4px;
+    color:var(--ink);font-family:var(--ui);line-height:1.5;
+    padding:0 0 80px;-webkit-font-smoothing:antialiased;
+  }
+
+  /* ——— global frame label between screens ——— */
+  .screenlbl{
+    max-width:1180px;margin:46px auto 14px;padding:0 24px;
+    display:flex;align-items:baseline;gap:14px;color:var(--amber);
+    font-family:var(--term);font-size:30px;letter-spacing:.5px;
+    text-shadow:0 0 12px var(--amber-glow);
+  }
+  .screenlbl .ref{font-family:var(--mono);font-size:11px;color:#7C7E86;letter-spacing:2px;text-shadow:none;}
+  .screenlbl .ln{flex:1;height:1px;background:linear-gradient(90deg,var(--amber-deep),transparent);opacity:.5}
+
+  /* ——— the "window" — a chiseled workstation panel ——— */
+  .win{
+    max-width:1180px;margin:0 auto;background:var(--face);
+    box-shadow:var(--bevel-out), 0 18px 50px rgba(0,0,0,.45);
+    border:1px solid var(--graphite);
+  }
+  /* pinstripe NeXT title bar */
+  .titlebar{
+    height:30px;display:flex;align-items:center;gap:10px;padding:0 9px;
+    background:
+      repeating-linear-gradient(0deg,var(--stripe) 0 1px,var(--raised) 1px 2px);
+    border-bottom:1px solid var(--b-shadow);
+    box-shadow:inset 0 1px 0 var(--b-light);
+  }
+  .tb-btn{width:13px;height:13px;background:var(--raised);
+    box-shadow:var(--bevel-out-2);position:relative;flex:0 0 auto}
+  .tb-btn.close::after{content:"";position:absolute;inset:4px;border:1px solid var(--ink-soft)}
+  .tb-title{font-family:var(--mono);font-weight:700;font-size:11px;letter-spacing:1px;
+    color:var(--ink);background:var(--raised);padding:2px 12px;margin:0 auto;
+    box-shadow:var(--bevel-out-2);text-transform:uppercase}
+  .tb-spacer{width:13px;flex:0 0 auto}
+
+  /* OS menubar */
+  .menubar{height:26px;display:flex;align-items:center;gap:2px;padding:0 6px;
+    background:var(--raised);border-bottom:1px solid var(--b-shadow);
+    box-shadow:inset 0 1px 0 var(--b-light)}
+  .menubar .apple{width:16px;height:16px;display:grid;place-items:center;color:var(--ink);margin-right:4px}
+  .menubar .apple svg{display:block}
+  .mi{font-size:12px;padding:3px 10px;color:var(--ink);cursor:default;font-weight:500}
+  .mi:hover{background:var(--slate);color:var(--amber)}
+  .menubar .clock{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-soft);padding-right:6px}
+  .menubar .clock .blink{color:var(--green)}
+
+  /* shared chrome bits */
+  .btn{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.5px;
+    padding:6px 13px;background:var(--raised);color:var(--ink);border:none;
+    box-shadow:var(--bevel-out-2);cursor:pointer;text-transform:uppercase;
+    display:inline-flex;align-items:center;gap:7px;text-decoration:none}
+  .btn:active{box-shadow:var(--bevel-in);transform:translate(1px,1px)}
+  .btn.amber{background:var(--amber);color:var(--graphite);box-shadow:inset 1px 1px 0 #FFD37A,inset -1px -1px 0 var(--amber-deep)}
+  .btn.amber:active{box-shadow:inset -1px -1px 0 #FFD37A,inset 1px 1px 0 var(--amber-deep)}
+  .btn.green{background:var(--green);color:#04361F;box-shadow:inset 1px 1px 0 #5CE6A8,inset -1px -1px 0 var(--green-deep)}
+
+  .chip{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.5px;
+    padding:2px 7px;text-transform:uppercase;border:1px solid var(--b-dark);background:var(--raised);color:var(--ink-soft)}
+  .chip.amber{background:#FFF1D6;border-color:var(--amber-deep);color:var(--amber-deep)}
+  .chip.green{background:#DBF7E9;border-color:var(--green-deep);color:var(--green-deep)}
+  .chip.cyan{background:#D9F2F4;border-color:#1B7E89;color:#15616A}
+
+  /* the blinking ZERO / boot cursor */
+  .cursor{display:inline-block;width:.62em;height:1.02em;background:var(--amber);
+    margin-left:.08em;transform:translateY(.14em);
+    box-shadow:0 0 9px var(--amber-glow);animation:blink 1.06s steps(1) infinite}
+  .cursor.green{background:var(--green);box-shadow:0 0 9px var(--green-glow)}
+  @keyframes blink{50%{opacity:0}}
+
+  /* avatar tokens */
+  .av{width:26px;height:26px;flex:0 0 auto;display:grid;place-items:center;
+    font-family:var(--mono);font-weight:700;font-size:10px;color:#fff;
+    box-shadow:var(--bevel-out-2)}
+  .av.h1{background:#5B6BB0}.av.h2{background:#A0566F}.av.h3{background:#5E8C61}.av.h4{background:#9C7A3C}
+  .av.agent{background:var(--graphite);color:var(--green);position:relative;
+    box-shadow:inset 0 0 0 1px var(--green-deep),0 0 7px var(--green-glow)}
+  .av.agent::after{content:"";position:absolute;right:-2px;bottom:-2px;width:7px;height:7px;
+    background:var(--green);border:1px solid var(--face);animation:breathe 2.4s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:1;box-shadow:0 0 0 0 var(--green-glow)}50%{opacity:.65;box-shadow:0 0 0 4px transparent}}
+
+  /* ——— (A) DASHBOARD ——— */
+  .dash{display:grid;grid-template-columns:210px 1fr;min-height:560px}
+  .sidebar{background:var(--graphite);color:#C9CBD1;padding:16px 0;border-right:1px solid #000}
+  .sb-brand{padding:0 16px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #34373F}
+  .sb-mark{width:30px;height:30px;background:var(--amber);display:grid;place-items:center;
+    font-family:var(--term);font-size:26px;color:var(--graphite);box-shadow:0 0 14px var(--amber-glow);flex:0 0 auto}
+  .sb-brand b{font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:.5px;color:#fff}
+  .sb-brand b span{color:var(--amber)}
+  .sb-brand small{display:block;font-family:var(--mono);font-size:9px;color:#6E7178;letter-spacing:1.5px}
+  .sb-sect{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:#6E7178;padding:18px 16px 7px}
+  .sb-item{display:flex;align-items:center;gap:10px;padding:6px 16px;font-size:13px;cursor:default;color:#C9CBD1}
+  .sb-item .ic{width:14px;text-align:center;color:#7C7E86}
+  .sb-item:hover{background:#26282E}
+  .sb-item.on{background:#000;color:var(--amber);box-shadow:inset 3px 0 0 var(--amber)}
+  .sb-item.on .ic{color:var(--amber)}
+  .sb-item .ct{margin-left:auto;font-family:var(--mono);font-size:10px;color:#6E7178}
+  .sb-foot{margin-top:18px;padding:12px 16px;border-top:1px solid #34373F;
+    font-family:var(--mono);font-size:10px;color:#6E7178;line-height:1.7}
+  .sb-foot .dot{color:var(--green)}
+
+  .canvas{padding:22px 26px;background:var(--face);
+    background-image:linear-gradient(rgba(0,0,0,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,.018) 1px,transparent 1px);
+    background-size:22px 22px}
+  .hello{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px}
+  .hello h1{font-family:var(--ui);font-weight:700;font-size:25px;color:var(--ink);letter-spacing:-.3px}
+  .hello .sub{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-top:4px;letter-spacing:.5px}
+
+  /* boot strip — the "zero / origin" motif */
+  .boot{background:var(--graphite);color:var(--green);font-family:var(--term);font-size:19px;
+    padding:13px 17px;margin-bottom:20px;position:relative;overflow:hidden;line-height:1.35;
+    box-shadow:var(--bevel-in)}
+  .boot::before{content:"";position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 2px,transparent 2px 4px)}
+  .boot::after{content:"";position:absolute;left:0;right:0;height:42px;
+    background:linear-gradient(rgba(22,193,114,.10),transparent);animation:sweep 5.5s linear infinite}
+  @keyframes sweep{0%{top:-42px}100%{top:100%}}
+  .boot .amb{color:var(--amber)}
+  .boot b{color:#8FE9C0;font-weight:400}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:20px}
+  .stat{background:var(--raised);padding:13px 15px;box-shadow:var(--bevel-out-2)}
+  .stat .k{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--ink-faint);text-transform:uppercase}
+  .stat .v{font-family:var(--term);font-size:42px;line-height:.92;margin-top:6px;color:var(--ink)}
+  .stat .v small{font-size:15px;color:var(--ink-faint)}
+  .stat .v.amb{color:var(--amber-deep)}.stat .v.grn{color:var(--green-deep)}
+  .stat .d{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-top:4px}
+
+  .twocol{display:grid;grid-template-columns:1.55fr 1fr;gap:16px}
+  .card{background:var(--raised);box-shadow:var(--bevel-out-2)}
+  .card-h{padding:9px 14px;border-bottom:1px solid var(--b-shadow);
+    background:var(--sunken);box-shadow:inset 0 1px 0 var(--b-light);
+    display:flex;align-items:center;gap:8px}
+  .card-h h3{font-family:var(--mono);font-weight:700;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--ink)}
+  .card-h .more{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-faint);cursor:default}
+  .card-b{padding:6px 0}
+  .row{display:flex;align-items:center;gap:11px;padding:9px 14px;border-bottom:1px solid #C7C8C0;cursor:default}
+  .row:last-child{border-bottom:none}
+  .row:hover{background:var(--sunken)}
+  .row .ico{width:22px;height:22px;flex:0 0 auto;background:var(--face);display:grid;place-items:center;
+    box-shadow:var(--bevel-out-2);font-size:11px;color:var(--ink-soft)}
+  .row .nm{font-size:13px;font-weight:500;color:var(--ink)}
+  .row .mt{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-top:1px}
+  .row .rt{margin-left:auto;text-align:right}
+  .row .when{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+
+  .feed{padding:4px 0}
+  .fitem{display:flex;gap:10px;padding:8px 14px;font-size:12px;color:var(--ink-soft);align-items:flex-start}
+  .fitem .tdot{width:8px;height:8px;flex:0 0 auto;margin-top:5px;background:var(--ink-faint)}
+  .fitem .tdot.a{background:var(--green);box-shadow:0 0 6px var(--green-glow)}
+  .fitem .tdot.h{background:var(--cyan)}
+  .fitem b{color:var(--ink);font-weight:600}
+  .fitem .who{font-family:var(--mono);font-size:11px}
+  .fitem .who.agent{color:var(--green-deep)}
+  .fitem time{display:block;font-family:var(--mono);font-size:9px;color:var(--ink-faint);margin-top:2px}
+
+  /* spaces tiles */
+  .spaces{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-top:18px}
+  .space{background:var(--raised);box-shadow:var(--bevel-out-2);padding:14px;cursor:default;position:relative}
+  .space:hover{background:#EDEEE6}
+  .space .sq{width:34px;height:34px;display:grid;place-items:center;font-family:var(--term);font-size:24px;color:#fff;margin-bottom:10px;box-shadow:var(--bevel-out-2)}
+  .space h4{font-size:14px;font-weight:600;color:var(--ink)}
+  .space p{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-top:4px;line-height:1.5}
+  .space .meta{display:flex;gap:6px;margin-top:11px;align-items:center}
+
+  /* ——— (B) DOCS LIST ——— */
+  .docview{display:grid;grid-template-columns:248px 1fr;min-height:580px}
+  .tree{background:var(--raised);border-right:1px solid var(--b-shadow);padding:12px 0;
+    box-shadow:inset -1px 0 0 var(--b-light)}
+  .tree-h{padding:0 14px 11px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--b-shadow);margin-bottom:8px}
+  .tree-h .sq{width:22px;height:22px;background:#5B6BB0;display:grid;place-items:center;font-family:var(--term);font-size:17px;color:#fff;box-shadow:var(--bevel-out-2)}
+  .tree-h b{font-size:13px;font-weight:700;color:var(--ink)}
+  .tree-h small{display:block;font-family:var(--mono);font-size:9px;color:var(--ink-faint);letter-spacing:1px}
+  .tnode{display:flex;align-items:center;gap:7px;padding:5px 14px;font-size:13px;cursor:default;color:var(--ink-soft);user-select:none}
+  .tnode:hover{background:var(--sunken)}
+  .tnode.on{background:var(--amber);color:var(--graphite);font-weight:600;box-shadow:inset 2px 0 0 var(--amber-deep)}
+  .tnode .tw{width:12px;text-align:center;font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+  .tnode.on .tw{color:var(--amber-deep)}
+  .tnode .fi{font-size:12px}
+  .tnode.l2{padding-left:30px}.tnode.l3{padding-left:46px}
+  .tnode .ct{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--ink-faint)}
+
+  .doclist{background:var(--face);display:flex;flex-direction:column}
+  .dl-bar{padding:13px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--b-shadow);background:var(--sunken);box-shadow:inset 0 1px 0 var(--b-light)}
+  .dl-bar h2{font-family:var(--ui);font-weight:700;font-size:17px;color:var(--ink)}
+  .dl-bar .path{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-top:2px}
+  .search{margin-left:auto;display:flex;align-items:center;gap:7px;background:var(--face);padding:5px 10px;box-shadow:var(--bevel-in);width:200px}
+  .search input{border:none;background:none;font-family:var(--mono);font-size:11px;color:var(--ink);width:100%;outline:none}
+  .search input::placeholder{color:var(--ink-faint)}
+
+  .tablehdr{display:grid;grid-template-columns:34px 1fr 168px 120px 84px;gap:12px;padding:7px 18px;
+    font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--ink-faint);text-transform:uppercase;
+    background:var(--raised);border-bottom:1px solid var(--b-shadow)}
+  .drow{display:grid;grid-template-columns:34px 1fr 168px 120px 84px;gap:12px;padding:11px 18px;
+    align-items:center;border-bottom:1px solid #C7C8C0;cursor:default}
+  .drow:hover{background:var(--raised)}
+  .drow .fic{width:24px;height:30px;background:var(--face);box-shadow:var(--bevel-out-2);position:relative;display:grid;place-items:end center;padding-bottom:3px}
+  .drow .fic::before{content:"";position:absolute;top:0;right:0;border:6px solid transparent;border-top-color:var(--b-shadow);border-right-color:var(--b-shadow)}
+  .drow .fic b{font-family:var(--mono);font-size:7px;color:var(--ink-faint)}
+  .drow .dt{font-size:13px;font-weight:600;color:var(--ink)}
+  .drow .dsub{font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-top:2px}
+  .editors{display:flex;align-items:center}
+  .editors .av{margin-right:-7px;width:24px;height:24px;border:1px solid var(--face)}
+  .editors .lbl{margin-left:14px;font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+  .editors .lbl.agent{color:var(--green-deep);font-weight:700}
+  .statecell{font-family:var(--mono);font-size:10px;display:flex;align-items:center;gap:6px;color:var(--ink-soft)}
+  .ld{width:7px;height:7px}.ld.pub{background:var(--green)}.ld.draft{background:var(--amber)}.ld.rev{background:var(--cyan);box-shadow:0 0 6px var(--green-glow)}
+
+  /* ——— (C) READER ——— */
+  .reader{display:grid;grid-template-columns:1fr 244px}
+  .doc-main{padding:0;background:var(--face)}
+  .doc-scroll{padding:44px 64px 60px;max-width:none}
+  .breadcrumb{font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--ink-faint);margin-bottom:26px;display:flex;align-items:center;gap:7px}
+  .breadcrumb b{color:var(--amber-deep)}
+  .doc-title{font-family:var(--ui);font-weight:700;font-size:38px;line-height:1.1;letter-spacing:-1px;color:var(--ink);margin-bottom:14px}
+  .doc-lede{font-size:17px;line-height:1.6;color:var(--ink-soft);margin-bottom:30px;font-weight:400}
+  .doc-meta-strip{display:flex;align-items:center;gap:18px;padding:13px 0;border-top:2px solid var(--ink);border-bottom:1px solid var(--b-shadow);margin-bottom:34px}
+  .doc-meta-strip .mt{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--ink-soft)}
+  .doc-meta-strip .mt b{color:var(--ink)}
+  .doc-body h2{font-family:var(--ui);font-weight:700;font-size:22px;color:var(--ink);margin:34px 0 12px;letter-spacing:-.3px;
+    padding-left:14px;border-left:4px solid var(--amber)}
+  .doc-body p{font-size:15.5px;line-height:1.72;color:#26282E;margin-bottom:16px}
+  .doc-body p code,.doc-body li code{font-family:var(--mono);font-size:12.5px;background:var(--raised);padding:1px 6px;box-shadow:var(--bevel-out-2);color:var(--amber-deep)}
+  .doc-body ul{margin:0 0 18px 8px;list-style:none}
+  .doc-body li{font-size:15.5px;line-height:1.7;color:#26282E;padding-left:22px;position:relative;margin-bottom:7px}
+  .doc-body li::before{content:"▸";position:absolute;left:0;color:var(--amber-deep);font-size:13px}
+  .callout{background:var(--graphite);color:#C9CBD1;padding:18px 20px;margin:26px 0;box-shadow:var(--bevel-in);position:relative;overflow:hidden}
+  .callout::before{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 2px,transparent 2px 4px)}
+  .callout .lab{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--amber);margin-bottom:8px}
+  .callout p{font-family:var(--term);font-size:19px;line-height:1.4;color:#8FE9C0;margin:0}
+  .codeblock{background:var(--graphite);padding:16px 18px;margin:22px 0;box-shadow:var(--bevel-in);font-family:var(--mono);font-size:12.5px;line-height:1.7;color:#C9CBD1;overflow-x:auto}
+  .codeblock .c{color:#6E7178}.codeblock .k{color:var(--amber)}.codeblock .s{color:var(--green)}
+
+  .doc-aside{background:var(--raised);border-left:1px solid var(--b-shadow);padding:18px 16px;box-shadow:inset 1px 0 0 var(--b-light)}
+  .aside-sec{margin-bottom:22px}
+  .aside-sec .lab{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--ink-faint);text-transform:uppercase;margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid var(--b-shadow)}
+  .contrib{display:flex;align-items:center;gap:9px;padding:6px 0}
+  .contrib .nm{font-size:12px;font-weight:500;color:var(--ink)}
+  .contrib .rl{font-family:var(--mono);font-size:9px;color:var(--ink-faint)}
+  .toc a{display:block;font-size:12px;color:var(--ink-soft);padding:4px 0 4px 12px;border-left:2px solid var(--b-shadow);text-decoration:none}
+  .toc a.on{border-left-color:var(--amber);color:var(--ink);font-weight:600}
+  .toc a:hover{color:var(--amber-deep)}
+  .metakv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;padding:4px 0;color:var(--ink-faint)}
+  .metakv b{color:var(--ink)}
+
+  /* ——— (D) EDITOR — the centrepiece ——— */
+  .editor-wrap{background:var(--face);position:relative}
+  .editor-top{display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--sunken);border-bottom:1px solid var(--b-shadow);box-shadow:inset 0 1px 0 var(--b-light)}
+  .editor-top .docn{font-family:var(--mono);font-weight:700;font-size:11px;color:var(--ink);display:flex;align-items:center;gap:8px}
+  .saved{font-family:var(--mono);font-size:10px;color:var(--green-deep);display:flex;align-items:center;gap:6px}
+  .saved .ld{width:6px;height:6px;background:var(--green)}
+  /* presence bar — humans + agents */
+  .presence{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .presence .plist{display:flex;align-items:center}
+  .presence .plist .av{margin-left:-6px;width:24px;height:24px;border:1px solid var(--sunken)}
+  .presence .ptag{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+
+  /* chiseled formatting toolbar */
+  .toolbar{display:flex;align-items:center;gap:3px;padding:6px 12px;background:var(--raised);border-bottom:1px solid var(--b-shadow);flex-wrap:wrap}
+  .tg{display:flex;gap:0;box-shadow:var(--bevel-in);background:var(--sunken)}
+  .tk{min-width:30px;height:28px;padding:0 8px;background:var(--raised);display:grid;place-items:center;
+    font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ink);cursor:pointer;box-shadow:var(--bevel-out-2)}
+  .tk:active{box-shadow:var(--bevel-in);transform:translate(1px,1px)}
+  .tk.on{background:var(--amber);color:var(--graphite);box-shadow:var(--bevel-in)}
+  .tk i{font-style:italic}.tk b{font-weight:700}.tk s{text-decoration:line-through}
+  .tk.mono{font-family:var(--mono)}
+  .tsep{width:1px;height:22px;background:var(--b-shadow);box-shadow:1px 0 0 var(--b-light);margin:0 5px}
+  .tk.wide{min-width:auto;gap:6px;display:flex}
+  .tk.wide .ar{font-size:9px;color:var(--ink-faint)}
+
+  /* editor sheet */
+  .sheet{position:relative;padding:34px 56px 70px;min-height:430px;background:var(--face)}
+  .blk{position:relative;margin-bottom:15px}
+  /* block drag handles (NodeView gutter) */
+  .handle{position:absolute;left:-40px;top:2px;display:flex;gap:2px;opacity:0;transition:opacity .12s}
+  .blk:hover .handle{opacity:1}
+  .handle .h{width:15px;height:21px;background:var(--raised);box-shadow:var(--bevel-out-2);display:grid;place-items:center;cursor:grab;color:var(--ink-faint);font-size:11px}
+  .blk h1.title{font-family:var(--ui);font-weight:700;font-size:33px;letter-spacing:-.8px;color:var(--ink);line-height:1.12}
+  .blk h2{font-family:var(--ui);font-weight:700;font-size:21px;color:var(--ink);letter-spacing:-.3px}
+  .blk p{font-size:15.5px;line-height:1.74;color:#26282E}
+  .blk p code{font-family:var(--mono);font-size:12.5px;background:var(--raised);padding:1px 6px;box-shadow:var(--bevel-out-2);color:var(--amber-deep)}
+  .blk .marker{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--ink-faint);text-transform:uppercase;display:inline-block;margin-bottom:5px}
+
+  /* the human caret */
+  .caret-h{display:inline-block;width:2px;height:1.05em;background:var(--cyan);vertical-align:text-bottom;margin:0 1px;animation:blink 1.06s steps(1) infinite}
+
+  /* —— THE SIGNATURE: live agent co-editor —— */
+  .agent-zone{position:relative}
+  /* phosphor agent cursor with floating flag */
+  .agent-caret{display:inline-block;width:2px;height:1.12em;background:var(--green);vertical-align:text-bottom;position:relative;
+    box-shadow:0 0 8px var(--green-glow);animation:phos 1.4s ease-in-out infinite}
+  @keyframes phos{0%,100%{box-shadow:0 0 7px var(--green-glow)}50%{box-shadow:0 0 14px var(--green),0 0 4px #fff}}
+  .agent-flag{position:absolute;top:-23px;left:-2px;background:var(--green);color:#04361F;
+    font-family:var(--mono);font-weight:700;font-size:9px;letter-spacing:.5px;padding:2px 7px;white-space:nowrap;
+    box-shadow:inset 1px 1px 0 #5CE6A8,inset -1px -1px 0 var(--green-deep);display:flex;align-items:center;gap:5px}
+  .agent-flag::after{content:"";position:absolute;bottom:-4px;left:8px;width:0;height:0;border:4px solid transparent;border-top-color:var(--green);border-bottom:0}
+  .agent-flag .blip{width:5px;height:5px;background:#04361F;animation:blink 1.06s steps(1) infinite}
+
+  /* tracked agent suggestion — inline change with review affordance */
+  .suggestion{position:relative;background:var(--green-glow);box-shadow:0 0 0 1px var(--green-deep);padding:1px 2px;
+    animation:slidein .5s ease both}
+  @keyframes slidein{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:translateX(0)}}
+  .suggestion .ins{color:var(--green-deep);font-weight:600;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+  .suggestion .del{color:var(--red);text-decoration:line-through;opacity:.7}
+
+  .review-pop{position:absolute;left:0;bottom:-58px;z-index:5;background:var(--raised);
+    box-shadow:var(--bevel-out-2),0 8px 22px rgba(0,0,0,.28);padding:9px 11px;width:340px}
+  .review-pop::before{content:"";position:absolute;top:-7px;left:24px;width:12px;height:12px;background:var(--raised);transform:rotate(45deg);box-shadow:inset 1px 1px 0 var(--b-light)}
+  .review-pop .rh{display:flex;align-items:center;gap:7px;margin-bottom:7px}
+  .review-pop .rh .av{width:20px;height:20px}
+  .review-pop .rh b{font-family:var(--mono);font-size:10px;color:var(--ink);font-weight:700}
+  .review-pop .rh .tm{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--ink-faint)}
+  .review-pop .rtxt{font-size:11px;color:var(--ink-soft);line-height:1.5;margin-bottom:9px}
+  .review-pop .rtxt em{color:var(--green-deep);font-style:normal;font-weight:600}
+  .review-pop .ract{display:flex;gap:7px}
+  .review-pop .btn{padding:4px 11px;font-size:10px}
+
+  /* slash menu (suggestion plugin) */
+  .slash{position:absolute;z-index:6;background:var(--raised);box-shadow:var(--bevel-out-2),0 10px 26px rgba(0,0,0,.3);width:262px;padding:5px}
+  .slash-h{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--ink-faint);padding:5px 9px 7px;border-bottom:1px solid var(--b-shadow);margin-bottom:4px}
+  .slash-h b{color:var(--amber-deep)}
+  .sl{display:flex;align-items:center;gap:11px;padding:6px 9px;cursor:default;color:var(--ink-soft)}
+  .sl:hover,.sl.on{background:var(--amber);color:var(--graphite)}
+  .sl .si{width:26px;height:26px;background:var(--face);box-shadow:var(--bevel-out-2);display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:13px;color:var(--ink);flex:0 0 auto}
+  .sl.on .si{background:var(--graphite);color:var(--amber)}
+  .sl .sn{font-size:12.5px;font-weight:600}
+  .sl .sd{font-family:var(--mono);font-size:9px;color:var(--ink-faint)}
+  .sl.on .sd{color:var(--amber-deep)}
+  .sl .sk{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+  .sl.on .sk{color:var(--graphite)}
+
+  /* ——— (E) ADMIN ——— */
+  .admin{display:grid;grid-template-columns:200px 1fr;min-height:560px}
+  .admin-nav{background:var(--graphite);padding:14px 0;color:#C9CBD1}
+  .admin-nav .ah{padding:0 16px 12px;font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:var(--amber);border-bottom:1px solid #34373F;margin-bottom:8px}
+  .admin-nav .ai{display:flex;align-items:center;gap:10px;padding:7px 16px;font-size:13px;color:#C9CBD1;cursor:default}
+  .admin-nav .ai .ic{width:14px;text-align:center;color:#7C7E86}
+  .admin-nav .ai:hover{background:#26282E}
+  .admin-nav .ai.on{background:#000;color:var(--amber);box-shadow:inset 3px 0 0 var(--amber)}
+  .admin-nav .ai.on .ic{color:var(--amber)}
+  .admin-body{background:var(--face);padding:22px 26px}
+  .admin-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+  .admin-head h2{font-family:var(--ui);font-weight:700;font-size:23px;color:var(--ink);letter-spacing:-.3px}
+  .admin-head .sub{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-top:4px}
+  .seg{display:flex;box-shadow:var(--bevel-in);background:var(--sunken)}
+  .seg .s{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.5px;padding:6px 13px;color:var(--ink-soft);cursor:pointer;box-shadow:var(--bevel-out-2);background:var(--raised);text-transform:uppercase}
+  .seg .s.on{background:var(--graphite);color:var(--amber);box-shadow:var(--bevel-in)}
+
+  .mtable{background:var(--raised);box-shadow:var(--bevel-out-2)}
+  .mth{display:grid;grid-template-columns:2fr 1.2fr 1fr 1fr 100px;gap:14px;padding:9px 16px;
+    font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--ink-faint);text-transform:uppercase;
+    background:var(--sunken);border-bottom:1px solid var(--b-shadow)}
+  .mtr{display:grid;grid-template-columns:2fr 1.2fr 1fr 1fr 100px;gap:14px;padding:11px 16px;align-items:center;border-bottom:1px solid #C7C8C0;cursor:default}
+  .mtr:hover{background:#EDEEE6}.mtr:last-child{border-bottom:none}
+  .mtr .who{display:flex;align-items:center;gap:10px}
+  .mtr .who .nm{font-size:13px;font-weight:600;color:var(--ink)}
+  .mtr .who .em{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+  .role{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;text-transform:uppercase;display:inline-block;box-shadow:var(--bevel-out-2)}
+  .role.admin{background:#FFF1D6;color:var(--amber-deep)}
+  .role.editor{background:#D9F2F4;color:#15616A}
+  .role.viewer{background:var(--sunken);color:var(--ink-soft)}
+  .role.agent{background:var(--graphite);color:var(--green)}
+  .mtr .teams{font-family:var(--mono);font-size:11px;color:var(--ink-soft)}
+  .mtr .last{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+  .kindtag{font-family:var(--mono);font-size:9px;letter-spacing:1px;display:flex;align-items:center;gap:6px;color:var(--ink-soft)}
+  .kindtag .kd{width:7px;height:7px}.kindtag .kd.h{background:var(--cyan)}.kindtag .kd.a{background:var(--green);box-shadow:0 0 5px var(--green-glow)}
+
+  /* footer signature */
+  .sig{max-width:1180px;margin:34px auto 0;padding:0 24px;display:flex;align-items:center;gap:14px;
+    font-family:var(--mono);font-size:10px;color:#6E7178;letter-spacing:1px}
+  .sig .sq{width:14px;height:14px;background:var(--amber);box-shadow:0 0 10px var(--amber-glow)}
+
+  @media (prefers-reduced-motion: reduce){
+    .cursor,.caret-h,.agent-caret,.agent-flag .blip,.suggestion{animation:none!important}
+    .boot::after,.av.agent::after{animation:none!important}
+    .cursor,.caret-h{opacity:1}
+  }
+  @media (max-width:920px){
+    .dash,.docview,.reader,.admin{grid-template-columns:1fr}
+    .reader{grid-template-columns:1fr}
+    .grid3,.spaces{grid-template-columns:1fr 1fr}
+    .twocol{grid-template-columns:1fr}
+    .doc-scroll{padding:30px 26px}
+    .sheet{padding:28px 26px 60px}
+    .handle{display:none}
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════ (A) DASHBOARD ════════════════ -->
+<div class="screenlbl"><span class="ref">SCR_A</span> dashboard.home<span class="cursor"></span><span class="ln"></span></div>
+<div class="win">
+  <div class="titlebar">
+    <span class="tb-btn close"></span><span class="tb-btn"></span><span class="tb-btn"></span>
+    <span class="tb-title">editorzero — workspace : acme-research</span>
+    <span class="tb-spacer"></span>
+  </div>
+  <div class="menubar">
+    <span class="apple"><svg width="13" height="13" viewBox="0 0 13 13"><rect x="0" y="0" width="13" height="13" fill="#FFB000"/><rect x="3" y="3" width="7" height="7" fill="#1C1E23"/></svg></span>
+    <span class="mi">File</span><span class="mi">Edit</span><span class="mi">View</span><span class="mi">Workspace</span><span class="mi">Agents</span><span class="mi">Help</span>
+    <span class="clock">SYNC <span class="blink">●</span> ONLINE · 09:41</span>
+  </div>
+
+  <div class="dash">
+    <!-- sidebar -->
+    <aside class="sidebar">
+      <div class="sb-brand">
+        <div class="sb-mark">0</div>
+        <div><b>editor<span>zero</span></b><small>v0.9 · SELF-HOSTED</small></div>
+      </div>
+      <div class="sb-sect">WORKSPACE</div>
+      <div class="sb-item on"><span class="ic">▦</span> Dashboard</div>
+      <div class="sb-item"><span class="ic">▤</span> All Documents <span class="ct">312</span></div>
+      <div class="sb-item"><span class="ic">◷</span> Recent</div>
+      <div class="sb-item"><span class="ic">★</span> Starred <span class="ct">9</span></div>
+      <div class="sb-item"><span class="ic">⤓</span> Published <span class="ct">24</span></div>
+      <div class="sb-sect">SPACES</div>
+      <div class="sb-item"><span class="ic" style="color:#5B6BB0">■</span> Engineering <span class="ct">88</span></div>
+      <div class="sb-item"><span class="ic" style="color:#A0566F">■</span> Product <span class="ct">54</span></div>
+      <div class="sb-item"><span class="ic" style="color:#5E8C61">■</span> Research <span class="ct">120</span></div>
+      <div class="sb-sect">SYSTEM</div>
+      <div class="sb-item"><span class="ic">⚙</span> Admin</div>
+      <div class="sb-item"><span class="ic">◆</span> Agents <span class="ct">4</span></div>
+      <div class="sb-foot"><span class="dot">●</span> 4 agents active<br>17 humans online<br>audit: 1,204 entries today</div>
+    </aside>
+
+    <!-- canvas -->
+    <main class="canvas">
+      <div class="hello">
+        <div>
+          <h1>Good morning, Nomi</h1>
+          <div class="sub">// 17 collaborators · 4 agents · last sync 6s ago</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <a class="btn" href="#"><span>⌕</span> Search</a>
+          <a class="btn amber" href="#"><span>＋</span> New Document</a>
+        </div>
+      </div>
+
+      <!-- boot strip: the zero / origin motif -->
+      <div class="boot">
+        <span class="amb">editorzero://</span> booting workspace <b>acme-research</b> … mounting 3 spaces … <span class="amb">[ok]</span><br>
+        principals: <b>17 human</b> · <b>4 agent</b> resolved · audit-log integrity <span class="amb">verified</span> · ready<span class="cursor green"></span>
+      </div>
+
+      <div class="grid3">
+        <div class="stat"><div class="k">Documents</div><div class="v">312</div><div class="d">+8 this week</div></div>
+        <div class="stat"><div class="k">Agent edits / 24h</div><div class="v grn">147<small>↑</small></div><div class="d">across 22 docs</div></div>
+        <div class="stat"><div class="k">Pending suggestions</div><div class="v amb">11</div><div class="d">5 from agents</div></div>
+      </div>
+
+      <div class="twocol">
+        <div class="card">
+          <div class="card-h"><h3>Recent Documents</h3><span class="more">view all ▸</span></div>
+          <div class="card-b">
+            <div class="row">
+              <div class="ico">▤</div>
+              <div><div class="nm">Vector Search Tuning — sqlite-vec vs pgvector</div><div class="mt">Engineering / Search · edited by you + AGENT.04</div></div>
+              <div class="rt"><div class="when">6s ago</div></div>
+            </div>
+            <div class="row">
+              <div class="ico">▤</div>
+              <div><div class="nm">Q3 Architecture Review</div><div class="mt">Product / Planning · 3 contributors</div></div>
+              <div class="rt"><div class="when">12 min</div></div>
+            </div>
+            <div class="row">
+              <div class="ico">⤓</div>
+              <div><div class="nm">Self-Hosting Runbook <span class="chip green" style="margin-left:4px">PUBLISHED</span></div><div class="mt">Engineering / Ops · /docs/runbook</div></div>
+              <div class="rt"><div class="when">1 hr</div></div>
+            </div>
+            <div class="row">
+              <div class="ico">▤</div>
+              <div><div class="nm">Agent Permission Scopes — draft</div><div class="mt">Research / Security · AGENT.01 drafting</div></div>
+              <div class="rt"><div class="when">2 hr</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h3>Live Activity</h3><span class="more">audit ▸</span></div>
+          <div class="feed">
+            <div class="fitem"><span class="tdot a"></span><div><span class="who agent">AGENT.04</span> <span>proposed an edit in</span> <b>Vector Search Tuning</b><time>just now · suggestion #882</time></div></div>
+            <div class="fitem"><span class="tdot h"></span><div><span class="who">m.chen</span> <span>accepted 2 suggestions</span><time>2 min ago</time></div></div>
+            <div class="fitem"><span class="tdot a"></span><div><span class="who agent">AGENT.01</span> <span>created</span> <b>Agent Permission Scopes</b><time>2 hr ago</time></div></div>
+            <div class="fitem"><span class="tdot h"></span><div><span class="who">you</span> <span>published</span> <b>Self-Hosting Runbook</b><time>1 hr ago</time></div></div>
+            <div class="fitem"><span class="tdot"></span><div><span class="who">a.okoro</span> <span>moved 4 docs to</span> <b>Research</b><time>3 hr ago</time></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="spaces">
+        <div class="space">
+          <div class="sq" style="background:#5B6BB0">E</div>
+          <h4>Engineering</h4>
+          <p>Architecture, runbooks, ADRs &amp; ops docs.</p>
+          <div class="meta"><span class="chip">88 DOCS</span><span class="chip green">2 AGENTS</span></div>
+        </div>
+        <div class="space">
+          <div class="sq" style="background:#A0566F">P</div>
+          <h4>Product</h4>
+          <p>Roadmaps, specs, research synthesis.</p>
+          <div class="meta"><span class="chip">54 DOCS</span><span class="chip green">1 AGENT</span></div>
+        </div>
+        <div class="space">
+          <div class="sq" style="background:#5E8C61">R</div>
+          <h4>Research</h4>
+          <p>Long-form notes &amp; agent-assisted reviews.</p>
+          <div class="meta"><span class="chip">120 DOCS</span><span class="chip green">1 AGENT</span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ════════════════ (B) DOCS LIST IN A SPACE ════════════════ -->
+<div class="screenlbl"><span class="ref">SCR_B</span> space.documents<span class="cursor"></span><span class="ln"></span></div>
+<div class="win">
+  <div class="titlebar">
+    <span class="tb-btn close"></span><span class="tb-btn"></span><span class="tb-btn"></span>
+    <span class="tb-title">Engineering — collections</span>
+    <span class="tb-spacer"></span>
+  </div>
+  <div class="docview">
+    <!-- collections tree -->
+    <aside class="tree">
+      <div class="tree-h">
+        <div class="sq">E</div>
+        <div><b>Engineering</b><small>88 DOCUMENTS</small></div>
+      </div>
+      <div class="tnode"><span class="tw">▾</span><span class="fi">▦</span> Architecture <span class="ct">21</span></div>
+      <div class="tnode l2"><span class="tw">▸</span><span class="fi">▤</span> ADRs <span class="ct">35</span></div>
+      <div class="tnode l2 on"><span class="tw">▾</span><span class="fi">▤</span> Search <span class="ct">7</span></div>
+      <div class="tnode l3"><span class="tw"></span><span class="fi">·</span> Indexing</div>
+      <div class="tnode l3"><span class="tw"></span><span class="fi">·</span> Embeddings</div>
+      <div class="tnode"><span class="tw">▸</span><span class="fi">▦</span> Operations <span class="ct">14</span></div>
+      <div class="tnode"><span class="tw">▸</span><span class="fi">▦</span> Runbooks <span class="ct">9</span></div>
+      <div class="tnode"><span class="tw">▸</span><span class="fi">▦</span> Security <span class="ct">6</span></div>
+      <div style="margin:12px 14px 0"><a class="btn" href="#" style="width:100%;justify-content:center"><span>＋</span> New Collection</a></div>
+    </aside>
+
+    <!-- document table -->
+    <section class="doclist">
+      <div class="dl-bar">
+        <div>
+          <h2>Search</h2>
+          <div class="path">// engineering / architecture / search · 7 documents</div>
+        </div>
+        <div class="search"><span style="color:#6E7178">⌕</span><input placeholder="filter documents…"></div>
+        <a class="btn amber" href="#"><span>＋</span> New Doc</a>
+      </div>
+
+      <div class="tablehdr">
+        <span></span><span>Title</span><span>Editors</span><span>Modified</span><span>State</span>
+      </div>
+
+      <div class="drow">
+        <div class="fic"><b>DOC</b></div>
+        <div><div class="dt">Vector Search Tuning — sqlite-vec vs pgvector</div><div class="dsub">/docs/search/vector-tuning · 2.4k words</div></div>
+        <div class="editors"><span class="av h1">MC</span><span class="av agent">04</span><span class="lbl agent">+AGENT.04 live</span></div>
+        <div class="statecell">6s ago<br>by you</div>
+        <div class="statecell"><span class="ld rev"></span> REVIEW</div>
+      </div>
+
+      <div class="drow">
+        <div class="fic"><b>DOC</b></div>
+        <div><div class="dt">Embedding Model Benchmarks 2026</div><div class="dsub">/docs/search/embeddings · 1.8k words</div></div>
+        <div class="editors"><span class="av h3">AO</span><span class="av agent">01</span><span class="lbl">2 editors</span></div>
+        <div class="statecell">2 hr ago<br>by a.okoro</div>
+        <div class="statecell"><span class="ld draft"></span> DRAFT</div>
+      </div>
+
+      <div class="drow">
+        <div class="fic"><b>DOC</b></div>
+        <div><div class="dt">ANN Index Rollout Plan</div><div class="dsub">/docs/search/ann-rollout · 940 words</div></div>
+        <div class="editors"><span class="av h2">RK</span><span class="lbl">1 editor</span></div>
+        <div class="statecell">yesterday<br>by r.kaur</div>
+        <div class="statecell"><span class="ld pub"></span> PUBLISHED</div>
+      </div>
+
+      <div class="drow">
+        <div class="fic"><b>DOC</b></div>
+        <div><div class="dt">Hybrid Search Query Planner — RFC</div><div class="dsub">/docs/search/hybrid-rfc · 3.1k words</div></div>
+        <div class="editors"><span class="av h1">MC</span><span class="av h4">JT</span><span class="av agent">02</span><span class="lbl agent">+AGENT.02</span></div>
+        <div class="statecell">3 days ago<br>by m.chen</div>
+        <div class="statecell"><span class="ld draft"></span> DRAFT</div>
+      </div>
+
+      <div class="drow">
+        <div class="fic"><b>DOC</b></div>
+        <div><div class="dt">Index Maintenance Schedule</div><div class="dsub">/docs/search/index-maint · 620 words</div></div>
+        <div class="editors"><span class="av agent">04</span><span class="lbl agent">authored by AGENT.04</span></div>
+        <div class="statecell">5 days ago<br>by AGENT.04</div>
+        <div class="statecell"><span class="ld pub"></span> PUBLISHED</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ════════════════ (C) READER ════════════════ -->
+<div class="screenlbl"><span class="ref">SCR_C</span> document.read<span class="cursor"></span><span class="ln"></span></div>
+<div class="win">
+  <div class="titlebar">
+    <span class="tb-btn close"></span><span class="tb-btn"></span><span class="tb-btn"></span>
+    <span class="tb-title">Self-Hosting Runbook</span>
+    <span class="tb-spacer"></span>
+  </div>
+  <div class="reader">
+    <main class="doc-main">
+      <div class="doc-scroll">
+        <div class="breadcrumb">engineering <span>/</span> operations <span>/</span> <b>self-hosting runbook</b></div>
+        <h1 class="doc-title">Self-Hosting editorzero<br>on a Single Node</h1>
+        <p class="doc-lede">Bring up a complete, audit-complete editorzero deployment — Hono trunk, embedded collab, SQLite — on one machine, and hand it to an admin. No SaaS, no phone-home.</p>
+
+        <div class="doc-meta-strip">
+          <span class="mt">◷ <b>8 min</b> read</span>
+          <span class="mt">⤓ Published <b>1 hr ago</b></span>
+          <span class="mt">◆ <b>3</b> contributors</span>
+          <span class="mt"><span class="chip green">PUBLIC PAGE</span></span>
+        </div>
+
+        <div class="doc-body">
+          <p>editorzero ships as a single self-contained artifact. The whole platform — the JSON-RPC API, the <code>/mcp</code> endpoint, the embedded Hocuspocus collaboration server, and the static SPA — co-hosts on one owned HTTP server. You deploy it; you own it.</p>
+
+          <h2>1 — Prerequisites</h2>
+          <p>A Linux host with Node 22 LTS and Docker for the optional Postgres backend. The SQLite floor needs nothing else — the database is a file, and the audit log is the source of truth.</p>
+          <ul>
+            <li>Node <code>22.x</code> LTS (EOL Apr 2027)</li>
+            <li>A persistent volume for <code>editorzero.db</code> and document updates</li>
+            <li>A reverse proxy terminating TLS on <code>:443</code></li>
+          </ul>
+
+          <h2>2 — Boot the trunk</h2>
+          <p>The <code>editorzero-server</code> binary constructs the composition root, mounts Better Auth same-origin, and upgrades <code>/collab</code> WebSocket connections after authenticating the cookie at the handshake.</p>
+          <div class="codeblock"><span class="c"># bring up the single-node stack</span><br><span class="k">$</span> editorzero-server <span class="k">--db</span> ./data/editorzero.db <span class="k">--port</span> <span class="s">3000</span><br><span class="c">  ▸ resolver ready · auth mounted · collab attached</span><br><span class="c">  ▸ listening on http://0.0.0.0:3000</span></div>
+
+          <div class="callout">
+            <div class="lab">▌ INVARIANT 3 — AUDIT COMPLETENESS</div>
+            <p>Every mutation produces exactly one audit entry. The audit log alone reconstructs final state — for humans and agents alike.</p>
+          </div>
+
+          <h2>3 — Add your first agent</h2>
+          <p>Agents are first-class principals (ADR 0016) with their own scoped tokens, rate limits, and revocation. Mint an agent-auth token and it becomes a peer co-editor — its edits land in the same audit trail as any human's.</p>
+          <ul>
+            <li>Scope the token with <code>doc.update</code>, <code>doc.create</code>, <code>collection.move</code></li>
+            <li>Revocation cascades to live collab sessions instantly</li>
+            <li>Tracked agent edits surface as reviewable suggestions, never silent writes</li>
+          </ul>
+        </div>
+      </div>
+    </main>
+
+    <aside class="doc-aside">
+      <div class="aside-sec">
+        <div class="lab">Contributors</div>
+        <div class="contrib"><span class="av h1">NA</span><div><div class="nm">Nomi A.</div><div class="rl">OWNER · 14 edits</div></div></div>
+        <div class="contrib"><span class="av h2">RK</span><div><div class="nm">r.kaur</div><div class="rl">EDITOR · 6 edits</div></div></div>
+        <div class="contrib"><span class="av agent">04</span><div><div class="nm">AGENT.04</div><div class="rl" style="color:var(--green-deep)">AGENT · 9 edits</div></div></div>
+      </div>
+      <div class="aside-sec">
+        <div class="lab">On this page</div>
+        <nav class="toc">
+          <a href="#" class="on">Prerequisites</a>
+          <a href="#">Boot the trunk</a>
+          <a href="#">Add your first agent</a>
+        </nav>
+      </div>
+      <div class="aside-sec">
+        <div class="lab">Metadata</div>
+        <div class="metakv"><span>Doc ID</span><b>doc_01H9…7Q</b></div>
+        <div class="metakv"><span>Slug</span><b>/runbook</b></div>
+        <div class="metakv"><span>Version</span><b>v18</b></div>
+        <div class="metakv"><span>Space</span><b>Engineering</b></div>
+        <div class="metakv"><span>License</span><b>AGPL-3.0</b></div>
+        <div style="margin-top:14px;display:flex;gap:7px">
+          <a class="btn" href="#" style="flex:1;justify-content:center">History</a>
+          <a class="btn amber" href="#" style="flex:1;justify-content:center">Edit</a>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- ════════════════ (D) EDITOR — THE CENTREPIECE ════════════════ -->
+<div class="screenlbl"><span class="ref">SCR_D</span> document.edit · live co-authoring<span class="cursor green"></span><span class="ln"></span></div>
+<div class="win">
+  <div class="titlebar">
+    <span class="tb-btn close"></span><span class="tb-btn"></span><span class="tb-btn"></span>
+    <span class="tb-title">Vector Search Tuning — EDITING</span>
+    <span class="tb-spacer"></span>
+  </div>
+
+  <div class="editor-wrap">
+    <!-- top status: presence of humans + agents -->
+    <div class="editor-top">
+      <span class="docn">▤ Vector Search Tuning <span style="color:var(--ink-faint)">· /docs/search/vector-tuning</span></span>
+      <span class="saved"><span class="ld"></span> SYNCED · v24 · all changes saved</span>
+      <div class="presence">
+        <span class="ptag">CO-EDITING</span>
+        <div class="plist">
+          <span class="av h1" title="m.chen (you)">MC</span>
+          <span class="av agent" title="AGENT.04 (live)">04</span>
+        </div>
+        <span class="ptag" style="color:var(--green-deep)"><b>2 PEERS</b></span>
+      </div>
+    </div>
+
+    <!-- chiseled formatting toolbar → Tiptap chain commands -->
+    <div class="toolbar">
+      <div class="tg">
+        <div class="tk wide">P <span class="ar">▾</span></div>
+      </div>
+      <span class="tsep"></span>
+      <div class="tg">
+        <div class="tk on"><b>B</b></div>
+        <div class="tk"><i>I</i></div>
+        <div class="tk"><span style="text-decoration:underline">U</span></div>
+        <div class="tk"><s>S</s></div>
+        <div class="tk mono">&lt;/&gt;</div>
+      </div>
+      <span class="tsep"></span>
+      <div class="tg">
+        <div class="tk">H1</div>
+        <div class="tk on">H2</div>
+        <div class="tk">H3</div>
+      </div>
+      <span class="tsep"></span>
+      <div class="tg">
+        <div class="tk">•</div>
+        <div class="tk">1.</div>
+        <div class="tk">❝</div>
+        <div class="tk">▦</div>
+      </div>
+      <span class="tsep"></span>
+      <div class="tg">
+        <div class="tk">🔗</div>
+      </div>
+      <a class="btn green" href="#" style="margin-left:auto"><span>◆</span> Ask AGENT.04</a>
+    </div>
+
+    <!-- the editable sheet -->
+    <div class="sheet">
+
+      <!-- title block -->
+      <div class="blk">
+        <div class="handle"><span class="h">⠿</span></div>
+        <h1 class="title">Vector Search Tuning</h1>
+      </div>
+
+      <!-- paragraph w/ human caret -->
+      <div class="blk">
+        <div class="handle"><span class="h">⠿</span></div>
+        <p>We benchmarked <code>sqlite-vec</code> against <code>pgvector</code> across three corpora. Brute-force scan is safe below one million vectors; beyond that, the ANN path is gated behind an experimental flag.<span class="caret-h"></span></p>
+      </div>
+
+      <!-- H2 block -->
+      <div class="blk">
+        <div class="handle"><span class="h">⠿</span></div>
+        <h2>Recall vs. Latency</h2>
+      </div>
+
+      <!-- ★ THE SIGNATURE BLOCK: live agent cursor + tracked suggestion ★ -->
+      <div class="blk agent-zone">
+        <div class="handle"><span class="h">⠿</span></div>
+        <p>
+          At p95, sqlite-vec returned results in
+          <!-- tracked agent suggestion: insertion + deletion -->
+          <span class="suggestion"><span class="del">~40ms</span> <span class="ins">31&nbsp;ms</span></span>
+          for the 200k-vector set, which is well inside the interactive budget for a docs search box.
+          <!-- live phosphor agent caret with floating flag -->
+          <span class="agent-caret"><span class="agent-flag"><span class="blip"></span> AGENT.04 · editing</span></span>
+        </p>
+
+        <!-- review affordance for the tracked change -->
+        <div class="review-pop">
+          <div class="rh">
+            <span class="av agent">04</span>
+            <b>AGENT.04 suggests an edit</b>
+            <span class="tm">just now</span>
+          </div>
+          <div class="rtxt">Replace <span style="color:var(--red);text-decoration:line-through">~40ms</span> with the measured value <em>31&nbsp;ms</em> from <code style="font-size:10px">bench/run-882.json</code>. Cited from the latest benchmark artifact.</div>
+          <div class="ract">
+            <a class="btn green" href="#">✓ Accept</a>
+            <a class="btn" href="#">✕ Reject</a>
+            <a class="btn" href="#" style="margin-left:auto">↳ Reply</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- block where a slash menu is open -->
+      <div class="blk" style="margin-top:74px">
+        <div class="handle"><span class="h">⠿</span></div>
+        <p style="color:var(--ink-faint)">/<span style="color:var(--ink)">cal</span><span class="caret-h"></span></p>
+        <!-- slash command list = @tiptap/suggestion render -->
+        <div class="slash">
+          <div class="slash-h">INSERT BLOCK — filtering “<b>cal</b>”</div>
+          <div class="sl on"><div class="si">!</div><div><div class="sn">Callout</div><div class="sd">Phosphor terminal note</div></div><span class="sk">↵</span></div>
+          <div class="sl"><div class="si">▦</div><div><div class="sn">Table</div><div class="sd">Grid of cells</div></div><span class="sk">⌘T</span></div>
+          <div class="sl"><div class="si">∑</div><div><div class="sn">Calculation</div><div class="sd">Inline formula block</div></div></div>
+          <div class="sl"><div class="si">◆</div><div><div class="sn">Ask an Agent</div><div class="sd">Delegate this block to AGENT.04</div></div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ (E) ADMIN / MEMBERS ════════════════ -->
+<div class="screenlbl"><span class="ref">SCR_E</span> admin.members<span class="cursor"></span><span class="ln"></span></div>
+<div class="win">
+  <div class="titlebar">
+    <span class="tb-btn close"></span><span class="tb-btn"></span><span class="tb-btn"></span>
+    <span class="tb-title">Admin — Members &amp; Agents</span>
+    <span class="tb-spacer"></span>
+  </div>
+  <div class="admin">
+    <aside class="admin-nav">
+      <div class="ah">▌ ADMINISTRATION</div>
+      <div class="ai on"><span class="ic">◇</span> Members</div>
+      <div class="ai"><span class="ic">▦</span> Teams</div>
+      <div class="ai"><span class="ic">■</span> Spaces</div>
+      <div class="ai"><span class="ic">◆</span> Agents</div>
+      <div class="ai"><span class="ic">⚿</span> Roles &amp; Scopes</div>
+      <div class="ai"><span class="ic">▤</span> Audit Log</div>
+      <div class="ai"><span class="ic">⚙</span> Settings</div>
+      <div style="margin-top:18px;padding:12px 16px;border-top:1px solid #34373F;font-family:var(--mono);font-size:9px;color:#6E7178;line-height:1.8">
+        SELF-HOSTED<br>AGPL-3.0-only<br><span style="color:var(--green)">● </span>node healthy
+      </div>
+    </aside>
+
+    <main class="admin-body">
+      <div class="admin-head">
+        <div>
+          <h2>Members &amp; Agents</h2>
+          <div class="sub">// 17 humans · 4 agents · workspace acme-research</div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div class="seg">
+            <span class="s on">ALL</span><span class="s">HUMANS</span><span class="s">AGENTS</span>
+          </div>
+          <a class="btn amber" href="#"><span>＋</span> Invite</a>
+        </div>
+      </div>
+
+      <div class="mtable">
+        <div class="mth">
+          <span>Principal</span><span>Type</span><span>Role</span><span>Teams</span><span>Last seen</span>
+        </div>
+
+        <div class="mtr">
+          <div class="who"><span class="av h1">NA</span><div><div class="nm">Nomi A.</div><div class="em">numman@acme.dev</div></div></div>
+          <div class="kindtag"><span class="kd h"></span> HUMAN</div>
+          <div><span class="role admin">Owner</span></div>
+          <div class="teams">Eng · Product</div>
+          <div class="last">online now</div>
+        </div>
+
+        <div class="mtr">
+          <div class="who"><span class="av h2">RK</span><div><div class="nm">r.kaur</div><div class="em">rkaur@acme.dev</div></div></div>
+          <div class="kindtag"><span class="kd h"></span> HUMAN</div>
+          <div><span class="role editor">Editor</span></div>
+          <div class="teams">Engineering</div>
+          <div class="last">4 min ago</div>
+        </div>
+
+        <div class="mtr">
+          <div class="who"><span class="av agent">04</span><div><div class="nm">AGENT.04</div><div class="em">agent-auth · scoped token</div></div></div>
+          <div class="kindtag"><span class="kd a"></span> AGENT</div>
+          <div><span class="role agent">Agent</span></div>
+          <div class="teams">Eng / Search</div>
+          <div class="last" style="color:var(--green-deep)">editing now</div>
+        </div>
+
+        <div class="mtr">
+          <div class="who"><span class="av h3">AO</span><div><div class="nm">a.okoro</div><div class="em">aokoro@acme.dev</div></div></div>
+          <div class="kindtag"><span class="kd h"></span> HUMAN</div>
+          <div><span class="role editor">Editor</span></div>
+          <div class="teams">Research</div>
+          <div class="last">1 hr ago</div>
+        </div>
+
+        <div class="mtr">
+          <div class="who"><span class="av agent">01</span><div><div class="nm">AGENT.01</div><div class="em">agent-auth · acting-as a.okoro</div></div></div>
+          <div class="kindtag"><span class="kd a"></span> AGENT</div>
+          <div><span class="role agent">Agent</span></div>
+          <div class="teams">Research</div>
+          <div class="last" style="color:var(--green-deep)">12 min ago</div>
+        </div>
+
+        <div class="mtr">
+          <div class="who"><span class="av h4">JT</span><div><div class="nm">j.tanaka</div><div class="em">jtanaka@acme.dev</div></div></div>
+          <div class="kindtag"><span class="kd h"></span> HUMAN</div>
+          <div><span class="role viewer">Viewer</span></div>
+          <div class="teams">Product</div>
+          <div class="last">yesterday</div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:10px;color:var(--ink-faint)">
+        <span>SHOWING 6 OF 21 PRINCIPALS</span>
+        <span style="margin-left:auto">Agents carry distinct rate limits, audit attribution &amp; instant revocation · ADR 0016</span>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="sig">
+  <span class="sq"></span>
+  PHOSPHOR · a refined retro-computing system for editorzero · VT323 + Space Mono + IBM Plex Sans · WCAG 2.1 AA · fully tokenised<span class="cursor"></span>
+</div>
+
+</body>
+</html>

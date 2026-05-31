@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Search + command palette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   SEARCH + COMMAND PALETTE — screen-specific rules (prefix: search-)
+   All colours/metrics reference Meridian Zero tokens.
+   ============================================================ */
+
+/* ---- top query bar ------------------------------------------------ */
+.search-bar{ gap:14px; flex-wrap:wrap; }
+.search-field{
+  margin-left:auto; display:flex; align-items:center; gap:9px; flex:1 1 360px; max-width:520px;
+  border:var(--rule) solid var(--ink); background:var(--surface);
+  padding:7px 11px; box-shadow:3px 3px 0 var(--surface-sunk);
+}
+.search-field-x{ width:14px; height:14px; flex:0 0 14px; color:var(--steel); }
+.search-input{
+  flex:1 1 auto; min-width:0; border:0; outline:0; background:transparent;
+  font-family:var(--mono); font-size:13px; color:var(--ink); letter-spacing:-0.01em;
+}
+.search-input::placeholder{ color:var(--steel-2); }
+.search-clear{
+  border:0; background:transparent; cursor:pointer; color:var(--steel);
+  font-size:16px; line-height:1; padding:0 2px;
+}
+.search-clear:hover{ color:var(--ink); }
+.search-k{
+  font-family:var(--mono); font-size:9px; color:var(--steel-2);
+  border:var(--rule) solid var(--hair-strong); padding:1px 5px; letter-spacing:0.04em;
+}
+.search-only-ai{ flex:0 0 auto; }
+
+/* ---- body: facets + results -------------------------------------- */
+.search-body{ padding:0; display:grid; grid-template-columns:236px 1fr; align-items:start; }
+
+/* ---- FACETS sidebar ---------------------------------------------- */
+.search-facets{
+  border-right:var(--rule) solid var(--hair-strong); background:var(--paper);
+  padding:16px 16px 24px; position:sticky; top:0; align-self:stretch; min-height:520px;
+}
+.search-facet-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.search-reset{
+  border:0; background:transparent; cursor:pointer;
+  font-family:var(--mono); font-size:9.5px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ultra-ink);
+}
+.search-reset:hover{ text-decoration:underline; }
+.search-active{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+.search-active .chip{ cursor:pointer; }
+.search-active .chip i{ font-style:normal; margin-left:1px; opacity:.7; }
+
+.search-fgroup{ padding:12px 0; }
+.search-fg-h{ display:flex; align-items:center; justify-content:space-between; margin-bottom:9px; }
+
+.search-opt{
+  display:flex; align-items:center; gap:9px; padding:5px 6px; margin:0 -6px; cursor:pointer;
+  font-size:12px; color:var(--ink-2); position:relative;
+}
+.search-opt:hover{ background:var(--surface); color:var(--ink); }
+.search-opt.on{ color:var(--ink); }
+.search-opt input{ position:absolute; opacity:0; width:0; height:0; }
+.search-cb{ width:13px; height:13px; flex:0 0 13px; border:var(--rule) solid var(--hair-strong); background:var(--surface); position:relative; }
+.search-opt:hover .search-cb{ border-color:var(--steel); }
+.search-opt input:checked + .search-cb{ background:var(--ultra); border-color:var(--ultra); }
+.search-opt input:checked + .search-cb::after{
+  content:""; position:absolute; left:3px; top:0px; width:4px; height:8px;
+  border:solid #fff; border-width:0 var(--rule-2) var(--rule-2) 0; transform:rotate(40deg);
+}
+.search-opt input:focus-visible + .search-cb{ outline:var(--rule-2) solid var(--ultra); outline-offset:1px; }
+.search-opt .av{ width:18px; height:18px; flex:0 0 18px; }
+.search-ol{ flex:1 1 auto; min-width:0; letter-spacing:-0.01em; display:flex; align-items:center; gap:6px; }
+.search-on{ font-family:var(--mono); font-size:10px; color:var(--steel-2); }
+.search-agtag{ font-size:8.5px; padding:0px 4px; }
+
+.search-dates{ display:flex; flex-wrap:wrap; gap:4px; }
+.search-date{
+  font-family:var(--mono); font-size:10px; letter-spacing:0.04em; padding:4px 8px;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface); color:var(--ink-2); cursor:pointer;
+}
+.search-date:hover{ border-color:var(--ink); color:var(--ink); }
+.search-date.on{ background:var(--ink); border-color:var(--ink); color:var(--paper); }
+
+/* ---- RESULTS column ---------------------------------------------- */
+.search-results{ padding:16px 22px 24px; min-width:0; }
+.search-res-head{
+  display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+  padding-bottom:14px; margin-bottom:4px; border-bottom:var(--rule) solid var(--ink);
+}
+.search-count{ font-size:13px; color:var(--ink-2); }
+.search-count b{ color:var(--ink); font-family:var(--display); font-weight:700; }
+.search-q{ color:var(--ultra-ink); font-weight:600; }
+.search-sort{ display:flex; align-items:center; gap:8px; }
+.search-sortbtn{
+  font-family:var(--mono); font-size:10px; letter-spacing:0.05em; text-transform:uppercase;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface); color:var(--steel); padding:4px 9px; cursor:pointer;
+}
+.search-sortbtn.on{ background:var(--surface-2); color:var(--ink); border-color:var(--hair-strong); }
+.search-sortbtn:hover{ color:var(--ink); }
+
+.search-list{ list-style:none; margin:0; padding:0; }
+.search-row{ display:flex; gap:14px; padding:16px 6px; margin:0 -6px; border-bottom:var(--rule) solid var(--hair); cursor:pointer; }
+.search-row:hover{ background:var(--paper); }
+.search-row:last-child{ border-bottom:0; }
+.search-rank{ flex:0 0 22px; padding-top:3px; }
+.search-rc{ min-width:0; flex:1 1 auto; }
+.search-rtop{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.search-title{
+  font-family:var(--display); font-weight:600; font-size:15.5px; letter-spacing:-0.02em; color:var(--ink);
+}
+.search-row:hover .search-title{ color:var(--ultra-ink); }
+.search-path{ font-size:10px; color:var(--steel-2); margin-top:5px; letter-spacing:0.02em; }
+.search-snip{ font-size:13px; line-height:1.6; color:var(--ink-1); margin:8px 0 0; max-width:74ch; }
+.search-snip mark{ background:var(--ultra-wash); color:var(--ultra-ink); font-weight:600; padding:0 2px; box-shadow:inset 0 -2px 0 var(--ultra-edge); }
+.search-meta{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-top:11px; font-family:var(--mono); font-size:10.5px; color:var(--steel); }
+.search-by{ display:flex; align-items:center; gap:6px; color:var(--ink-2); }
+.search-by .av{ width:18px; height:18px; flex:0 0 18px; }
+.search-dot{ color:var(--steel-2); }
+.search-rtag{ font-size:9px; padding:1px 6px; }
+.search-meta .editors-stack .av{ width:18px; height:18px; flex:0 0 18px; }
+
+.search-more{ display:flex; align-items:center; justify-content:space-between; gap:14px; margin-top:20px; }
+.search-page{ font-size:10px; color:var(--steel-2); letter-spacing:0.05em; }
+
+/* ============================================================
+   COMMAND PALETTE OVERLAY
+   ============================================================ */
+.search-scrim{
+  position:absolute; inset:0; z-index:20;
+  background:color-mix(in srgb, var(--ink) 46%, transparent);
+  backdrop-filter:blur(1.5px);
+}
+.search-palette{
+  position:absolute; z-index:21; top:64px; left:50%; transform:translateX(-50%);
+  width:min(620px, calc(100% - 48px));
+  background:var(--surface); border:var(--rule-2) solid var(--ink);
+  box-shadow:10px 10px 0 var(--surface-sunk);
+  display:flex; flex-direction:column; max-height:560px;
+}
+
+/* input row */
+.search-pal-input{
+  display:flex; align-items:center; gap:11px; padding:14px 16px;
+  border-bottom:var(--rule) solid var(--ink); background:var(--surface);
+}
+.search-pal-x{ width:18px; height:18px; flex:0 0 18px; color:var(--ultra); }
+.search-pal-field{
+  flex:1 1 auto; min-width:0; border:0; outline:0; background:transparent;
+  font-family:var(--mono); font-size:15px; color:var(--ink); letter-spacing:-0.01em;
+}
+.search-pal-field::placeholder{ color:var(--steel-2); font-size:13.5px; }
+.search-pal-scope{ flex:0 0 auto; }
+.search-kchip{
+  font-family:var(--mono); font-size:9.5px; color:var(--steel); letter-spacing:0.03em;
+  border:var(--rule) solid var(--hair-strong); background:var(--paper); padding:2px 6px; min-width:20px; text-align:center;
+}
+.search-kchip--ai{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+
+/* scrollable results */
+.search-pal-body{ overflow-y:auto; padding:4px 0; }
+.search-grp{ padding:6px 0; border-bottom:var(--rule) solid var(--hair); }
+.search-grp:last-child{ border-bottom:0; }
+.search-grp-h{ display:flex; align-items:center; justify-content:space-between; padding:6px 16px 7px; }
+
+.search-item{
+  display:flex; align-items:center; gap:12px; padding:9px 16px; cursor:pointer; position:relative;
+}
+.search-item:hover{ background:var(--paper); }
+.search-it-ic{
+  width:24px; height:24px; flex:0 0 24px; display:grid; place-items:center;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface);
+  font-family:var(--mono); font-size:11px; font-weight:600; color:var(--steel);
+}
+.search-it-ic--sp{ color:var(--ink-1); }
+.search-it-ic--act{ color:var(--ultra-ink); border-color:var(--ultra-edge); background:var(--ultra-wash); }
+.search-it-ic--ai{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+.search-it-tx{ min-width:0; flex:1 1 auto; }
+.search-it-nm{ font-size:13px; color:var(--ink); letter-spacing:-0.01em; display:flex; align-items:center; gap:7px; }
+.search-it-nm mark{ background:var(--ultra-wash); color:var(--ultra-ink); font-weight:700; padding:0 1px; }
+.search-it-sub{ font-size:10px; color:var(--steel); margin-top:2px; letter-spacing:0.02em; }
+.search-it-av{ width:20px; height:20px; flex:0 0 20px; }
+.search-it-pav{ width:24px; height:24px; flex:0 0 24px; }
+.search-ai-q{ color:var(--agent-ink); font-family:var(--mono); font-size:11px; }
+
+/* the selected row — ink inverse */
+.search-item.sel{ background:var(--ink); }
+.search-item.sel::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--ultra); }
+.search-item.sel .search-it-nm{ color:var(--paper); }
+.search-item.sel .search-it-nm mark{ background:transparent; color:var(--ultra-edge); }
+.search-item.sel .search-it-sub{ color:var(--steel-2); }
+.search-item.sel .search-it-ic{ background:transparent; border-color:var(--steel); color:var(--paper); }
+.search-item.sel .search-kchip{ background:transparent; border-color:var(--steel); color:var(--paper); }
+
+/* AI action row tint */
+.search-item--ai:hover{ background:var(--agent-wash); }
+
+/* footer hint bar */
+.search-pal-foot{
+  display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:9px 16px;
+  border-top:var(--rule) solid var(--ink); background:var(--paper);
+}
+.search-fhint{ display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:9.5px; color:var(--steel); letter-spacing:0.03em; }
+.search-fhint--right{ margin-left:auto; color:var(--agent-ink); }
+.search-pal-foot .search-kchip{ font-size:9px; padding:1px 5px; min-width:18px; }
+
+/* ============================================================
+   MOBILE BOTTOM TAB BAR (hidden on desktop)
+   ============================================================ */
+.search-tabbar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1120px){
+  /* facets become a top horizontal strip; results below */
+  .search-body{ grid-template-columns:1fr; }
+  .search-facets{
+    position:static; min-height:0; border-right:0; border-bottom:var(--rule) solid var(--hair-strong);
+    display:grid; grid-template-columns:1fr 1fr; gap:0 22px; padding:16px;
+  }
+  .search-facet-head{ grid-column:1 / -1; }
+  .search-active{ grid-column:1 / -1; margin-bottom:6px; }
+  .search-facets .hr{ display:none; }
+  .search-fgroup{ padding:10px 0; }
+}
+
+@media (max-width:760px){
+  .search-bar{ padding:11px 16px; }
+  .search-field{ flex-basis:100%; max-width:none; order:3; box-shadow:none; }
+  .search-only-ai{ margin-left:auto; }
+  .search-facets{ grid-template-columns:1fr; }
+  .search-results{ padding:14px 16px 90px; }
+  .search-res-head{ gap:8px; }
+
+  /* palette ~ fullscreen sheet */
+  .search-scrim{ backdrop-filter:none; }
+  .search-palette{
+    top:0; left:0; transform:none; width:100%; max-height:100%; height:100%;
+    border:0; box-shadow:none;
+  }
+  .search-pal-input{ padding:14px; gap:9px; }
+  .search-pal-field{ font-size:16px; }      /* >=16px avoids iOS zoom */
+  .search-pal-scope{ display:none; }
+  .search-item{ padding:12px 14px; min-height:44px; } /* touch target */
+  .search-it-nm{ font-size:14px; }
+  .search-pal-foot{ display:none; }         /* on-screen kbd hints not useful on phone */
+
+  /* bottom tab bar */
+  .search-tabbar{
+    display:flex; position:absolute; z-index:30; left:0; right:0; bottom:0;
+    background:var(--surface); border-top:var(--rule) solid var(--hair-strong);
+  }
+  .search-tab{
+    flex:1 1 0; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:8px 0 9px; min-height:56px; justify-content:center;
+    color:var(--steel); cursor:pointer; position:relative;
+  }
+  .search-tab-ic{ width:18px; height:18px; display:grid; place-items:center; font-size:15px; color:var(--steel-2); }
+  .search-tab-x{ width:16px; height:16px; color:inherit; }
+  .search-tab-av{ width:20px; height:20px; flex:0 0 20px; }
+  .search-tab-l{ font-family:var(--mono); font-size:9px; letter-spacing:0.05em; }
+  .search-tab.on{ color:var(--ink); }
+  .search-tab.on .search-tab-ic{ color:var(--ultra); }
+  .search-tab.on::before{ content:""; position:absolute; top:0; left:18%; right:18%; height:2px; background:var(--ultra); }
+}
+
+@media (max-width:420px){
+  .search-snip{ font-size:12.5px; }
+  .search-rank{ display:none; }
+  .search-row{ gap:0; }
+}
+
+/* ============================================================
+   MOTION — disabled under reduced-motion
+   ============================================================ */
+@media (prefers-reduced-motion: reduce){
+  .search-row, .search-item, .search-title, .search-date,
+  .search-sortbtn, .search-clear, .search-reset{ transition:none !important; }
+  .live{ animation:none !important; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<!-- ================= SEARCH-RESULTS PAGE (behind the palette) ================= -->
+<section class="screen">
+  <div class="screen-tab">
+    <div class="id">
+      <span class="logo">
+        <span class="mark cross"><span class="cross-ring"></span></span>
+        <span class="word">editor<b class="zero">zero</b></span>
+      </span>
+      <span class="big">Search</span>
+    </div>
+    <div class="meta">
+      <span>x:06</span>
+      <span>SURFACE / WEB-UI</span>
+      <span>CMD-K</span>
+    </div>
+  </div>
+
+  <div class="win win--full">
+    <div class="main">
+      <!-- top bar: live query field + scope -->
+      <div class="bar search-bar">
+        <div class="crumb"><b>Search</b><span class="sep">/</span>all spaces</div>
+        <div class="search-field" role="search">
+          <span class="cross search-field-x"></span>
+          <input class="search-input" type="text" value="determinism loop" aria-label="Search query" />
+          <button class="search-clear" aria-label="Clear query">×</button>
+          <span class="search-k">⌘K</span>
+        </div>
+        <button class="btn btn--ghost btn--sm search-only-ai" type="button">
+          <span class="dot dot--agent"></span> Agent results
+        </button>
+      </div>
+
+      <div class="body search-body">
+        <!-- ============ FACETS SIDEBAR ============ -->
+        <aside class="search-facets" aria-label="Filters">
+          <div class="search-facet-head">
+            <span class="kicker">Filters</span>
+            <button class="search-reset" type="button">Reset</button>
+          </div>
+
+          <!-- active filter chips -->
+          <div class="search-active">
+            <span class="chip chip--ultra">type: doc <i>×</i></span>
+            <span class="chip chip--agent">author: agent <i>×</i></span>
+            <span class="chip chip--ghost">30 days <i>×</i></span>
+          </div>
+
+          <div class="hr"></div>
+
+          <!-- TYPE -->
+          <div class="search-fgroup">
+            <div class="search-fg-h"><span class="kicker">Type</span><span class="ord">04</span></div>
+            <label class="search-opt on"><input type="checkbox" checked /><span class="search-cb"></span><span class="search-ol">Documents</span><span class="search-on tnum">182</span></label>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="search-ol">Spaces</span><span class="search-on tnum">6</span></label>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="search-ol">People &amp; Agents</span><span class="search-on tnum">11</span></label>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="search-ol">Comments</span><span class="search-on tnum">43</span></label>
+          </div>
+
+          <div class="hr"></div>
+
+          <!-- SPACE -->
+          <div class="search-fgroup">
+            <div class="search-fg-h"><span class="kicker">Space</span><span class="ord">06</span></div>
+            <label class="search-opt on"><input type="checkbox" checked /><span class="search-cb"></span><span class="search-ol">Engineering</span><span class="search-on tnum">88</span></label>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="search-ol">Product</span><span class="search-on tnum">52</span></label>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="search-ol">Research</span><span class="search-on tnum">40</span></label>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="search-ol">Handbook</span><span class="search-on tnum">36</span></label>
+          </div>
+
+          <div class="hr"></div>
+
+          <!-- AUTHOR (humans AND agents) -->
+          <div class="search-fgroup">
+            <div class="search-fg-h"><span class="kicker">Author</span><span class="ord">11</span></div>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="av av--u">EM</span><span class="search-ol">Elena Marsh</span><span class="search-on tnum">34</span></label>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="av av--u3">RK</span><span class="search-ol">Raj Kapoor</span><span class="search-on tnum">21</span></label>
+            <label class="search-opt on"><input type="checkbox" checked /><span class="search-cb"></span><span class="av av--agent">CR</span><span class="search-ol">Curie <span class="chip chip--agent search-agtag">agent</span></span><span class="search-on tnum">29</span></label>
+            <label class="search-opt"><input type="checkbox" /><span class="search-cb"></span><span class="av av--agent">AT</span><span class="search-ol">Atlas <span class="chip chip--agent search-agtag">agent</span></span><span class="search-on tnum">17</span></label>
+          </div>
+
+          <div class="hr"></div>
+
+          <!-- DATE -->
+          <div class="search-fgroup">
+            <div class="search-fg-h"><span class="kicker">Updated</span><span class="ord">∆t</span></div>
+            <div class="search-dates">
+              <button class="search-date" type="button">24h</button>
+              <button class="search-date" type="button">7d</button>
+              <button class="search-date on" type="button">30d</button>
+              <button class="search-date" type="button">Year</button>
+              <button class="search-date" type="button">All</button>
+            </div>
+          </div>
+        </aside>
+
+        <!-- ============ RESULTS COLUMN ============ -->
+        <div class="search-results">
+          <div class="search-res-head">
+            <div class="search-count"><b class="tnum">182</b> results for <span class="search-q">“determinism loop”</span></div>
+            <div class="search-sort">
+              <span class="kicker">Sort</span>
+              <button class="search-sortbtn on" type="button">Relevance</button>
+              <button class="search-sortbtn" type="button">Recent</button>
+            </div>
+          </div>
+
+          <ol class="search-list">
+            <li class="search-row">
+              <span class="ord search-rank">01</span>
+              <div class="search-rc">
+                <div class="search-rtop">
+                  <span class="status-tag st-pub">published</span>
+                  <a class="search-title">The determinism contract for fleet control</a>
+                </div>
+                <div class="search-path mono">Engineering › Architecture › control-plane.md</div>
+                <p class="search-snip">Each robot runs a tight perception-plan-act <mark>loop</mark> at 50&nbsp;Hz. The <mark>loop</mark> is the unit of <mark>determinism</mark>: given identical sensor input and identical state, two replicas produce byte-identical actuation commands.</p>
+                <div class="search-meta">
+                  <span class="search-by"><span class="av av--agent">CR</span> Curie</span>
+                  <span class="search-dot">·</span>
+                  <span class="mono">edited 2h ago</span>
+                  <span class="search-dot">·</span>
+                  <span class="chip chip--agent search-rtag"><span class="dot dot--agent live"></span> 3 agent edits</span>
+                </div>
+              </div>
+            </li>
+
+            <li class="search-row">
+              <span class="ord search-rank">02</span>
+              <div class="search-rc">
+                <div class="search-rtop">
+                  <span class="status-tag st-rev">in review</span>
+                  <a class="search-title">CRDT convergence &amp; the replay invariant</a>
+                </div>
+                <div class="search-path mono">Engineering › Architecture › crdt-model.md</div>
+                <p class="search-snip">Convergence holds when the merge is commutative; the audit <mark>loop</mark> replays every mutation deterministically so the log alone reconstructs final state — the core of <mark>determinism</mark> here.</p>
+                <div class="search-meta">
+                  <span class="search-by"><span class="av av--u">EM</span> Elena Marsh</span>
+                  <span class="search-dot">·</span>
+                  <span class="mono">edited yesterday</span>
+                  <span class="search-dot">·</span>
+                  <span class="chip chip--ghost">14 comments</span>
+                </div>
+              </div>
+            </li>
+
+            <li class="search-row">
+              <span class="ord search-rank">03</span>
+              <div class="search-rc">
+                <div class="search-rtop">
+                  <span class="status-tag st-draft">draft</span>
+                  <a class="search-title">Runbook: recovering a desynced replica</a>
+                </div>
+                <div class="search-path mono">Engineering › Runbooks › replica-resync.md</div>
+                <p class="search-snip">When a node falls out of the <mark>determinism</mark> envelope, halt the actuation <mark>loop</mark>, snapshot the Yjs doc, and re-apply the audit tail before rejoining the fleet.</p>
+                <div class="search-meta">
+                  <span class="search-by"><span class="av av--agent">AT</span> Atlas</span>
+                  <span class="search-dot">·</span>
+                  <span class="mono">edited 3d ago</span>
+                  <span class="search-dot">·</span>
+                  <span class="chip chip--agent search-rtag">agent draft</span>
+                </div>
+              </div>
+            </li>
+
+            <li class="search-row">
+              <span class="ord search-rank">04</span>
+              <div class="search-rc">
+                <div class="search-rtop">
+                  <span class="status-tag st-pub">published</span>
+                  <a class="search-title">Simulation parity: byte-identical replays</a>
+                </div>
+                <div class="search-path mono">Research › Methods › sim-parity.md</div>
+                <p class="search-snip">A <mark>deterministic</mark> control <mark>loop</mark> makes fleet behaviour reproducible in simulation; we diff actuation traces frame-by-frame to certify parity before any over-the-air rollout.</p>
+                <div class="search-meta">
+                  <span class="search-by"><span class="av av--u3">RK</span> Raj Kapoor</span>
+                  <span class="search-dot">·</span>
+                  <span class="mono">edited 5d ago</span>
+                  <span class="search-dot">·</span>
+                  <span class="editors-stack">
+                    <span class="av av--u3">RK</span>
+                    <span class="av av--agent">CR</span>
+                  </span>
+                </div>
+              </div>
+            </li>
+          </ol>
+
+          <div class="search-more">
+            <button class="btn btn--ghost btn--sm" type="button">Load 178 more</button>
+            <span class="mono search-page">page 01 / 46</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= COMMAND PALETTE OVERLAY (on top) ================= -->
+  <div class="search-scrim" role="presentation"></div>
+  <div class="search-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <!-- input row -->
+    <div class="search-pal-input">
+      <span class="cross search-pal-x"></span>
+      <input class="search-pal-field" type="text" value="determ" aria-label="Type a command or search" placeholder="Search docs, spaces, people, or run a command…" />
+      <span class="chip chip--ghost search-pal-scope">all spaces</span>
+      <span class="search-kchip">esc</span>
+    </div>
+
+    <div class="search-pal-body">
+      <!-- DOCUMENTS -->
+      <div class="search-grp">
+        <div class="search-grp-h"><span class="kicker">Documents</span><span class="ord">04</span></div>
+
+        <div class="search-item sel" aria-selected="true">
+          <span class="search-it-ic">D</span>
+          <div class="search-it-tx">
+            <div class="search-it-nm">The <mark>determ</mark>inism contract for fleet control</div>
+            <div class="search-it-sub mono">Engineering › Architecture</div>
+          </div>
+          <span class="av av--agent search-it-av">CR</span>
+          <span class="search-kchip">↵</span>
+        </div>
+
+        <div class="search-item">
+          <span class="search-it-ic">D</span>
+          <div class="search-it-tx">
+            <div class="search-it-nm">CRDT convergence &amp; the replay invariant</div>
+            <div class="search-it-sub mono">Engineering › Architecture</div>
+          </div>
+          <span class="av av--u search-it-av">EM</span>
+        </div>
+
+        <div class="search-item">
+          <span class="search-it-ic">D</span>
+          <div class="search-it-tx">
+            <div class="search-it-nm"><mark>Determ</mark>inistic rollout checklist</div>
+            <div class="search-it-sub mono">Product › Releases</div>
+          </div>
+          <span class="av av--u3 search-it-av">RK</span>
+        </div>
+      </div>
+
+      <!-- SPACES -->
+      <div class="search-grp">
+        <div class="search-grp-h"><span class="kicker">Spaces</span><span class="ord">06</span></div>
+        <div class="search-item">
+          <span class="search-it-ic search-it-ic--sp">#</span>
+          <div class="search-it-tx">
+            <div class="search-it-nm">Engineering</div>
+            <div class="search-it-sub mono">88 docs · 6 members · 2 agents</div>
+          </div>
+          <span class="search-kchip">⌘1</span>
+        </div>
+      </div>
+
+      <!-- PEOPLE & AGENTS -->
+      <div class="search-grp">
+        <div class="search-grp-h"><span class="kicker">People &amp; Agents</span><span class="ord">11</span></div>
+        <div class="search-item">
+          <span class="av av--u search-it-pav">EM</span>
+          <div class="search-it-tx">
+            <div class="search-it-nm">Elena Marsh</div>
+            <div class="search-it-sub mono">admin · elena@nexa.dev</div>
+          </div>
+        </div>
+        <div class="search-item">
+          <span class="av av--agent search-it-pav">CR</span>
+          <div class="search-it-tx">
+            <div class="search-it-nm">Curie <span class="chip chip--agent search-agtag">agent</span></div>
+            <div class="search-it-sub mono">svc:curie · research-bot · scopes 4/6</div>
+          </div>
+          <span class="dot dot--agent live"></span>
+        </div>
+      </div>
+
+      <!-- ACTIONS -->
+      <div class="search-grp">
+        <div class="search-grp-h"><span class="kicker">Actions</span><span class="ord">fn</span></div>
+        <div class="search-item">
+          <span class="search-it-ic search-it-ic--act">+</span>
+          <div class="search-it-tx"><div class="search-it-nm">Create document</div></div>
+          <span class="search-kchip">⌘N</span>
+        </div>
+        <div class="search-item">
+          <span class="search-it-ic search-it-ic--act">⇪</span>
+          <div class="search-it-tx"><div class="search-it-nm">Invite member or agent</div></div>
+          <span class="search-kchip">⌘I</span>
+        </div>
+        <div class="search-item search-item--ai">
+          <span class="search-it-ic search-it-ic--ai">✦</span>
+          <div class="search-it-tx">
+            <div class="search-it-nm">Ask an agent<span class="search-ai-q"> “determ…”</span></div>
+            <div class="search-it-sub mono">routes to Curie · research-bot</div>
+          </div>
+          <span class="search-kchip search-kchip--ai">⌘↵</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- footer hint bar -->
+    <div class="search-pal-foot">
+      <span class="search-fhint"><span class="search-kchip">↑</span><span class="search-kchip">↓</span> navigate</span>
+      <span class="search-fhint"><span class="search-kchip">↵</span> open</span>
+      <span class="search-fhint"><span class="search-kchip">tab</span> filter scope</span>
+      <span class="search-fhint search-fhint--right"><span class="dot dot--agent"></span> agent-aware</span>
+    </div>
+  </div>
+
+  <!-- ================= MOBILE BOTTOM TAB BAR ================= -->
+  <nav class="search-tabbar" aria-label="Primary">
+    <a class="search-tab"><span class="search-tab-ic">▦</span><span class="search-tab-l">Home</span></a>
+    <a class="search-tab"><span class="search-tab-ic">▤</span><span class="search-tab-l">Docs</span></a>
+    <a class="search-tab on"><span class="search-tab-ic"><span class="cross search-tab-x"></span></span><span class="search-tab-l">Search</span></a>
+    <a class="search-tab"><span class="search-tab-ic"><span class="dot dot--agent"></span></span><span class="search-tab-l">Agents</span></a>
+    <a class="search-tab"><span class="av av--u search-tab-av">EM</span><span class="search-tab-l">You</span></a>
+  </nav>
+</section>
+</body>
+</html>

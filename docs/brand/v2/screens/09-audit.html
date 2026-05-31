@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Audit log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   SCR.F — AUDIT LOG  (prefix: audit-)
+   Dense immutable engineering ledger. Tokens only.
+   ============================================================ */
+
+/* —— sidebar integrity panel (chain-verified readout) —— */
+.audit-integ{
+  margin:6px 12px 0; padding:11px 12px;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface);
+}
+.audit-integ-h{
+  font-family:var(--mono); font-size:9px; letter-spacing:0.1em; text-transform:uppercase;
+  color:var(--ok); display:flex; align-items:center; gap:7px; margin-bottom:9px;
+}
+.audit-integ-row{ display:flex; justify-content:space-between; align-items:center; padding:3px 0; }
+.audit-integ-row .k{ font-family:var(--mono); font-size:10px; color:var(--steel); letter-spacing:0.04em; }
+.audit-integ-row .v{ font-size:10.5px; color:var(--ink-1); }
+
+/* —— export cluster in top bar —— */
+.audit-export{ display:flex; gap:6px; margin-left:0; }
+
+/* —— invariant banner (engineering note strip) —— */
+.audit-invariant{
+  display:flex; align-items:center; gap:12px;
+  border:var(--rule) solid var(--hair-strong); background:var(--paper);
+  padding:11px 14px; margin-bottom:16px;
+}
+.audit-invariant .b{ width:2px; align-self:stretch; background:var(--ok); flex:0 0 2px; }
+.audit-invariant .tx{ font-size:12px; color:var(--ink-1); line-height:1.5; }
+.audit-invariant .tx b{ color:var(--ink); font-weight:600; }
+
+/* —— filter rail —— */
+.audit-filters{
+  display:flex; align-items:flex-end; gap:18px 20px; flex-wrap:wrap;
+  border:var(--rule) solid var(--hair-strong); border-bottom:0;
+  background:var(--surface); padding:13px 15px;
+}
+.audit-fgroup{ display:flex; flex-direction:column; gap:6px; min-width:0; }
+.audit-flbl{
+  font-family:var(--mono); font-size:9px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel);
+}
+/* reuse .seg look from .toolbar2 for the principal switch */
+.audit-filters .seg{ display:flex; border:var(--rule) solid var(--hair-strong); }
+.audit-filters .seg button{
+  font-family:var(--mono); font-size:10px; letter-spacing:0.05em; text-transform:uppercase; padding:6px 10px;
+  background:var(--surface); color:var(--steel); border:0; border-right:var(--rule) solid var(--hair); cursor:pointer;
+  display:inline-flex; align-items:center; gap:6px;
+}
+.audit-filters .seg button:last-child{ border-right:0; }
+.audit-filters .seg button.on{ background:var(--ink); color:var(--paper); }
+.audit-segdot{ width:7px; height:7px; flex:0 0 7px; display:inline-block; }
+.audit-segdot--u{ background:var(--ultra); }
+.audit-segdot--a{ background:var(--agent); clip-path:polygon(22% 0,100% 0,100% 78%,78% 100%,0 100%,0 22%); }
+
+.audit-fsel{
+  display:inline-flex; align-items:center; gap:8px; cursor:pointer;
+  font-family:var(--mono); font-size:11px; color:var(--ink-1); letter-spacing:0.02em;
+  border:var(--rule) solid var(--hair-strong); padding:6px 10px; background:var(--surface);
+  white-space:nowrap;
+}
+.audit-fsel .car{ color:var(--steel-2); margin-left:2px; }
+.audit-fsel--date{ gap:6px; }
+.audit-arrow{ color:var(--ultra-ink); }
+.audit-reset{
+  margin-left:auto; align-self:flex-end;
+  font-family:var(--mono); font-size:10px; letter-spacing:0.05em; text-transform:uppercase;
+  color:var(--steel); background:transparent; border:var(--rule) solid transparent; padding:6px 4px; cursor:pointer;
+}
+.audit-reset:hover{ color:var(--ink); }
+
+/* —— active filter readout —— */
+.audit-meta{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  border:var(--rule) solid var(--hair-strong); border-bottom:0;
+  background:var(--paper); padding:9px 15px;
+}
+.audit-chips{ display:flex; gap:6px; flex-wrap:wrap; }
+.audit-count{ margin-left:auto; font-size:10px; color:var(--steel); letter-spacing:0.06em; }
+
+/* ============================================================
+   THE LEDGER TABLE
+   ============================================================ */
+.audit-tbl{ width:100%; border-collapse:collapse; border:var(--rule) solid var(--hair-strong); background:var(--surface); }
+.audit-tbl thead th{
+  position:sticky; top:0; z-index:2;
+  text-align:left; font-family:var(--mono); font-weight:500; font-size:9px; letter-spacing:0.1em; text-transform:uppercase;
+  color:var(--steel); padding:9px 13px; background:var(--paper);
+  border-bottom:var(--rule) solid var(--ink);
+}
+.audit-tbl td{
+  padding:9px 13px; border-bottom:var(--rule) solid var(--hair);
+  vertical-align:middle; font-size:12px;
+}
+.audit-tbl tbody:last-child tr:last-child td{ border-bottom:0; }
+.audit-tbl tbody tr:not(.audit-day):hover td{ background:var(--paper); }
+
+/* column widths — engineering-fixed */
+.audit-seq{ width:74px; }
+.audit-ts{ width:128px; }
+.audit-res{ width:128px; }
+.audit-trace{ width:92px; text-align:right; }
+
+.audit-tbl td.audit-seq{ color:var(--steel-2); font-size:10.5px; letter-spacing:0.02em; }
+.audit-tbl td.audit-ts{ color:var(--ink-2); font-size:10.5px; letter-spacing:0.01em; white-space:nowrap; }
+.audit-tbl td.audit-trace{ color:var(--steel); font-size:10px; letter-spacing:0.02em; }
+
+/* day separator row — drawing-style band */
+.audit-day td{
+  padding:0 !important; background:var(--surface-2); border-bottom:var(--rule) solid var(--hair-strong);
+  border-top:var(--rule) solid var(--hair-strong);
+}
+.audit-tbl tbody:first-of-type .audit-day td{ border-top:0; }
+.audit-day td > *{ vertical-align:middle; }
+.audit-day-d{
+  display:inline-block; padding:6px 13px;
+  font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
+  color:var(--ink); border-right:var(--rule) solid var(--hair-strong);
+}
+.audit-day-line{ display:inline-block; }
+.audit-day-c{
+  float:right; padding:6px 13px; font-size:9.5px; color:var(--steel); letter-spacing:0.05em;
+}
+
+/* principal cell */
+.audit-who{ display:flex; align-items:center; gap:9px; min-width:0; }
+.audit-who .av{ width:22px; height:22px; flex:0 0 22px; }
+.audit-av--sys{ background:var(--ink-1); color:var(--steel-2); font-size:11px; }
+.audit-wn{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.audit-wn .nm{ font-weight:600; color:var(--ink); font-size:12px; letter-spacing:-0.01em; line-height:1.1; }
+.audit-kk{ display:flex; }
+.audit-kk .kind{ font-size:8.5px; padding:1px 5px; }
+.audit-kind-s{ color:var(--steel); border-color:var(--hair-strong); background:var(--surface); }
+
+/* action = capability id, mono, drawing-blue */
+.audit-act{
+  display:inline-block; font-size:11px; color:var(--ultra-ink); letter-spacing:0.01em;
+  background:var(--ultra-wash); border:var(--rule) solid var(--ultra-edge);
+  padding:2px 7px; border-radius:var(--radius-chip);
+}
+
+/* target cell */
+.audit-tgt{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+.audit-tk{
+  font-family:var(--mono); font-size:8.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel-2);
+}
+.audit-tn{ font-size:12px; color:var(--ink-1); font-weight:500; letter-spacing:-0.01em; }
+.audit-tp{ font-size:9.5px; color:var(--steel); letter-spacing:0.02em; }
+
+/* result chips */
+.audit-res{ white-space:nowrap; }
+.audit-r{
+  font-family:var(--mono); font-size:9.5px; font-weight:500; letter-spacing:0.05em; text-transform:uppercase;
+  padding:2px 7px; border:var(--rule) solid; border-radius:var(--radius-chip); display:inline-flex; align-items:center; gap:4px;
+}
+.audit-r--ok{ color:var(--ok); border-color:#a7d9bf; background:#e4f4eb; }
+.audit-r--deny{ color:var(--ink); border-color:var(--hair-strong); background:var(--surface-2); }
+.audit-r--warn{ color:var(--warn-ink); border-color:#e6c98a; background:var(--warn-wash); }
+.audit-rnote{ display:block; font-size:9px; color:var(--steel); margin-top:3px; letter-spacing:0.02em; }
+
+/* ============================================================
+   FOOTER — cursor pagination + export
+   ============================================================ */
+.audit-foot{
+  display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  margin-top:14px;
+}
+.audit-cursor{ display:flex; align-items:center; gap:14px; font-size:10px; color:var(--steel); letter-spacing:0.05em; }
+.audit-cursor-nav{ display:flex; gap:6px; }
+.audit-cursor-nav .btn[disabled]{ opacity:0.4; cursor:not-allowed; }
+.audit-foot-r{ margin-left:auto; display:flex; align-items:center; gap:10px; }
+.audit-foot-note{ font-size:10px; color:var(--steel); letter-spacing:0.05em; }
+
+/* ============================================================
+   MOBILE BOTTOM TAB BAR — hidden on desktop
+   ============================================================ */
+.audit-tabbar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   The shared sheet already collapses .side + stacks .win at <=1120px.
+   Below that, the audit body must reflow: hide low-priority columns,
+   then drop to a stacked card ledger on phones, and show a bottom tab bar.
+   ============================================================ */
+
+/* tablet / collapsed-sidebar: wrap filters tighter, ease table padding */
+@media (max-width:1120px){
+  .audit-filters{ gap:14px 16px; }
+  .audit-reset{ margin-left:0; }
+  .audit-tbl thead th, .audit-tbl td{ padding:9px 11px; }
+}
+
+/* mid: drop seq + trace columns (still in CSV/JSON export), keep the spine */
+@media (max-width:900px){
+  .audit-tbl .audit-seq, .audit-tbl .audit-trace{ display:none; }
+  .audit-count{ width:100%; margin-left:0; }
+}
+
+/* phone: stacked card ledger + bottom tab bar */
+@media (max-width:640px){
+  .body{ padding:16px 14px 84px; }   /* room for fixed tab bar */
+  .page-h{ flex-direction:column; align-items:flex-start; gap:12px; }
+  .page-h h1{ font-size:24px; }
+  .page-h .btn{ width:100%; justify-content:center; }
+  .audit-invariant{ flex-wrap:wrap; }
+  .audit-invariant .chip{ margin-left:0 !important; }
+
+  /* filters become full-width stacked controls, >=44px touch targets */
+  .audit-filters{ flex-direction:column; align-items:stretch; gap:12px; padding:12px; }
+  .audit-fgroup{ width:100%; }
+  .audit-filters .seg{ width:100%; }
+  .audit-filters .seg button{ flex:1; justify-content:center; min-height:44px; }
+  .audit-fsel{ width:100%; justify-content:space-between; min-height:44px; box-sizing:border-box; }
+  .audit-reset{ min-height:40px; text-align:center; border-color:var(--hair-strong); }
+
+  /* turn the table into stacked records */
+  .audit-tbl, .audit-tbl tbody, .audit-tbl tr, .audit-tbl td{ display:block; width:100%; }
+  .audit-tbl thead{ display:none; }
+  .audit-tbl{ border:0; }
+  .audit-tbl tbody{ border:var(--rule) solid var(--hair-strong); border-top:0; }
+  .audit-tbl tbody:first-of-type{ border-top:var(--rule) solid var(--hair-strong); }
+
+  .audit-day td{ border-top:0 !important; }
+  .audit-day-d{ border-right:0; padding:8px 13px; }
+  .audit-day-c{ padding:8px 13px; }
+
+  .audit-tbl tbody tr:not(.audit-day){
+    position:relative; padding:13px 13px 12px; border-bottom:var(--rule) solid var(--hair);
+  }
+  .audit-tbl tbody tr:not(.audit-day):last-child{ border-bottom:0; }
+  .audit-tbl td{ padding:0; border:0; }
+
+  /* show the hidden cols again, inline, as a meta line */
+  .audit-tbl .audit-seq{ display:inline-block; width:auto; }
+  .audit-tbl .audit-trace{ display:inline-block; width:auto; text-align:left; }
+
+  .audit-tbl td.audit-seq{ position:absolute; top:13px; right:13px; color:var(--steel-2); }
+  .audit-tbl td.audit-seq::before{ content:"#"; }
+  .audit-tbl td.audit-ts{ margin-bottom:9px; color:var(--steel); }
+  .audit-who{ margin-bottom:9px; }
+  .audit-tbl td.audit-act-cell, .audit-tbl td:nth-child(4){ margin-bottom:7px; }
+  .audit-tgt{ margin-bottom:9px; }
+  .audit-res{ display:inline-block; }
+  .audit-tbl td.audit-trace{ display:inline-block; margin-left:10px; color:var(--steel); }
+  .audit-tbl td.audit-trace::before{ content:"trace "; color:var(--steel-2); }
+
+  /* footer stacks */
+  .audit-foot{ gap:12px; }
+  .audit-cursor{ width:100%; justify-content:space-between; }
+  .audit-foot-r{ margin-left:0; width:100%; flex-wrap:wrap; }
+  .audit-foot-r .btn{ flex:1; justify-content:center; min-height:44px; }
+  .audit-foot-note{ width:100%; }
+
+  /* bottom tab bar */
+  .audit-tabbar{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:50;
+    background:var(--surface); border-top:var(--rule) solid var(--ink);
+  }
+  .audit-tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:9px 4px; min-height:56px; justify-content:center;
+    font-family:var(--mono); font-size:9px; letter-spacing:0.04em; text-transform:uppercase; color:var(--steel);
+    border-right:var(--rule) solid var(--hair); position:relative;
+  }
+  .audit-tab:last-child{ border-right:0; }
+  .audit-tab-ic{ font-size:15px; line-height:1; color:var(--steel-2); }
+  .audit-tab--on{ color:var(--ink); }
+  .audit-tab--on .audit-tab-ic{ color:var(--ultra); }
+  .audit-tab--on::before{ content:""; position:absolute; top:0; left:0; right:0; height:2px; background:var(--ultra); }
+}
+
+/* very small: tighten chrome label band so it never overflows */
+@media (max-width:420px){
+  .screen-tab .meta span:nth-child(n+2){ display:none; }
+  .audit-invariant .tx{ font-size:11.5px; }
+}
+
+/* ============================================================
+   MOTION — all transient motion already lives in the shared sheet
+   (.live pulse, caret blink). This screen adds none, but we honour
+   the reduced-motion contract defensively for any inherited animation.
+   ============================================================ */
+@media (prefers-reduced-motion: reduce){
+  .audit-tab, .audit-fsel, .audit-filters .seg button, .audit-reset, .audit-r{
+    transition:none !important; animation:none !important;
+  }
+  .dot.live{ animation:none !important; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<section class="screen">
+  <div class="screen-tab">
+    <div class="id"><span class="ord">SCR.F</span><span class="big">Admin · Audit log</span></div>
+    <div class="meta"><span>LEDGER</span><span>IMMUTABLE</span><span>1 MUTATION = 1 ENTRY</span></div>
+  </div>
+
+  <div class="win">
+    <!-- ============ ADMIN SIDEBAR ============ -->
+    <aside class="side">
+      <div class="top">
+        <div class="kicker">Administration</div>
+        <div class="ws">
+          <span class="av av--u3">N</span>
+          <div style="min-width:0;"><div class="nm">Northwind Eng</div><div class="sub">self-hosted · v0.1.0</div></div>
+          <span class="car">▾</span>
+        </div>
+      </div>
+      <div class="nav-h kicker">Manage</div>
+      <nav class="nav">
+        <a href="#"><span class="ic">◑</span> Members <span class="ct">38</span></a>
+        <a href="#"><span class="ic">◫</span> Teams <span class="ct">07</span></a>
+        <a href="#"><span class="ic">▦</span> Spaces <span class="ct">06</span></a>
+        <a href="#"><span class="ic">✦</span> Agents <span class="ct">04</span></a>
+        <a href="#"><span class="ic">⊹</span> Settings</a>
+        <a class="on" href="#"><span class="ic">▤</span> Audit log <span class="ct">∞</span></a>
+      </nav>
+
+      <div class="nav-h kicker">Saved views</div>
+      <nav class="nav">
+        <a href="#"><span class="dot dot--agent" style="margin:0 3px"></span> Agent writes</a>
+        <a href="#"><span class="dot dot--ultra" style="margin:0 3px"></span> Permission grants</a>
+        <a href="#"><span class="dot" style="margin:0 3px"></span> Deletions &amp; restores</a>
+      </nav>
+
+      <!-- integrity panel: reinforce immutable hash-chained ledger -->
+      <div class="audit-integ">
+        <div class="audit-integ-h"><span class="cross" style="width:12px;height:12px;color:var(--ok)"></span> CHAIN VERIFIED</div>
+        <div class="audit-integ-row"><span class="k">entries</span><span class="v mono">1,284,902</span></div>
+        <div class="audit-integ-row"><span class="k">gaps</span><span class="v mono" style="color:var(--ok)">0</span></div>
+        <div class="audit-integ-row"><span class="k">head</span><span class="v mono">#1284902</span></div>
+      </div>
+
+      <div class="foot">
+        <span class="av av--u">NA</span>
+        <div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div class="main">
+      <div class="bar">
+        <div class="crumb"><span class="cross" style="width:13px;height:13px;color:var(--ultra)"></span> <b>Administration</b> <span class="sep">/</span> Audit log</div>
+        <div class="search"><span>⌕</span> Search entries, targets, trace… <span class="k">⌘K</span></div>
+        <div class="audit-export">
+          <button class="btn btn--ghost btn--sm">⤓ CSV</button>
+          <button class="btn btn--ghost btn--sm">⤓ JSON</button>
+        </div>
+      </div>
+
+      <div class="body">
+        <!-- page header -->
+        <div class="page-h" style="margin-bottom:16px;">
+          <div class="lhs">
+            <div class="kicker kicker--ultra">▤ IMMUTABLE LEDGER · APPEND-ONLY</div>
+            <h1>Audit log<span class="z">.</span></h1>
+            <div class="sub"><span>1,284,902 ENTRIES</span><span>·</span><span>EVERY MUTATION = ONE ENTRY</span><span>·</span><span>HASH-CHAINED</span></div>
+          </div>
+          <button class="btn btn--primary">⤓ Export ledger</button>
+        </div>
+
+        <!-- invariant banner -->
+        <div class="audit-invariant">
+          <span class="b"></span>
+          <div class="tx"><b>Invariant —</b> the audit log alone reconstructs final state. Entries are append-only and cryptographically chained; nothing here can be edited or deleted.</div>
+          <span class="chip chip--ghost" style="margin-left:auto;white-space:nowrap">SHA-256 · MERKLE</span>
+        </div>
+
+        <!-- filter rail -->
+        <div class="audit-filters">
+          <div class="audit-fgroup">
+            <span class="audit-flbl">Principal</span>
+            <div class="seg">
+              <button class="on">All</button>
+              <button><span class="audit-segdot audit-segdot--u"></span> Human</button>
+              <button><span class="audit-segdot audit-segdot--a"></span> Agent</button>
+              <button>System</button>
+            </div>
+          </div>
+
+          <div class="audit-fgroup">
+            <span class="audit-flbl">Action</span>
+            <span class="audit-fsel">doc.* <span class="car">▾</span></span>
+          </div>
+
+          <div class="audit-fgroup">
+            <span class="audit-flbl">Scope</span>
+            <span class="audit-fsel">Platform / all docs <span class="car">▾</span></span>
+          </div>
+
+          <div class="audit-fgroup">
+            <span class="audit-flbl">Result</span>
+            <span class="audit-fsel">Any <span class="car">▾</span></span>
+          </div>
+
+          <div class="audit-fgroup audit-fgroup--date">
+            <span class="audit-flbl">Range</span>
+            <span class="audit-fsel audit-fsel--date">2026-05-30 00:00 <span class="audit-arrow">→</span> 2026-05-31 12:00</span>
+          </div>
+
+          <button class="audit-reset" type="button">✕ Reset</button>
+        </div>
+
+        <!-- active filter readout + count -->
+        <div class="audit-meta">
+          <div class="audit-chips">
+            <span class="chip chip--ultra">PRINCIPAL · ALL</span>
+            <span class="chip chip--ghost">ACTION · doc.*</span>
+            <span class="chip chip--ghost">SCOPE · PLATFORM</span>
+            <span class="chip chip--ghost">2 DAYS</span>
+          </div>
+          <div class="audit-count mono">2,418 MATCHING · NEWEST FIRST</div>
+        </div>
+
+        <!-- ============ THE LEDGER ============ -->
+        <table class="audit-tbl">
+          <thead>
+            <tr>
+              <th class="audit-seq">#</th>
+              <th class="audit-ts">Timestamp · UTC</th>
+              <th>Principal</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th class="audit-res">Result</th>
+              <th class="audit-trace">Trace</th>
+            </tr>
+          </thead>
+
+          <!-- DAY GROUP — today -->
+          <tbody>
+            <tr class="audit-day">
+              <td colspan="7">
+                <span class="audit-day-d">SAT · 2026-05-31</span>
+                <span class="audit-day-line"></span>
+                <span class="audit-day-c mono">1,902 entries · agents 41%</span>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="audit-seq mono">1284902</td>
+              <td class="audit-ts mono">12:04:18.221</td>
+              <td><div class="audit-who"><span class="av av--agent" title="archivist (AI)">AR</span><div class="audit-wn"><span class="nm">archivist</span><span class="audit-kk"><span class="kind kind-a">Agent</span></span></div></div></td>
+              <td><span class="audit-act mono">doc.suggest</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">doc</span><span class="audit-tn">Runtime topology &amp; co-hosting</span><span class="audit-tp mono">platform/architecture</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">7f3a·c1d0</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284901</td>
+              <td class="audit-ts mono">12:03:55.880</td>
+              <td><div class="audit-who"><span class="av av--u">NA</span><div class="audit-wn"><span class="nm">Nadia Ahmadi</span><span class="audit-kk"><span class="kind kind-h">Human</span></span></div></div></td>
+              <td><span class="audit-act mono">doc.publish</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">doc</span><span class="audit-tn">Capability registry — SSOT</span><span class="audit-tp mono">platform/specs</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">a902·44fb</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284900</td>
+              <td class="audit-ts mono">12:03:12.402</td>
+              <td><div class="audit-who"><span class="av av--agent" title="linter-bot (AI)">LB</span><div class="audit-wn"><span class="nm">linter-bot</span><span class="audit-kk"><span class="kind kind-a">Agent</span></span></div></div></td>
+              <td><span class="audit-act mono">block.insert</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">block</span><span class="audit-tn">§ Sync &amp; CRDT → para[14]</span><span class="audit-tp mono">doc 0xА3F1·b07</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">3c10·9e2a</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284899</td>
+              <td class="audit-ts mono">12:01:47.913</td>
+              <td><div class="audit-who"><span class="av av--agent" title="summariser (AI)">SM</span><div class="audit-wn"><span class="nm">summariser</span><span class="audit-kk"><span class="kind kind-a">Agent</span></span></div></div></td>
+              <td><span class="audit-act mono">doc.read</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">doc</span><span class="audit-tn">Markdown fidelity tiers</span><span class="audit-tp mono">platform/specs</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--deny">⊘ DENIED</span><span class="audit-rnote mono">scope: read-only</span></td>
+              <td class="audit-trace mono">be41·77c5</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284898</td>
+              <td class="audit-ts mono">11:58:30.115</td>
+              <td><div class="audit-who"><span class="av av--u2">JK</span><div class="audit-wn"><span class="nm">Jo Kerrigan</span><span class="audit-kk"><span class="kind kind-h">Human</span></span></div></div></td>
+              <td><span class="audit-act mono">member.invite</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">member</span><span class="audit-tn">rai@northwind.eng</span><span class="audit-tp mono">role: editor</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">10ff·2b88</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284897</td>
+              <td class="audit-ts mono">11:55:02.640</td>
+              <td><div class="audit-who"><span class="av av--u">NA</span><div class="audit-wn"><span class="nm">Nadia Ahmadi</span><span class="audit-kk"><span class="kind kind-h">Human</span></span></div></div></td>
+              <td><span class="audit-act mono">agent.token.revoke</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">agent</span><span class="audit-tn">draft-helper</span><span class="audit-tp mono">token #11b9</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">5ac3·d019</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284896</td>
+              <td class="audit-ts mono">11:51:44.207</td>
+              <td><div class="audit-who"><span class="av av--agent" title="archivist (AI)">AR</span><div class="audit-wn"><span class="nm">archivist</span><span class="audit-kk"><span class="kind kind-a">Agent</span></span></div></div></td>
+              <td><span class="audit-act mono">doc.update</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">doc</span><span class="audit-tn">Agent scope tiers &amp; revocation</span><span class="audit-tp mono">platform/security</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span><span class="audit-rnote mono">4 blocks</span></td>
+              <td class="audit-trace mono">c7e2·0a41</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284895</td>
+              <td class="audit-ts mono">11:47:19.038</td>
+              <td><div class="audit-who"><span class="av av--u3">TM</span><div class="audit-wn"><span class="nm">Theo Mensah</span><span class="audit-kk"><span class="kind kind-h">Human</span></span></div></div></td>
+              <td><span class="audit-act mono">doc.delete</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">doc</span><span class="audit-tn">RFC-014 — deprecated</span><span class="audit-tp mono">platform/specs · soft</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--warn">⤓ SOFT-DEL</span></td>
+              <td class="audit-trace mono">9b0d·e3aa</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284894</td>
+              <td class="audit-ts mono">11:42:08.771</td>
+              <td><div class="audit-who"><span class="av audit-av--sys" title="system">◇</span><div class="audit-wn"><span class="nm">system</span><span class="audit-kk"><span class="kind audit-kind-s">System</span></span></div></div></td>
+              <td><span class="audit-act mono">workspace.snapshot</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">workspace</span><span class="audit-tn">Northwind Eng</span><span class="audit-tp mono">scheduled · hourly</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">0000·snap</td>
+            </tr>
+          </tbody>
+
+          <!-- DAY GROUP — yesterday -->
+          <tbody>
+            <tr class="audit-day">
+              <td colspan="7">
+                <span class="audit-day-d">FRI · 2026-05-30</span>
+                <span class="audit-day-line"></span>
+                <span class="audit-day-c mono">516 entries · agents 38%</span>
+              </td>
+            </tr>
+
+            <tr>
+              <td class="audit-seq mono">1284886</td>
+              <td class="audit-ts mono">23:14:55.310</td>
+              <td><div class="audit-who"><span class="av av--u2">JK</span><div class="audit-wn"><span class="nm">Jo Kerrigan</span><span class="audit-kk"><span class="kind kind-h">Human</span></span></div></div></td>
+              <td><span class="audit-act mono">collection.create</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">collection</span><span class="audit-tn">Security</span><span class="audit-tp mono">space SP·01</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">2f81·a4c0</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284885</td>
+              <td class="audit-ts mono">22:58:41.002</td>
+              <td><div class="audit-who"><span class="av av--agent" title="linter-bot (AI)">LB</span><div class="audit-wn"><span class="nm">linter-bot</span><span class="audit-kk"><span class="kind kind-a">Agent</span></span></div></div></td>
+              <td><span class="audit-act mono">block.update</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">block</span><span class="audit-tn">§ Topology → code[3]</span><span class="audit-tp mono">doc 0x77C2·91a</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">88de·1f37</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284884</td>
+              <td class="audit-ts mono">22:40:09.487</td>
+              <td><div class="audit-who"><span class="av av--u3">TM</span><div class="audit-wn"><span class="nm">Theo Mensah</span><span class="audit-kk"><span class="kind kind-h">Human</span></span></div></div></td>
+              <td><span class="audit-act mono">doc.restore</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">doc</span><span class="audit-tn">RFC-009 — naming</span><span class="audit-tp mono">platform/specs</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span><span class="audit-rnote mono">from trash</span></td>
+              <td class="audit-trace mono">d4b6·5c82</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284883</td>
+              <td class="audit-ts mono">21:12:33.916</td>
+              <td><div class="audit-who"><span class="av av--u">NA</span><div class="audit-wn"><span class="nm">Nadia Ahmadi</span><span class="audit-kk"><span class="kind kind-h">Human</span></span></div></div></td>
+              <td><span class="audit-act mono">member.role.update</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">member</span><span class="audit-tn">Theo Mensah</span><span class="audit-tp mono">member → editor</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--ok">✓ OK</span></td>
+              <td class="audit-trace mono">61aa·b7e9</td>
+            </tr>
+            <tr>
+              <td class="audit-seq mono">1284882</td>
+              <td class="audit-ts mono">20:47:51.244</td>
+              <td><div class="audit-who"><span class="av av--agent" title="summariser (AI)">SM</span><div class="audit-wn"><span class="nm">summariser</span><span class="audit-kk"><span class="kind kind-a">Agent</span></span></div></div></td>
+              <td><span class="audit-act mono">agent.ratelimit.hit</span></td>
+              <td><div class="audit-tgt"><span class="audit-tk">agent</span><span class="audit-tn">summariser</span><span class="audit-tp mono">120 req/min</span></div></td>
+              <td class="audit-res"><span class="audit-r audit-r--warn">⚠ THROTTLED</span></td>
+              <td class="audit-trace mono">ee07·3320</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- footer: cursor pagination + export -->
+        <div class="audit-foot">
+          <div class="audit-cursor mono">
+            <span class="audit-cursor-pos">ROWS 1–14 / 2,418</span>
+            <span class="audit-cursor-nav"><button class="btn btn--ghost btn--sm" disabled>← Newer</button><button class="btn btn--ghost btn--sm">Older →</button></span>
+          </div>
+          <div class="audit-foot-r">
+            <span class="mono audit-foot-note">APPEND-ONLY · TAMPER-EVIDENT · RETAINED 7Y</span>
+            <button class="btn btn--ghost btn--sm">⤓ Export CSV</button>
+            <button class="btn btn--ghost btn--sm">⤓ Export JSON</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MOBILE BOTTOM TAB BAR (chrome) ============ -->
+<nav class="audit-tabbar" aria-label="Primary">
+  <a href="#" class="audit-tab"><span class="audit-tab-ic">⊹</span><span>Home</span></a>
+  <a href="#" class="audit-tab"><span class="audit-tab-ic">▤</span><span>Docs</span></a>
+  <a href="#" class="audit-tab"><span class="audit-tab-ic">◫</span><span>Spaces</span></a>
+  <a href="#" class="audit-tab audit-tab--on"><span class="audit-tab-ic">▤</span><span>Audit</span></a>
+  <a href="#" class="audit-tab"><span class="av av--u" style="width:22px;height:22px;flex:0 0 22px">NA</span><span>You</span></a>
+</nav>
+
+<div class="credit">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span class="logo" style="gap:7px;"><span class="mark" style="width:16px;height:16px;"><span class="cross" style="width:16px;height:16px;"></span><span class="cross-ring" style="inset:3px;"></span></span><span class="word" style="font-size:12px;">editor<b>zero</b></span></span>
+  </div>
+  <div class="ms"><span>AUDIT · IMMUTABLE LEDGER</span><span>1 MUTATION = 1 ENTRY</span><span>WCAG 2.1 AA</span><span>LIGHT MODE</span></div>
+</div>
+</body>
+</html>

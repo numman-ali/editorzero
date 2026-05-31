@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Dashboard / Home — Org overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   DASHBOARD / HOME — screen-specific + responsive only.
+   All colours via Meridian Zero tokens; no hard-coded hex.
+   ============================================================ */
+
+/* Full-frame app shell: fill the viewport edge-to-edge, not a gallery card. */
+.dashboard-viewport{
+  max-width:none;
+  margin:0;
+  padding:0;
+  min-height:100vh;
+  min-height:100dvh;
+  background:var(--paper);
+}
+.dashboard-shell{
+  min-height:100vh;
+  min-height:100dvh;
+  border:0;
+}
+
+/* Sidebar sticks; main column scrolls independently on desktop. */
+.dashboard-side{
+  position:sticky;
+  top:0;
+  height:100vh;
+  height:100dvh;
+  overflow-y:auto;
+}
+.dashboard-side .top{ padding-top:18px; }
+
+.dashboard-agents-h{
+  display:flex;
+  align-items:center;
+  gap:7px;
+}
+.dashboard-agents-h .dashboard-agents-ct{
+  margin-left:auto;
+  color:var(--agent-ink);
+  font-size:9.5px;
+  border:var(--rule) solid var(--agent-edge);
+  background:var(--agent-wash);
+  border-radius:var(--radius-chip);
+  padding:0 5px;
+}
+.dashboard-agents a .ct{ text-transform:none; letter-spacing:0.04em; }
+.dashboard-agent-idle{ color:var(--steel-2); }
+
+/* Main column scrolls within the frame. */
+.dashboard-main{
+  max-height:100vh;
+  max-height:100dvh;
+  overflow-y:auto;
+}
+.dashboard-bar{
+  position:sticky;
+  top:0;
+  z-index:6;
+  background:var(--surface);
+}
+.dashboard-search{ width:clamp(180px, 24vw, 280px); }
+.dashboard-search input{
+  border:0;
+  background:transparent;
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--ink-1);
+  width:100%;
+  outline:none;
+  letter-spacing:0.02em;
+}
+.dashboard-search input::placeholder{ color:var(--steel); }
+.dashboard-search:focus-within{ border-color:var(--ultra); }
+
+/* hamburger — hidden on desktop, shown on mobile */
+.dashboard-burger{
+  display:none;
+  flex-direction:column;
+  justify-content:center;
+  gap:4px;
+  width:38px;
+  height:38px;
+  padding:0 9px;
+  border:var(--rule) solid var(--hair-strong);
+  background:var(--surface);
+  cursor:pointer;
+  border-radius:var(--radius);
+}
+.dashboard-burger span{
+  display:block;
+  height:var(--rule-2);
+  background:var(--ink-1);
+}
+
+.dashboard-body{ padding-bottom:30px; }
+
+.dashboard-page-h{ align-items:flex-start; }
+.dashboard-headchips{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:7px;
+}
+.dashboard-headchips .chip .dot{ margin-right:1px; }
+.dashboard-agents-active{ color:var(--agent-ink); }
+
+/* ---- stat grid: spark on every card, agent split ---- */
+.dashboard-statgrid .stat{ display:flex; flex-direction:column; }
+.dashboard-statgrid .stat .d{ margin-top:auto; }
+.dashboard-v-split .u{
+  color:var(--agent-ink);
+  font-size:12px;
+  font-weight:600;
+  margin-left:5px;
+  letter-spacing:0.02em;
+}
+.dashboard-stack-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:11px;
+  margin-bottom:7px;
+}
+.dashboard-stack-row .av{ width:21px; height:21px; flex:0 0 21px; }
+.dashboard-stack-more{
+  font-size:10px;
+  color:var(--steel);
+  letter-spacing:0.04em;
+}
+.dashboard-statgrid .stat .ix .ord{ font-size:13px; color:var(--steel-2); }
+
+/* ---- cols2 ledger niceties ---- */
+.dashboard-ledger{ display:flex; flex-direction:column; }
+.dashboard-ledger .feed{ flex:1; }
+.dashboard-ledger-foot{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 15px;
+  border-top:var(--rule) solid var(--hair);
+  background:var(--paper);
+  font-size:10px;
+  color:var(--steel);
+}
+.dashboard-ledger-foot .mono{ font-family:var(--mono); letter-spacing:0.04em; }
+.dashboard-ledger-foot .link{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--ultra-ink);
+  letter-spacing:0.05em;
+  text-transform:uppercase;
+  cursor:pointer;
+}
+.dashboard-ledger-foot .link:hover{ text-decoration:underline; }
+
+.panel .ph .r .chip .dot{ margin-right:2px; }
+
+/* ---- spaces section ---- */
+.dashboard-spaces-sec{ margin-top:24px; }
+.dashboard-sec-h{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom:13px;
+}
+.dashboard-sec-h h2{ font-size:14px; }
+.dashboard-sec-h .link{ cursor:pointer; }
+.dashboard-sec-h .link:hover{ text-decoration:underline; }
+/* 6 spaces → 3 columns; restore bottom border the base rule drops */
+.dashboard-spaces{ border-bottom:var(--rule) solid var(--hair-strong); }
+
+.dashboard-credit{ border-top:var(--rule) solid var(--hair); margin-top:26px; }
+
+/* focus-visible: cold ultramarine ring, square */
+.dashboard-shell a:focus-visible,
+.dashboard-shell button:focus-visible,
+.dashboard-shell [tabindex]:focus-visible,
+.dashboard-tabbar a:focus-visible{
+  outline:var(--rule-2) solid var(--ultra);
+  outline-offset:2px;
+}
+
+/* ---- mobile drawer scrim + bottom tab bar (hidden on desktop) ---- */
+.dashboard-scrim{ display:none; }
+.dashboard-tabbar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   Base sheet hides .side and stacks .cols2/.statgrid at <=1120px.
+   We re-introduce navigation (drawer + bottom tab bar) + refine.
+   ============================================================ */
+
+/* tablet: tighten spaces to 2-up */
+@media (max-width:1024px){
+  .dashboard-spaces{ grid-template-columns:repeat(2,1fr); }
+  .dashboard-spaces .sp:nth-child(3n){ border-right:var(--rule) solid var(--hair); }
+  .dashboard-spaces .sp:nth-child(2n){ border-right:0; }
+}
+
+/* <=1120px: base sheet hides .side. Make it an off-canvas drawer instead. */
+@media (max-width:1120px){
+  .dashboard-side{
+    display:flex;
+    position:fixed;
+    top:0;
+    left:0;
+    bottom:0;
+    width:288px;
+    max-width:86vw;
+    z-index:40;
+    transform:translateX(-100%);
+    transition:transform .22s ease;
+    box-shadow:2px 0 0 var(--hair-strong);
+    height:100dvh;
+  }
+  .dashboard-shell.is-open .dashboard-side{ transform:translateX(0); }
+  .dashboard-scrim{
+    display:block;
+    position:fixed;
+    inset:0;
+    z-index:30;
+    background:var(--ink);
+    opacity:0;
+    visibility:hidden;
+    transition:opacity .22s ease, visibility .22s ease;
+  }
+  .dashboard-shell.is-open .dashboard-scrim{ opacity:0.32; visibility:visible; }
+  [hidden].dashboard-scrim{ display:none; }
+  .dashboard-shell.is-open [hidden].dashboard-scrim{ display:block; }
+
+  .dashboard-burger{ display:flex; }
+  .dashboard-main{ max-height:none; overflow:visible; }
+  .dashboard-shell{ display:block; }
+}
+
+/* tablet/medium: hide secondary export, stack heading */
+@media (max-width:900px){
+  .dashboard-export{ display:none; }
+  .dashboard-page-h{ flex-direction:column; gap:14px; }
+  .dashboard-headchips{ flex-direction:row; align-items:center; }
+}
+
+/* phone <=640px */
+@media (max-width:640px){
+  .dashboard-bar{ padding:10px 14px; gap:10px; flex-wrap:wrap; }
+  .dashboard-search{
+    order:3;
+    width:100%;
+    margin-left:0;
+  }
+  .dashboard-bar > .crumb{ display:none; }
+  .dashboard-bar .btn--ultra{ margin-left:auto; }
+
+  .dashboard-body{ padding:16px 14px 96px; }
+
+  .dashboard-page-h h1{ font-size:24px; }
+  .dashboard-headchips{ flex-wrap:wrap; }
+
+  /* stat grid → single column ledger of stats, denser */
+  .dashboard-statgrid{ grid-template-columns:1fr; }
+  .dashboard-statgrid .stat{
+    border-right:0;
+    border-bottom:var(--rule) solid var(--hair);
+    flex-direction:row;
+    align-items:flex-start;
+    flex-wrap:wrap;
+    column-gap:14px;
+    padding:13px 14px;
+  }
+  .dashboard-statgrid .stat:last-child{ border-bottom:0; }
+  .dashboard-statgrid .stat .k{ flex:1 0 100%; }
+  .dashboard-statgrid .stat .v{ font-size:26px; margin-top:5px; }
+  .dashboard-statgrid .stat .spark{ flex:1; min-width:90px; margin-top:12px; }
+  .dashboard-statgrid .stat .d{ flex:0 0 100%; margin-top:8px; }
+  .dashboard-stack-row{ flex:0 0 100%; }
+
+  /* recent docs: drop status col on phone, keep dense */
+  .dashboard-tt th:nth-child(3),
+  .dashboard-tt td:nth-child(3){ display:none; }
+  .dashboard-tt .doc .pth{ display:none; }
+  .dashboard-tt .who .lbl{ display:none; }
+  .dashboard-tt td{ padding:10px 12px; }
+  .dashboard-tt th{ padding:8px 12px; }
+
+  /* spaces → single column */
+  .dashboard-spaces{ grid-template-columns:1fr; }
+  .dashboard-spaces .sp{ border-right:0 !important; }
+
+  .dashboard-credit{ flex-direction:column; gap:8px; align-items:flex-start; }
+  .dashboard-credit .ms{ flex-direction:column; gap:4px; }
+
+  /* mobile bottom tab bar */
+  .dashboard-tabbar{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    position:fixed;
+    left:0;
+    right:0;
+    bottom:0;
+    z-index:35;
+    background:var(--surface);
+    border-top:var(--rule) solid var(--ink);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .dashboard-tabbar a{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:3px;
+    min-height:56px;
+    padding:8px 4px;
+    color:var(--steel);
+    border-right:var(--rule) solid var(--hair);
+    position:relative;
+  }
+  .dashboard-tabbar a:last-child{ border-right:0; }
+  .dashboard-tabbar a .ic{ font-family:var(--mono); font-size:16px; line-height:1; }
+  .dashboard-tabbar a .lb{
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+  }
+  .dashboard-tabbar a.on{ color:var(--ink); }
+  .dashboard-tabbar a.on::after{
+    content:"";
+    position:absolute;
+    top:0; left:0; right:0;
+    height:2px;
+    background:var(--ultra);
+  }
+  .dashboard-tabbar a .dashboard-tab-agent{ color:var(--agent-ink); }
+  /* center "New" action reads as the primary ultramarine control */
+  .dashboard-tabbar .dashboard-tab-new{
+    color:var(--paper);
+    background:var(--ultra);
+    border-right-color:var(--ultra);
+  }
+}
+
+/* very small phones: shrink heading, keep targets >=44px */
+@media (max-width:360px){
+  .dashboard-page-h h1{ font-size:21px; }
+  .dashboard-tabbar a .lb{ font-size:8px; }
+}
+
+/* ---- reduced motion: disable every animation/transition ---- */
+@media (prefers-reduced-motion: reduce){
+  .dashboard-side,
+  .dashboard-scrim,
+  .dashboard-shell *,
+  .dashboard-tabbar *{
+    transition:none !important;
+    animation:none !important;
+  }
+  .dashboard-shell .live{ animation:none !important; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<div class="viewport dashboard-viewport">
+  <div class="win dashboard-shell">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="side dashboard-side" id="dashboard-side">
+      <div class="top">
+        <div class="logo">
+          <span class="mark"><span class="cross"></span><span class="cross-ring"></span></span>
+          <span class="word">editor<b class="zero">zero</b></span>
+        </div>
+        <div class="kicker" style="margin-top:14px">Workspace</div>
+        <button class="ws" aria-label="Switch workspace" aria-haspopup="listbox">
+          <span class="av av--u3">N</span>
+          <div style="min-width:0;text-align:left">
+            <div class="nm">Northwind Eng</div>
+            <div class="sub">self-hosted · 6 spaces</div>
+          </div>
+          <span class="car" aria-hidden="true">▾</span>
+        </button>
+      </div>
+
+      <nav class="nav" aria-label="Primary">
+        <a class="on" href="#" aria-current="page"><span class="ic" aria-hidden="true">⊹</span> Overview</a>
+        <a href="#"><span class="ic" aria-hidden="true">▤</span> All Documents <span class="ct tnum">312</span></a>
+        <a href="#"><span class="ic" aria-hidden="true">◫</span> Spaces <span class="ct tnum">06</span></a>
+        <a href="#"><span class="ic" aria-hidden="true">↻</span> Shared with me <span class="ct tnum">24</span></a>
+        <a href="#"><span class="ic" aria-hidden="true">⌦</span> Trash <span class="ct tnum">07</span></a>
+      </nav>
+
+      <div class="nav-h kicker dashboard-agents-h">
+        <span class="cross" aria-hidden="true" style="width:11px;height:11px;color:var(--agent-ink)"></span>
+        Agents · live <span class="dashboard-agents-ct tnum">4</span>
+      </div>
+      <nav class="nav dashboard-agents" aria-label="Live agents">
+        <a href="#">
+          <span class="dot dot--agent live" aria-hidden="true" style="margin:0 4px 0 3px"></span>
+          archivist <span class="ct">editor</span>
+        </a>
+        <a href="#">
+          <span class="dot dot--agent live" aria-hidden="true" style="margin:0 4px 0 3px"></span>
+          linter-bot <span class="ct">author</span>
+        </a>
+        <a href="#">
+          <span class="dot dot--agent live" aria-hidden="true" style="margin:0 4px 0 3px"></span>
+          summariser <span class="ct">r-only</span>
+        </a>
+        <a href="#">
+          <span class="dot" aria-hidden="true" style="margin:0 4px 0 3px"></span>
+          drafter <span class="ct dashboard-agent-idle">idle</span>
+        </a>
+      </nav>
+
+      <div class="foot">
+        <span class="av av--u">NA</span>
+        <div style="min-width:0">
+          <div class="nm">Nadia A.</div>
+          <div class="rl">ADMIN · #001</div>
+        </div>
+        <span class="dot dot--ok live" aria-hidden="true" style="margin-left:auto" title="online"></span>
+      </div>
+    </aside>
+
+    <!-- scrim for mobile drawer -->
+    <div class="dashboard-scrim" id="dashboard-scrim" hidden></div>
+
+    <!-- ============ MAIN ============ -->
+    <div class="main dashboard-main">
+      <div class="bar dashboard-bar">
+        <button class="dashboard-burger" id="dashboard-burger" aria-label="Open navigation" aria-controls="dashboard-side" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="crumb">
+          <span class="cross" aria-hidden="true" style="width:13px;height:13px;color:var(--ultra)"></span>
+          <b>Northwind Eng</b> <span class="sep">/</span> Overview
+        </div>
+        <label class="search dashboard-search">
+          <span aria-hidden="true">⌕</span>
+          <input type="search" placeholder="Search documents…" aria-label="Search documents" />
+          <span class="k" aria-hidden="true">⌘K</span>
+        </label>
+        <button class="btn btn--ghost btn--sm dashboard-export">⤓ Export ledger</button>
+        <button class="btn btn--ultra btn--sm">+ New doc</button>
+      </div>
+
+      <div class="body dashboard-body">
+        <!-- page heading -->
+        <div class="page-h dashboard-page-h">
+          <div class="lhs">
+            <div class="kicker kicker--ultra">⊹ 2026 · WK22 · TUE 09:41</div>
+            <h1>Good morning, Nadia<span class="z">.</span></h1>
+            <div class="sub">
+              <span>312 DOCUMENTS</span><span>·</span><span>6 SPACES</span><span>·</span>
+              <span class="dashboard-agents-active">4 AGENTS ACTIVE</span>
+            </div>
+          </div>
+          <div class="dashboard-headchips">
+            <span class="chip"><span class="dot dot--ok" aria-hidden="true"></span> ALL SYSTEMS NOMINAL</span>
+            <span class="chip chip--ghost mono">v0.4.0 · NODE 22</span>
+          </div>
+        </div>
+
+        <!-- ============ STAT GRID ============ -->
+        <div class="statgrid dashboard-statgrid">
+          <div class="stat stat--ultra">
+            <div class="ix"><span class="cross" aria-hidden="true" style="width:12px;height:12px;color:var(--ultra)"></span></div>
+            <div class="k">Documents</div>
+            <div class="v tnum">312</div>
+            <div class="spark" aria-hidden="true">
+              <i style="height:34%"></i><i style="height:50%"></i><i class="h" style="height:42%"></i><i style="height:64%"></i><i style="height:56%"></i><i class="h" style="height:78%"></i><i class="t" style="height:100%"></i>
+            </div>
+            <div class="d"><span class="up">▲ 18</span> this week</div>
+          </div>
+
+          <div class="stat">
+            <div class="ix"><span class="ord">◫</span></div>
+            <div class="k">Spaces</div>
+            <div class="v tnum">6</div>
+            <div class="spark" aria-hidden="true">
+              <i style="height:50%"></i><i style="height:50%"></i><i style="height:66%"></i><i style="height:66%"></i><i class="h" style="height:83%"></i><i class="h" style="height:83%"></i><i class="t" style="height:100%"></i>
+            </div>
+            <div class="d"><span class="dot dot--ok" aria-hidden="true" style="margin-right:2px"></span> 4 public · 2 private</div>
+          </div>
+
+          <div class="stat">
+            <div class="ix"><span class="cross" aria-hidden="true" style="width:12px;height:12px;color:var(--agent)"></span></div>
+            <div class="k">Active editors</div>
+            <div class="v tnum dashboard-v-split">7 <span class="u">3 AI</span></div>
+            <div class="dashboard-stack-row">
+              <div class="editors-stack">
+                <span class="av av--u" title="Nadia A.">NA</span>
+                <span class="av av--u2" title="Jo K.">JK</span>
+                <span class="av av--u3" title="Theo M.">TM</span>
+                <span class="av av--agent" title="archivist (AI)">AR</span>
+                <span class="av av--agent" title="linter-bot (AI)">LB</span>
+              </div>
+              <span class="dashboard-stack-more mono">+2</span>
+            </div>
+            <div class="d"><span class="dot dot--agent live" aria-hidden="true" style="margin-right:3px"></span> co-editing now</div>
+          </div>
+
+          <div class="stat">
+            <div class="ix"><span class="ord">⊙</span></div>
+            <div class="k">Pending suggestions</div>
+            <div class="v tnum" style="color:var(--agent-ink)">11</div>
+            <div class="spark" aria-hidden="true">
+              <i style="height:30%"></i><i class="h" style="height:55%"></i><i style="height:40%"></i><i class="h" style="height:72%"></i><i style="height:48%"></i><i style="height:60%"></i><i class="t" style="height:90%"></i>
+            </div>
+            <div class="d"><span class="dot dot--agent" aria-hidden="true" style="margin-right:2px"></span> from 3 agents · review →</div>
+          </div>
+        </div>
+
+        <!-- ============ COLS2: RECENT + LEDGER ============ -->
+        <div class="cols2 dashboard-cols2">
+          <!-- recent docs -->
+          <div class="panel">
+            <div class="ph">
+              <span class="ord">01</span><span class="t">Recently edited</span>
+              <div class="r"><span class="link" role="link" tabindex="0">View all →</span></div>
+            </div>
+            <div class="dashboard-tt-wrap">
+              <table class="tt dashboard-tt">
+                <thead>
+                  <tr><th>Document</th><th>Last editor</th><th>Status</th><th class="num">Updated</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><div class="doc"><span class="ord">01</span><div><div class="nm">Runtime topology &amp; co-hosting</div><div class="pth">platform / architecture</div></div></div></td>
+                    <td><div class="who"><span class="av av--agent" title="archivist (AI)">AR</span><span class="lbl">archivist</span><span class="chip chip--agent" style="padding:1px 5px">AI</span></div></td>
+                    <td><span class="status-tag st-rev">in review</span></td>
+                    <td class="num when">02m</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">02</span><div><div class="nm">Capability registry — SSOT</div><div class="pth">platform / specs</div></div></div></td>
+                    <td><div class="who"><span class="av av--u" title="Nadia A.">NA</span><span class="lbl">Nadia A.</span></div></td>
+                    <td><span class="status-tag st-pub">published</span></td>
+                    <td class="num when">14m</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">03</span><div><div class="nm">Agent scope tiers &amp; revocation</div><div class="pth">platform / security</div></div></div></td>
+                    <td><div class="who"><div class="editors-stack"><span class="av av--u2" title="Jo K.">JK</span><span class="av av--agent" title="linter-bot (AI)">LB</span></div><span class="lbl">2 editors</span></div></td>
+                    <td><span class="status-tag st-draft">draft</span></td>
+                    <td class="num when">1h</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">04</span><div><div class="nm">Onboarding — new engineers</div><div class="pth">handbook / people</div></div></div></td>
+                    <td><div class="who"><span class="av av--u3" title="Theo M.">TM</span><span class="lbl">Theo M.</span></div></td>
+                    <td><span class="status-tag st-pub">published</span></td>
+                    <td class="num when">3h</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">05</span><div><div class="nm">Markdown fidelity tiers</div><div class="pth">platform / specs</div></div></div></td>
+                    <td><div class="who"><span class="av av--agent" title="summariser (AI)">SM</span><span class="lbl">summariser</span><span class="chip chip--agent" style="padding:1px 5px">AI</span></div></td>
+                    <td><span class="status-tag st-rev">in review</span></td>
+                    <td class="num when">5h</td>
+                  </tr>
+                  <tr>
+                    <td><div class="doc"><span class="ord">06</span><div><div class="nm">Release notes — 0.4.0</div><div class="pth">product / releases</div></div></div></td>
+                    <td><div class="who"><div class="editors-stack"><span class="av av--u3" title="Ravi P.">RP</span><span class="av av--agent" title="archivist (AI)">AR</span></div><span class="lbl">2 editors</span></div></td>
+                    <td><span class="status-tag st-draft">draft</span></td>
+                    <td class="num when">8h</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- activity ledger -->
+          <div class="panel dashboard-ledger">
+            <div class="ph">
+              <span class="ord">02</span><span class="t">Activity ledger</span>
+              <div class="r"><span class="chip chip--ghost"><span class="dot dot--ok live" aria-hidden="true"></span> AUDIT · LIVE</span></div>
+            </div>
+            <div class="feed">
+              <div class="fe"><div class="rail ag"></div><div class="t">09:41</div><div class="ax"><b>archivist</b> proposed <span class="ev ag">doc.suggest</span> on <b>Runtime topology</b> — 1 insertion pending</div></div>
+              <div class="fe"><div class="rail u"></div><div class="t">09:38</div><div class="ax"><b>Nadia A.</b> ran <span class="ev">doc.publish</span> → <b>Capability registry</b></div></div>
+              <div class="fe"><div class="rail ag"></div><div class="t">09:30</div><div class="ax"><b>linter-bot</b> applied <span class="ev ag">doc.update</span> · 4 blocks normalised</div></div>
+              <div class="fe"><div class="rail ag"></div><div class="t">09:24</div><div class="ax"><b>summariser</b> suggested <span class="ev ag">doc.suggest</span> · 3 edits on <b>Markdown fidelity</b></div></div>
+              <div class="fe"><div class="rail u"></div><div class="t">09:12</div><div class="ax"><b>Jo K.</b> ran <span class="ev">space.create</span> → <b>Security</b></div></div>
+              <div class="fe"><div class="rail"></div><div class="t">08:55</div><div class="ax"><b>Theo M.</b> ran <span class="ev">doc.restore</span> · recovered <b>RFC-014</b></div></div>
+              <div class="fe"><div class="rail u"></div><div class="t">08:40</div><div class="ax"><b>Ravi P.</b> invited <span class="ev">member.invite</span> · 1 agent principal</div></div>
+            </div>
+            <div class="dashboard-ledger-foot">
+              <span class="mono">312 entries · 24h</span>
+              <span class="link" role="link" tabindex="0">Open audit log →</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ SPACES ============ -->
+        <div class="dashboard-spaces-sec">
+          <div class="dashboard-sec-h">
+            <span class="ord">03</span><h2>Spaces</h2>
+            <span class="hr" style="flex:1"></span>
+            <span class="kicker">6 TOTAL</span>
+            <span class="link mono" role="link" tabindex="0" style="color:var(--ultra-ink)">Manage →</span>
+          </div>
+          <div class="spaces dashboard-spaces">
+            <div class="sp" tabindex="0">
+              <div class="ord">SP·01</div>
+              <div class="nm">Platform</div>
+              <div class="ds">Architecture, specs, security &amp; the kernel.</div>
+              <div class="ft"><div class="editors-stack"><span class="av av--u" title="Nadia A.">NA</span><span class="av av--agent" title="archivist (AI)">AR</span></div> 128 docs · 2 agents</div>
+              <div class="bar-tip" aria-hidden="true"></div>
+            </div>
+            <div class="sp" tabindex="0">
+              <div class="ord">SP·02</div>
+              <div class="nm">Handbook</div>
+              <div class="ds">People, process, onboarding, rituals.</div>
+              <div class="ft"><div class="editors-stack"><span class="av av--u2" title="Theo M.">TM</span><span class="av av--u3" title="Jo K.">JK</span></div> 64 docs · public</div>
+              <div class="bar-tip" aria-hidden="true"></div>
+            </div>
+            <div class="sp" tabindex="0">
+              <div class="ord">SP·03</div>
+              <div class="nm">Product</div>
+              <div class="ds">Briefs, decisions, release notes.</div>
+              <div class="ft"><div class="editors-stack"><span class="av av--u3" title="Ravi P.">RP</span><span class="av av--agent" title="drafter (AI)">DR</span></div> 47 docs · 1 agent</div>
+              <div class="bar-tip" aria-hidden="true"></div>
+            </div>
+            <div class="sp" tabindex="0">
+              <div class="ord">SP·04</div>
+              <div class="nm">Security</div>
+              <div class="ds">Threat models, audits, incident runbooks.</div>
+              <div class="ft"><div class="editors-stack"><span class="av av--u2" title="Jo K.">JK</span><span class="av av--agent" title="linter-bot (AI)">LB</span></div> 31 docs · private</div>
+              <div class="bar-tip" aria-hidden="true"></div>
+            </div>
+            <div class="sp" tabindex="0">
+              <div class="ord">SP·05</div>
+              <div class="nm">Research</div>
+              <div class="ds">Experiments, RFCs, prior art &amp; notes.</div>
+              <div class="ft"><div class="editors-stack"><span class="av av--u3" title="Ravi P.">RP</span><span class="av av--agent" title="summariser (AI)">SM</span></div> 22 docs · 1 agent</div>
+              <div class="bar-tip" aria-hidden="true"></div>
+            </div>
+            <div class="sp" tabindex="0">
+              <div class="ord">SP·06</div>
+              <div class="nm">Operations</div>
+              <div class="ds">Deploys, on-call, infra &amp; cost ledgers.</div>
+              <div class="ft"><div class="editors-stack"><span class="av av--u" title="Nadia A.">NA</span></div> 20 docs · private</div>
+              <div class="bar-tip" aria-hidden="true"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="credit dashboard-credit">
+          <span>EDITORZERO · SELF-HOSTED · AGPL-3.0</span>
+          <div class="ms">
+            <span>ORIGIN 0,0</span>
+            <span>HUMANS + AGENTS · PEER CO-EDITORS</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MOBILE BOTTOM TAB BAR ============ -->
+  <nav class="dashboard-tabbar" aria-label="Mobile navigation">
+    <a href="#" class="on" aria-current="page"><span class="ic" aria-hidden="true">⊹</span><span class="lb">Overview</span></a>
+    <a href="#"><span class="ic" aria-hidden="true">▤</span><span class="lb">Docs</span></a>
+    <a href="#" class="dashboard-tab-new"><span class="ic" aria-hidden="true">+</span><span class="lb">New</span></a>
+    <a href="#"><span class="ic" aria-hidden="true">◫</span><span class="lb">Spaces</span></a>
+    <a href="#"><span class="ic dashboard-tab-agent" aria-hidden="true">⊹</span><span class="lb">Agents</span></a>
+  </nav>
+</div>
+</body>
+</html>

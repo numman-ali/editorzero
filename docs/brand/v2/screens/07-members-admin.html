@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Admin · Members &amp;amp; Teams</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ===== Admin · Members & Teams — screen-specific (slug: members-) ===== */
+
+/* page-header action cluster */
+.members-acts{ display:flex; gap:6px; flex-shrink:0; }
+.members-prov{ border-color:var(--agent); color:var(--agent-ink); }
+.members-prov:hover{ border-color:var(--agent-ink); }
+
+/* count pill inside primary tabs */
+.members-tc{
+  margin-left:7px; font-size:9px; color:var(--steel-2);
+  background:var(--surface-2); padding:1px 5px; border:var(--rule) solid var(--hair);
+  border-radius:var(--radius-chip); letter-spacing:0.04em;
+}
+.adm-tabs button.on .members-tc{ color:var(--ultra-ink); background:var(--ultra-wash); border-color:var(--ultra-edge); }
+
+/* sub-filter strip between tabs and table */
+.members-sub{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  padding:11px 14px; border:var(--rule) solid var(--hair-strong); border-top:0;
+  background:var(--surface);
+}
+.members-filt{ display:flex; gap:7px; margin-left:auto; flex-wrap:wrap; }
+.members-chip{
+  display:inline-flex; align-items:center; gap:7px;
+  font-family:var(--mono); font-size:10px; color:var(--ink-1); letter-spacing:0.03em;
+  border:var(--rule) solid var(--hair-strong); padding:4px 9px; background:var(--surface); cursor:pointer;
+}
+.members-chip:hover{ border-color:var(--ink); }
+.members-chip .car{ color:var(--steel-2); }
+
+/* table wrapper keeps the hairline frame continuous under the sub-strip */
+.members-tblwrap .mtbl{ border-top:0; }
+
+/* team pills inside a row */
+.members-teams{ display:inline-flex; gap:4px; flex-wrap:wrap; }
+.members-team{
+  font-family:var(--mono); font-size:9.5px; letter-spacing:0.03em; color:var(--ink-2);
+  border:var(--rule) solid var(--hair); padding:1px 6px; background:var(--paper);
+  border-radius:var(--radius-chip); white-space:nowrap;
+}
+
+/* capability scope cell: pips + readable label */
+.members-scope{ display:flex; flex-direction:column; gap:4px; }
+.members-scopelbl{ font-size:9px; color:var(--steel); letter-spacing:0.03em; }
+
+/* agent-tinted role selects (compose on .role-sel) */
+.members-role--ag{ border-color:var(--agent-edge); color:var(--agent-ink); }
+.members-role--ro{ border-color:var(--hair-strong); color:var(--steel); }
+.members-when--ag{ color:var(--agent-ink); display:flex; align-items:center; justify-content:flex-end; gap:6px; }
+
+/* status cell */
+.members-st{
+  display:inline-flex; align-items:center; gap:6px;
+  font-family:var(--mono); font-size:9.5px; letter-spacing:0.05em; text-transform:uppercase;
+}
+.members-st .dot{ flex:0 0 6px; }
+.members-st--active{ color:var(--ok); }
+.members-st--ag{ color:var(--agent-ink); }
+.members-st--inv{ color:var(--warn-ink); }
+.members-st--inv .dot{ background:var(--warn-ink); }
+.members-st--rev{ color:var(--steel); }
+.members-st--rev .dot{ background:var(--steel-2); }
+
+/* faint cyan wash so agent principals read as a second signal at a glance */
+.members-agentrow td{ background:var(--agent-wash); }
+.members-agentrow:hover td{ background:var(--agent-wash); }
+.members-agentrow td:first-child{ box-shadow:inset 2px 0 0 var(--agent); }
+
+/* revoked agent row reads as dimmed */
+.members-revoked td{ background:var(--surface); }
+.members-revoked:hover td{ background:var(--paper); }
+.members-revoked td:first-child{ box-shadow:inset 2px 0 0 var(--steel-2); }
+.members-revoked .person .nm{ color:var(--steel); }
+.members-av--rev{ filter:grayscale(1); opacity:.6; }
+
+/* footer legend + pager */
+.members-foot{
+  display:flex; align-items:center; justify-content:space-between; gap:14px;
+  margin-top:13px; flex-wrap:wrap;
+}
+.members-legend{ font-size:10px; color:var(--steel); letter-spacing:0.05em; }
+.members-keyu{ color:var(--ultra-ink); }
+.members-keya{ color:var(--agent-ink); }
+.members-pager{ display:flex; align-items:center; gap:8px; font-size:10px; color:var(--steel); }
+
+/* ===== teams grid ===== */
+.members-teamgrid{ display:grid; grid-template-columns:repeat(4,1fr); border:var(--rule) solid var(--hair-strong); }
+.members-tcard{ border-right:var(--rule) solid var(--hair); border-bottom:var(--rule) solid var(--hair); cursor:pointer; background:var(--surface); }
+.members-tcard:nth-child(4n){ border-right:0; }
+.members-tcard:nth-last-child(-n+4){ border-bottom:0; }
+.members-tcard:hover{ background:var(--paper); }
+.members-tcard-h{ display:flex; align-items:center; gap:9px; padding:11px 14px; border-bottom:var(--rule) solid var(--hair); }
+.members-tdot{ width:7px; height:7px; flex:0 0 7px; }
+.members-tname{ font-family:var(--display); font-weight:600; font-size:13.5px; letter-spacing:-0.01em; }
+.members-tcount{ margin-left:auto; }
+.members-tcard-b{ padding:13px 14px 14px; }
+.members-tmembers{ display:flex; align-items:center; }
+.members-tmembers .av{ width:22px; height:22px; flex:0 0 22px; margin-left:-6px; border:var(--rule-2) solid var(--surface); }
+.members-tmembers .av:first-child{ margin-left:0; }
+.members-tcard:hover .members-tmembers .av{ border-color:var(--paper); }
+.members-more{ margin-left:6px; font-size:9.5px; color:var(--steel); letter-spacing:0.04em; }
+.members-tmeta{ display:flex; gap:14px; margin-top:12px; font-size:9.5px; color:var(--steel); letter-spacing:0.04em; }
+.members-tmeta .members-keyu{ color:var(--ultra); }
+.members-tmeta .members-keya{ color:var(--agent); }
+
+/* ===== mobile-only chrome (hidden on desktop) ===== */
+.members-menu{ display:none; }
+.members-tabbar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   The shared stylesheet collapses .side at <=1120px and stacks
+   .win to one column. We add: a denser teams grid mid-width,
+   a card-reflow for the principal table, and a mobile tab bar.
+   ============================================================ */
+
+@media (max-width:1120px){
+  .members-teamgrid{ grid-template-columns:repeat(2,1fr); }
+  .members-tcard:nth-child(4n){ border-right:var(--rule) solid var(--hair); }
+  .members-tcard:nth-child(2n){ border-right:0; }
+  .members-tcard:nth-last-child(-n+4){ border-bottom:var(--rule) solid var(--hair); }
+  .members-tcard:nth-last-child(-n+2){ border-bottom:0; }
+  /* sidebar is hidden by the shared sheet → expose hamburger */
+  .members-menu{ display:inline-flex; }
+}
+
+/* tablet/narrow: drop the heaviest table columns */
+@media (max-width:880px){
+  .mtbl th:nth-child(4), .mtbl td:nth-child(4),  /* Teams */
+  .mtbl th:nth-child(6), .mtbl td:nth-child(6){  /* Last active */
+    display:none;
+  }
+  .members-sub{ gap:10px; }
+  .members-filt .members-chip:nth-child(2){ display:none; }
+}
+
+/* phone: reflow each table row into a stacked card */
+@media (max-width:640px){
+  .members-acts{ width:100%; }
+  .members-acts .btn{ flex:1; justify-content:center; }
+
+  .adm-tabs{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .adm-tabs button{ white-space:nowrap; padding:11px 13px; }
+  .adm-tabs button:last-child{ margin-left:0; }
+
+  .members-sub{ flex-direction:column; align-items:stretch; }
+  .members-sub .toolbar2 .seg{ width:100%; }
+  .members-sub .toolbar2 .seg button{ flex:1; text-align:center; }
+  .members-filt{ margin-left:0; }
+  .members-filt .members-chip{ flex:1; justify-content:center; }
+  .members-filt .members-chip:nth-child(2){ display:inline-flex; }
+
+  /* reset any cut columns back on — cards show everything */
+  .mtbl th:nth-child(4), .mtbl td:nth-child(4),
+  .mtbl th:nth-child(6), .mtbl td:nth-child(6){ display:table-cell; }
+
+  .members-tblwrap{ border:0; }
+  .mtbl{ border:0; }
+  .mtbl thead{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .mtbl tr{ display:block; border:var(--rule) solid var(--hair-strong); margin-bottom:-1px; background:var(--surface); }
+  .mtbl td{
+    display:flex; align-items:flex-start; justify-content:space-between; gap:14px;
+    padding:9px 13px; border-bottom:var(--rule) solid var(--hair); min-height:44px;
+  }
+  .mtbl td:last-child{ border-bottom:0; }
+  .mtbl tr:hover td, .members-agentrow:hover td, .members-revoked:hover td{ background:inherit; }
+  /* per-cell label from data-label */
+  .mtbl td::before{
+    content:attr(data-label);
+    font-family:var(--mono); font-size:9px; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--steel); flex:0 0 96px; padding-top:3px;
+  }
+  /* principal cell spans full width, no label */
+  .mtbl td[data-label="Principal"]{ background:var(--paper); }
+  .mtbl td[data-label="Principal"]::before{ display:none; }
+  .mtbl td[data-label="Principal"] .person{ width:100%; }
+  /* keep the agent signal on the reflowed card */
+  .members-agentrow td{ background:var(--agent-wash); }
+  .members-agentrow td[data-label="Principal"]{ box-shadow:inset 3px 0 0 var(--agent); }
+  .members-revoked td{ background:var(--surface); }
+  .members-revoked td[data-label="Principal"]{ box-shadow:inset 3px 0 0 var(--steel-2); }
+  /* right-align values read left on cards */
+  .mtbl td.r{ text-align:left; }
+  .members-when--ag{ justify-content:flex-start; }
+  .members-scope{ align-items:flex-end; }
+  .members-scopelbl{ text-align:right; }
+  .role-sel{ min-height:32px; }
+
+  /* teams grid → single column */
+  .members-teamgrid{ grid-template-columns:1fr; }
+  .members-tcard{ border-right:0 !important; border-bottom:var(--rule) solid var(--hair) !important; }
+  .members-tcard:last-child{ border-bottom:0 !important; }
+
+  .members-foot{ flex-direction:column; align-items:flex-start; gap:10px; }
+
+  /* search collapses; rely on tabbar + hamburger */
+  .bar .search{ display:none; }
+
+  /* reserve space for fixed bottom tab bar */
+  .body{ padding-bottom:78px; }
+
+  /* bottom tab bar — PWA primary nav */
+  .members-tabbar{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:40;
+    background:var(--surface); border-top:var(--rule) solid var(--ink);
+    padding-bottom:env(safe-area-inset-bottom,0);
+  }
+  .members-tabbar a{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:9px 4px; min-height:54px; justify-content:center;
+    font-family:var(--mono); font-size:8.5px; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--steel); border-right:var(--rule) solid var(--hair); position:relative;
+  }
+  .members-tabbar a:last-child{ border-right:0; }
+  .members-tabbar a .members-tbi{ font-size:15px; line-height:1; color:var(--steel-2); }
+  .members-tabbar a.on{ color:var(--ink); }
+  .members-tabbar a.on .members-tbi{ color:var(--ultra); }
+  .members-tabbar a.on::before{ content:""; position:absolute; left:0; right:0; top:0; height:2px; background:var(--ultra); }
+}
+
+/* very small phones: tighten labels */
+@media (max-width:380px){
+  .mtbl td::before{ flex-basis:80px; }
+  .members-scopelbl{ font-size:8.5px; }
+}
+
+/* honour reduced-motion: the shared .live pulse is the only motion here */
+@media (prefers-reduced-motion: reduce){
+  .live, .dot--agent.live{ animation:none !important; }
+  .members-tcard, .btn{ transition:none !important; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<section class="screen">
+  <div class="screen-tab">
+    <div class="id"><span class="ord">SCR.E</span><span class="big">Admin · Members &amp; Teams</span></div>
+    <div class="meta"><span>USERS</span><span>AGENTS</span><span>TEAMS</span><span>SCOPES</span></div>
+  </div>
+
+  <div class="win">
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="side">
+      <div class="top">
+        <div class="logo">
+          <span class="mark"><span class="cross"></span><span class="cross-ring"></span></span>
+          <span class="word">editor<b>zero</b></span>
+        </div>
+        <div class="ws" role="button" tabindex="0" aria-label="Switch organisation">
+          <span class="av av--u3">N</span>
+          <div style="min-width:0;">
+            <div class="nm">Northwind Eng</div>
+            <div class="sub">self-hosted · v0.1.0</div>
+          </div>
+          <span class="car">▾</span>
+        </div>
+      </div>
+
+      <div class="nav-h kicker">Administration</div>
+      <nav class="nav" aria-label="Administration">
+        <a class="on" href="#" aria-current="page"><span class="ic">◑</span> Members <span class="ct">38</span></a>
+        <a href="#"><span class="ic">◫</span> Teams <span class="ct">07</span></a>
+        <a href="#"><span class="ic">▦</span> Spaces <span class="ct">06</span></a>
+        <a href="#"><span class="ic">✦</span> Agents <span class="ct">04</span></a>
+        <a href="#"><span class="ic">⊹</span> Roles &amp; scopes</a>
+        <a href="#"><span class="ic">▤</span> Audit log</a>
+        <a href="#"><span class="ic">◇</span> Settings</a>
+      </nav>
+
+      <div class="nav-h kicker">Teams</div>
+      <div class="tree" aria-label="Teams">
+        <div class="row"><span class="ic" style="color:var(--ultra)">◧</span> Platform <span class="ct">9</span></div>
+        <div class="row"><span class="ic">◧</span> Security <span class="ct">6</span></div>
+        <div class="row"><span class="ic">◧</span> Product <span class="ct">7</span></div>
+        <div class="row"><span class="ic">◧</span> Handbook <span class="ct">5</span></div>
+        <div class="row"><span class="ic">◧</span> Support <span class="ct">11</span></div>
+      </div>
+
+      <div class="foot">
+        <span class="av av--u">NA</span>
+        <div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div class="main">
+      <div class="bar">
+        <button class="members-menu btn btn--ghost btn--sm" aria-label="Open navigation">☰</button>
+        <div class="crumb"><b>Administration</b> <span class="sep">/</span> Members &amp; Teams</div>
+        <div class="search" role="search"><span aria-hidden="true">⌕</span> Search members &amp; agents… <span class="k">⌘K</span></div>
+        <button class="btn btn--ultra btn--sm">＋ Invite</button>
+      </div>
+
+      <div class="body">
+        <div class="page-h" style="margin-bottom:14px;">
+          <div class="lhs">
+            <div class="kicker kicker--ultra">◑ PRINCIPALS</div>
+            <h1>Members &amp; teams<span class="z">.</span></h1>
+            <div class="sub"><span>34 USERS</span><span>·</span><span>04 AGENTS</span><span>·</span><span>07 TEAMS</span><span>·</span><span>02 PENDING</span></div>
+          </div>
+          <div class="members-acts">
+            <button class="btn btn--ghost btn--sm">⤓ Export CSV</button>
+            <button class="btn btn--ghost btn--sm members-prov">＋ Provision agent</button>
+          </div>
+        </div>
+
+        <!-- ===== primary tabs ===== -->
+        <div class="adm-tabs" role="tablist" aria-label="Administration sections">
+          <button class="on" role="tab" aria-selected="true">Members<span class="members-tc">38</span></button>
+          <button role="tab" aria-selected="false">Teams<span class="members-tc">07</span></button>
+          <button role="tab" aria-selected="false">Invites<span class="members-tc">02</span></button>
+          <button role="tab" aria-selected="false">Roles<span class="members-tc">04</span></button>
+        </div>
+
+        <!-- ===== sub-filter bar ===== -->
+        <div class="members-sub">
+          <div class="toolbar2" style="margin:0;">
+            <div class="seg" role="group" aria-label="Filter by kind">
+              <button class="on">All · 38</button>
+              <button>Humans · 34</button>
+              <button>Agents · 04</button>
+            </div>
+          </div>
+          <div class="members-filt mono">
+            <span class="members-chip">Team · All <span class="car">▾</span></span>
+            <span class="members-chip">Role · All <span class="car">▾</span></span>
+            <span class="members-chip">Status · Active <span class="car">▾</span></span>
+          </div>
+        </div>
+
+        <!-- ===== unified principal table ===== -->
+        <div class="members-tblwrap">
+          <table class="mtbl" style="border-top:0;">
+            <thead>
+              <tr>
+                <th>Principal</th>
+                <th>Kind</th>
+                <th>Role</th>
+                <th>Teams</th>
+                <th>Capability scope</th>
+                <th class="r">Last active</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+
+              <!-- human · admin -->
+              <tr>
+                <td data-label="Principal"><div class="person"><span class="av av--u">NA</span><div><div class="nm">Nadia Ahmadi</div><div class="em">nadia@northwind.eng</div></div></div></td>
+                <td data-label="Kind"><span class="kind kind-h">Human</span></td>
+                <td data-label="Role"><span class="role-sel">Admin <span class="car">▾</span></span></td>
+                <td data-label="Teams"><span class="members-teams"><span class="members-team">Platform</span></span></td>
+                <td data-label="Scope">
+                  <div class="members-scope">
+                    <div class="scope-bar" title="read · author · edit · admin"><i class="onu"></i><i class="onu"></i><i class="onu"></i><i class="onu"></i></div>
+                    <span class="members-scopelbl mono">read·author·edit·admin</span>
+                  </div>
+                </td>
+                <td data-label="Last active" class="r when">now</td>
+                <td data-label="Status"><span class="members-st members-st--active"><span class="dot dot--ok"></span>Active</span></td>
+              </tr>
+
+              <!-- AGENT · editor · live -->
+              <tr class="members-agentrow">
+                <td data-label="Principal"><div class="person"><span class="av av--agent">AR</span><div><div class="nm">archivist</div><div class="em">agent · key #a7c1 · by Nadia</div></div></div></td>
+                <td data-label="Kind"><span class="kind kind-a">Agent</span></td>
+                <td data-label="Role"><span class="role-sel members-role--ag">Editor <span class="car">▾</span></span></td>
+                <td data-label="Teams"><span class="members-teams"><span class="members-team">Platform</span></span></td>
+                <td data-label="Scope">
+                  <div class="members-scope">
+                    <div class="scope-bar" title="read · author · edit"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+                    <span class="members-scopelbl mono">read·author·edit · 600/min</span>
+                  </div>
+                </td>
+                <td data-label="Last active" class="r when members-when--ag"><span class="dot dot--agent live"></span>writing…</td>
+                <td data-label="Status"><span class="members-st members-st--ag"><span class="dot dot--agent"></span>Live</span></td>
+              </tr>
+
+              <!-- human · editor -->
+              <tr>
+                <td data-label="Principal"><div class="person"><span class="av av--u2">JK</span><div><div class="nm">Jo Kerrigan</div><div class="em">jo@northwind.eng</div></div></div></td>
+                <td data-label="Kind"><span class="kind kind-h">Human</span></td>
+                <td data-label="Role"><span class="role-sel">Editor <span class="car">▾</span></span></td>
+                <td data-label="Teams"><span class="members-teams"><span class="members-team">Security</span><span class="members-team">Platform</span></span></td>
+                <td data-label="Scope">
+                  <div class="members-scope">
+                    <div class="scope-bar" title="read · author · edit"><i class="onu"></i><i class="onu"></i><i class="onu"></i><i></i></div>
+                    <span class="members-scopelbl mono">read·author·edit</span>
+                  </div>
+                </td>
+                <td data-label="Last active" class="r when">12m</td>
+                <td data-label="Status"><span class="members-st members-st--active"><span class="dot dot--ok"></span>Active</span></td>
+              </tr>
+
+              <!-- AGENT · author -->
+              <tr class="members-agentrow">
+                <td data-label="Principal"><div class="person"><span class="av av--agent">LB</span><div><div class="nm">linter-bot</div><div class="em">agent · key #3f02 · by Jo</div></div></div></td>
+                <td data-label="Kind"><span class="kind kind-a">Agent</span></td>
+                <td data-label="Role"><span class="role-sel members-role--ag">Author <span class="car">▾</span></span></td>
+                <td data-label="Teams"><span class="members-teams"><span class="members-team">Security</span></span></td>
+                <td data-label="Scope">
+                  <div class="members-scope">
+                    <div class="scope-bar" title="read · author"><i class="on"></i><i class="on"></i><i></i><i></i></div>
+                    <span class="members-scopelbl mono">read·author · 200/min</span>
+                  </div>
+                </td>
+                <td data-label="Last active" class="r when">09:30</td>
+                <td data-label="Status"><span class="members-st members-st--active"><span class="dot dot--ok"></span>Active</span></td>
+              </tr>
+
+              <!-- human · member -->
+              <tr>
+                <td data-label="Principal"><div class="person"><span class="av av--u3">TM</span><div><div class="nm">Theo Mensah</div><div class="em">theo@northwind.eng</div></div></div></td>
+                <td data-label="Kind"><span class="kind kind-h">Human</span></td>
+                <td data-label="Role"><span class="role-sel">Author <span class="car">▾</span></span></td>
+                <td data-label="Teams"><span class="members-teams"><span class="members-team">Handbook</span></span></td>
+                <td data-label="Scope">
+                  <div class="members-scope">
+                    <div class="scope-bar" title="read · author"><i class="onu"></i><i class="onu"></i><i></i><i></i></div>
+                    <span class="members-scopelbl mono">read·author</span>
+                  </div>
+                </td>
+                <td data-label="Last active" class="r when">3h</td>
+                <td data-label="Status"><span class="members-st members-st--active"><span class="dot dot--ok"></span>Active</span></td>
+              </tr>
+
+              <!-- AGENT · read-only -->
+              <tr class="members-agentrow">
+                <td data-label="Principal"><div class="person"><span class="av av--agent">SM</span><div><div class="nm">summariser</div><div class="em">agent · key #9d4e · by Nadia</div></div></div></td>
+                <td data-label="Kind"><span class="kind kind-a">Agent</span></td>
+                <td data-label="Role"><span class="role-sel members-role--ro">Read-only <span class="car">▾</span></span></td>
+                <td data-label="Teams"><span class="members-teams"><span class="members-team">Product</span></span></td>
+                <td data-label="Scope">
+                  <div class="members-scope">
+                    <div class="scope-bar" title="read"><i class="on"></i><i></i><i></i><i></i></div>
+                    <span class="members-scopelbl mono">read · 120/min</span>
+                  </div>
+                </td>
+                <td data-label="Last active" class="r when">5h</td>
+                <td data-label="Status"><span class="members-st members-st--active"><span class="dot dot--ok"></span>Active</span></td>
+              </tr>
+
+              <!-- human · guest -->
+              <tr>
+                <td data-label="Principal"><div class="person"><span class="av av--u3">PV</span><div><div class="nm">Priya Vance</div><div class="em">priya@contractor.io</div></div></div></td>
+                <td data-label="Kind"><span class="kind kind-h">Human</span></td>
+                <td data-label="Role"><span class="role-sel members-role--ro">Guest <span class="car">▾</span></span></td>
+                <td data-label="Teams"><span class="members-teams"><span class="members-team">Product</span></span></td>
+                <td data-label="Scope">
+                  <div class="members-scope">
+                    <div class="scope-bar" title="read"><i class="onu"></i><i></i><i></i><i></i></div>
+                    <span class="members-scopelbl mono">read</span>
+                  </div>
+                </td>
+                <td data-label="Last active" class="r when">2d</td>
+                <td data-label="Status"><span class="members-st members-st--inv"><span class="dot"></span>Invited</span></td>
+              </tr>
+
+              <!-- AGENT · revoked -->
+              <tr class="members-agentrow members-revoked">
+                <td data-label="Principal"><div class="person"><span class="av av--agent">RX</span><div><div class="nm">release-notes</div><div class="em">agent · key #1b8f · by Theo</div></div></div></td>
+                <td data-label="Kind"><span class="kind kind-a">Agent</span></td>
+                <td data-label="Role"><span class="role-sel members-role--ro">Editor <span class="car">▾</span></span></td>
+                <td data-label="Teams"><span class="members-teams"><span class="members-team">Handbook</span></span></td>
+                <td data-label="Scope">
+                  <div class="members-scope">
+                    <div class="scope-bar" title="revoked"><i></i><i></i><i></i><i></i></div>
+                    <span class="members-scopelbl mono">key revoked</span>
+                  </div>
+                </td>
+                <td data-label="Last active" class="r when">14d</td>
+                <td data-label="Status"><span class="members-st members-st--rev"><span class="dot"></span>Revoked</span></td>
+              </tr>
+
+            </tbody>
+          </table>
+        </div>
+
+        <div class="members-foot">
+          <span class="mono members-legend">SCOPE TIERS · READ → AUTHOR → EDITOR → ADMIN · <span class="members-keyu">▮ HUMAN</span> <span class="members-keya">▮ AGENT</span> · TOKENS REVOCABLE PER ROW</span>
+          <div class="members-pager mono">
+            <span>1–8 of 38</span>
+            <button class="btn btn--ghost btn--sm" aria-label="Previous page">‹</button>
+            <button class="btn btn--ghost btn--sm" aria-label="Next page">›</button>
+          </div>
+        </div>
+
+        <!-- ===== TEAMS section ===== -->
+        <div class="hr" style="margin:26px 0 0;"></div>
+        <div class="page-h" style="margin:22px 0 16px;">
+          <div class="lhs">
+            <div class="kicker">◫ TEAMS · 07</div>
+            <h2 style="font-size:19px;">Teams &amp; membership</h2>
+          </div>
+          <button class="btn btn--ghost btn--sm">＋ Add team</button>
+        </div>
+
+        <div class="members-teamgrid">
+          <!-- team card -->
+          <div class="members-tcard">
+            <div class="members-tcard-h">
+              <span class="members-tdot" style="background:var(--ultra)"></span>
+              <span class="members-tname">Platform</span>
+              <span class="ord members-tcount">09</span>
+            </div>
+            <div class="members-tcard-b">
+              <div class="members-tmembers">
+                <span class="av av--u">NA</span>
+                <span class="av av--u2">JK</span>
+                <span class="av av--agent">AR</span>
+                <span class="members-more mono">+6</span>
+              </div>
+              <div class="members-tmeta mono">
+                <span><span class="members-keyu">●</span> 7 humans</span>
+                <span><span class="members-keya">◆</span> 2 agents</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="members-tcard">
+            <div class="members-tcard-h">
+              <span class="members-tdot" style="background:var(--agent)"></span>
+              <span class="members-tname">Security</span>
+              <span class="ord members-tcount">06</span>
+            </div>
+            <div class="members-tcard-b">
+              <div class="members-tmembers">
+                <span class="av av--u2">JK</span>
+                <span class="av av--agent">LB</span>
+                <span class="av av--u3">DM</span>
+                <span class="members-more mono">+3</span>
+              </div>
+              <div class="members-tmeta mono">
+                <span><span class="members-keyu">●</span> 5 humans</span>
+                <span><span class="members-keya">◆</span> 1 agent</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="members-tcard">
+            <div class="members-tcard-h">
+              <span class="members-tdot" style="background:var(--ink-1)"></span>
+              <span class="members-tname">Product</span>
+              <span class="ord members-tcount">07</span>
+            </div>
+            <div class="members-tcard-b">
+              <div class="members-tmembers">
+                <span class="av av--u3">TM</span>
+                <span class="av av--agent">SM</span>
+                <span class="av av--u3">PV</span>
+                <span class="members-more mono">+4</span>
+              </div>
+              <div class="members-tmeta mono">
+                <span><span class="members-keyu">●</span> 6 humans</span>
+                <span><span class="members-keya">◆</span> 1 agent</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="members-tcard">
+            <div class="members-tcard-h">
+              <span class="members-tdot" style="background:var(--ink-1)"></span>
+              <span class="members-tname">Handbook</span>
+              <span class="ord members-tcount">05</span>
+            </div>
+            <div class="members-tcard-b">
+              <div class="members-tmembers">
+                <span class="av av--u3">TM</span>
+                <span class="av av--agent members-av--rev">RX</span>
+                <span class="members-more mono">+3</span>
+              </div>
+              <div class="members-tmeta mono">
+                <span><span class="members-keyu">●</span> 4 humans</span>
+                <span><span class="members-keya">◆</span> 1 agent</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== mobile bottom tab bar (PWA) ===== -->
+<nav class="members-tabbar" aria-label="Primary">
+  <a class="on" href="#" aria-current="page"><span class="members-tbi">◑</span>Members</a>
+  <a href="#"><span class="members-tbi">◫</span>Teams</a>
+  <a href="#"><span class="members-tbi">✉</span>Invites</a>
+  <a href="#"><span class="members-tbi">⊹</span>Roles</a>
+  <a href="#"><span class="members-tbi">▤</span>Audit</a>
+</nav>
+</body>
+</html>

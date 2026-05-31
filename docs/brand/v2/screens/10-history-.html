@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Version history + track-changes review (ADR 0032)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   SCREEN F · Version history + track-changes review (ADR 0032)
+   Prefix: history-  · composes Meridian Zero tokens + classes.
+   ============================================================ */
+
+.history-win{ min-height:640px; }
+.history-main{ overflow:visible; }
+.history-body{ overflow:visible; }
+.history-back{ font-size:9.5px; }
+
+/* shared add/remove semantics (cyan = the tracked-change signal) */
+.history-add{ color:var(--agent-ink); }
+.history-rem{ color:var(--steel); }
+
+/* ============ LEFT · VERSION TIMELINE ============ */
+.history-side{ min-width:0; }
+.history-tlhead{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 16px 8px;
+}
+.history-timeline{
+  flex:1; overflow-y:auto; padding:2px 10px 14px;
+  display:flex; flex-direction:column;
+}
+
+.history-snap{
+  display:grid; grid-template-columns:18px 1fr; gap:10px;
+  padding:9px 6px 11px; cursor:pointer; position:relative;
+  border-left:2px solid transparent; margin-left:-10px; padding-left:14px;
+}
+.history-snap:hover{ background:var(--surface); }
+.history-snap.is-selected{ background:var(--surface); border-left-color:var(--ultra); }
+.history-snap.is-selected:hover{ background:var(--surface); }
+
+/* rail + node (engineering tick on a vertical line) */
+.history-rail{ position:relative; display:flex; justify-content:center; }
+.history-rail::before{
+  content:""; position:absolute; top:-9px; bottom:-11px; left:50%;
+  width:var(--rule); background:var(--hair); transform:translateX(-50%);
+}
+.history-snap:first-child .history-rail::before{ top:7px; }
+.history-snap:last-child .history-rail::before{ bottom:auto; height:14px; }
+.history-node{
+  position:relative; z-index:1; margin-top:3px;
+  width:9px; height:9px; background:var(--surface);
+  border:var(--rule-2) solid var(--steel-2);
+}
+.history-snap.is-head .history-node{ border-color:var(--ultra); background:var(--ultra); }
+.history-snap.is-selected .history-node{ border-color:var(--ultra); box-shadow:0 0 0 3px var(--ultra-wash); }
+.history-snap[role="option"] .history-snbody{ min-width:0; }
+
+.history-snhead{ display:flex; align-items:center; gap:7px; }
+.history-vtag{ font-size:12px; font-weight:700; color:var(--ink); letter-spacing:0.01em; }
+.history-snmeta{ display:flex; align-items:center; gap:7px; margin-top:6px; }
+.history-snmeta .av{ width:18px; height:18px; flex:0 0 18px; }
+.history-author{ font-size:11.5px; font-weight:600; color:var(--ink-1); letter-spacing:-0.01em; }
+.history-when{ font-size:9.5px; color:var(--steel); margin-left:auto; letter-spacing:0.02em; flex:0 0 auto; }
+.history-sum{ font-size:11px; color:var(--ink-2); line-height:1.45; margin-top:6px; }
+
+.history-snstat{
+  display:flex; align-items:center; gap:9px; margin-top:7px;
+  font-size:9.5px; letter-spacing:0.03em;
+}
+.history-touch{ color:var(--steel-2); }
+.history-restorebtn{ margin-top:9px; font-size:9.5px; }
+
+/* ============ CENTER · DIFF ============ */
+.history-diffmode{ margin-left:auto; display:flex; border:var(--rule) solid var(--hair-strong); }
+.history-diffmode button{
+  font-family:var(--mono); font-size:10px; letter-spacing:0.06em; text-transform:uppercase;
+  padding:6px 11px; background:var(--surface); color:var(--steel);
+  border:0; border-right:var(--rule) solid var(--hair); cursor:pointer;
+}
+.history-diffmode button:last-child{ border-right:0; }
+.history-diffmode button.on{ background:var(--ink); color:var(--paper); }
+
+.history-diffbar{
+  display:grid; grid-template-columns:1fr auto 1fr; gap:18px; align-items:center;
+  border:var(--rule) solid var(--hair-strong); background:var(--paper);
+  padding:11px 16px; margin-bottom:20px;
+}
+.history-dstat{ display:flex; flex-direction:column; gap:3px; min-width:0; }
+.history-dk{ font-size:9px; letter-spacing:0.1em; text-transform:uppercase; color:var(--steel-2); }
+.history-dv{ font-size:11px; color:var(--ink-1); }
+.history-dmeter{ display:flex; align-items:center; gap:9px; }
+.history-mlabel{ font-size:11px; font-weight:700; }
+.history-mtrack{ display:flex; width:120px; height:5px; background:var(--surface-sunk); }
+.history-madd{ background:var(--agent); }
+.history-mrem{ background:var(--steel-2); }
+
+.history-diff{ max-width:760px; }
+.history-block{
+  display:grid; grid-template-columns:54px 1fr; gap:0;
+  border:var(--rule) solid var(--hair); border-bottom:0; background:var(--surface);
+}
+.history-block:last-child{ border-bottom:var(--rule) solid var(--hair); }
+.history-bgut{
+  display:flex; flex-direction:column; align-items:flex-end; gap:6px;
+  padding:11px 9px; border-right:var(--rule) solid var(--hair); background:var(--paper);
+}
+.history-bln{ font-size:10px; color:var(--steel-2); }
+.history-bbadge{ font-size:8px; letter-spacing:0.04em; padding:1px 4px; border:var(--rule) solid; }
+.history-bb-mod{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+.history-bb-add{ color:var(--ultra-ink); border-color:var(--ultra-edge); background:var(--ultra-wash); }
+.history-bb-rem{ color:var(--steel); border-color:var(--hair-strong); background:var(--surface-2); }
+.history-bbody{ padding:13px 16px; min-width:0; }
+.history-bauthor{
+  display:flex; align-items:center; gap:7px; margin-bottom:9px;
+  font-size:9.5px; color:var(--steel); letter-spacing:0.03em;
+}
+.history-bauthor .av{ width:17px; height:17px; flex:0 0 17px; }
+
+/* left-edge tint by change kind — cold cyan/ultra rails, never warm */
+.history-block.is-changed .history-bgut{ box-shadow:inset 2px 0 0 var(--agent); }
+.history-block.is-added .history-bgut{ box-shadow:inset 2px 0 0 var(--ultra); }
+.history-block.is-removed{ background:var(--paper); }
+.history-block.is-removed .history-bgut{ box-shadow:inset 2px 0 0 var(--hair-strong); }
+.history-block.is-removed .history-bbody{ opacity:0.86; }
+.history-block.is-ctx .history-bbody{ color:var(--ink-2); }
+
+/* ============ RIGHT · SUGGESTION QUEUE + RESTORE ============ */
+.history-erail{ overflow:visible; }
+.history-rcline{ font-size:11px; color:var(--ink-2); line-height:1.5; }
+.history-rcline b{ color:var(--ink); font-weight:600; }
+
+.history-restorecard{ position:relative; }
+.history-confirm{
+  margin-top:10px; border:var(--rule-2) solid var(--ultra);
+  background:var(--surface); box-shadow:4px 4px 0 var(--ultra-wash);
+}
+.history-cfh{
+  padding:8px 11px; font-size:9.5px; letter-spacing:0.08em; color:#fff;
+  background:var(--ultra-ink);
+}
+.history-cfbody{ padding:10px 11px; }
+.history-cfack{
+  display:flex; align-items:center; gap:8px; margin-top:9px; cursor:pointer;
+  font-size:10.5px; color:var(--ink-1); padding-top:9px; border-top:var(--rule) solid var(--hair);
+}
+.history-cfbox{
+  width:13px; height:13px; flex:0 0 13px; border:var(--rule) solid var(--ultra);
+  background:var(--ultra); position:relative;
+}
+.history-cfbox::after{
+  content:""; position:absolute; left:4px; top:1px; width:3px; height:7px;
+  border:solid #fff; border-width:0 2px 2px 0; transform:rotate(40deg);
+}
+.history-cffoot{ display:flex; gap:0; border-top:var(--rule) solid var(--ultra-edge); }
+.history-cffoot .btn{ border-radius:0; border-left:0; border-right:0; border-bottom:0; }
+
+/* a queued suggestion = full review card (matches .sugg-card grammar) */
+.history-qcard{
+  border:var(--rule) solid var(--hair-strong); background:var(--surface);
+  margin-bottom:11px;
+}
+.history-qcard.is-agent{ border-color:var(--agent-edge); }
+.history-qcard.is-human{ border-color:var(--ultra-edge); }
+.history-qhead{
+  display:flex; align-items:center; gap:7px; padding:8px 10px;
+  border-bottom:var(--rule) solid var(--hair);
+}
+.history-qcard.is-agent .history-qhead{ background:var(--agent-wash); border-bottom-color:var(--agent-edge); }
+.history-qcard.is-human .history-qhead{ background:var(--ultra-wash); border-bottom-color:var(--ultra-edge); }
+.history-qhead .av{ width:18px; height:18px; flex:0 0 18px; }
+.history-qwho{ font-size:10.5px; font-weight:700; }
+.history-qcard.is-agent .history-qwho{ color:var(--agent-ink); }
+.history-qcard.is-human .history-qwho{ color:var(--ultra-ink); }
+.history-qhead .chg{ margin-left:auto; padding:0; border:0; }
+.history-qmeta{ padding:9px 11px 0; font-size:9px; color:var(--steel-2); letter-spacing:0.03em; }
+.history-qquote{ padding:7px 11px 0; font-size:11.5px; line-height:1.5; color:var(--ink-1); }
+.history-qwhy{
+  padding:9px 11px; margin-top:9px; font-size:10.5px; color:var(--steel);
+  line-height:1.5; border-top:var(--rule) solid var(--hair);
+}
+.history-qcard.is-human .history-qquote{ padding-bottom:11px; }
+.history-qact{ display:flex; gap:0; border-top:var(--rule) solid var(--hair); }
+.history-qact button{
+  flex:1; padding:8px; font-family:var(--mono); font-size:10px; letter-spacing:0.05em;
+  text-transform:uppercase; cursor:pointer; border:0; background:var(--surface);
+}
+.history-acc{ background:var(--agent); color:#02363b; font-weight:700; }
+.history-acc--u{ background:var(--ultra); color:#fff; }
+.history-rej{ color:var(--steel); border-left:var(--rule) solid var(--hair) !important; }
+.history-rej:hover{ color:var(--ink); }
+
+.history-resolved{ margin-top:6px; padding-top:12px; border-top:var(--rule) solid var(--hair); }
+.history-rlabel{ display:block; margin-bottom:6px; }
+.history-st-rej{ color:var(--steel); border:var(--rule) solid var(--hair-strong); }
+.history-bulk{ margin-top:14px; display:flex; gap:6px; }
+
+/* mobile bottom tab bar — hidden on desktop */
+.history-mobnav{ display:none; }
+
+/* ============================================================
+   RESPONSIVE — base sheet collapses .side/.erail + stacks the
+   3-col grid at <=1120px; we re-introduce the panes as a stacked
+   set with a sticky bottom tab bar, then refine <=640px.
+   ============================================================ */
+@media (max-width:1120px){
+  .history-win{ display:block; min-height:0; padding-bottom:60px; }
+
+  .history-side,
+  .history-erail{ display:flex; }
+  .history-side,
+  .history-main,
+  .history-erail{ border-right:0; border-left:0; }
+  .history-main{ border-top:var(--rule) solid var(--hair); }
+  .history-side{ border-bottom:var(--rule) solid var(--hair-strong); }
+  .history-timeline{ max-height:none; }
+
+  .history-mobnav{
+    display:grid; grid-template-columns:repeat(3,1fr);
+    position:sticky; bottom:0; z-index:20;
+    background:var(--surface); border-top:var(--rule-2) solid var(--ink);
+  }
+  .history-mobnav button{
+    display:flex; align-items:center; justify-content:center; gap:7px;
+    min-height:52px; padding:8px; cursor:pointer;
+    font-family:var(--mono); font-size:10.5px; letter-spacing:0.05em; text-transform:uppercase;
+    color:var(--steel); background:var(--surface);
+    border:0; border-right:var(--rule) solid var(--hair); position:relative;
+  }
+  .history-mobnav button:last-child{ border-right:0; }
+  .history-mobnav button.on{ color:var(--ink); }
+  .history-mobnav button.on::after{
+    content:""; position:absolute; left:10px; right:10px; top:0; height:2px; background:var(--ultra);
+  }
+  .history-mi{ font-size:13px; }
+  .history-mbadge{
+    font-size:9px; color:var(--agent-ink); background:var(--agent-wash);
+    border:var(--rule) solid var(--agent-edge); padding:0 4px; border-radius:var(--radius-chip);
+  }
+
+  .history-diffbar{ grid-template-columns:1fr; gap:12px; text-align:left; }
+  .history-dstat:last-child{ text-align:left; }
+  .history-dmeter{ justify-content:flex-start; }
+  .history-mtrack{ flex:1; width:auto; }
+}
+
+@media (max-width:640px){
+  .history-bgut{ grid-template-columns:none; padding:9px 7px; }
+  .history-block{ grid-template-columns:42px 1fr; }
+  .history-bbody{ padding:12px 13px; }
+  .history-diff{ max-width:100%; }
+
+  /* >=44px touch targets on every actionable control */
+  .history-qact button,
+  .history-cffoot .btn,
+  .history-restoremain,
+  .history-restorebtn,
+  .history-diffmode button{ min-height:44px; }
+  .history-diffmode button{ flex:1; }
+  .history-diffmode{ width:100%; margin-left:0; }
+
+  /* the engineering coordinate band + bar crumb are desktop chrome;
+     on a phone the bottom tab bar + diff-mode row carry wayfinding.
+     Hiding them keeps the header from forcing horizontal overflow. */
+  .screen-tab .meta{ display:none; }
+  .screen-tab .id{ flex-wrap:wrap; gap:6px; padding:9px 13px; }
+  .history-main .bar{ flex-wrap:wrap; gap:10px; padding:11px 13px; }
+  .history-main .crumb{ width:100%; }
+
+  .history-snmeta{ flex-wrap:wrap; }
+  .history-when{ margin-left:0; }
+
+  /* long mono lines stay inside their own scroll box (pre has
+     overflow:auto from the base sheet); min-width:0 lets the grid
+     child actually shrink so nothing widens the page. */
+  .history-bbody, .history-snbody, .history-qcard, .codeblock{ min-width:0; }
+  .codeblock pre{ font-size:11px; }
+}
+
+/* ============================================================
+   MOTION — all opt-out under reduced-motion
+   ============================================================ */
+@media (prefers-reduced-motion: reduce){
+  .history-snap, .history-mobnav button, .history-diffmode button,
+  .history-qact button, .btn{ transition:none !important; }
+  .live{ animation:none !important; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<section class="screen">
+  <div class="screen-tab">
+    <div class="id">
+      <span class="ord" style="color:var(--agent-ink)">SCR.F</span>
+      <span class="big">Document · Version history</span>
+      <span class="chip chip--ghost" style="margin-left:4px">ADR 0032 · DIFF + REVIEW</span>
+    </div>
+    <div class="meta"><span>SNAPSHOT TIMELINE</span><span>INLINE DIFF</span><span>SUGGESTION QUEUE</span></div>
+  </div>
+
+  <div class="win win--editor history-win">
+
+    <!-- ============ LEFT · VERSION TIMELINE ============ -->
+    <aside class="side history-side">
+      <div class="top">
+        <div class="kicker">Document</div>
+        <div class="ws"><span class="av av--u3" style="background:var(--ultra)">R</span><div style="min-width:0;"><div class="nm">Runtime topology</div><div class="sub">SP·01 / D·0a1e·c7</div></div></div>
+        <button class="btn btn--ghost btn--sm history-back" style="margin-top:12px;width:100%;justify-content:center;">← Back to editor</button>
+      </div>
+
+      <div class="history-tlhead">
+        <span class="kicker">Snapshots</span>
+        <span class="ord">42 · NEWEST ↑</span>
+      </div>
+
+      <div class="history-timeline" role="listbox" aria-label="Version snapshots">
+        <!-- CURRENT (head) -->
+        <div class="history-snap is-head" role="option">
+          <div class="history-rail"><span class="history-node"></span></div>
+          <div class="history-snbody">
+            <div class="history-snhead">
+              <span class="history-vtag mono">v14</span>
+              <span class="chip chip--ultra" style="font-size:9px;padding:1px 6px">CURRENT</span>
+            </div>
+            <div class="history-snmeta">
+              <span class="av av--u" aria-hidden="true">NA</span>
+              <span class="history-author">Nadia A.</span>
+              <span class="history-when mono">now · live</span>
+            </div>
+            <div class="history-sum">Working copy — CRDT converged, 1 open suggestion.</div>
+          </div>
+        </div>
+
+        <!-- SELECTED comparison base -->
+        <div class="history-snap is-selected" role="option" aria-selected="true">
+          <div class="history-rail"><span class="history-node"></span></div>
+          <div class="history-snbody">
+            <div class="history-snhead">
+              <span class="history-vtag mono">v13</span>
+              <span class="chip chip--agent" style="font-size:9px;padding:1px 6px"><span class="dot dot--agent"></span> AGENT</span>
+            </div>
+            <div class="history-snmeta">
+              <span class="av av--agent" aria-hidden="true">AR</span>
+              <span class="history-author">archivist · AI</span>
+              <span class="history-when mono">May 31 · 09:41</span>
+            </div>
+            <div class="history-sum">Rewrote rollback invariant; normalised 4 code fences.</div>
+            <div class="history-snstat mono"><span class="history-add">+38</span><span class="history-rem">−12</span><span class="history-touch">2 blocks</span></div>
+            <button class="btn btn--ultra btn--sm history-restorebtn" aria-haspopup="dialog">↺ Restore this version</button>
+          </div>
+        </div>
+
+        <div class="history-snap" role="option">
+          <div class="history-rail"><span class="history-node"></span></div>
+          <div class="history-snbody">
+            <div class="history-snhead">
+              <span class="history-vtag mono">v12</span>
+              <span class="chip chip--ultra" style="font-size:9px;padding:1px 6px"><span class="dot dot--ultra"></span> HUMAN</span>
+            </div>
+            <div class="history-snmeta">
+              <span class="av av--u2" aria-hidden="true">TM</span>
+              <span class="history-author">Tomas M.</span>
+              <span class="history-when mono">May 31 · 08:55</span>
+            </div>
+            <div class="history-sum">Added “Decision” section; tightened lede.</div>
+            <div class="history-snstat mono"><span class="history-add">+64</span><span class="history-rem">−4</span><span class="history-touch">3 blocks</span></div>
+          </div>
+        </div>
+
+        <div class="history-snap is-restore" role="option">
+          <div class="history-rail"><span class="history-node"></span></div>
+          <div class="history-snbody">
+            <div class="history-snhead">
+              <span class="history-vtag mono">v11</span>
+              <span class="chip chip--ghost" style="font-size:9px;padding:1px 6px">RESTORE PT</span>
+            </div>
+            <div class="history-snmeta">
+              <span class="av av--agent" aria-hidden="true">LB</span>
+              <span class="history-author">linter-bot · AI</span>
+              <span class="history-when mono">May 31 · 08:30</span>
+            </div>
+            <div class="history-sum">Restored from v9 by Nadia A. · auto-normalised.</div>
+            <div class="history-snstat mono"><span class="history-add">+2</span><span class="history-rem">−2</span><span class="history-touch">4 blocks</span></div>
+          </div>
+        </div>
+
+        <div class="history-snap" role="option">
+          <div class="history-rail"><span class="history-node"></span></div>
+          <div class="history-snbody">
+            <div class="history-snhead">
+              <span class="history-vtag mono">v10</span>
+              <span class="chip chip--ultra" style="font-size:9px;padding:1px 6px"><span class="dot dot--ultra"></span> HUMAN</span>
+            </div>
+            <div class="history-snmeta">
+              <span class="av av--u3" aria-hidden="true">JK</span>
+              <span class="history-author">Jun K.</span>
+              <span class="history-when mono">May 30 · 17:12</span>
+            </div>
+            <div class="history-sum">Initial co-hosting draft.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="foot"><span class="av av--u">NA</span><div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div></div>
+    </aside>
+
+    <!-- ============ CENTER · DIFF (selected vs current) ============ -->
+    <div class="main history-main">
+      <div class="bar">
+        <div class="crumb"><b>v13</b> <span class="sep">→</span> <b>v14</b> <span class="sep">·</span> archivist → current</div>
+        <div class="history-diffmode" role="tablist" aria-label="Diff view">
+          <button role="tab" class="on">Inline</button>
+          <button role="tab">Split</button>
+          <button role="tab">Rich</button>
+        </div>
+      </div>
+
+      <div class="body history-body">
+        <!-- diff stat ledger -->
+        <div class="history-diffbar">
+          <div class="history-dstat"><span class="history-dk mono">Comparing</span><span class="history-dv mono">v13 <span style="color:var(--steel-2)">↔</span> v14 (current)</span></div>
+          <div class="history-dmeter" aria-hidden="true">
+            <span class="history-mlabel mono history-add">+102</span>
+            <div class="history-mtrack"><i class="history-madd" style="flex:0 0 64%"></i><i class="history-mrem" style="flex:0 0 36%"></i></div>
+            <span class="history-mlabel mono history-rem">−18</span>
+          </div>
+          <div class="history-dstat" style="text-align:right"><span class="history-dk mono">Blocks touched</span><span class="history-dv mono">3 of 24</span></div>
+        </div>
+
+        <div class="edcanvas history-diff">
+
+          <!-- unchanged context block -->
+          <div class="history-block is-ctx">
+            <div class="history-bgut"><span class="history-bln mono">01</span></div>
+            <div class="history-bbody">
+              <div class="ed-h1">Runtime topology &amp; co-hosting<span class="z">.</span></div>
+            </div>
+          </div>
+
+          <!-- changed block: inline ins/del -->
+          <div class="history-block is-changed">
+            <div class="history-bgut"><span class="history-bln mono">04</span><span class="history-bbadge mono history-bb-mod">~ MOD</span></div>
+            <div class="history-bbody">
+              <div class="history-bauthor"><span class="av av--agent" aria-hidden="true">AR</span><span class="mono">archivist edited · 09:41</span></div>
+              <div class="ed-p">
+                A rolled-back SQL transaction must
+                <span class="sugg-del">not break the</span> <span class="sugg-ins">never leave a mutation resident in the</span>
+                live Y.Doc once WebSocket clients attach.
+              </div>
+            </div>
+          </div>
+
+          <!-- changed block: code fence normalisation -->
+          <div class="history-block is-changed">
+            <div class="history-bgut"><span class="history-bln mono">07</span><span class="history-bbadge mono history-bb-mod">~ MOD</span></div>
+            <div class="history-bbody">
+              <div class="history-bauthor"><span class="av av--agent" aria-hidden="true">AR</span><span class="mono">archivist edited · 09:41</span></div>
+              <div class="codeblock" style="margin:0;">
+                <div class="ch"><span>onAuthenticate.ts · ts</span><span class="mono">NORMALISED</span></div>
+                <pre><span class="cm">// reject before the socket joins the room</span>
+<span class="kw">if</span> (!ctx.principal) <span class="kw">throw</span> <span class="st">"unauthorized"</span>;
+<span class="sugg-del">return ctx.doc;</span>
+<span class="sugg-ins">return ctx.attach(ctx.doc, { evictOnRollback: true });</span></pre>
+              </div>
+            </div>
+          </div>
+
+          <!-- added block (whole block new in current) -->
+          <div class="history-block is-added">
+            <div class="history-bgut"><span class="history-bln mono">11</span><span class="history-bbadge mono history-bb-add">+ ADD</span></div>
+            <div class="history-bbody">
+              <div class="history-bauthor"><span class="av av--u" aria-hidden="true">NA</span><span class="mono">Nadia A. added · now</span></div>
+              <div class="ed-h2"><span class="sugg-ins" style="box-shadow:none;background:transparent;color:var(--ink)">02 — Eviction guarantee</span></div>
+              <div class="ed-p"><span class="sugg-ins">Once a transaction rolls back, the dispatcher evicts the staged Y update before any client attaches — the audit log records the eviction as a single entry.</span></div>
+            </div>
+          </div>
+
+          <!-- removed block -->
+          <div class="history-block is-removed">
+            <div class="history-bgut"><span class="history-bln mono">14</span><span class="history-bbadge mono history-bb-rem">− DEL</span></div>
+            <div class="history-bbody">
+              <div class="history-bauthor"><span class="av av--agent" aria-hidden="true">LB</span><span class="mono">linter-bot removed · 09:30</span></div>
+              <div class="ed-p"><span class="sugg-del">TODO: confirm whether beforeSync is awaited in Hocuspocus 3.4.x — leftover note, superseded.</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ RIGHT · SUGGESTION QUEUE ============ -->
+    <aside class="erail history-erail">
+      <div class="es">
+        <div class="h">Restore <span class="ord">v13</span></div>
+        <div class="history-restorecard">
+          <div class="history-rcline">Restoring <b>v13</b> replaces the working copy. A new version <b class="mono">v15</b> is written; nothing is lost — current state stays in history.</div>
+          <button class="btn btn--ultra history-restoremain" aria-haspopup="dialog" style="width:100%;justify-content:center;margin-top:10px;">↺ Restore this version</button>
+
+          <!-- confirm popover (shown state) -->
+          <div class="history-confirm" role="dialog" aria-label="Confirm restore" aria-modal="false">
+            <div class="history-cfh mono">CONFIRM RESTORE → v13</div>
+            <div class="history-cfbody">
+              <div class="kv"><span class="k">from</span><span class="v mono">v14 (current)</span></div>
+              <div class="kv"><span class="k">to</span><span class="v mono">v13 · archivist</span></div>
+              <div class="kv"><span class="k">writes</span><span class="v mono" style="color:var(--ultra-ink)">v15</span></div>
+              <label class="history-cfack"><span class="history-cfbox" aria-hidden="true"></span> Keep 1 open suggestion as pending</label>
+            </div>
+            <div class="history-cffoot">
+              <button class="btn btn--ultra btn--sm" style="flex:1;justify-content:center;">Confirm</button>
+              <button class="btn btn--ghost btn--sm" style="flex:1;justify-content:center;">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="es" style="flex:1;">
+        <div class="h">Suggestion queue <span class="ord">2 OPEN · 3 RESOLVED</span></div>
+
+        <!-- pending agent suggestion (full review card) -->
+        <div class="history-qcard is-agent">
+          <div class="history-qhead">
+            <span class="av av--agent" aria-hidden="true">AR</span>
+            <span class="history-qwho mono">archivist</span>
+            <span class="chg"><span class="st pend" style="margin:0">pending</span></span>
+          </div>
+          <div class="history-qmeta mono">SG·01 · block 04 · insertion · 09:41</div>
+          <div class="history-qquote">
+            <span class="sugg-del" style="box-shadow:none">not break the</span>
+            <span class="sugg-ins" style="box-shadow:inset 0 -2px 0 var(--agent)">never leave a mutation resident in the</span>
+          </div>
+          <div class="history-qwhy">Tightens the invariant per ADR 0030 — “resident in the live Y.Doc” matches the rollback-eviction guarantee.</div>
+          <div class="history-qact">
+            <button class="history-acc">✓ Accept</button>
+            <button class="history-rej">✕ Reject</button>
+          </div>
+        </div>
+
+        <!-- pending human suggestion -->
+        <div class="history-qcard is-human">
+          <div class="history-qhead">
+            <span class="av av--u2" aria-hidden="true">TM</span>
+            <span class="history-qwho mono">Tomas M.</span>
+            <span class="chg"><span class="st pend" style="margin:0;color:var(--ultra-ink);border-color:var(--ultra-edge);background:var(--ultra-wash)">pending</span></span>
+          </div>
+          <div class="history-qmeta mono">SG·02 · block 11 · comment · 09:48</div>
+          <div class="history-qquote">Should the eviction emit a metric? Suggest a span <span class="sugg-ins" style="color:var(--ultra-ink);background:var(--ultra-wash);box-shadow:inset 0 -2px 0 var(--ultra)">dispatcher.evict</span>.</div>
+          <div class="history-qact">
+            <button class="history-acc history-acc--u">✓ Apply</button>
+            <button class="history-rej">✕ Dismiss</button>
+          </div>
+        </div>
+
+        <!-- resolved ledger (compact .chg rows) -->
+        <div class="history-resolved">
+          <div class="history-rlabel kicker">Resolved</div>
+          <div class="chg">
+            <div class="rail ag"></div>
+            <div class="bd"><div class="ln"><b>archivist</b> · normalised</div><div class="mt">SG·00 · 4 fences · 09:30</div></div>
+            <span class="st acc">accepted</span>
+          </div>
+          <div class="chg">
+            <div class="rail u"></div>
+            <div class="bd"><div class="ln"><b>Nadia A.</b> · added block</div><div class="mt">block 11 · now</div></div>
+            <span class="st acc">accepted</span>
+          </div>
+          <div class="chg">
+            <div class="rail ag"></div>
+            <div class="bd"><div class="ln"><b>linter-bot</b> · TODO removal</div><div class="mt">block 14 · 09:30</div></div>
+            <span class="st history-st-rej">rejected</span>
+          </div>
+        </div>
+
+        <div class="history-bulk">
+          <button class="btn btn--sm" style="flex:1;border-color:var(--agent);color:var(--agent-ink);background:var(--agent-wash)">Accept all</button>
+          <button class="btn btn--ghost btn--sm" style="flex:1;">Reject all</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ============ MOBILE BOTTOM TAB BAR ============ -->
+  <nav class="history-mobnav" aria-label="History sections">
+    <button class="on" data-pane="timeline"><span class="history-mi" aria-hidden="true">⌗</span> Versions</button>
+    <button data-pane="diff"><span class="history-mi" aria-hidden="true">≢</span> Diff</button>
+    <button data-pane="queue"><span class="history-mi" aria-hidden="true">✦</span> Queue <span class="history-mbadge mono">2</span></button>
+  </nav>
+</section>
+</body>
+</html>

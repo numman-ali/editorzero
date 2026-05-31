@@ -30,7 +30,7 @@ What becomes easier. What becomes harder.
 
 ## Index
 
-Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 boundary (2026-04-17); 0021–0026 landed as additive Phase-3 slices and are Accepted-and-implemented; **0027–0033 are the Web UI surface-architecture cluster (2026-05-30)**, which **superseded 0004 and 0005**. The red-team and refresh trails are linked at the bottom.
+Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 boundary (2026-04-17); 0021–0026 landed as additive Phase-3 slices and are Accepted-and-implemented; **0027–0033 are the Web UI surface-architecture cluster (2026-05-30)**, which **superseded 0004 and 0005**; 0034–0035 refined the schemas SSOT + SPA scaffold; **0036–0039 are the Web UI surface-foundations cluster (2026-05-31)** — brand (Meridian Zero), design system + theming (Base UI), the owned Tiptap editor (superseding 0031), and the PWA/mobile/offline stance. The red-team and refresh trails are linked at the bottom.
 
 | # | Title | Status |
 |---|---|---|
@@ -64,11 +64,15 @@ Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 b
 | [0028](0028-web-ui-routing-typed-client.md) | **Web UI routing: TanStack Router + the single typed-client seam** | **Accepted (new, 2026-05-30)** |
 | [0029](0029-api-package-shape.md) | **API package shape: registry-generated per-route Hono factories under one tuple literal** | **Accepted (new, 2026-05-30; refines 0021)** |
 | [0030](0030-better-auth-mount.md) | **Better Auth mounted in-trunk, same-origin, zero framework adapter** | **Accepted (new, 2026-05-30)** |
-| [0031](0031-editor-substrate.md) | **Editor substrate: bootstrap on BlockNote, eject to Tiptap v3 + owned block layer (clean-start)** | **Accepted (new, 2026-05-30; supersedes 0004)** |
+| [0031](0031-editor-substrate.md) | **Editor substrate: bootstrap on BlockNote, eject to Tiptap v3 + owned block layer (clean-start)** | **Superseded by [0038](0038-owned-editor-tiptap-direct.md) (2026-05-31); superseded 0004** |
 | [0032](0032-version-history-track-changes.md) | **Version history + track-changes: build ourselves on Yjs snapshots + prosemirror-changeset** | **Accepted (new, 2026-05-30)** |
 | [0033](0033-web-ui-testing-rpc-contract.md) | **Web UI testing strategy + typed RPC error contract** | **Accepted (new, 2026-05-30)** |
 | [0034](0034-schemas-ssot-package.md) | **`@editorzero/schemas`: single-source wire+internal contracts reused by capabilities and surfaces** | **Accepted (new, 2026-05-30; refines 0029)** |
-| [0035](0035-web-ui-spa-scaffold.md) | **Web UI SPA scaffold: `apps/app`, Vite same-origin dev proxy, file-based routing, exact-pin + lockfile + pnpm cooldown supply-chain posture** | **Accepted (new, 2026-05-31)** |
+| [0035](0035-web-ui-spa-scaffold.md) | **Web UI SPA scaffold: `apps/app`, Vite same-origin dev proxy, file-based routing, exact-pin + lockfile + pnpm cooldown supply-chain posture** | **Accepted (new, 2026-05-31; editor pins amended by 0037/0038/0039)** |
+| [0036](0036-brand-meridian-zero.md) | **Brand & visual identity: Meridian Zero (cold-Swiss; ultramarine + agent-cyan; AA-hardened token SSOT)** | **Accepted (new, 2026-05-31)** |
+| [0037](0037-design-system-base-ui-theming.md) | **Design system & theming: Base UI shell + layered design tokens (curated + user-authored themes by `:root` override)** | **Accepted (new, 2026-05-31; retires the Mantine assumption)** |
+| [0038](0038-owned-editor-tiptap-direct.md) | **Owned editor: adopt Tiptap v3 directly + DOM-free JSON-in server write path** | **Accepted (new, 2026-05-31; supersedes 0031)** |
+| [0039](0039-pwa-mobile-offline.md) | **PWA, mobile & offline-CRDT stance: installable PWA, offline-read-only v1, responsive 3-pane collapse, iOS auth verdict** | **Accepted (new, 2026-05-31)** |
 
 ## Review trails
 
@@ -78,3 +82,4 @@ Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 b
 - [`red-team-phase-4.md`](red-team-phase-4.md) — Phase 3 first pass against landed code (Codex): F85–F97 (3 BLOCKER, 4 HIGH, 1 MEDIUM, 1 LOW, 4 UNUSUAL-GOOD). All applied 2026-04-18.
 - [`refresh-research-phase-1.md`](refresh-research-phase-1.md) — Phase 1 v2 refresh: 8 Opus sub-agent memos; substantive changes to ADRs 0002/0004/0005/0006/0007/0008/0009/0010/0012/0013/0016/0018; new ADR 0020.
 - **Web UI surface-architecture review (2026-05-30)** — the 0027–0033 cluster: a 36-agent exhaustive Workflow review (`wf_b3e0aac1-bff`) with judge panels + 5 adversarial red-teamers, plus a cross-model Codex ADR-level pass (3 block-acceptance findings + 2 refinements, all integrated). Superseded 0004 (editor) and 0005 (UI framework); rewrote ADR 0012's server-artifact line and architecture.md §5.4.
+- **Web UI surface-foundations cluster (2026-05-31)** — the 0036–0039 ADRs. Brand chosen via a divergent-generate-then-curate Workflow over 12 full-screen design explorations (`wf_b3a17378-0fb` design, `wf_545b3708-b04` buildout + a11y audit); Nomi selected **Meridian Zero**. A research + adversarial-verification Workflow (`wf_734a602e-3d6`, 7 agents) then verified every library pin against the live npm registry + official docs/specs (2026-05-31), **correcting** the design-system, editor, and PWA drafts before they locked: no `y-prosemirror@2.0.0` exists; Hocuspocus is at 4.1.0 (repo pins 3.4.4); `@base-ui/react@1.5.0` carries mandatory `date-fns`/`@date-fns/tz` peer-deps; Floating-UI convergence is at `@floating-ui/dom@1.7.6` via two adapters; the SW-cannot-touch-WS claim re-cited to the Fetch spec. Superseded 0031 (editor) and the Mantine-via-BlockNote assumption; amended 0018 (DOM-free write path) and 0035 (editor pins).

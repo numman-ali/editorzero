@@ -1,0 +1,1176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>editorzero — Halling (scandi-cool)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=Space+Mono:wght@400;700&family=Fraunces:opsz,wght@9..144,400;9..144,500&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   HALLING — a scandi-cool design system for editorzero
+   All visual decisions live in CSS custom properties (tokens).
+   Cool only: no warm paper, no clay, no terracotta. Glacier.
+   ============================================================ */
+:root{
+  /* --- Cool neutral ramp: greys with a deliberate blue cast (hue ~218) --- */
+  --ez-0:#fbfcfe;   /* app base — cool near-white, faint blue */
+  --ez-1:#f3f6fb;   /* raised surface / rail */
+  --ez-2:#eaeff6;   /* hover / sunk */
+  --ez-3:#dde4ee;   /* hairline-strong / chips */
+  --ez-4:#c5d0df;   /* borders */
+  --ez-5:#79889f;   /* faint ink — incidental microcopy; clears AA-large/UI on cool surfaces */
+  --ez-6:#6b7a90;   /* secondary ink */
+  --ez-7:#3b4659;   /* body ink */
+  --ez-8:#1c2433;   /* heading ink */
+  --ez-9:#0c111c;   /* max ink / near-black blue */
+
+  /* --- Glacier blue: the primary --- */
+  --ice-50:#eef4fb;
+  --ice-100:#d8e6f6;
+  --ice-200:#b3cdec;
+  --ice-400:#5b8fd6;
+  --ice-500:#2f6dc4;   /* primary */
+  --ice-600:#235aa8;
+  --ice-700:#1b4684;
+
+  /* --- Sage: THE AGENT COLOUR. Cool muted green, peer to human-blue --- */
+  --sage-50:#eef5f0;
+  --sage-100:#d7e9dd;
+  --sage-200:#aed3b9;
+  --sage-400:#5fa377;
+  --sage-500:#3f8a5c;   /* agent primary */
+  --sage-600:#327049;
+  --sage-700:#275a3a;
+
+  /* --- functional --- */
+  --warn:#9c6a00;       /* desaturated amber (used only for 'outdated') */
+  --warn-bg:#fbf3df;
+  --danger:#b4434f;
+
+  /* --- semantic surface tokens --- */
+  --bg:var(--ez-0);
+  --surface:#ffffff;
+  --rail:var(--ez-1);
+  --line:var(--ez-4);
+  --line-soft:var(--ez-3);
+  --ink:var(--ez-7);
+  --ink-strong:var(--ez-8);
+  --ink-muted:var(--ez-6);
+  --ink-faint:var(--ez-5);
+  --accent:var(--ice-500);
+  --accent-ink:var(--ice-700);
+  --agent:var(--sage-500);
+  --agent-ink:var(--sage-700);
+
+  /* --- type --- */
+  --font-display:"Space Grotesk",system-ui,sans-serif;
+  --font-ui:"Inter",system-ui,sans-serif;
+  --font-mono:"Space Mono",ui-monospace,monospace;
+  --font-read:"Fraunces",Georgia,serif;
+
+  /* --- geometry: Nordic = low radius, hairlines, real grid --- */
+  --r-sm:3px; --r:6px; --r-lg:10px;
+  --hair:1px solid var(--line-soft);
+  --hair-strong:1px solid var(--line);
+  --gap:22px;
+  --rail-w:248px;
+  --tree-w:268px;
+
+  --shadow-1:0 1px 2px rgba(20,33,55,.05), 0 2px 8px rgba(20,33,55,.04);
+  --shadow-2:0 8px 30px rgba(16,28,48,.10), 0 2px 8px rgba(16,28,48,.06);
+  --ease:cubic-bezier(.2,.7,.2,1);
+}
+
+*{box-sizing:border-box;}
+html{ -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--font-ui); font-size:14px; line-height:1.5;
+  font-feature-settings:"cv05" 1,"ss01" 1;
+}
+::selection{ background:var(--ice-100); color:var(--ice-700); }
+.mono{ font-family:var(--font-mono); }
+
+/* dotted "origin grid" texture — the zero motif, very faint */
+.gridfield{
+  background-image:radial-gradient(var(--ez-3) 1px, transparent 1.4px);
+  background-size:22px 22px;
+  background-position:-1px -1px;
+}
+
+/* ---------- shell scaffold ---------- */
+.frame{ max-width:1240px; margin:0 auto; padding:34px 26px 90px; }
+.screen{ margin-bottom:64px; }
+.screen-tag{
+  display:flex; align-items:baseline; gap:14px; margin:0 2px 14px;
+}
+.screen-tag .num{
+  font-family:var(--font-mono); font-size:11px; letter-spacing:.14em;
+  color:#fff; background:var(--ez-9); padding:3px 8px; border-radius:var(--r-sm);
+}
+.screen-tag h2{
+  font-family:var(--font-display); font-weight:600; font-size:15px;
+  letter-spacing:-.01em; color:var(--ink-strong); margin:0;
+}
+.screen-tag .desc{ font-size:12.5px; color:var(--ink-faint); }
+
+.app{
+  background:var(--surface); border:var(--hair-strong); border-radius:var(--r-lg);
+  box-shadow:var(--shadow-2); overflow:hidden;
+}
+
+/* ---------- brand mark: the "zero" ring + origin dot ---------- */
+.mark{ width:26px; height:26px; display:block; flex:none; }
+.mark .ring{ fill:none; stroke:var(--ez-9); stroke-width:2.4; }
+.mark .dot{ fill:var(--ice-500); }
+.mark .slash{ stroke:var(--ice-500); stroke-width:2.4; stroke-linecap:round; }
+.wordmark{
+  font-family:var(--font-display); font-weight:700; font-size:16.5px;
+  letter-spacing:-.03em; color:var(--ink-strong);
+}
+.wordmark b{ color:var(--ice-500); font-weight:700; }
+
+/* ---------- top bar ---------- */
+.topbar{
+  display:flex; align-items:center; gap:16px;
+  padding:13px 18px; border-bottom:var(--hair-strong); background:var(--surface);
+}
+.topbar .brand{ display:flex; align-items:center; gap:9px; }
+.topbar .sep{ width:1px; height:22px; background:var(--line-soft); }
+.search{
+  flex:1; max-width:430px; display:flex; align-items:center; gap:9px;
+  background:var(--ez-1); border:var(--hair); border-radius:var(--r);
+  padding:7px 11px; color:var(--ink-faint); font-size:13px;
+}
+.search .k{ margin-left:auto; font-family:var(--font-mono); font-size:10.5px;
+  background:var(--surface); border:var(--hair); border-radius:4px; padding:1px 6px; color:var(--ink-faint); }
+.spacer{ flex:1; }
+.topbtn{
+  font-family:var(--font-ui); font-size:13px; font-weight:500; color:var(--ink);
+  background:var(--surface); border:var(--hair-strong); border-radius:var(--r);
+  padding:7px 13px; cursor:pointer; display:inline-flex; align-items:center; gap:7px;
+  transition:background .15s var(--ease), border-color .15s var(--ease);
+}
+.topbtn:hover{ background:var(--ez-1); border-color:var(--ez-4); }
+.topbtn.primary{ background:var(--ez-9); color:#fff; border-color:var(--ez-9); }
+.topbtn.primary:hover{ background:#000; }
+.avatar{
+  width:28px; height:28px; border-radius:50%; flex:none;
+  display:grid; place-items:center; font-size:11px; font-weight:600; color:#fff;
+  font-family:var(--font-mono); letter-spacing:-.02em;
+}
+.av-h{ background:linear-gradient(150deg,var(--ice-500),var(--ice-700)); }
+.av-h2{ background:linear-gradient(150deg,#5566a8,#2c3566); }
+.av-h3{ background:linear-gradient(150deg,#7a8190,#3b4659); }
+.av-agent{ background:linear-gradient(150deg,var(--sage-400),var(--sage-700)); position:relative; }
+.av-agent::after{ /* the agent gets a ring notch — non-human signal */
+  content:""; position:absolute; inset:0; border-radius:50%;
+  box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.55);
+}
+
+/* agent glyph mark (square-in-circle) for inline agent chips */
+.botglyph{ width:13px; height:13px; flex:none; }
+
+/* ---------- generic chips / pills ---------- */
+.pill{
+  display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:500;
+  padding:3px 9px; border-radius:100px; border:var(--hair); background:var(--ez-1); color:var(--ink-muted);
+}
+.pill .dot{ width:6px; height:6px; border-radius:50%; }
+.pill.live{ color:var(--sage-700); background:var(--sage-50); border-color:var(--sage-200); }
+.pill.live .dot{ background:var(--sage-500); animation:pulse 1.8s var(--ease) infinite; }
+.pill.agentkind{ color:var(--sage-700); background:var(--sage-50); border-color:var(--sage-200); }
+.pill.humankind{ color:var(--ice-700); background:var(--ice-50); border-color:var(--ice-200); }
+.tag{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink-faint); }
+
+@keyframes pulse{ 0%,100%{ opacity:1; transform:scale(1);} 50%{ opacity:.4; transform:scale(.8);} }
+
+/* ============================================================
+   (A) DASHBOARD
+   ============================================================ */
+.layout{ display:grid; grid-template-columns:var(--rail-w) 1fr; min-height:560px; }
+.rail{ background:var(--rail); border-right:var(--hair-strong); padding:16px 12px; }
+.rail .grp{ margin-bottom:22px; }
+.rail .grp h4{
+  font-family:var(--font-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--ink-faint); margin:0 8px 8px; font-weight:700;
+}
+.navitem{
+  display:flex; align-items:center; gap:10px; padding:7px 9px; border-radius:var(--r);
+  color:var(--ink); font-size:13.5px; font-weight:450; cursor:pointer; position:relative;
+  transition:background .13s var(--ease);
+}
+.navitem:hover{ background:var(--ez-2); }
+.navitem.on{ background:var(--surface); box-shadow:var(--shadow-1); color:var(--ink-strong); font-weight:550; }
+.navitem.on::before{
+  content:""; position:absolute; left:-12px; top:7px; bottom:7px; width:3px;
+  background:var(--ice-500); border-radius:0 3px 3px 0;
+}
+.navitem .ic{ width:16px; height:16px; flex:none; color:var(--ink-muted); }
+.navitem.on .ic{ color:var(--ice-600); }
+.navitem .count{ margin-left:auto; font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); }
+.navitem .dotc{ margin-left:auto; width:7px;height:7px;border-radius:50%; }
+
+.spacelist .navitem .swatch{ width:9px; height:9px; border-radius:2px; flex:none; }
+
+.main{ padding:26px 30px; overflow:hidden; }
+.page-h{ display:flex; align-items:flex-end; gap:14px; margin-bottom:22px; }
+.page-h .greet{ font-family:var(--font-display); font-weight:600; font-size:23px;
+  letter-spacing:-.02em; color:var(--ink-strong); margin:0; }
+.page-h .sub{ color:var(--ink-faint); font-size:13px; margin:2px 0 0; }
+
+/* stat strip */
+.stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line-soft);
+  border:var(--hair-strong); border-radius:var(--r-lg); overflow:hidden; margin-bottom:26px; }
+.stat{ background:var(--surface); padding:15px 17px; }
+.stat .v{ font-family:var(--font-display); font-weight:600; font-size:25px; letter-spacing:-.02em;
+  color:var(--ink-strong); display:flex; align-items:baseline; gap:7px; }
+.stat .v small{ font-family:var(--font-mono); font-size:11px; font-weight:400; }
+.stat .v small.up{ color:var(--sage-600); }
+.stat .l{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink-faint); margin-top:3px; }
+
+.cols2{ display:grid; grid-template-columns:1.55fr 1fr; gap:var(--gap); }
+.card{ background:var(--surface); border:var(--hair-strong); border-radius:var(--r-lg); }
+.card > .hd{ display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:var(--hair); }
+.card > .hd h3{ font-family:var(--font-display); font-weight:600; font-size:13.5px; letter-spacing:-.01em;
+  color:var(--ink-strong); margin:0; }
+.card > .hd .more{ margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); cursor:pointer; }
+.card > .hd .more:hover{ color:var(--ice-600); }
+
+/* recent docs rows */
+.docrow{ display:flex; align-items:center; gap:13px; padding:12px 16px; border-bottom:var(--hair);
+  cursor:pointer; transition:background .12s var(--ease); }
+.docrow:last-child{ border-bottom:0; }
+.docrow:hover{ background:var(--ez-1); }
+.docrow .ficon{ width:30px; height:30px; border-radius:var(--r-sm); flex:none; display:grid; place-items:center;
+  background:var(--ez-1); border:var(--hair); color:var(--ink-muted); }
+.docrow .meta{ min-width:0; flex:1; }
+.docrow .meta .t{ font-weight:550; color:var(--ink-strong); font-size:13.5px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+.docrow .meta .s{ font-size:11.5px; color:var(--ink-faint); display:flex; align-items:center; gap:7px; margin-top:2px; }
+.docrow .meta .s .dotmini{ width:3px;height:3px;border-radius:50%; background:var(--ez-4); }
+.stack{ display:flex; }
+.stack .avatar{ width:24px; height:24px; border:2px solid var(--surface); }
+.stack .avatar + .avatar{ margin-left:-9px; }
+
+/* spaces grid (right column) */
+.spaces{ display:flex; flex-direction:column; gap:11px; padding:14px 16px; }
+.space{ display:flex; align-items:center; gap:12px; padding:11px 12px; border:var(--hair-strong);
+  border-radius:var(--r); cursor:pointer; transition:transform .15s var(--ease), box-shadow .15s var(--ease); }
+.space:hover{ transform:translateY(-1px); box-shadow:var(--shadow-1); }
+.space .glyph{ width:34px; height:34px; border-radius:var(--r); flex:none; display:grid; place-items:center;
+  font-family:var(--font-display); font-weight:700; color:#fff; font-size:15px; }
+.space .info{ flex:1; min-width:0; }
+.space .info .n{ font-weight:600; color:var(--ink-strong); font-size:13px; }
+.space .info .d{ font-size:11px; color:var(--ink-faint); }
+.space .bars{ display:flex; gap:2px; align-items:flex-end; height:22px; }
+.space .bars i{ width:3px; background:var(--ice-200); border-radius:2px; }
+
+/* activity feed w/ agent peers */
+.feed{ padding:6px 16px 10px; }
+.fitem{ display:flex; gap:11px; padding:9px 0; border-bottom:var(--hair); }
+.fitem:last-child{ border:0; }
+.fitem .av-wrap{ position:relative; }
+.fitem .body{ font-size:12.5px; color:var(--ink); flex:1; }
+.fitem .body b{ color:var(--ink-strong); font-weight:600; }
+.fitem .body .when{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); margin-top:2px; display:block;}
+.fitem .body .frag{ color:var(--ink-muted); }
+
+/* ============================================================
+   (B) DOCUMENTS LIST  — collections tree + table w/ human+agent
+   ============================================================ */
+.layout3{ display:grid; grid-template-columns:var(--rail-w) var(--tree-w) 1fr; min-height:580px; }
+.tree{ background:var(--ez-1); border-right:var(--hair-strong); padding:14px 10px; }
+.tree .crumb{ display:flex; align-items:center; gap:7px; padding:0 8px 12px; }
+.tree .crumb .sw{ width:11px;height:11px;border-radius:3px; }
+.tree .crumb .nm{ font-family:var(--font-display); font-weight:600; color:var(--ink-strong); font-size:14px; }
+.tnode{ display:flex; align-items:center; gap:7px; padding:6px 8px; border-radius:var(--r); font-size:13px;
+  color:var(--ink); cursor:pointer; transition:background .12s var(--ease); }
+.tnode:hover{ background:var(--ez-2); }
+.tnode.on{ background:var(--surface); color:var(--ink-strong); font-weight:550; box-shadow:var(--shadow-1); }
+.tnode .tw{ width:14px; text-align:center; color:var(--ink-faint); font-size:10px; }
+.tnode .ic{ width:15px;height:15px; color:var(--ink-muted); flex:none; }
+.tnode .cnt{ margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--ink-faint); }
+.tchild{ margin-left:14px; border-left:var(--hair); padding-left:6px; }
+
+/* documents table */
+.tablewrap{ padding:0; }
+.list-h{ display:flex; align-items:center; gap:12px; padding:18px 22px 14px; }
+.list-h h1{ font-family:var(--font-display); font-weight:600; font-size:19px; letter-spacing:-.02em;
+  color:var(--ink-strong); margin:0; }
+.seg{ display:inline-flex; background:var(--ez-1); border:var(--hair); border-radius:var(--r); padding:2px; }
+.seg button{ font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; border:0; background:transparent;
+  padding:4px 11px; border-radius:4px; color:var(--ink-muted); cursor:pointer; }
+.seg button.on{ background:var(--surface); color:var(--ink-strong); box-shadow:var(--shadow-1); }
+
+table.docs{ width:100%; border-collapse:collapse; font-size:13px; }
+table.docs thead th{ text-align:left; font-family:var(--font-mono); font-size:10px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--ink-faint); font-weight:700; padding:9px 14px;
+  border-top:var(--hair-strong); border-bottom:var(--hair-strong); background:var(--ez-1); }
+table.docs tbody td{ padding:13px 14px; border-bottom:var(--hair); vertical-align:middle; }
+table.docs tbody tr{ cursor:pointer; transition:background .12s var(--ease); }
+table.docs tbody tr:hover{ background:var(--ez-1); }
+.tt{ display:flex; align-items:center; gap:11px; }
+.tt .ficon{ width:28px;height:28px;border-radius:var(--r-sm); display:grid;place-items:center;
+  background:var(--ez-1); border:var(--hair); color:var(--ink-muted); flex:none; }
+.tt .nm{ font-weight:550; color:var(--ink-strong); }
+.tt .pth{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); }
+.editors{ display:flex; align-items:center; }
+.editors .avatar{ width:24px;height:24px; border:2px solid var(--surface); }
+.editors .avatar + .avatar{ margin-left:-8px; }
+.status{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:500; }
+.status .d{ width:7px;height:7px;border-radius:50%; }
+.s-pub .d{ background:var(--sage-500);} .s-pub{ color:var(--sage-700); }
+.s-draft .d{ background:var(--ez-5);} .s-draft{ color:var(--ink-muted); }
+.s-review .d{ background:var(--ice-500);} .s-review{ color:var(--ice-700); }
+.when{ font-family:var(--font-mono); font-size:11px; color:var(--ink-muted); }
+.rowtag{ font-family:var(--font-mono); font-size:10px; letter-spacing:.05em; padding:2px 7px; border-radius:4px;
+  background:var(--sage-50); color:var(--sage-700); border:1px solid var(--sage-200); }
+
+/* ============================================================
+   (C) READING VIEW
+   ============================================================ */
+.readwrap{ display:grid; grid-template-columns:1fr; }
+.read-top{ padding:14px 22px; border-bottom:var(--hair); display:flex; align-items:center; gap:12px; }
+.read-top .bc{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+.read-top .bc b{ color:var(--ink-muted); }
+.reader{ max-width:720px; margin:0 auto; padding:46px 28px 60px; }
+.reader .kicker{ font-family:var(--font-mono); font-size:11px; letter-spacing:.18em; text-transform:uppercase;
+  color:var(--ice-600); margin-bottom:14px; }
+.reader h1.title{ font-family:var(--font-read); font-weight:500; font-size:42px; line-height:1.1;
+  letter-spacing:-.018em; color:var(--ink-strong); margin:0 0 18px; }
+.docmeta{ display:flex; flex-wrap:wrap; align-items:center; gap:16px; padding:14px 0 18px;
+  border-bottom:var(--hair); margin-bottom:30px; }
+.docmeta .who{ display:flex; align-items:center; gap:8px; }
+.docmeta .who .avatar{ width:26px;height:26px; }
+.docmeta .who .nm{ font-size:12.5px; color:var(--ink); font-weight:500; }
+.docmeta .who .rl{ font-family:var(--font-mono); font-size:10px; color:var(--ink-faint); }
+.docmeta .mi{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+
+.prose{ font-size:16.5px; line-height:1.72; color:var(--ez-7); }
+.prose p{ margin:0 0 18px; }
+.prose h2{ font-family:var(--font-display); font-weight:600; font-size:21px; letter-spacing:-.01em;
+  color:var(--ink-strong); margin:34px 0 12px; }
+.prose .lead{ font-size:18.5px; color:var(--ez-6); line-height:1.6; }
+.prose strong{ color:var(--ink-strong); font-weight:600; }
+.prose a{ color:var(--ice-600); text-decoration:none; border-bottom:1px solid var(--ice-200); }
+.prose ul{ margin:0 0 18px; padding-left:4px; list-style:none; }
+.prose ul li{ position:relative; padding-left:22px; margin-bottom:9px; }
+.prose ul li::before{ content:""; position:absolute; left:4px; top:11px; width:6px; height:6px;
+  border:1.5px solid var(--ice-400); border-radius:50%; }
+/* callout — a lossy-tier block from ADR 0013 */
+.callout{ display:flex; gap:13px; background:var(--ice-50); border:var(--hair);
+  border-left:3px solid var(--ice-500); border-radius:var(--r); padding:15px 17px; margin:0 0 22px; }
+.callout .ic{ color:var(--ice-600); flex:none; margin-top:1px; }
+.callout .ct{ font-size:14.5px; color:var(--ice-700); line-height:1.6; }
+.callout .ct b{ color:var(--ice-700); }
+/* code block */
+.codeblk{ background:var(--ez-9); border-radius:var(--r); padding:16px 18px; margin:0 0 22px;
+  font-family:var(--font-mono); font-size:12.5px; line-height:1.7; color:#c9d6ea; overflow:auto; position:relative; }
+.codeblk .lang{ position:absolute; top:9px; right:13px; font-size:9.5px; letter-spacing:.12em;
+  color:var(--ez-5); text-transform:uppercase; }
+.codeblk .kw{ color:#7fb0f0; } .codeblk .st{ color:#8fcaa0; } .codeblk .cm{ color:#5c6a82; }
+blockquote{ margin:0 0 22px; padding:4px 0 4px 20px; border-left:3px solid var(--ez-3);
+  font-family:var(--font-read); font-style:italic; font-size:18px; color:var(--ink-muted); }
+.toc{ position:relative; }
+
+/* ============================================================
+   (D) EDITOR — the signature screen
+   ============================================================ */
+.ed-layout{ display:grid; grid-template-columns:1fr 280px; min-height:640px; }
+.ed-main{ position:relative; }
+.ed-bar{ display:flex; align-items:center; gap:5px; padding:9px 16px; border-bottom:var(--hair);
+  position:sticky; top:0; background:rgba(255,255,255,.85); backdrop-filter:blur(8px); z-index:6; }
+.tbtn{ width:30px;height:30px; border-radius:var(--r-sm); border:0; background:transparent; cursor:pointer;
+  display:grid; place-items:center; color:var(--ink-muted); font-family:var(--font-read); font-size:15px;
+  transition:background .12s var(--ease), color .12s var(--ease); }
+.tbtn:hover{ background:var(--ez-2); color:var(--ink-strong); }
+.tbtn.on{ background:var(--ice-50); color:var(--ice-700); }
+.tbtn b{ font-weight:700;} .tbtn i{ font-style:italic; }
+.tbtn s{ text-decoration:line-through;}
+.tdiv{ width:1px;height:18px; background:var(--line-soft); margin:0 5px; }
+.tsel{ display:flex; align-items:center; gap:7px; padding:5px 10px; border-radius:var(--r-sm);
+  font-family:var(--font-display); font-weight:600; font-size:13px; color:var(--ink-strong); cursor:pointer; }
+.tsel:hover{ background:var(--ez-2); }
+.ed-presence{ margin-left:auto; display:flex; align-items:center; gap:9px; }
+
+/* editor canvas */
+.canvas{ max-width:680px; margin:0 auto; padding:40px 30px 80px; position:relative; }
+.doc-title{ font-family:var(--font-read); font-weight:500; font-size:36px; line-height:1.12;
+  letter-spacing:-.015em; color:var(--ink-strong); margin:0 0 8px; outline:none; }
+.doc-sub{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); margin-bottom:26px;
+  display:flex; gap:10px; align-items:center; }
+
+/* a block: handle gutter + content */
+.block{ position:relative; padding:5px 0; }
+.block .handles{ position:absolute; left:-46px; top:6px; display:flex; gap:1px; opacity:0;
+  transition:opacity .12s var(--ease); }
+.block:hover .handles{ opacity:1; }
+.block .hbtn{ width:18px;height:20px; border-radius:4px; border:0; background:transparent; cursor:grab;
+  color:var(--ink-faint); display:grid; place-items:center; font-size:13px; }
+.block .hbtn:hover{ background:var(--ez-2); color:var(--ink-muted); }
+.block .hbtn.plus{ font-size:15px; }
+.bk-h2{ font-family:var(--font-display); font-weight:600; font-size:22px; letter-spacing:-.01em;
+  color:var(--ink-strong); }
+.bk-p{ font-size:16px; line-height:1.7; color:var(--ez-7); }
+
+/* ---- THE SIGNATURE: live agent presence + tracked agent suggestion ---- */
+/* agent live cursor (sage), peer to a human caret */
+.agent-caret{ position:relative; display:inline-block; width:0; }
+.agent-caret i{ position:absolute; left:0; top:-2px; width:2px; height:22px; background:var(--sage-500);
+  border-radius:2px; animation:blink 1.15s steps(1) infinite; }
+.agent-caret .flag{ position:absolute; left:-1px; top:-23px; white-space:nowrap;
+  font-family:var(--font-mono); font-size:10px; font-weight:700; letter-spacing:.02em;
+  background:var(--sage-500); color:#fff; padding:2px 7px 2px 6px; border-radius:4px 4px 4px 0;
+  display:flex; align-items:center; gap:5px; box-shadow:var(--shadow-1); }
+.agent-caret .flag svg{ width:10px;height:10px; }
+@keyframes blink{ 0%,55%{opacity:1;} 56%,100%{opacity:.15;} }
+
+/* a human collaborator caret for contrast (ice) */
+.human-caret{ position:relative; display:inline-block; width:0; }
+.human-caret i{ position:absolute; left:0; top:-2px; width:2px; height:22px; background:var(--ice-500);
+  border-radius:2px; }
+.human-caret .flag{ position:absolute; left:-1px; top:-23px; white-space:nowrap; font-family:var(--font-mono);
+  font-size:10px; font-weight:700; background:var(--ice-500); color:#fff; padding:2px 7px; border-radius:4px 4px 4px 0;
+  box-shadow:var(--shadow-1); }
+
+/* tracked suggestion marks (prosemirror-changeset semantics, ADR 0032) */
+.sugg-ins{ background:var(--sage-50); color:var(--sage-700); border-bottom:2px solid var(--sage-400);
+  border-radius:2px; padding:0 1px; }
+.sugg-del{ color:var(--danger); text-decoration:line-through; text-decoration-color:var(--danger);
+  background:rgba(180,67,79,.07); border-radius:2px; }
+
+/* the suggestion review card anchored to the block — peer review affordance */
+.sugg-card{ margin:10px 0 4px; border:var(--hair-strong); border-left:3px solid var(--sage-500);
+  border-radius:var(--r); background:linear-gradient(180deg,var(--sage-50),#fff 70%); overflow:hidden;
+  box-shadow:var(--shadow-1); }
+.sugg-card .sh{ display:flex; align-items:center; gap:9px; padding:9px 12px; border-bottom:1px solid var(--sage-100); }
+.sugg-card .sh .who{ font-size:12px; font-weight:600; color:var(--sage-700); display:flex; align-items:center; gap:6px; }
+.sugg-card .sh .who .avatar{ width:20px;height:20px; }
+.sugg-card .sh .kind{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--sage-600); background:var(--sage-100); padding:2px 6px; border-radius:3px; }
+.sugg-card .sh .when{ margin-left:auto; }
+.sugg-card .sbody{ padding:10px 12px; font-size:13px; color:var(--ink); line-height:1.6; }
+.sugg-card .sbody .rationale{ font-size:11.5px; color:var(--ink-muted); margin-top:7px;
+  padding-top:7px; border-top:1px dashed var(--sage-200); display:flex; gap:7px; }
+.sugg-card .acts{ display:flex; gap:8px; padding:0 12px 11px; }
+.btn-accept{ font-family:var(--font-ui); font-size:12px; font-weight:600; color:#fff; background:var(--sage-600);
+  border:0; border-radius:var(--r-sm); padding:6px 13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+.btn-accept:hover{ background:var(--sage-700); }
+.btn-reject{ font-family:var(--font-ui); font-size:12px; font-weight:500; color:var(--ink-muted);
+  background:var(--surface); border:var(--hair-strong); border-radius:var(--r-sm); padding:6px 13px; cursor:pointer; }
+.btn-reject:hover{ background:var(--ez-1); color:var(--danger); border-color:var(--ez-4); }
+.sugg-card .acts .right{ margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--ink-faint);
+  align-self:center; }
+
+/* a SECOND suggestion shown OUTDATED — proves the stale/void lifecycle (ADR 0032 §accept-reject) */
+.sugg-card.outdated{ border-left-color:var(--warn); background:#fff; opacity:.92; }
+.sugg-card.outdated .sh{ border-color:var(--warn-bg); }
+.sugg-card.outdated .sh .who{ color:var(--warn); }
+.sugg-card.outdated .sh .kind{ color:var(--warn); background:var(--warn-bg); }
+
+/* slash-command menu (Tiptap suggestion plugin) */
+.slash{ position:absolute; left:0; top:54px; width:262px; background:var(--surface);
+  border:var(--hair-strong); border-radius:var(--r-lg); box-shadow:var(--shadow-2); overflow:hidden; z-index:7;
+  animation:rise .18s var(--ease); }
+@keyframes rise{ from{ opacity:0; transform:translateY(6px);} to{ opacity:1; transform:none;} }
+.slash .sx{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--ink-faint); padding:9px 12px 5px; }
+.slash .si{ display:flex; align-items:center; gap:11px; padding:8px 12px; cursor:pointer; }
+.slash .si:hover, .slash .si.on{ background:var(--ice-50); }
+.slash .si .g{ width:30px;height:30px; border-radius:var(--r-sm); border:var(--hair); background:var(--ez-1);
+  display:grid; place-items:center; color:var(--ink-muted); flex:none; font-family:var(--font-read); }
+.slash .si .nm{ font-size:13px; font-weight:550; color:var(--ink-strong); }
+.slash .si .ds{ font-size:11px; color:var(--ink-faint); }
+.slash .si .kb{ margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--ink-faint); }
+
+/* editor right rail: presence + suggestions queue + version */
+.ed-rail{ background:var(--ez-1); border-left:var(--hair-strong); padding:16px 14px; }
+.ed-rail h4{ font-family:var(--font-mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--ink-faint); margin:0 0 11px; font-weight:700; }
+.presence-row{ display:flex; align-items:center; gap:9px; padding:7px 0; }
+.presence-row .nm{ font-size:12.5px; font-weight:500; color:var(--ink-strong); }
+.presence-row .rl{ font-family:var(--font-mono); font-size:10px; }
+.presence-row .liveb{ margin-left:auto; }
+.ed-rail .qcard{ background:var(--surface); border:var(--hair); border-radius:var(--r); padding:10px 11px;
+  margin-bottom:8px; cursor:pointer; transition:box-shadow .14s var(--ease); }
+.ed-rail .qcard:hover{ box-shadow:var(--shadow-1); }
+.ed-rail .qcard.active{ border-color:var(--sage-200); border-left:2px solid var(--sage-500); }
+.ed-rail .qcard .qt{ font-size:11.5px; color:var(--ink); }
+.ed-rail .qcard .qt b{ color:var(--sage-700); }
+.ed-rail .qcard .qm{ display:flex; align-items:center; gap:6px; margin-top:6px;
+  font-family:var(--font-mono); font-size:9.5px; color:var(--ink-faint); }
+.divline{ height:1px; background:var(--line-soft); margin:16px 0; }
+.savebar{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); display:flex; align-items:center; gap:7px; }
+.savebar .dot{ width:6px;height:6px;border-radius:50%; background:var(--sage-500); }
+
+/* ============================================================
+   (E) ADMIN — members / teams / spaces
+   ============================================================ */
+.adm-h{ padding:22px 26px 0; }
+.adm-h h1{ font-family:var(--font-display); font-weight:600; font-size:21px; letter-spacing:-.02em;
+  color:var(--ink-strong); margin:0; }
+.adm-h p{ color:var(--ink-faint); font-size:13px; margin:4px 0 0; }
+.tabs{ display:flex; gap:2px; padding:16px 26px 0; border-bottom:var(--hair-strong); }
+.tabs button{ font-family:var(--font-ui); font-size:13px; font-weight:500; color:var(--ink-muted);
+  background:transparent; border:0; padding:9px 13px; cursor:pointer; position:relative; }
+.tabs button.on{ color:var(--ink-strong); }
+.tabs button.on::after{ content:""; position:absolute; left:8px; right:8px; bottom:-1px; height:2px;
+  background:var(--ice-500); border-radius:2px; }
+.tabs .cnt{ font-family:var(--font-mono); font-size:10px; color:var(--ink-faint); margin-left:5px; }
+
+.adm-body{ padding:20px 26px 28px; }
+.adm-toolbar{ display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+.invite{ margin-left:auto; }
+
+table.members{ width:100%; border-collapse:collapse; font-size:13px; }
+table.members thead th{ text-align:left; font-family:var(--font-mono); font-size:10px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-faint); font-weight:700; padding:10px 12px; border-bottom:var(--hair-strong); }
+table.members tbody td{ padding:13px 12px; border-bottom:var(--hair); }
+table.members tbody tr:hover{ background:var(--ez-1); }
+.mwho{ display:flex; align-items:center; gap:11px; }
+.mwho .nm{ font-weight:600; color:var(--ink-strong); }
+.mwho .em{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); }
+.roletag{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:500; padding:3px 10px;
+  border-radius:100px; border:var(--hair); }
+.role-admin{ color:var(--ice-700); background:var(--ice-50); border-color:var(--ice-200); }
+.role-editor{ color:var(--ez-7); background:var(--ez-1); }
+.role-agent{ color:var(--sage-700); background:var(--sage-50); border-color:var(--sage-200); }
+.teams-cell{ display:flex; gap:5px; flex-wrap:wrap; }
+.teamchip{ font-size:10.5px; padding:2px 8px; border-radius:4px; background:var(--ez-2); color:var(--ink-muted);
+  font-family:var(--font-mono); }
+.kebab{ color:var(--ink-faint); cursor:pointer; font-weight:700; letter-spacing:1px; }
+.mono-id{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); }
+.scoped{ display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:10px;
+  color:var(--sage-700); }
+
+.foot{ text-align:center; font-family:var(--font-mono); font-size:11px; color:var(--ink-faint);
+  letter-spacing:.04em; padding:10px 0 0; }
+.foot b{ color:var(--ink-muted); }
+
+/* responsive: collapse rails on narrow viewports */
+@media (max-width:980px){
+  .layout, .layout3, .ed-layout{ grid-template-columns:1fr; }
+  .rail,.tree,.ed-rail{ display:none; }
+  .cols2{ grid-template-columns:1fr; }
+  .stats{ grid-template-columns:repeat(2,1fr); }
+}
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <!-- =================== HEADER / SYSTEM LABEL =================== -->
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:30px;">
+    <svg class="mark" viewBox="0 0 28 28" style="width:34px;height:34px;">
+      <circle class="ring" cx="14" cy="14" r="10.5"/>
+      <line class="slash" x1="8.6" y1="19.4" x2="19.4" y2="8.6"/>
+      <circle class="dot" cx="14" cy="14" r="2.4"/>
+    </svg>
+    <div>
+      <div class="wordmark" style="font-size:21px;">editor<b>zero</b></div>
+      <div class="tag" style="margin-top:1px;">Halling · scandi-cool · self-hosted · humans + agents at parity</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="pill live"><span class="dot"></span> design preview</div>
+  </div>
+
+  <!-- ============================================================
+       (A) DASHBOARD
+       ============================================================ -->
+  <section class="screen">
+    <div class="screen-tag">
+      <span class="num">A</span><h2>Dashboard · home</h2>
+      <span class="desc">overview · recent docs · spaces · peer activity</span>
+    </div>
+
+    <div class="app">
+      <!-- topbar -->
+      <div class="topbar">
+        <div class="brand">
+          <svg class="mark" viewBox="0 0 28 28"><circle class="ring" cx="14" cy="14" r="10.5"/><line class="slash" x1="8.6" y1="19.4" x2="19.4" y2="8.6"/><circle class="dot" cx="14" cy="14" r="2.4"/></svg>
+          <span class="wordmark">editor<b>zero</b></span>
+        </div>
+        <div class="sep"></div>
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+          Search docs, spaces, people…
+          <span class="k">⌘K</span>
+        </div>
+        <div class="spacer"></div>
+        <button class="topbtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></button>
+        <button class="topbtn primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg> New doc</button>
+        <div class="avatar av-h">NA</div>
+      </div>
+
+      <div class="layout">
+        <!-- rail -->
+        <aside class="rail">
+          <div class="grp">
+            <div class="navitem on"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg> Home</div>
+            <div class="navitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> All documents <span class="count">312</span></div>
+            <div class="navitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Recent</div>
+            <div class="navitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></svg> Agent activity <span class="dotc" style="background:var(--sage-500)"></span></div>
+          </div>
+          <div class="grp spacelist">
+            <h4>Spaces</h4>
+            <div class="navitem"><span class="swatch" style="background:var(--ice-500)"></span> Product <span class="count">48</span></div>
+            <div class="navitem"><span class="swatch" style="background:var(--sage-500)"></span> Engineering <span class="count">126</span></div>
+            <div class="navitem"><span class="swatch" style="background:#7a8190"></span> Design <span class="count">37</span></div>
+            <div class="navitem"><span class="swatch" style="background:#5566a8"></span> Handbook <span class="count">61</span></div>
+            <div class="navitem" style="color:var(--ink-faint)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg> New space</div>
+          </div>
+          <div class="grp">
+            <h4>Admin</h4>
+            <div class="navitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg> Members & teams</div>
+            <div class="navitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"/></svg> Workspace settings</div>
+          </div>
+        </aside>
+
+        <!-- main -->
+        <main class="main gridfield">
+          <div class="page-h">
+            <div>
+              <h1 class="greet">Good morning, Nomi</h1>
+              <p class="sub">Acme Robotics workspace · 14 people · 3 agents online</p>
+            </div>
+            <div class="spacer"></div>
+            <div class="pill live"><span class="dot"></span> 3 agents working</div>
+          </div>
+
+          <!-- stat strip -->
+          <div class="stats">
+            <div class="stat"><div class="v">312</div><div class="l">Documents</div></div>
+            <div class="stat"><div class="v">24 <small class="up">▲ 6</small></div><div class="l">Edited today</div></div>
+            <div class="stat"><div class="v">7 <small style="color:var(--sage-600)">sage</small></div><div class="l">Agent suggestions</div></div>
+            <div class="stat"><div class="v">4</div><div class="l">Active spaces</div></div>
+          </div>
+
+          <div class="cols2">
+            <!-- recent docs -->
+            <div class="card" style="align-self:start;">
+              <div class="hd"><h3>Recent documents</h3><span class="more">View all →</span></div>
+              <div class="docrow">
+                <div class="ficon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+                <div class="meta">
+                  <div class="t">Q3 Platform Architecture</div>
+                  <div class="s">Engineering <span class="dotmini"></span> edited 12m ago <span class="dotmini"></span> <span class="rowtag">agent suggestion</span></div>
+                </div>
+                <div class="stack"><div class="avatar av-h">NA</div><div class="avatar av-agent"></div></div>
+              </div>
+              <div class="docrow">
+                <div class="ficon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+                <div class="meta">
+                  <div class="t">Onboarding Runbook v4</div>
+                  <div class="s">Handbook <span class="dotmini"></span> edited 1h ago <span class="dotmini"></span> published</div>
+                </div>
+                <div class="stack"><div class="avatar av-h2">JL</div><div class="avatar av-h3">MK</div></div>
+              </div>
+              <div class="docrow">
+                <div class="ficon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+                <div class="meta">
+                  <div class="t">API Reference — Capabilities</div>
+                  <div class="s">Engineering <span class="dotmini"></span> edited 3h ago <span class="dotmini"></span> 2 editors</div>
+                </div>
+                <div class="stack"><div class="avatar av-agent"></div><div class="avatar av-h">NA</div></div>
+              </div>
+              <div class="docrow">
+                <div class="ficon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+                <div class="meta">
+                  <div class="t">Pricing & Packaging FAQ</div>
+                  <div class="s">Product <span class="dotmini"></span> edited yesterday <span class="dotmini"></span> draft</div>
+                </div>
+                <div class="stack"><div class="avatar av-h2">JL</div></div>
+              </div>
+            </div>
+
+            <!-- right column -->
+            <div style="display:flex;flex-direction:column;gap:var(--gap);">
+              <div class="card">
+                <div class="hd"><h3>Spaces</h3></div>
+                <div class="spaces">
+                  <div class="space">
+                    <div class="glyph" style="background:linear-gradient(150deg,var(--ice-400),var(--ice-700))">P</div>
+                    <div class="info"><div class="n">Product</div><div class="d">48 docs · 6 people</div></div>
+                    <div class="bars"><i style="height:9px"></i><i style="height:15px"></i><i style="height:7px"></i><i style="height:20px"></i><i style="height:12px"></i></div>
+                  </div>
+                  <div class="space">
+                    <div class="glyph" style="background:linear-gradient(150deg,var(--sage-400),var(--sage-700))">E</div>
+                    <div class="info"><div class="n">Engineering</div><div class="d">126 docs · 9 people · 2 agents</div></div>
+                    <div class="bars"><i style="height:14px;background:var(--sage-200)"></i><i style="height:20px;background:var(--sage-200)"></i><i style="height:11px;background:var(--sage-200)"></i><i style="height:17px;background:var(--sage-200)"></i><i style="height:9px;background:var(--sage-200)"></i></div>
+                  </div>
+                  <div class="space">
+                    <div class="glyph" style="background:linear-gradient(150deg,#8b93a3,#3b4659)">D</div>
+                    <div class="info"><div class="n">Design</div><div class="d">37 docs · 4 people</div></div>
+                    <div class="bars"><i style="height:7px;background:var(--ez-4)"></i><i style="height:11px;background:var(--ez-4)"></i><i style="height:18px;background:var(--ez-4)"></i><i style="height:10px;background:var(--ez-4)"></i><i style="height:14px;background:var(--ez-4)"></i></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="hd"><h3>Peer activity</h3><span class="tag" style="margin-left:auto;">live</span></div>
+                <div class="feed">
+                  <div class="fitem">
+                    <div class="av-wrap"><div class="avatar av-agent" style="width:28px;height:28px;"></div></div>
+                    <div class="body"><b>Atlas</b> <span class="pill agentkind" style="padding:1px 7px;font-size:10px;"><svg class="botglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/><path d="M12 3v4M9 13h.01M15 13h.01"/></svg>agent</span> proposed an edit in <b>Q3 Platform Architecture</b><span class="frag"> — “tighten the snapshot retention paragraph”</span><span class="when">12 minutes ago · awaiting review</span></div>
+                  </div>
+                  <div class="fitem">
+                    <div class="av-wrap"><div class="avatar av-h" style="width:28px;height:28px;">NA</div></div>
+                    <div class="body"><b>Nomi</b> published <b>Onboarding Runbook v4</b><span class="when">1 hour ago</span></div>
+                  </div>
+                  <div class="fitem">
+                    <div class="av-wrap"><div class="avatar av-agent" style="width:28px;height:28px;"></div></div>
+                    <div class="body"><b>Scout</b> <span class="pill agentkind" style="padding:1px 7px;font-size:10px;"><svg class="botglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/><path d="M12 3v4M9 13h.01M15 13h.01"/></svg>agent</span> created <b>Changelog 0.9 → 1.0</b> from 14 merged PRs<span class="when">2 hours ago</span></div>
+                  </div>
+                  <div class="fitem">
+                    <div class="av-wrap"><div class="avatar av-h2" style="width:28px;height:28px;">JL</div></div>
+                    <div class="body"><b>Jonas</b> accepted 2 suggestions by <b>Atlas</b> in <b>API Reference</b><span class="when">3 hours ago</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       (B) DOCUMENTS LIST — tree + table (human + agent editors)
+       ============================================================ -->
+  <section class="screen">
+    <div class="screen-tag">
+      <span class="num">B</span><h2>Documents · inside a space</h2>
+      <span class="desc">collections tree · table showing human AND agent editors</span>
+    </div>
+
+    <div class="app">
+      <div class="topbar">
+        <div class="brand">
+          <svg class="mark" viewBox="0 0 28 28"><circle class="ring" cx="14" cy="14" r="10.5"/><line class="slash" x1="8.6" y1="19.4" x2="19.4" y2="8.6"/><circle class="dot" cx="14" cy="14" r="2.4"/></svg>
+          <span class="wordmark">editor<b>zero</b></span>
+        </div>
+        <div class="sep"></div>
+        <div class="search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg> Search in Engineering… <span class="k">⌘K</span></div>
+        <div class="spacer"></div>
+        <button class="topbtn primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg> New doc</button>
+        <div class="avatar av-h">NA</div>
+      </div>
+
+      <div class="layout3">
+        <!-- rail -->
+        <aside class="rail">
+          <div class="grp">
+            <div class="navitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg> Home</div>
+            <div class="navitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> All documents</div>
+          </div>
+          <div class="grp spacelist">
+            <h4>Spaces</h4>
+            <div class="navitem"><span class="swatch" style="background:var(--ice-500)"></span> Product</div>
+            <div class="navitem on"><span class="swatch" style="background:var(--sage-500)"></span> Engineering <span class="count">126</span></div>
+            <div class="navitem"><span class="swatch" style="background:#7a8190"></span> Design</div>
+            <div class="navitem"><span class="swatch" style="background:#5566a8"></span> Handbook</div>
+          </div>
+        </aside>
+
+        <!-- collections tree -->
+        <aside class="tree">
+          <div class="crumb"><span class="sw" style="background:var(--sage-500)"></span><span class="nm">Engineering</span></div>
+          <div class="tnode on"><span class="tw">▾</span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> Architecture <span class="cnt">18</span></div>
+          <div class="tchild">
+            <div class="tnode"><span class="tw"></span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg> Decision records <span class="cnt">35</span></div>
+            <div class="tnode"><span class="tw"></span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg> Runbooks <span class="cnt">12</span></div>
+          </div>
+          <div class="tnode"><span class="tw">▸</span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> API & SDK <span class="cnt">41</span></div>
+          <div class="tnode"><span class="tw">▸</span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> Infrastructure <span class="cnt">29</span></div>
+          <div class="tnode"><span class="tw">▸</span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> Security <span class="cnt">17</span></div>
+          <div class="divline" style="margin:14px 8px"></div>
+          <div class="tnode" style="color:var(--ink-faint)"><span class="tw"></span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M3 12h18M3 18h18"/></svg> Trash</div>
+        </aside>
+
+        <!-- documents table -->
+        <main class="tablewrap">
+          <div class="list-h">
+            <h1>Architecture</h1>
+            <span class="pill" style="margin-left:2px">18 documents</span>
+            <div class="spacer" style="flex:1"></div>
+            <div class="seg"><button class="on">LIST</button><button>BOARD</button><button>TREE</button></div>
+          </div>
+          <table class="docs">
+            <thead><tr><th style="width:42%">Document</th><th>Status</th><th>Editors</th><th>Updated</th><th></th></tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="tt"><div class="ficon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div><div><div class="nm">Q3 Platform Architecture</div><div class="pth">/architecture/q3-platform</div></div></div></td>
+                <td><span class="status s-review"><span class="d"></span>In review</span></td>
+                <td><div class="editors"><div class="avatar av-h">NA</div><div class="avatar av-agent" title="agent"></div></div></td>
+                <td><span class="when">12m ago</span></td>
+                <td><span class="kebab">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="tt"><div class="ficon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div><div><div class="nm">CRDT Convergence Model</div><div class="pth">/architecture/crdt-convergence</div></div></div></td>
+                <td><span class="status s-pub"><span class="d"></span>Published</span></td>
+                <td><div class="editors"><div class="avatar av-h2">JL</div><div class="avatar av-h3">MK</div></div></td>
+                <td><span class="when">2h ago</span></td>
+                <td><span class="kebab">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="tt"><div class="ficon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div><div><div class="nm">Audit Log &amp; Replay Spec</div><div class="pth">/architecture/audit-replay</div></div></div></td>
+                <td><span class="status s-pub"><span class="d"></span>Published</span></td>
+                <td><div class="editors"><div class="avatar av-agent" title="agent: Scout"></div><div class="avatar av-h">NA</div><div class="avatar av-h2">JL</div></div></td>
+                <td><span class="when">5h ago</span></td>
+                <td><span class="kebab">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="tt"><div class="ficon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div><div><div class="nm">Permission Enforcement Floor</div><div class="pth">/architecture/permission-floor</div></div></div></td>
+                <td><span class="status s-draft"><span class="d"></span>Draft</span></td>
+                <td><div class="editors"><div class="avatar av-h3">MK</div></div></td>
+                <td><span class="when">Yesterday</span></td>
+                <td><span class="kebab">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="tt"><div class="ficon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div><div><div class="nm">Snapshot Retention Policy</div><div class="pth">/architecture/snapshot-retention</div></div></div></td>
+                <td><span class="status s-review"><span class="d"></span>In review</span></td>
+                <td><div class="editors"><div class="avatar av-agent" title="agent: Atlas"></div><div class="avatar av-h">NA</div></div></td>
+                <td><span class="when">2d ago</span></td>
+                <td><span class="kebab">⋯</span></td>
+              </tr>
+              <tr>
+                <td><div class="tt"><div class="ficon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div><div><div class="nm">Tenant Isolation Threat Model</div><div class="pth">/architecture/tenant-isolation</div></div></div></td>
+                <td><span class="status s-pub"><span class="d"></span>Published</span></td>
+                <td><div class="editors"><div class="avatar av-h2">JL</div></div></td>
+                <td><span class="when">4d ago</span></td>
+                <td><span class="kebab">⋯</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       (C) READING VIEW
+       ============================================================ -->
+  <section class="screen">
+    <div class="screen-tag">
+      <span class="num">C</span><h2>Document · reading view</h2>
+      <span class="desc">finished doc · title · rich body · metadata</span>
+    </div>
+
+    <div class="app">
+      <div class="read-top">
+        <span class="bc"><b>Engineering</b> / Architecture / <b style="color:var(--ink-strong)">Q3 Platform Architecture</b></span>
+        <div class="spacer" style="flex:1"></div>
+        <span class="pill"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> v12 · published</span>
+        <button class="topbtn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Edit</button>
+        <button class="topbtn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5 8.6 10.5"/></svg> Share</button>
+      </div>
+
+      <div class="reader">
+        <div class="kicker">Engineering · Architecture</div>
+        <h1 class="title">Q3 Platform Architecture</h1>
+
+        <div class="docmeta">
+          <div class="who"><div class="avatar av-h">NA</div><div><div class="nm">Nomi Ali</div><div class="rl">author · human</div></div></div>
+          <div class="who"><div class="avatar av-agent"></div><div><div class="nm">Atlas</div><div class="rl">co-editor · agent</div></div></div>
+          <div class="mi">Updated 12 min ago</div>
+          <div class="mi">·</div>
+          <div class="mi">9 min read</div>
+          <div class="mi">·</div>
+          <div class="mi">v12</div>
+        </div>
+
+        <div class="prose">
+          <p class="lead">editorzero treats humans and AI agents as peer co-editors. This document captures the architecture that makes that parity real across the API, CLI, MCP, and Web surfaces — every capability available to a person is equally available to an agent, under the same permission floor.</p>
+
+          <h2>The unified write path</h2>
+          <p>All content mutations flow through a single transactional path, <a href="#">ctx.transact(doc_id, fn)</a>. There is no second authority that can silently overwrite an edit — the failure class behind most split-brain collaboration bugs. Every mutation produces <strong>exactly one audit entry</strong>, and the audit log alone can reconstruct the document's final state.</p>
+
+          <div class="callout">
+            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <div class="ct"><b>Determinism is a feature.</b> Doc-model changes must preserve CRDT convergence and per-block Markdown fidelity. Concurrent edits from a human and an agent converge to the same state across every replica.</div>
+          </div>
+
+          <h2>Tracked agent edits</h2>
+          <p>An agent's edit can be recorded as a <strong>suggestion</strong> attributed to the agent principal, reviewable and acceptable by a human or another authorised agent. Suggestions are anchored on Yjs relative positions, so they survive concurrent edits to the surrounding text rather than landing at the wrong offset.</p>
+          <ul>
+            <li>Suggestion anchors use <strong>relative positions</strong>, never absolute offsets.</li>
+            <li>Accept and reject are conflict-aware capabilities — a stale anchor is surfaced as <em>outdated</em>, never silently applied.</li>
+            <li>Restore appends a converging state; it never rewinds the CRDT in place.</li>
+          </ul>
+
+          <blockquote>The killer feature is owned, free, and self-hostable — no Pro gate, no unshipped upstream dependency.</blockquote>
+
+          <h2>Version history</h2>
+          <p>Versions are named Yjs snapshots, dispatcher-mediated, each with author attribution and one audit entry. Restoring a version computes the delta against current state and applies it as a new corrective update:</p>
+          <div class="codeblk"><span class="lang">typescript</span><span class="cm">// restore appends, never rewinds</span><br><span class="kw">const</span> delta = diff(current, snapshot.<span class="st">stateVector</span>);<br><span class="kw">await</span> ctx.<span class="st">transact</span>(docId, (d) =&gt; d.applyUpdate(delta));</div>
+
+          <p>Because snapshots and changesets are computed <em>over</em> the CRDT rather than in place of it, the CRDT remains the single source of truth at all times.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       (D) EDITOR — THE SIGNATURE SCREEN
+       ============================================================ -->
+  <section class="screen">
+    <div class="screen-tag">
+      <span class="num">D</span><h2>Document · editor &nbsp;<span style="color:var(--sage-600);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;">★ signature</span></h2>
+      <span class="desc">Tiptap-style editor · slash menu · block handles · LIVE agent co-editor + tracked agent suggestion</span>
+    </div>
+
+    <div class="app">
+      <div class="topbar">
+        <span class="bc mono" style="font-size:11px;color:var(--ink-faint)"><b style="color:var(--ink-muted)">Engineering</b> / Architecture /</span>
+        <span class="tsel" style="margin-left:-4px;">Q3 Platform Architecture</span>
+        <div class="spacer"></div>
+        <!-- live presence: humans AND an agent, as peers -->
+        <div class="pill live"><span class="dot"></span> 3 editing now</div>
+        <div class="stack" style="margin-left:2px">
+          <div class="avatar av-h" title="Nomi (you)">NA</div>
+          <div class="avatar av-h2" title="Jonas">JL</div>
+          <div class="avatar av-agent" title="Atlas · agent"></div>
+        </div>
+        <button class="topbtn primary" style="margin-left:6px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5 8.6 10.5"/></svg> Share</button>
+      </div>
+
+      <div class="ed-layout">
+        <!-- editor main -->
+        <div class="ed-main">
+          <!-- formatting toolbar (Tiptap bubble/fixed menu) -->
+          <div class="ed-bar">
+            <div class="tsel">Heading 2 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></div>
+            <div class="tdiv"></div>
+            <button class="tbtn on"><b>B</b></button>
+            <button class="tbtn"><i>I</i></button>
+            <button class="tbtn"><span style="text-decoration:underline">U</span></button>
+            <button class="tbtn"><s>S</s></button>
+            <button class="tbtn mono" style="font-size:12px">&lt;/&gt;</button>
+            <div class="tdiv"></div>
+            <button class="tbtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
+            <button class="tbtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11H5a2 2 0 0 0-2 2v6h6M15 13h4a2 2 0 0 1 2 2v4h-6M9 5h6"/></svg></button>
+            <div class="tdiv"></div>
+            <button class="tbtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
+            <!-- presence on the bar -->
+            <div class="ed-presence">
+              <span class="pill agentkind"><svg class="botglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/><path d="M12 3v4M9 13h.01M15 13h.01"/></svg> Atlas is editing</span>
+            </div>
+          </div>
+
+          <!-- canvas -->
+          <div class="canvas gridfield">
+            <h1 class="doc-title">Q3 Platform Architecture</h1>
+            <div class="doc-sub"><span>DRAFT v12</span><span>·</span><span>last edit 12s ago</span><span>·</span><span style="color:var(--sage-600)">2 open suggestions</span></div>
+
+            <!-- block 1: heading -->
+            <div class="block">
+              <div class="handles"><button class="hbtn plus" title="Insert block">+</button><button class="hbtn" title="Drag / menu">⠿</button></div>
+              <div class="bk-h2">The unified write path</div>
+            </div>
+
+            <!-- block 2: paragraph with a HUMAN collaborator caret -->
+            <div class="block">
+              <div class="handles"><button class="hbtn plus">+</button><button class="hbtn">⠿</button></div>
+              <div class="bk-p">All content mutations flow through a single transactional path. There is no second authority that can silently overwrite an edit<span class="human-caret"><i></i><span class="flag">Jonas</span></span> — the failure class behind most split-brain collaboration bugs.</div>
+            </div>
+
+            <!-- block 3: paragraph WITH A TRACKED AGENT SUGGESTION (ins + del) -->
+            <div class="block">
+              <div class="handles"><button class="hbtn plus">+</button><button class="hbtn">⠿</button></div>
+              <div class="bk-p">Every mutation produces <span class="sugg-ins">exactly one</span> <span class="sugg-del">a single</span> audit entry, and the audit log alone can reconstruct the document's final state.<span class="agent-caret"><i></i><span class="flag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="7" width="14" height="12" rx="2"/><path d="M12 3v4"/></svg>Atlas</span></span></div>
+
+              <!-- the suggestion review card — peer-reviewable agent edit -->
+              <div class="sugg-card">
+                <div class="sh">
+                  <span class="who"><div class="avatar av-agent"></div> Atlas <span class="kind">agent · suggestion</span></span>
+                  <span class="when mono" style="font-size:10px;">just now</span>
+                </div>
+                <div class="sbody">
+                  Replace <span class="sugg-del">“a single”</span> with <span class="sugg-ins">“exactly one”</span> to match the invariant wording.
+                  <div class="rationale"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--sage-600)" stroke-width="2" style="flex:none;margin-top:1px"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg><span>Invariant 3 in the brief says “exactly one audit entry.” Aligning the prose with the canonical phrasing.</span></div>
+                </div>
+                <div class="acts">
+                  <button class="btn-accept"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6 9 17l-5-5"/></svg> Accept</button>
+                  <button class="btn-reject">Reject</button>
+                  <span class="right">anchored · rel-pos · audit on accept</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- block 4: another paragraph + an OUTDATED suggestion (stale/void lifecycle) -->
+            <div class="block">
+              <div class="handles"><button class="hbtn plus">+</button><button class="hbtn">⠿</button></div>
+              <div class="bk-p">Versions are named Yjs snapshots, each with author attribution and one audit entry.</div>
+
+              <div class="sugg-card outdated">
+                <div class="sh">
+                  <span class="who"><div class="avatar av-agent"></div> Scout <span class="kind">outdated</span></span>
+                  <span class="when mono" style="font-size:10px;">23m ago</span>
+                </div>
+                <div class="sbody" style="color:var(--ink-muted)">
+                  Suggested adding a sentence about auto-snapshot cadence — but the anchored range was edited concurrently, so this suggestion no longer resolves.
+                  <div class="rationale" style="border-top-color:var(--warn-bg)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2" style="flex:none;margin-top:1px"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg><span>Anchor moved under a concurrent edit — surfaced as outdated, never silently applied.</span></div>
+                </div>
+                <div class="acts">
+                  <button class="btn-reject" style="color:var(--warn);border-color:var(--warn-bg)">Dismiss</button>
+                  <button class="btn-reject">View original anchor</button>
+                  <span class="right" style="color:var(--warn)">⚠ anchor unresolved</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- slash menu floating (Tiptap suggestion plugin) -->
+            <div class="block" style="margin-top:6px">
+              <div class="handles"><button class="hbtn plus">+</button><button class="hbtn">⠿</button></div>
+              <div class="bk-p" style="color:var(--ink-faint)">/<span style="color:var(--ink)">heading</span></div>
+              <div class="slash">
+                <div class="sx">Blocks · type to filter</div>
+                <div class="si on"><div class="g" style="font-weight:700">H</div><div><div class="nm">Heading 1</div><div class="ds">Section title</div></div><span class="kb">#</span></div>
+                <div class="si"><div class="g" style="font-size:13px;font-weight:600">H</div><div><div class="nm">Heading 2</div><div class="ds">Sub-section</div></div><span class="kb">##</span></div>
+                <div class="si"><div class="g"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg></div><div><div class="nm">Callout</div><div class="ds">Highlighted note · lossy tier</div></div></div>
+                <div class="si"><div class="g mono" style="font-size:11px">&lt;/&gt;</div><div><div class="nm">Code block</div><div class="ds">Monospace · syntax</div></div><span class="kb">```</span></div>
+                <div class="si"><div class="g" style="color:var(--sage-600)"><svg class="botglyph" style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/><path d="M12 3v4M9 13h.01M15 13h.01"/></svg></div><div><div class="nm" style="color:var(--sage-700)">Ask an agent…</div><div class="ds">Draft, summarise, or suggest</div></div><span class="kb">@</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- editor right rail: presence + suggestion queue + version -->
+        <aside class="ed-rail">
+          <h4>Live editors</h4>
+          <div class="presence-row"><div class="avatar av-h">NA</div><span class="nm">Nomi</span><span class="rl" style="color:var(--ice-700)">you</span></div>
+          <div class="presence-row"><div class="avatar av-h2">JL</div><span class="nm">Jonas</span><span class="rl" style="color:var(--ink-faint)">human</span><span class="liveb"><span class="pill live" style="padding:1px 7px"><span class="dot"></span></span></span></div>
+          <div class="presence-row"><div class="avatar av-agent"></div><span class="nm">Atlas</span><span class="rl" style="color:var(--sage-700)">agent</span><span class="liveb"><span class="pill live" style="padding:1px 7px"><span class="dot"></span></span></span></div>
+
+          <div class="divline"></div>
+
+          <h4>Suggestions · 2 open</h4>
+          <div class="qcard active">
+            <div class="qt"><b>Atlas</b> · replace “a single” → “exactly one”</div>
+            <div class="qm"><svg class="botglyph" style="width:11px;height:11px" viewBox="0 0 24 24" fill="none" stroke="var(--sage-600)" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/></svg> agent · awaiting review</div>
+          </div>
+          <div class="qcard">
+            <div class="qt"><b style="color:var(--warn)">Scout</b> · add auto-snapshot note</div>
+            <div class="qm"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg> outdated · anchor moved</div>
+          </div>
+
+          <div class="divline"></div>
+
+          <h4>Version</h4>
+          <div class="savebar"><span class="dot"></span> v12 · synced</div>
+          <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);margin-top:7px;line-height:1.7">
+            CRDT converged · 3 replicas<br>last snapshot 4m ago<br>audit: 1 entry / mutation
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       (E) ADMIN — members / teams / spaces
+       ============================================================ -->
+  <section class="screen">
+    <div class="screen-tag">
+      <span class="num">E</span><h2>Admin · members</h2>
+      <span class="desc">users · teams · spaces · agents as first-class principals</span>
+    </div>
+
+    <div class="app">
+      <div class="topbar">
+        <div class="brand">
+          <svg class="mark" viewBox="0 0 28 28"><circle class="ring" cx="14" cy="14" r="10.5"/><line class="slash" x1="8.6" y1="19.4" x2="19.4" y2="8.6"/><circle class="dot" cx="14" cy="14" r="2.4"/></svg>
+          <span class="wordmark">editor<b>zero</b></span>
+        </div>
+        <div class="sep"></div>
+        <span class="tag" style="font-size:11px">Workspace administration</span>
+        <div class="spacer"></div>
+        <div class="avatar av-h">NA</div>
+      </div>
+
+      <div class="adm-h">
+        <h1>Members &amp; access</h1>
+        <p>Acme Robotics · 14 people, 3 agents · managed by this self-hosted workspace</p>
+      </div>
+      <div class="tabs">
+        <button class="on">People <span class="cnt">14</span></button>
+        <button>Agents <span class="cnt">3</span></button>
+        <button>Teams <span class="cnt">5</span></button>
+        <button>Spaces <span class="cnt">4</span></button>
+        <button>Settings</button>
+      </div>
+
+      <div class="adm-body">
+        <div class="adm-toolbar">
+          <div class="search" style="max-width:300px;flex:0 1 300px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg> Filter members…</div>
+          <span class="pill humankind">11 humans</span>
+          <span class="pill agentkind"><svg class="botglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/></svg> 3 agents</span>
+          <button class="topbtn primary invite"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg> Invite / provision</button>
+        </div>
+
+        <table class="members">
+          <thead><tr><th style="width:30%">Member</th><th>Type</th><th>Role</th><th>Teams</th><th>Last active</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="mwho"><div class="avatar av-h">NA</div><div><div class="nm">Nomi Ali</div><div class="em">nomi@acme.dev</div></div></div></td>
+              <td><span class="pill humankind">human</span></td>
+              <td><span class="roletag role-admin"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Admin</span></td>
+              <td><div class="teams-cell"><span class="teamchip">Eng</span><span class="teamchip">Product</span></div></td>
+              <td><span class="when">now</span></td>
+              <td><span class="kebab">⋯</span></td>
+            </tr>
+            <tr>
+              <td><div class="mwho"><div class="avatar av-agent"></div><div><div class="nm">Atlas <span style="font-weight:400;color:var(--sage-600);font-family:var(--font-mono);font-size:10px">claude-opus</span></div><div class="mono-id">agent:atlas · tok ••••7f3a</div></div></div></td>
+              <td><span class="pill agentkind"><svg class="botglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/></svg> agent</span></td>
+              <td><span class="roletag role-agent"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Editor</span></td>
+              <td><div class="teams-cell"><span class="teamchip">Eng</span><span class="scoped"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>scoped · rate-limited</span></div></td>
+              <td><span class="when">editing now</span></td>
+              <td><span class="kebab">⋯</span></td>
+            </tr>
+            <tr>
+              <td><div class="mwho"><div class="avatar av-h2">JL</div><div><div class="nm">Jonas Lindberg</div><div class="em">jonas@acme.dev</div></div></div></td>
+              <td><span class="pill humankind">human</span></td>
+              <td><span class="roletag role-editor">Editor</span></td>
+              <td><div class="teams-cell"><span class="teamchip">Eng</span><span class="teamchip">Design</span></div></td>
+              <td><span class="when">2m ago</span></td>
+              <td><span class="kebab">⋯</span></td>
+            </tr>
+            <tr>
+              <td><div class="mwho"><div class="avatar av-agent"></div><div><div class="nm">Scout <span style="font-weight:400;color:var(--sage-600);font-family:var(--font-mono);font-size:10px">changelog-bot</span></div><div class="mono-id">agent:scout · tok ••••c1d9</div></div></div></td>
+              <td><span class="pill agentkind"><svg class="botglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/></svg> agent</span></td>
+              <td><span class="roletag role-agent"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Editor</span></td>
+              <td><div class="teams-cell"><span class="teamchip">Eng</span><span class="scoped"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>scoped</span></div></td>
+              <td><span class="when">2h ago</span></td>
+              <td><span class="kebab">⋯</span></td>
+            </tr>
+            <tr>
+              <td><div class="mwho"><div class="avatar av-h3">MK</div><div><div class="nm">Maja Kowalski</div><div class="em">maja@acme.dev</div></div></div></td>
+              <td><span class="pill humankind">human</span></td>
+              <td><span class="roletag role-editor">Editor</span></td>
+              <td><div class="teams-cell"><span class="teamchip">Design</span></div></td>
+              <td><span class="when">1h ago</span></td>
+              <td><span class="kebab">⋯</span></td>
+            </tr>
+            <tr>
+              <td><div class="mwho"><div class="avatar av-agent"></div><div><div class="nm">Indexer <span style="font-weight:400;color:var(--sage-600);font-family:var(--font-mono);font-size:10px">search-sync</span></div><div class="mono-id">agent:indexer · tok ••••9b02</div></div></div></td>
+              <td><span class="pill agentkind"><svg class="botglyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="2"/></svg> agent</span></td>
+              <td><span class="roletag role-editor" style="color:var(--ink-muted)">Viewer</span></td>
+              <td><div class="teams-cell"><span class="teamchip">All spaces</span><span class="scoped"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>read-only</span></div></td>
+              <td><span class="when">5m ago</span></td>
+              <td><span class="kebab">⋯</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div class="foot">editorzero · <b>Halling</b> design system · AGPL-3.0 · open-source fonts only · all surfaces at parity</div>
+
+</div>
+</body>
+</html>

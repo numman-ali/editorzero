@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>editorzero · Theming &amp; custom themes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../meridian-zero.css">
+<link rel="stylesheet" href="../themes.css">
+<style>
+/* ============================================================
+   THEMING & CUSTOM THEMES — screen-specific rules (slug: theming-)
+   Token-pure: every colour/size references a Meridian Zero var.
+   The thumbnails + live preview SCOPE token overrides on a wrapper,
+   literally demonstrating "a theme is just :root custom props".
+   ============================================================ */
+.theming-vp{ padding-bottom:80px; }
+.theming-win{ min-height:660px; }
+.theming-subon{ font-size:11.5px; }
+
+/* active-theme readout in page header */
+.theming-applied{ display:flex; flex-direction:column; gap:7px; align-items:flex-end; }
+.theming-applied-v{
+  display:flex; align-items:center; gap:8px; font-family:var(--display);
+  font-weight:600; font-size:14px; letter-spacing:-0.02em; color:var(--ink);
+}
+.theming-applied-v .ord{ color:var(--steel); }
+
+/* thesis callout */
+.theming-thesis{ margin:0 0 26px; }
+.theming-thesis .tx{ line-height:1.6; }
+.theming-thesis code{
+  font-family:var(--mono); font-size:11px; background:var(--surface);
+  padding:0 4px; border:var(--rule) solid var(--ultra-edge); color:var(--ultra-ink);
+}
+
+/* section headers */
+.theming-sech{ display:flex; align-items:center; gap:12px; margin:0 0 14px; }
+.theming-sech--ed{ margin-top:30px; padding-top:24px; border-top:var(--rule-2) solid var(--ink); }
+.theming-editing{ letter-spacing:0.04em; }
+
+/* ============ (1) CURATED THEME CARDS ============ */
+.theming-cards{
+  display:grid; grid-template-columns:repeat(4,1fr);
+  border:var(--rule) solid var(--hair-strong);
+}
+.theming-card{
+  border-right:var(--rule) solid var(--hair); background:var(--surface);
+  display:flex; flex-direction:column; position:relative; cursor:pointer;
+  transition:background .14s;
+}
+.theming-card:last-child{ border-right:0; }
+.theming-card:hover{ background:var(--paper); }
+.theming-card.on{ outline:var(--rule-2) solid var(--ultra); outline-offset:-2px; z-index:1; }
+
+/* the thumbnail = a scoped mini-app, re-skinned by token overrides on the wrapper */
+.theming-thumb{
+  height:128px; padding:11px; border-bottom:var(--rule) solid var(--hair);
+  background:var(--paper); overflow:hidden;
+}
+.theming-mini{
+  height:100%; display:grid; grid-template-columns:34px 1fr;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface);
+}
+.theming-mini-side{
+  background:var(--paper); border-right:var(--rule) solid var(--hair-strong);
+  padding:7px 5px; display:flex; flex-direction:column; gap:4px;
+}
+.theming-mini-mark{
+  width:9px; height:9px; position:relative; margin-bottom:3px; flex:0 0 9px;
+  background:
+    linear-gradient(var(--ultra),var(--ultra)) 50% 0/var(--rule) 100% no-repeat,
+    linear-gradient(var(--ultra),var(--ultra)) 0 50%/100% var(--rule) no-repeat;
+}
+.theming-mini-side i{ height:4px; background:var(--surface-sunk); }
+.theming-mini-side i.on{ background:var(--ultra); }
+.theming-mini-main{ padding:7px; display:flex; flex-direction:column; gap:5px; min-width:0; }
+.theming-mini-bar{ display:flex; align-items:center; gap:4px; margin-bottom:2px; }
+.theming-mini-bar b{ height:7px; width:38%; background:var(--ink); display:block; }
+.theming-mini-bar span{ height:7px; width:18px; margin-left:auto; background:var(--ultra); display:block; }
+.theming-mini-h{ height:9px; width:62%; background:var(--ink-1); }
+.theming-mini-row{ display:flex; align-items:center; gap:5px; }
+.theming-mini-av{ width:9px; height:9px; flex:0 0 9px; background:var(--ultra); }
+.theming-mini-av.ag{
+  background:var(--agent);
+  clip-path:polygon(22% 0,100% 0,100% 78%,78% 100%,0 100%,0 22%);
+}
+.theming-mini-row em{ height:5px; flex:1; background:var(--surface-sunk); display:block; }
+.theming-mini-row em.ag{ background:var(--agent-wash); }
+
+/* per-theme TOKEN OVERRIDES — this is the whole point: same markup, new :root */
+.theming-tk-meridian{ /* default — inherits root tokens */ }
+.theming-tk-graphite{
+  --paper:#0e1117; --surface:#161b22; --surface-sunk:#21272f;
+  --ink:#e6edf3; --ink-1:#c2ccd6; --hair:#283039; --hair-strong:#3a434e;
+  --ultra:#3b5bff; --agent:#22d3e0; --agent-wash:#0a3a40;
+}
+.theming-tk-warm{
+  --paper:#f3ece1; --surface:#fbf6ee; --surface-sunk:#e8ded0;
+  --ink:#241c12; --ink-1:#4a3d2c; --hair:#ddd0bd; --hair-strong:#c4b39a;
+  --ultra:#1f3cff; --agent:#0f9aa6; --agent-wash:#d6f0f2;
+}
+.theming-tk-hicon{
+  --paper:#ffffff; --surface:#ffffff; --surface-sunk:#e6e6e6;
+  --ink:#000000; --ink-1:#000000; --hair:#000000; --hair-strong:#000000;
+  --ultra:#0010c4; --agent:#006470; --agent-wash:#cdeef1;
+}
+
+/* card footer */
+.theming-card-ft{
+  padding:11px 13px; display:flex; align-items:center; gap:10px;
+  margin-top:auto; justify-content:space-between;
+}
+.theming-card-meta{ min-width:0; }
+.theming-card-nm{
+  font-family:var(--display); font-weight:600; font-size:13px; letter-spacing:-0.02em;
+  color:var(--ink); display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+}
+.theming-defchip{ padding:1px 5px; font-size:9px; }
+.theming-a11ychip{ padding:1px 5px; font-size:9px; color:var(--ink-1); border-color:var(--hair-strong); }
+.theming-card-sw{ display:flex; gap:3px; margin-top:8px; }
+.theming-card-sw i{
+  width:15px; height:15px; flex:0 0 15px;
+  border:var(--rule) solid var(--hair-strong);
+}
+/* swatch rows show each theme's real palette */
+.theming-sw-graphite i:nth-child(1){ background:#0e1117 } .theming-sw-graphite i:nth-child(2){ background:#e6edf3 } .theming-sw-graphite i:nth-child(3){ background:#3b5bff } .theming-sw-graphite i:nth-child(4){ background:#22d3e0 } .theming-sw-graphite i:nth-child(5){ background:#283039 }
+.theming-sw-warm i:nth-child(1){ background:#f3ece1 } .theming-sw-warm i:nth-child(2){ background:#241c12 } .theming-sw-warm i:nth-child(3){ background:#1f3cff } .theming-sw-warm i:nth-child(4){ background:#0f9aa6 } .theming-sw-warm i:nth-child(5){ background:#c4b39a }
+.theming-sw-hicon i:nth-child(1){ background:#fff } .theming-sw-hicon i:nth-child(2){ background:#000 } .theming-sw-hicon i:nth-child(3){ background:#0010c4 } .theming-sw-hicon i:nth-child(4){ background:#006470 } .theming-sw-hicon i:nth-child(5){ background:#000 }
+
+.theming-active-tag{
+  font-family:var(--mono); font-size:9px; letter-spacing:0.06em; color:var(--ultra-ink);
+  display:flex; align-items:center; gap:5px; white-space:nowrap; flex:0 0 auto;
+}
+.theming-applybtn{ flex:0 0 auto; }
+
+/* ============ (2) CREATE THEME EDITOR ============ */
+.theming-editor{ display:grid; grid-template-columns:1fr 1.15fr; gap:20px; align-items:start; }
+
+/* LEFT — token rows */
+.theming-tokens{ display:flex; flex-direction:column; }
+.theming-tcount{ font-size:10px; color:var(--steel); letter-spacing:0.06em; }
+.theming-tokscroll{ max-height:642px; overflow:auto; }
+.theming-grp{ border-bottom:var(--rule) solid var(--hair); }
+.theming-grp--last{ border-bottom:0; }
+.theming-grp-h{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 15px 7px; background:var(--paper);
+  border-bottom:var(--rule) solid var(--hair); position:sticky; top:0; z-index:2;
+}
+.theming-kag{ color:var(--agent-ink); }
+
+.theming-trow{
+  display:grid; grid-template-columns:26px 1fr auto auto; align-items:center; gap:11px;
+  padding:8px 15px; border-bottom:var(--rule) solid var(--hair); cursor:pointer;
+  transition:background .1s;
+}
+.theming-grp .theming-trow:last-child{ border-bottom:0; }
+.theming-trow:hover{ background:var(--paper); }
+.theming-trow--on{ background:var(--ultra-wash); }
+.theming-trow--on:hover{ background:var(--ultra-wash); }
+.theming-sw{
+  width:26px; height:26px; flex:0 0 26px; border:var(--rule) solid var(--hair-strong);
+  position:relative;
+}
+.theming-sw--edit{ outline:var(--rule-2) solid var(--ultra); outline-offset:1px; }
+.theming-tname{ font-size:11.5px; color:var(--ink); font-weight:500; }
+.theming-trole{ font-family:var(--mono); font-size:9.5px; color:var(--steel); letter-spacing:0.03em; text-align:right; }
+.theming-hex{
+  font-size:11px; color:var(--ink-1); border:var(--rule) solid var(--hair-strong);
+  padding:3px 8px; background:var(--surface); min-width:88px; text-align:right; letter-spacing:0.02em;
+}
+.theming-hex--edit{
+  border-color:var(--ultra); color:var(--ultra-ink); background:var(--surface);
+  display:inline-flex; align-items:center; justify-content:flex-end;
+}
+.theming-hex--edit .caret-u{ margin-left:1px; }
+.theming-hex--edit .caret-u::after{ height:.95em; margin-bottom:-2px; }
+
+/* font + metric swatch variants */
+.theming-sw--font{
+  display:grid; place-items:center; font-family:var(--display); font-weight:700;
+  font-size:12px; color:var(--ink); background:var(--surface-2);
+}
+.theming-sw--mono{ font-family:var(--mono); font-size:10px; }
+.theming-trow--font .theming-hex{ font-family:var(--mono); }
+.theming-sw--metric{ display:grid; place-items:center; background:var(--surface-2); }
+.theming-sw--metric b{ height:14px; background:var(--ink); display:block; }
+.theming-sw--radius{ background:var(--ink); }
+
+/* RIGHT — preview + actions */
+.theming-previewcol{ display:flex; flex-direction:column; gap:16px; min-width:0; }
+.theming-livetag{
+  font-family:var(--mono); font-size:9.5px; letter-spacing:0.05em; color:var(--agent-ink);
+  display:flex; align-items:center; gap:6px;
+}
+
+/* the scoped live-preview stage — re-skinned via .theming-tk-afterdark overrides */
+.theming-stage{ padding:14px; background:var(--surface-2); }
+.theming-tk-afterdark{
+  --paper:#0e1117; --surface:#161b22; --surface-2:#1c232c; --surface-sunk:#21272f;
+  --ink:#e6edf3; --ink-1:#c2ccd6; --ink-2:#9da7b3;
+  --steel:#8b96a3; --steel-2:#6c7783;
+  --hair:#283039; --hair-strong:#3a434e;
+  --ultra:#3b5bff; --ultra-ink:#a9b8ff; --ultra-wash:#16204d; --ultra-edge:#2c3a72;
+  --agent:#22d3e0; --agent-ink:#7deaf2; --agent-wash:#0a3a40; --agent-edge:#155760;
+  --ok:#2bb673;
+}
+.theming-samp{
+  display:grid; grid-template-columns:128px 1fr;
+  border:var(--rule) solid var(--hair-strong); background:var(--surface); min-height:280px;
+}
+.theming-samp-side{
+  background:var(--paper); border-right:var(--rule) solid var(--hair-strong);
+  padding:11px 10px; display:flex; flex-direction:column; gap:3px;
+}
+.theming-samp-logo{
+  font-family:var(--display); font-weight:700; font-size:12px; color:var(--ink);
+  display:flex; align-items:center; gap:6px; margin-bottom:10px; letter-spacing:-0.02em;
+}
+.theming-samp-logo b{ color:var(--ultra-ink); }
+.theming-samp-mark{
+  width:13px; height:13px; flex:0 0 13px; position:relative; color:var(--ultra);
+  background:
+    linear-gradient(var(--ultra),var(--ultra)) 50% 0/var(--rule) 100% no-repeat,
+    linear-gradient(var(--ultra),var(--ultra)) 0 50%/100% var(--rule) no-repeat;
+}
+.theming-samp-nav{
+  font-family:var(--mono); font-size:10px; color:var(--ink-2); padding:5px 7px;
+  display:flex; align-items:center; gap:6px; letter-spacing:0.02em;
+}
+.theming-samp-nav.on{ background:var(--surface); color:var(--ink); box-shadow:inset 2px 0 0 var(--ultra); }
+.theming-samp-nav.ag{ color:var(--agent-ink); }
+.theming-samp-dot{ width:6px; height:6px; border-radius:50%; background:var(--agent); flex:0 0 6px; }
+.theming-samp-navh{
+  font-family:var(--mono); font-size:8.5px; letter-spacing:0.12em; color:var(--steel);
+  margin:9px 0 4px; padding:0 7px;
+}
+.theming-samp-main{ display:flex; flex-direction:column; min-width:0; }
+.theming-samp-bar{
+  display:flex; align-items:center; gap:10px; padding:9px 12px;
+  border-bottom:var(--rule) solid var(--hair);
+}
+.theming-samp-crumb{ font-family:var(--mono); font-size:9.5px; color:var(--steel); letter-spacing:0.03em; }
+.theming-samp-btn{
+  margin-left:auto; font-family:var(--mono); font-size:9px; letter-spacing:0.06em;
+  text-transform:uppercase; color:#fff; background:var(--ultra); padding:4px 8px;
+}
+.theming-samp-body{ padding:13px 14px; }
+.theming-samp-kick{ font-family:var(--mono); font-size:9px; letter-spacing:0.12em; color:var(--ultra-ink); text-transform:uppercase; }
+.theming-samp-h1{ font-family:var(--display); font-weight:700; font-size:22px; letter-spacing:-0.03em; color:var(--ink); margin:6px 0 8px; }
+.theming-samp-h1 span{ color:var(--ultra-ink); }
+.theming-samp-p{ font-size:11.5px; line-height:1.55; color:var(--ink-1); max-width:46ch; }
+
+.theming-samp-presence{ display:flex; gap:7px; margin:13px 0; flex-wrap:wrap; }
+.theming-samp-pchip{
+  display:inline-flex; align-items:center; gap:6px; padding:3px 8px 3px 4px;
+  border:var(--rule) solid var(--hair-strong); font-family:var(--mono); font-size:9.5px; color:var(--ink-1);
+}
+.theming-samp-pchip.u{ border-color:var(--ultra-edge); }
+.theming-samp-pchip.ag{ border-color:var(--agent-edge); background:var(--agent-wash); color:var(--agent-ink); }
+.theming-samp-av{ width:15px; height:15px; flex:0 0 15px; background:var(--ultra); }
+.theming-samp-av.u{ background:var(--ultra); }
+.theming-samp-av.ag{ background:var(--agent); clip-path:polygon(22% 0,100% 0,100% 78%,78% 100%,0 100%,0 22%); }
+.theming-samp-typing{ color:var(--agent-ink); }
+
+/* tracked suggestion line in preview */
+.theming-samp-sugg{ font-size:11.5px; line-height:1.7; color:var(--ink-1); border-top:var(--rule) solid var(--hair); padding-top:11px; }
+.theming-samp-ins{ color:var(--agent-ink); background:var(--agent-wash); box-shadow:inset 0 -2px 0 var(--agent); padding:0 2px; }
+.theming-samp-del{ color:var(--steel); text-decoration:line-through; text-decoration-color:var(--agent); }
+
+.theming-samp-chips{ display:flex; gap:6px; margin-top:13px; flex-wrap:wrap; }
+.theming-samp-tag{
+  font-family:var(--mono); font-size:8.5px; letter-spacing:0.06em; padding:2px 6px;
+  border:var(--rule) solid var(--hair-strong); color:var(--ink-1);
+}
+.theming-samp-tag.pub{ color:var(--ok); border-color:var(--ok); }
+.theming-samp-tag.rev{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+.theming-samp-tag.ok{ color:var(--ultra-ink); border-color:var(--ultra-edge); background:var(--ultra-wash); }
+
+/* contrast guard band */
+.theming-guard{
+  display:flex; align-items:center; gap:11px; padding:11px 15px;
+  border-top:var(--rule) solid var(--hair); background:var(--paper);
+}
+.theming-guard-ic{
+  width:22px; height:22px; flex:0 0 22px; display:grid; place-items:center;
+  background:var(--ok); color:#fff; font-size:12px; font-weight:700;
+}
+.theming-guard-tx{ font-size:11px; color:var(--ink-1); line-height:1.45; }
+.theming-guard-tx b{ color:var(--ink); }
+.theming-guard-tag{
+  margin-left:auto; font-family:var(--mono); font-size:9px; letter-spacing:0.06em;
+  color:var(--ok); border:var(--rule) solid var(--ok); padding:2px 7px; white-space:nowrap;
+}
+
+/* action row */
+.theming-actions{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.theming-actions-l, .theming-actions-r{ display:flex; gap:8px; }
+
+/* export / paste */
+.theming-code{ margin:0; }
+.theming-code pre{ font-size:11.5px; line-height:1.7; }
+.theming-copy{ cursor:pointer; color:var(--ultra-ink); }
+.theming-export-ft{
+  display:flex; align-items:center; gap:12px; padding:12px 15px;
+  border-top:var(--rule) solid var(--hair); background:var(--paper);
+}
+.theming-export-note{ font-size:11px; color:var(--ink-1); line-height:1.45; }
+.theming-export-note code{
+  font-family:var(--mono); font-size:10.5px; background:var(--surface);
+  border:var(--rule) solid var(--hair-strong); padding:0 4px; color:var(--ink-1);
+}
+.theming-export-ft .btn{ margin-left:auto; flex:0 0 auto; }
+
+/* ============ MOBILE BOTTOM TAB BAR (hidden on desktop) ============ */
+.theming-tabbar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1120px){
+  /* cards: 2-up; editor stacks (preview first so it stays visible while editing) */
+  .theming-cards{ grid-template-columns:repeat(2,1fr); }
+  .theming-card:nth-child(2){ border-right:0; }
+  .theming-card:nth-child(1),.theming-card:nth-child(2){ border-bottom:var(--rule) solid var(--hair); }
+  .theming-editor{ grid-template-columns:1fr; gap:16px; }
+  .theming-previewcol{ order:-1; }
+  .theming-tokscroll{ max-height:none; }
+}
+
+@media (max-width:760px){
+  .theming-samp{ grid-template-columns:1fr; }
+  .theming-samp-side{
+    flex-direction:row; flex-wrap:wrap; align-items:center; gap:8px;
+    border-right:0; border-bottom:var(--rule) solid var(--hair-strong);
+  }
+  .theming-samp-logo{ margin-bottom:0; }
+  .theming-samp-navh{ display:none; }
+  .theming-samp-nav{ padding:4px 6px; }
+}
+
+@media (max-width:640px){
+  .theming-vp{ padding:0 0 76px; }
+  .screen{ border-left:0; border-right:0; margin-bottom:0; }
+  .screen-tab .meta{ display:none; }
+
+  /* page header stacks */
+  .page-h{ flex-direction:column; align-items:flex-start; gap:14px; }
+  .theming-applied{ align-items:flex-start; }
+
+  /* cards: single column, full-width preview thumbs */
+  .theming-cards{ grid-template-columns:1fr; }
+  .theming-card{ border-right:0; border-bottom:var(--rule) solid var(--hair); }
+  .theming-card:last-child{ border-bottom:0; }
+  .theming-card.on{ outline-offset:-2px; }
+  .theming-thumb{ height:150px; }
+
+  /* token rows: drop the role column, keep swatch + name + hex; 44px touch targets */
+  .theming-trow{ grid-template-columns:30px 1fr auto; gap:10px; padding:11px 14px; min-height:44px; }
+  .theming-trole{ display:none; }
+  .theming-sw{ width:30px; height:30px; flex:0 0 30px; }
+  .theming-hex{ min-width:0; }
+
+  /* actions: full-width stacked buttons, comfy tap area */
+  .theming-actions{ flex-direction:column; align-items:stretch; }
+  .theming-actions-l, .theming-actions-r{ flex-direction:column; }
+  .theming-actions .btn{ justify-content:center; padding:13px; }
+
+  .theming-export-ft{ flex-direction:column; align-items:stretch; }
+  .theming-export-ft .btn{ margin-left:0; justify-content:center; padding:12px; }
+  .theming-sech--ed{ flex-wrap:wrap; }
+  .theming-editing{ order:3; }
+
+  /* the header import button is redundant on mobile (new-theme stays) */
+  .theming-importbtn{ display:none; }
+
+  /* bottom tab bar */
+  .theming-tabbar{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:50;
+    background:var(--surface); border-top:var(--rule) solid var(--hair-strong);
+    padding:0 2px; padding-bottom:env(safe-area-inset-bottom);
+  }
+  .theming-tab{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:9px 0 10px; min-height:56px; justify-content:center;
+    font-family:var(--mono); font-size:9px; letter-spacing:0.04em; text-transform:uppercase;
+    color:var(--steel); position:relative;
+  }
+  .theming-tab-ic{ font-size:16px; line-height:1; color:var(--steel-2); }
+  .theming-tab.on{ color:var(--ultra-ink); }
+  .theming-tab.on .theming-tab-ic{ color:var(--ultra); }
+  .theming-tab.on::before{ content:""; position:absolute; top:0; left:18%; right:18%; height:2px; background:var(--ultra); }
+}
+
+/* reduced-motion: kill the pulse/blink that the shared atoms animate */
+@media (prefers-reduced-motion: reduce){
+  .theming-vp .live,
+  .theming-vp .caret-u::after,
+  .theming-vp .dot--agent.live{ animation:none !important; }
+  .theming-card,.theming-trow{ transition:none !important; }
+}
+</style>
+<script>var t=new URLSearchParams(location.search).get('theme');if(t)document.documentElement.setAttribute('data-theme',t);</script>
+</head>
+<body>
+<div class="viewport theming-vp">
+  <section class="screen">
+    <div class="screen-tab">
+      <div class="id"><span class="ord">SCR.F</span><span class="big">Settings / Appearance · Themes</span></div>
+      <div class="meta"><span>CURATED</span><span>EDITOR</span><span>TOKENS</span></div>
+    </div>
+
+    <div class="win theming-win">
+      <!-- ============ SIDEBAR ============ -->
+      <aside class="side">
+        <div class="top">
+          <div class="kicker">Workspace</div>
+          <div class="ws">
+            <span class="av av--u3">N</span>
+            <div style="min-width:0;">
+              <div class="nm">Northwind Eng</div>
+              <div class="sub">self-hosted · 6 spaces</div>
+            </div>
+            <span class="car">▾</span>
+          </div>
+        </div>
+        <div class="nav-h kicker">Settings</div>
+        <nav class="nav">
+          <a href="#"><span class="ic">◷</span> General</a>
+          <a href="#"><span class="ic">◫</span> Members &amp; agents <span class="ct">28</span></a>
+          <a href="#"><span class="ic">⊟</span> Spaces</a>
+          <a class="on" href="#"><span class="ic">◧</span> Appearance</a>
+          <a href="#"><span class="ic">⌗</span> API keys <span class="ct">12</span></a>
+          <a href="#"><span class="ic">⎄</span> Integrations</a>
+          <a href="#"><span class="ic">⌦</span> Audit log</a>
+        </nav>
+        <div class="nav-h kicker">Appearance</div>
+        <nav class="nav">
+          <a class="on theming-subon" href="#"><span class="ic">◨</span> Themes</a>
+          <a href="#"><span class="ic">⊹</span> Density</a>
+          <a href="#"><span class="ic">⌑</span> Typography</a>
+        </nav>
+        <div class="foot">
+          <span class="av av--u">NA</span>
+          <div><div class="nm">Nadia A.</div><div class="rl">ADMIN · #001</div></div>
+        </div>
+      </aside>
+
+      <!-- ============ MAIN ============ -->
+      <div class="main">
+        <div class="bar">
+          <div class="crumb"><span class="cross" style="width:13px;height:13px;color:var(--ultra)"></span> <b>Settings</b> <span class="sep">/</span> Appearance <span class="sep">/</span> <b>Themes</b></div>
+          <div class="search"><span>⌕</span> Search tokens… <span class="k">⌘K</span></div>
+          <button class="btn btn--ghost btn--sm theming-importbtn">⇪ Import CSS</button>
+          <button class="btn btn--ultra btn--sm">+ New theme</button>
+        </div>
+
+        <div class="body">
+          <div class="page-h">
+            <div class="lhs">
+              <div class="kicker kicker--ultra">◧ APPEARANCE · TOKEN THEMES</div>
+              <h1>Theming<span class="z">.</span></h1>
+              <div class="sub"><span>4 CURATED</span><span>·</span><span>2 CUSTOM</span><span>·</span><span>APPLIES WORKSPACE-WIDE</span></div>
+            </div>
+            <div class="theming-applied">
+              <span class="kicker">Active theme</span>
+              <div class="theming-applied-v"><span class="dot dot--ultra"></span> Meridian Zero <span class="ord">v0.1.0</span></div>
+            </div>
+          </div>
+
+          <!-- thesis callout -->
+          <div class="callout theming-thesis">
+            <div class="b"></div>
+            <div class="tx">
+              <b>A theme is just a set of CSS custom properties you override globally.</b>
+              Every colour, space and size in editorzero reads from a token (<code>--ink</code>, <code>--paper</code>, <code>--ultra</code>, <code>--agent</code>…). Re-skinning is editing those globals — <b>no rebuild, no fork.</b> Ship a curated theme, or paste your own <code>:root{ }</code> block. Humans and agents stay legible under every set.
+            </div>
+          </div>
+
+          <!-- ============ (1) CURATED THEME CARDS ============ -->
+          <div class="theming-sech">
+            <span class="ord">01</span><h2 style="font-size:14px;">Curated themes</h2>
+            <span class="hr" style="flex:1"></span>
+            <span class="kicker">SAME UI · DIFFERENT :ROOT</span>
+          </div>
+
+          <div class="theming-cards">
+
+            <!-- card: Meridian Zero (active / default) -->
+            <div class="theming-card on">
+              <div class="theming-thumb theming-tk-meridian" aria-label="Meridian Zero preview">
+                <div class="theming-mini">
+                  <div class="theming-mini-side">
+                    <span class="theming-mini-mark"></span>
+                    <i></i><i class="on"></i><i></i><i></i>
+                  </div>
+                  <div class="theming-mini-main">
+                    <div class="theming-mini-bar"><b></b><span></span></div>
+                    <div class="theming-mini-h"></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av u"></span><em></em></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av ag"></span><em class="ag"></em></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av u"></span><em></em></div>
+                  </div>
+                </div>
+              </div>
+              <div class="theming-card-ft">
+                <div class="theming-card-meta">
+                  <div class="theming-card-nm">Meridian Zero <span class="chip chip--ultra theming-defchip">DEFAULT</span></div>
+                  <div class="theming-card-sw">
+                    <i style="background:var(--paper)"></i><i style="background:var(--ink)"></i><i style="background:var(--ultra)"></i><i style="background:var(--agent)"></i><i style="background:var(--hair-strong)"></i>
+                  </div>
+                </div>
+                <span class="theming-active-tag"><span class="dot dot--ultra"></span> ACTIVE</span>
+              </div>
+            </div>
+
+            <!-- card: Graphite Dark -->
+            <div class="theming-card">
+              <div class="theming-thumb theming-tk-graphite" aria-label="Graphite Dark preview">
+                <div class="theming-mini">
+                  <div class="theming-mini-side">
+                    <span class="theming-mini-mark"></span>
+                    <i></i><i class="on"></i><i></i><i></i>
+                  </div>
+                  <div class="theming-mini-main">
+                    <div class="theming-mini-bar"><b></b><span></span></div>
+                    <div class="theming-mini-h"></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av u"></span><em></em></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av ag"></span><em class="ag"></em></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av u"></span><em></em></div>
+                  </div>
+                </div>
+              </div>
+              <div class="theming-card-ft">
+                <div class="theming-card-meta">
+                  <div class="theming-card-nm">Graphite Dark</div>
+                  <div class="theming-card-sw theming-sw-graphite">
+                    <i></i><i></i><i></i><i></i><i></i>
+                  </div>
+                </div>
+                <button class="btn btn--ghost btn--sm theming-applybtn">Apply</button>
+              </div>
+            </div>
+
+            <!-- card: Warm Paper -->
+            <div class="theming-card">
+              <div class="theming-thumb theming-tk-warm" aria-label="Warm Paper preview">
+                <div class="theming-mini">
+                  <div class="theming-mini-side">
+                    <span class="theming-mini-mark"></span>
+                    <i></i><i class="on"></i><i></i><i></i>
+                  </div>
+                  <div class="theming-mini-main">
+                    <div class="theming-mini-bar"><b></b><span></span></div>
+                    <div class="theming-mini-h"></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av u"></span><em></em></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av ag"></span><em class="ag"></em></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av u"></span><em></em></div>
+                  </div>
+                </div>
+              </div>
+              <div class="theming-card-ft">
+                <div class="theming-card-meta">
+                  <div class="theming-card-nm">Warm Paper</div>
+                  <div class="theming-card-sw theming-sw-warm">
+                    <i></i><i></i><i></i><i></i><i></i>
+                  </div>
+                </div>
+                <button class="btn btn--ghost btn--sm theming-applybtn">Apply</button>
+              </div>
+            </div>
+
+            <!-- card: High Contrast -->
+            <div class="theming-card">
+              <div class="theming-thumb theming-tk-hicon" aria-label="High Contrast preview">
+                <div class="theming-mini">
+                  <div class="theming-mini-side">
+                    <span class="theming-mini-mark"></span>
+                    <i></i><i class="on"></i><i></i><i></i>
+                  </div>
+                  <div class="theming-mini-main">
+                    <div class="theming-mini-bar"><b></b><span></span></div>
+                    <div class="theming-mini-h"></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av u"></span><em></em></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av ag"></span><em class="ag"></em></div>
+                    <div class="theming-mini-row"><span class="theming-mini-av u"></span><em></em></div>
+                  </div>
+                </div>
+              </div>
+              <div class="theming-card-ft">
+                <div class="theming-card-meta">
+                  <div class="theming-card-nm">High Contrast <span class="chip chip--ghost theming-a11ychip">WCAG AAA</span></div>
+                  <div class="theming-card-sw theming-sw-hicon">
+                    <i></i><i></i><i></i><i></i><i></i>
+                  </div>
+                </div>
+                <button class="btn btn--ghost btn--sm theming-applybtn">Apply</button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ============ (2) CREATE THEME EDITOR ============ -->
+          <div class="theming-sech theming-sech--ed">
+            <span class="ord">02</span><h2 style="font-size:14px;">Create theme</h2>
+            <span class="chip chip--ultra theming-editing">EDITING · “Northwind After-Dark”</span>
+            <span class="hr" style="flex:1"></span>
+            <span class="kicker">UNSAVED CHANGES</span>
+          </div>
+
+          <div class="theming-editor">
+
+            <!-- LEFT: token rows grouped -->
+            <div class="panel theming-tokens">
+              <div class="ph">
+                <span class="ord">⊹</span><span class="t">Semantic tokens</span>
+                <div class="r">
+                  <span class="theming-tcount mono">28 VARS</span>
+                  <span class="link">Reset group</span>
+                </div>
+              </div>
+
+              <div class="theming-tokscroll">
+
+                <!-- group: Neutrals -->
+                <div class="theming-grp">
+                  <div class="theming-grp-h"><span class="kicker">Neutrals</span><span class="ord">07</span></div>
+
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--paper)"></span>
+                    <span class="theming-tname mono">--paper</span>
+                    <span class="theming-trole">canvas</span>
+                    <span class="theming-hex mono">#0E1117</span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--surface)"></span>
+                    <span class="theming-tname mono">--surface</span>
+                    <span class="theming-trole">panels</span>
+                    <span class="theming-hex mono">#161B22</span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--ink)"></span>
+                    <span class="theming-tname mono">--ink</span>
+                    <span class="theming-trole">primary text</span>
+                    <span class="theming-hex mono">#E6EDF3</span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--ink-2)"></span>
+                    <span class="theming-tname mono">--ink-2</span>
+                    <span class="theming-trole">secondary</span>
+                    <span class="theming-hex mono">#9DA7B3</span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--hair)"></span>
+                    <span class="theming-tname mono">--hair</span>
+                    <span class="theming-trole">hairline</span>
+                    <span class="theming-hex mono">#283039</span>
+                  </label>
+                </div>
+
+                <!-- group: Accent -->
+                <div class="theming-grp">
+                  <div class="theming-grp-h"><span class="kicker kicker--ultra">Accent · Ultramarine</span><span class="ord">04</span></div>
+
+                  <label class="theming-trow theming-trow--on">
+                    <span class="theming-sw theming-sw--edit" style="background:var(--ultra)"></span>
+                    <span class="theming-tname mono">--ultra</span>
+                    <span class="theming-trole">accent</span>
+                    <span class="theming-hex mono theming-hex--edit">#3B5BFF<span class="caret-u"></span></span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--ultra-ink)"></span>
+                    <span class="theming-tname mono">--ultra-ink</span>
+                    <span class="theming-trole">accent text</span>
+                    <span class="theming-hex mono">#A9B8FF</span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--ultra-wash)"></span>
+                    <span class="theming-tname mono">--ultra-wash</span>
+                    <span class="theming-trole">accent fill</span>
+                    <span class="theming-hex mono">#16204D</span>
+                  </label>
+                </div>
+
+                <!-- group: Agent -->
+                <div class="theming-grp">
+                  <div class="theming-grp-h"><span class="kicker theming-kag">Agent · Cyan</span><span class="ord">04</span></div>
+
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--agent)"></span>
+                    <span class="theming-tname mono">--agent</span>
+                    <span class="theming-trole">agent signal</span>
+                    <span class="theming-hex mono">#22D3E0</span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--agent-ink)"></span>
+                    <span class="theming-tname mono">--agent-ink</span>
+                    <span class="theming-trole">agent text</span>
+                    <span class="theming-hex mono">#7DEAF2</span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--agent-wash)"></span>
+                    <span class="theming-tname mono">--agent-wash</span>
+                    <span class="theming-trole">agent fill</span>
+                    <span class="theming-hex mono">#0A3A40</span>
+                  </label>
+                </div>
+
+                <!-- group: Functional -->
+                <div class="theming-grp">
+                  <div class="theming-grp-h"><span class="kicker">Functional</span><span class="ord">03</span></div>
+
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--ok)"></span>
+                    <span class="theming-tname mono">--ok</span>
+                    <span class="theming-trole">success</span>
+                    <span class="theming-hex mono">#2BB673</span>
+                  </label>
+                  <label class="theming-trow">
+                    <span class="theming-sw" style="background:var(--warn-ink)"></span>
+                    <span class="theming-tname mono">--warn-ink</span>
+                    <span class="theming-trole">warning text</span>
+                    <span class="theming-hex mono">#E0A52B</span>
+                  </label>
+                </div>
+
+                <!-- group: Type -->
+                <div class="theming-grp">
+                  <div class="theming-grp-h"><span class="kicker">Type</span><span class="ord">03</span></div>
+
+                  <label class="theming-trow theming-trow--font">
+                    <span class="theming-sw theming-sw--font">Aa</span>
+                    <span class="theming-tname mono">--display</span>
+                    <span class="theming-trole">headings</span>
+                    <span class="theming-hex mono">Space Grotesk</span>
+                  </label>
+                  <label class="theming-trow theming-trow--font">
+                    <span class="theming-sw theming-sw--font">Aa</span>
+                    <span class="theming-tname mono">--text</span>
+                    <span class="theming-trole">body</span>
+                    <span class="theming-hex mono">Archivo</span>
+                  </label>
+                  <label class="theming-trow theming-trow--font">
+                    <span class="theming-sw theming-sw--font theming-sw--mono">M0</span>
+                    <span class="theming-tname mono">--mono</span>
+                    <span class="theming-trole">labels · nums</span>
+                    <span class="theming-hex mono">JetBrains Mono</span>
+                  </label>
+                </div>
+
+                <!-- group: Metrics -->
+                <div class="theming-grp theming-grp--last">
+                  <div class="theming-grp-h"><span class="kicker">Metrics</span><span class="ord">04</span></div>
+
+                  <label class="theming-trow theming-trow--metric">
+                    <span class="theming-sw theming-sw--metric"><b style="width:8px"></b></span>
+                    <span class="theming-tname mono">--u</span>
+                    <span class="theming-trole">base unit</span>
+                    <span class="theming-hex mono">8px</span>
+                  </label>
+                  <label class="theming-trow theming-trow--metric">
+                    <span class="theming-sw theming-sw--metric"><b style="width:1px"></b></span>
+                    <span class="theming-tname mono">--rule</span>
+                    <span class="theming-trole">hairline w</span>
+                    <span class="theming-hex mono">1px</span>
+                  </label>
+                  <label class="theming-trow theming-trow--metric">
+                    <span class="theming-sw theming-sw--metric theming-sw--radius"></span>
+                    <span class="theming-tname mono">--radius</span>
+                    <span class="theming-trole">corner</span>
+                    <span class="theming-hex mono">0px</span>
+                  </label>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- RIGHT: live preview + actions -->
+            <div class="theming-previewcol">
+              <div class="panel theming-preview">
+                <div class="ph">
+                  <span class="ord">◉</span><span class="t">Live preview</span>
+                  <div class="r">
+                    <span class="theming-livetag"><span class="dot dot--agent live"></span> RENDERS AS YOU TYPE</span>
+                  </div>
+                </div>
+
+                <!-- the scoped, re-themed sample app -->
+                <div class="theming-stage theming-tk-afterdark">
+                  <div class="theming-samp">
+                    <!-- sample sidebar -->
+                    <div class="theming-samp-side">
+                      <div class="theming-samp-logo"><span class="theming-samp-mark"></span> editor<b>zero</b></div>
+                      <div class="theming-samp-nav on">⊹ Overview</div>
+                      <div class="theming-samp-nav">▤ Documents</div>
+                      <div class="theming-samp-nav">◫ Spaces</div>
+                      <div class="theming-samp-navh">AGENTS · LIVE</div>
+                      <div class="theming-samp-nav ag"><span class="theming-samp-dot live"></span> archivist</div>
+                    </div>
+                    <!-- sample main -->
+                    <div class="theming-samp-main">
+                      <div class="theming-samp-bar">
+                        <span class="theming-samp-crumb">Platform / Architecture</span>
+                        <span class="theming-samp-btn">+ New</span>
+                      </div>
+                      <div class="theming-samp-body">
+                        <div class="theming-samp-kick">2026 · WK22 · LIVE DOC</div>
+                        <div class="theming-samp-h1">Runtime topology<span>.</span></div>
+                        <div class="theming-samp-p">The dispatcher routes every mutation through one transaction seam, so humans and agents converge on a single CRDT.</div>
+
+                        <!-- presence: human + agent peers -->
+                        <div class="theming-samp-presence">
+                          <span class="theming-samp-pchip u"><span class="theming-samp-av u"></span> Nadia A.</span>
+                          <span class="theming-samp-pchip ag"><span class="theming-samp-av ag"></span> archivist <span class="theming-samp-typing">typing…</span></span>
+                        </div>
+
+                        <!-- tracked agent suggestion -->
+                        <div class="theming-samp-sugg">
+                          <span class="theming-samp-ins">Idempotent</span> retries keep the audit log to exactly <span class="theming-samp-del">two</span><span class="theming-samp-ins">one</span> entry per mutation.
+                        </div>
+
+                        <div class="theming-samp-chips">
+                          <span class="theming-samp-tag pub">● PUBLISHED</span>
+                          <span class="theming-samp-tag rev">◐ IN REVIEW</span>
+                          <span class="theming-samp-tag ok">✓ CONVERGED</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- contrast guard -->
+                <div class="theming-guard">
+                  <span class="theming-guard-ic">✓</span>
+                  <div class="theming-guard-tx"><b>Contrast verified.</b> Body text 8.1:1 · agent text 5.4:1 · accent 4.9:1 — all pass WCAG AA. Two tokens auto-nudged for legibility.</div>
+                  <span class="theming-guard-tag">AA OK</span>
+                </div>
+              </div>
+
+              <!-- actions -->
+              <div class="theming-actions">
+                <div class="theming-actions-l">
+                  <button class="btn btn--primary">⤓ Save theme</button>
+                  <button class="btn btn--ultra">Apply now</button>
+                </div>
+                <div class="theming-actions-r">
+                  <button class="btn btn--ghost">⧉ Export CSS</button>
+                  <button class="btn btn--ghost">↺ Revert</button>
+                </div>
+              </div>
+
+              <!-- (3) export / paste — theme is just CSS -->
+              <div class="panel theming-export">
+                <div class="ph">
+                  <span class="ord">03</span><span class="t">Export · or paste your own</span>
+                  <div class="r"><span class="chip chip--ghost">CSS CUSTOM PROPERTIES</span></div>
+                </div>
+                <div class="codeblock theming-code">
+                  <div class="ch"><span>northwind-after-dark.theme.css</span><span class="theming-copy">⧉ COPY</span></div>
+                  <pre><span class="cm">/* A theme = a :root override. No rebuild. */</span>
+<span class="kw">:root</span>[data-theme=<span class="st">"after-dark"</span>] {
+  --paper:   <span class="st">#0E1117</span>;  --surface: <span class="st">#161B22</span>;
+  --ink:     <span class="st">#E6EDF3</span>;  --hair:    <span class="st">#283039</span>;
+  --ultra:   <span class="st">#3B5BFF</span>;  --agent:   <span class="st">#22D3E0</span>;
+  --ok:      <span class="st">#2BB673</span>;  --radius:  <span class="st">0px</span>;
+}</pre>
+                </div>
+                <div class="theming-export-ft">
+                  <span class="theming-export-note">Paste any <code>:root{ }</code> block to author a theme — the same tokens drive every surface: Web UI, exported PDF, embeds.</span>
+                  <button class="btn btn--ghost btn--sm">⇪ Import from CSS</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="credit">
+            <span>EDITORZERO · THEMING = GLOBAL TOKEN OVERRIDE · NO REBUILD</span>
+            <div class="ms"><span>28 TOKENS</span><span>6 GROUPS</span><span>WCAG AA ENFORCED</span></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MOBILE BOTTOM TAB BAR ============ -->
+  <nav class="theming-tabbar" aria-label="Primary">
+    <a href="#" class="theming-tab"><span class="theming-tab-ic">⊹</span><span>Home</span></a>
+    <a href="#" class="theming-tab"><span class="theming-tab-ic">▤</span><span>Docs</span></a>
+    <a href="#" class="theming-tab"><span class="theming-tab-ic">◫</span><span>Spaces</span></a>
+    <a href="#" class="theming-tab on"><span class="theming-tab-ic">◧</span><span>Theme</span></a>
+    <a href="#" class="theming-tab"><span class="theming-tab-ic">◷</span><span>More</span></a>
+  </nav>
+</div>
+</body>
+</html>
