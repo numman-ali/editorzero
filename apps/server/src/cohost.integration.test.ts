@@ -26,7 +26,10 @@
  * Auth frame. But the gate keys on the Auth frame, not on hook presence: with
  * **no** `onAuthenticate`, any Auth frame establishes full read/write. So
  * "`onAuthenticate` is registered and throws on deny" is the only backstop —
- * an invariant the production WS attach must assert at boot.
+ * the production WS attach enforces it by *construction* (a single
+ * `createAuthenticatedCollabHocuspocus` factory that always installs the hook,
+ * with a negative test that a hook-less instance is never on the production
+ * path), not by a runtime boot-time assertion.
  *
  * Scope: this proves co-hosting + cookie authN + per-doc authZ *feasibility*,
  * not the final production sync topology (one shared Hocuspocus instance + a
@@ -276,6 +279,59 @@ function wsAuth(port: number, documentName: string, cookie: string | null): Prom
   });
 }
 
+/**
+ * Open one collab WS with a session cookie, then run the Auth handshake for
+ * `docFirst` then `docSecond` *on the same socket*, returning both outcomes in
+ * order. This pins the multiplex concern that forced authZ into
+ * `onAuthenticate`: Hocuspocus gates each `documentName` independently over a
+ * shared socket, so authenticating one document must not establish another — a
+ * cross-workspace doc sent over an already-authenticated socket must still be
+ * denied. The second frame is sent only after the first terminal response, so
+ * the outcomes map to send order (interleaved sync frames decode to null and
+ * are skipped by `decodeAuthResponse`).
+ */
+function wsAuthSameSocket(
+  port: number,
+  cookie: string,
+  docFirst: string,
+  docSecond: string,
+): Promise<readonly [AuthOutcome, AuthOutcome]> {
+  return new Promise((resolve, reject) => {
+    const client = new WebSocket(`ws://127.0.0.1:${port}/collab`, { headers: { cookie } });
+    let first: AuthOutcome | null = null;
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      client.terminate();
+      reject(new Error("ws same-socket auth handshake timed out"));
+    }, WS_TIMEOUT_MS);
+    const fail = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(`ws closed mid same-socket handshake (first outcome: ${first ?? "none"})`));
+    };
+    client.on("open", () => client.send(buildAuthFrame(docFirst, "smoke-session-token")));
+    client.on("message", (data) => {
+      if (settled) return;
+      const outcome = decodeAuthResponse(rawToUint8(data));
+      if (outcome === null) return;
+      if (first === null) {
+        first = outcome;
+        client.send(buildAuthFrame(docSecond, "smoke-session-token"));
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      client.close();
+      resolve([first, outcome]);
+    });
+    client.on("error", fail);
+    client.on("close", fail);
+  });
+}
+
 describe("co-hosting + auth (deliverable #2)", () => {
   let host: CoHost | undefined;
   let booted: BootedApp | undefined;
@@ -283,6 +339,7 @@ describe("co-hosting + auth (deliverable #2)", () => {
   let cookieA = "";
   let cookieB = "";
   let docInA = "";
+  let docInB = "";
 
   function activePort(): number {
     if (host === undefined) throw new Error("coHost not started");
@@ -300,6 +357,7 @@ describe("co-hosting + auth (deliverable #2)", () => {
     cookieA = await signUp(host.port, "alice@example.com");
     cookieB = await signUp(host.port, "bob@example.com");
     docInA = await createDoc(host.port, cookieA, "Alice's smoke doc");
+    docInB = await createDoc(host.port, cookieB, "Bob's smoke doc");
   });
 
   afterAll(async () => {
@@ -328,5 +386,14 @@ describe("co-hosting + auth (deliverable #2)", () => {
 
   it("denies a collab connection for a doc in another workspace (authZ at onAuthenticate)", async () => {
     expect(await wsAuth(activePort(), docInA, cookieB)).toBe("denied");
+  });
+
+  it("gates each document independently on one socket (same-socket multiplex authZ)", async () => {
+    // Alice authenticates her own doc, then sends an Auth frame for Bob's doc
+    // over the *same* socket: the first establishes, the second is denied —
+    // proving per-document authZ holds across a multiplexed connection.
+    const [first, second] = await wsAuthSameSocket(activePort(), cookieA, docInA, docInB);
+    expect(first).toBe("authenticated");
+    expect(second).toBe("denied");
   });
 });
