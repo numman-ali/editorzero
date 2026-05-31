@@ -68,6 +68,7 @@ Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 b
 | [0032](0032-version-history-track-changes.md) | **Version history + track-changes: build ourselves on Yjs snapshots + prosemirror-changeset** | **Accepted (new, 2026-05-30)** |
 | [0033](0033-web-ui-testing-rpc-contract.md) | **Web UI testing strategy + typed RPC error contract** | **Accepted (new, 2026-05-30)** |
 | [0034](0034-schemas-ssot-package.md) | **`@editorzero/schemas`: single-source wire+internal contracts reused by capabilities and surfaces** | **Accepted (new, 2026-05-30; refines 0029)** |
+| [0035](0035-web-ui-spa-scaffold.md) | **Web UI SPA scaffold: `apps/app`, Vite same-origin dev proxy, file-based routing, exact-pin + lockfile + pnpm cooldown supply-chain posture** | **Accepted (new, 2026-05-31)** |
 
 ## Review trails
 
