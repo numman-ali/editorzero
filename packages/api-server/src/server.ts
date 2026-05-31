@@ -21,14 +21,25 @@
  * closing the driver first would strand an in-flight read (Explore
  * finding). Idempotent.
  *
- * **Not yet wired** (deliverable #2, the co-hosting smoke): `serveStatic`
- * for the SPA bundle and the `/collab/*` WebSocket upgrade. `getApiApp`
- * returns the bare API trunk; those mount onto it at the serve() layer
- * once the SPA bundle exists and `@hono/node-server` v2 `upgradeWebSocket`
- * + a real `onAuthenticate` land (ADR 0027 / 0030).
+ * **WS seam exposed; production mount pending.** The co-hosting smoke
+ * (deliverable #2) proved the single-box topology on `@hono/node-server`
+ * **v1** — `serveStatic` for the SPA bundle plus the `/collab` WebSocket
+ * upgrade on one owned `http.Server` via raw `ws` (`WebSocketServer({
+ * noServer })` + `server.on("upgrade")`), with cookie authN at the upgrade
+ * and per-document authZ in Hocuspocus's `onAuthenticate` (ADR 0027 /
+ * 0030). No v2 bump is needed. `getApiApp` now exposes `resolver` so the
+ * upgrade can authenticate the session cookie through the shared Better
+ * Auth instance; folding the static + WS mounts into the serve() layer as
+ * a reusable attach hook (and converging on one Hocuspocus instance) is
+ * the ADR 0027 production pass.
  */
 
-import { createAuth, runAuthMigrations } from "@editorzero/auth";
+import {
+  type BetterAuthResolver,
+  createAuth,
+  createBetterAuthResolver,
+  runAuthMigrations,
+} from "@editorzero/auth";
 import { createDefaultRegistry } from "@editorzero/capabilities";
 import { loadEnvConfig, type RuntimeConfig, resolveSecretRef } from "@editorzero/config";
 import {
@@ -78,6 +89,16 @@ export interface BootedApp {
   readonly driver: SqliteDriver;
   /** The embedded sync service (headless Hocuspocus). */
   readonly sync: HocuspocusSync;
+  /**
+   * Principal resolver (`(headers) => UserPrincipal | null`) over the
+   * *same* Better Auth instance the trunk uses. Exposed so the collab
+   * WebSocket upgrade can authenticate the session cookie through one
+   * shared resolver rather than re-implementing identity (ADR 0030,
+   * invariant 5). The trunk's principal middleware builds its own from
+   * the same `auth` + `loadRoles`; production unification onto a single
+   * resolver instance is the ADR 0027 WS-attach-hook pass.
+   */
+  readonly resolver: BetterAuthResolver;
   /** Tear down sync then driver, in dependency order. Idempotent. */
   readonly close: () => Promise<void>;
 }
@@ -127,6 +148,7 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
   });
   const dispatcher = createApiDispatcher({ driver, registry, sync });
   const loadRoles = createLoadRoles(driver);
+  const resolver = createBetterAuthResolver({ auth, loadRoles });
 
   const app = createApiApp({
     auth,
@@ -144,5 +166,5 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     await driver.close();
   };
 
-  return { app, driver, sync, close };
+  return { app, driver, sync, resolver, close };
 }

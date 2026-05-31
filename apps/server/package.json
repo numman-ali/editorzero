@@ -27,9 +27,15 @@
     "@hono/node-server": "^1.19.14"
   },
   "devDependencies": {
+    "@editorzero/ids": "workspace:*",
+    "@hocuspocus/common": "3.4.4",
+    "@hocuspocus/server": "3.4.4",
     "@types/node": "catalog:",
+    "@types/ws": "^8.5.0",
     "@vitest/coverage-v8": "catalog:",
+    "lib0": "0.2.117",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "ws": "8.20.0"
   }
 }

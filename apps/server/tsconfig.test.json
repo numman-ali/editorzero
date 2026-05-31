@@ -9,6 +9,7 @@
   "references": [
     { "path": "../../packages/api-server" },
     { "path": "../../packages/config" },
+    { "path": "../../packages/ids" },
     { "path": "../../packages/observability" }
   ],
   "exclude": ["node_modules", "dist"]
