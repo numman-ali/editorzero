@@ -4,6 +4,8 @@
 **Date:** 2026-04-20
 **Deciders:** @numman
 
+> **Extended by [ADR 0040](0040-tenancy-ia-model.md) (2026-06-01).** ADR 0040 cashes out this ADR's reserved evolution axes (orgs-above-workspaces, teams-within-workspaces) as the **Org → Space → Collection/Doc** tenancy model. It does **not** supersede this ADR: `workspaces` stays the physical tenant root and `workspace_id` stays the scope column; **Space** is a new table *within* the workspace (no rename). v1 builds Space + Personal + per-doc `grants` + agents-as-grant-targets; Teams, the multi-org `organizations` table, and the guest-principal stay reserved here.
+
 ## Context
 
 `resolver.ts:74` hardcodes `roles: ["member"]` for every authenticated

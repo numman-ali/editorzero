@@ -1,0 +1,241 @@
+# ADR 0040 — Tenancy & information-architecture model: Org → Space (membership ceiling) → Collection/Doc (per-doc ACL), with Personal spaces, item-scoped guest grants, publish as an independent dimension, and agents as peer grant-targets
+
+**Status:** Accepted (new, 2026-06-01)
+**Date:** 2026-06-01
+**Deciders:** @numman, Claude Opus 4.8
+
+## Context
+
+editorzero already commits to three things that constrain how tenancy and sharing can work, and these are not negotiable:
+
+- **Per-doc granular ACLs** (architecture §3.12; ADR 0015). The container is not the only source of access — a doc carries its own access decision.
+- **One audit entry per mutation, and the audit log alone reconstructs persistent state** (AGENTS.md invariant 3; architecture §9.1 invariant 3a). Access state must be replayable from `audit_events`.
+- **Humans and AI agents are peer principals** (ADR 0016; `packages/principal/src/index.ts`). Both flow through the same `PermissionGate`.
+
+The third constraint is the sharp one. Agents mutate ACLs at machine speed. If "who can read doc X?" requires walking a whole sharing graph, that answer is un-auditable and un-cacheable at the rate agents move. The access model must keep that question a **local, provable lookup** — and the audit log must be able to reconstruct the answer at any past time T.
+
+Today the codebase is **single-tenant-per-user and greenfield**. `workspaces` is the tenant (architecture §3.2); `workspace_members(workspace_id, user_id) → role` sources the role (ADR 0024; `packages/db/src/schema.ts` `WorkspaceMembersTable`); one workspace is auto-minted per signup (ADR 0024 §4; the `create-auth.ts` after-hook seeds both the `workspaces` row and the `workspace_members` `owner` row post-commit). Agents are workspace-scoped but are **not** members (architecture §3.4). The collection tree (architecture §3.5) and `docs.visibility ∈ {workspace, public, private}` exist; `doc.publish`/`doc.unpublish` are visibility-only today, and `published_slug`/`published_at` are **absent from the live schema** (verified — `DocsTable` has only `slug`, `visibility`, `visibility_version`).
+
+A great deal of what Model B needs is **reserved scaffolding, not invention.** ADR 0024 deliberately reserved four evolution axes as "new ADR, new slice" (ADR 0024 Revisit triggers): multi-workspace + invites; **orgs-above-workspaces** (`organizations` table + nullable `workspaces.organization_id`); **teams-within-workspaces** (`workspace_teams` + `team_members` + an ACL-resolver layer in `PermissionGate`); platform-admin. Architecture §3.12 already sketches `doc_acls`/`collection_acls`; the capability matrix already reserves `permission.grant`/`revoke`/`list` rows; `packages/audit/src/effect.ts` already declares `acl.grant`/`acl.revoke`; `@editorzero/scopes` already carries `permission:grant`/`permission:revoke`. This ADR **cashes out the org + teams reserved axes** and pins the access algebra. It **extends ADR 0024 and supersedes nothing.**
+
+> **What is genuinely new (only three things):** (1) the **ceiling rule** — it inverts §3.12's most-permissive union; (2) **Space** as a membership boundary distinct from the tenant; (3) **item-scoped guest grants** (and Teams-as-grant-targets, reserved). Everything else is repositioning.
+
+The decision is grounded in how six products actually model this, live-verified 2026-06-01 across three research runs (Notion, Linear, cross-tool), and laid out visually in [`docs/ia/tenancy-models.html`](../ia/tenancy-models.html) (subtitled "decision brief for ADR 0040"; its section 05 maps the model onto the current schema):
+
+- **Notion** — teamspaces (Open/Closed/Private) as a membership home, per-page ACLs that can narrow, page-level guests outside the teamspace, publish independent of edit. The closest prior art; we adopt its shape but make the ceiling **hard** (see Decision).
+- **Linear** — teams as the boundary, private teams, shareable issues that can't be re-shared, no personal/draft space, no native publish. We borrow "shared item can't widen further" (bounded blast radius) and reject "no personal space."
+- **Confluence** — spaces with space permissions as a true ceiling; cross-space sharing is **forbidden** (you must grant space access). We take the hard ceiling and **soften only via an explicit, audited guest grant** so cross-space sharing remains possible without dissolving the ceiling. (Confluence patched a CVE for silently applying the new parent's permissions on move — directly motivating our audited-move rule.)
+- **Slack** — guests are *yours* (your directory, your audit, your revocation), not federation. Shapes the future guest-principal as a zero-membership directory entry, not a cross-tenant trust edge.
+- **GitHub** — outside collaborators as item-scoped grants; org/team grouping. Shapes Teams-as-grant-target and item-scoped guest grants.
+- **Google Drive** — shared drives + per-item shares; the universal footgun where moving across a boundary silently drops or changes shares. Motivates the explicit move-transition prompt.
+
+## Vocabulary
+
+One cohesive set (mirrors section 01 of `docs/ia/tenancy-models.html`). This is the control-plane vocabulary the whole product — API, CLI, MCP, Web UI — speaks.
+
+- **Org** — the self-hosted deployment; the tenant root. **One by default.** In v1 Org is **conceptual** (= the deployment); the existing `workspaces` table stays the physical tenant-isolation root, and the Layer-2 scope column stays `workspace_id`. No `organizations` table in v1 (reserved per ADR 0024 "orgs-above-workspaces"). Holds the member directory + all agents.
+- **Member** — a human in the org directory; a full principal who can join Spaces & Teams. Maps to a Better Auth `user` + a membership row.
+- **Agent** — an AI principal in the org (ADR 0016). Receives grants **exactly like a member** (peer), with its own attribution, rate limits, and revocation. Not a new principal kind for sharing — `AgentPrincipal` already exists.
+- **Space** — a membership boundary inside the Org (a team's shared home) with a default access baseline. Types: **Open / Closed / Private**. The **hard ceiling** for ACL resolution. Implemented as a **new `spaces` table** FK'd to `workspace_id` — a row *within* the workspace, **not** a rename of `workspaces`.
+- **Personal** — each member's private, owner-only-baseline Space where drafts live; promote by **moving** a doc into a shared Space (an audited cross-boundary transition). A `spaces` row of `kind='personal'` with `owner_user_id`. Auto-seeded at signup.
+- **Collection** — a folder tree *inside* a Space. **In v1 a Collection is pure navigation: it carries no ACL of its own** (see the ceiling rule and blocker B1 below). The **existing `collections` table** (`CollectionsTable`), reparented under a Space via a new `space_id` column. Collection-level grants are a **reserved** extension.
+- **Doc** — the leaf. Carries its **own ACL** (a narrowing of the Space baseline, or an item-scoped guest grant). The existing `docs` table.
+- **Team** — a named group of members used as a **grant target**. **Reserved** for a later slice per ADR 0024; mocked in the members-admin screen but feature-gated until the schema + capabilities land.
+- **Grant** — an ACL entry: (principal-or-Team) → role ∈ {owner, edit, comment, view} on a (Space/Doc; Collection reserved).
+- **Guest grant** — an **item-scoped** grant to a principal *outside* the Space — **the only way to widen past the ceiling.** Enumerable, revocable, audited. A `grants` row with `is_guest=true`.
+- **Publish** — an **independent visibility dimension** on a Doc (public-read link / published site), **orthogonal** to the ACL. A "guest editor" = a guest grant with `edit` on a published doc.
+- **Guest principal (future)** — a directory entry that is *not* a member; sees only what it is explicitly granted. **Reserved.** v1-minimal modeling: a Better Auth `user` with zero Space memberships, so "sees only what it's granted" falls out of the grant resolver with no new principal kind.
+
+## Options considered
+
+### Option A — Flat Org + per-doc ACL
+
+Everyone is a member of the one Org; collections are pure navigation; every doc carries an ACL and that ACL is the *only* access decision. No membership boundary between Org and Doc.
+
+**Pros.** Dead simple; matches the per-doc-ACL commitment literally. Best for a solo user or a tiny team. Closest to GitHub-without-teams.
+
+**Cons.** "What can Alice see?" becomes *walk every doc* — the exact whole-graph lookup the agent-speed constraint forbids. No team homes; large orgs drown in per-doc grants. No membership grouping to onboard/offboard against. No place for private drafts distinct from shared work.
+
+**Rejected** — fails the locality constraint at scale and gives agents no bounded "who can read X" answer.
+
+### Option B — Org → Spaces (membership ceiling) + Personal — **CHOSEN**
+
+Org holds the member directory + agents. Spaces are membership boundaries with a default baseline (Open/Closed/Private). Collections are folders inside a Space. Docs carry per-doc ACLs that may only **narrow** within the Space. A Personal space per member holds private drafts. Cross-space sharing is an explicit, audited **guest grant**. Publish is an independent dimension. Agents and Teams are grant targets.
+
+**Pros.** One model scales solo → small team → large org. "What can X see?" = (Space members − narrowing) ∪ (enumerable guest grants on X) — **bounded and auditable** (indexed lookups, never a graph walk). Clean cross-boundary + guest + publish story. Maps onto the existing schema as a **repositioning, not a rewrite** (Notion-class, with Confluence's hard ceiling). Personal space gives drafts a home Linear lacks.
+
+**Cons.** More concepts than Option A. The hard ceiling needs the guest-grant escape hatch so it doesn't feel rigid. Inverts the documented union algebra (a real, scoped amendment). The cross-space guest grant is the one row-type that deliberately crosses the Layer-2 scope predicate, requiring a carefully-chosen read path (see Decision → open structural forks).
+
+**Chosen.** It is the only option that keeps the agent-speed locality constraint *and* serves all eight scenarios, and it consumes ADR 0024's reserved axes rather than inventing a parallel structure.
+
+### Option C — Multi-workspace tenancy + federation
+
+Keep `workspaces` as the hard tenant boundary; a solo user, a team, and a customer are each a separate workspace; cross-workspace sharing is federation (the reserved `workspace_trust_edges` axis, architecture §3.2).
+
+**Pros.** Hard isolation by construction; least change from today's code. Right for agencies / true multi-customer isolation.
+
+**Cons.** Solo→team and "share one doc out" get awkward — expanding a personal workspace into a team means spinning a new tenant and re-adding identity. Identity and agents duplicate per tenant. Over-built for a single self-hosted Org. Federation is a v2+ research problem (architecture §3.2 defers cross-workspace to v2+).
+
+**Rejected for v1 as the *primary* model** — but **preserved as the reserved multi-org axis** (ADR 0024). Model B sits *inside* one workspace; if true multi-customer isolation is later needed, the `organizations` table layers above (each Org = one `workspaces` row family) without reshaping Model B.
+
+## Decision
+
+**Adopt Model B.** Concretely, for v1:
+
+- **Org = the deployment (conceptual).** `workspaces` stays the physical tenant-isolation root and the Layer-2 / (future) Layer-3 scope column stays `workspace_id`. No `organizations` table. This preserves `TENANT_SCOPE_COLUMNS`, the `workspaces`-self-scoped special-case (`workspaces: "id"`), the Kysely `WorkspaceScopingPlugin`, the agent api-key `referenceId = workspace_id` binding (architecture §3.3), and every branded ID and capability noun **untouched**. (Resolved structural fork #1.)
+- **Space = a new `spaces` table within the workspace**, FK'd to `workspace_id`, registered in `TENANT_SCOPE_COLUMNS` (scope = `workspace_id`), so it inherits Layer-2 isolation for free. (A drift guard already fails the build if a tenant table is added without an isolation test — so this registration is enforced, not merely conventional.) A Space is **not** a renamed `workspaces` row. Columns: `id (SpaceId)`, `workspace_id`, `kind ∈ {team, personal}`, `type ∈ {open, closed, private}`, `owner_user_id` (null for team spaces), `name`, `slug`, baseline-access, `created_by`, timestamps, `deleted_at`.
+- **Collection = the existing `collections` table** + a new nullable `space_id` column (handler-enforced, no SQL FK — matching the existing `docs.collection_id` pattern). **Collections hold no ACL in v1** (pure navigation).
+- **Doc = the existing `docs` table**, ACL via the grants table below.
+- **Grant = one polymorphic `grants` table** (resolved structural fork #3): `(id (GrantId), workspace_id, resource_kind, resource_id, subject_kind, subject_id, role, is_guest, created_by, created_at)`. **v1 enums:** `resource_kind ∈ {space, doc}` (`collection` reserved — B1), `subject_kind ∈ {user, agent}` (`team` reserved — H13), `role ∈ GRANT_ROLES`. This **supersedes the architecture §3.12 two-table `doc_acls`/`collection_acls` sketch** (union-based, `subject_kind = user|agent|role`). One table collapses "who can read X" to a single indexed query keyed on `(resource_kind, resource_id)`. The enums are **open for greenfield widening** (`collection`, `team`) — a widening, not a breaking change.
+- **Grant lifecycle (resolved — H1).** Revoke is a **hard `DELETE`** (matching the §3.12 `UNIQUE(resource, subject)` shape); `grants` carries **no `deleted_at`**. Grant rows **persist through their resource's soft-delete** (inert while the doc/space is trashed because the resource isn't readable), so `doc.restore`/`space.restore` recover the exact grant set 1:1 for free. `doc.purge` hard-deletes a doc's grants and enumerates them in its preimage (so replay stays exact). Forward-replay of `acl.grant` then `acl.revoke` nets to no row — sufficient for invariant 3a; "undo a revoke" (which would need a preimage on the `acl.revoke` effect) is **reserved**, and grant state on restore is **state-as-of-delete** (matching ADR 0017's workspace-restore semantics).
+- **No composite FK on `grants` (resolved — H6).** The repo's tenant-integrity pattern gives child rows a composite `(id, workspace_id)` FK so the scoping plugin can't be paired with a wrong-tenant `id`. A **polymorphic** `resource_id` cannot carry per-kind composite FKs. `grants` (and `collections.space_id`) therefore **forgo composite-FK integrity by design**; the compensating control is explicit: the read-only resolver + a **dedicated isolation-fuzzer property** asserts every grant's `resource_id` resolves within the same `workspace_id`. This is the highest-risk table (machine-speed agent ACL writes, deliberately cross-boundary guest rows), so the guard is named here, not left to "matches `collection_id`" (whose no-FK is itself a test-fixture concession).
+- **GRANT_ROLES = {owner, edit, comment, view}** as a new `as const` in `@editorzero/scopes`, **distinct** from the existing workspace `ROLES = {owner, admin, member, guest}`. Different vocabularies — conflating them is a real drift hazard, so contract tests pin GRANT_ROLES separately.
+- **Grant subject is two flat fields, not a nested object (resolved — H12).** Capability inputs use flat sibling fields `subject_kind: z.enum(...)` + `subject_id: <branded string>` at the top level (the shipped `workspace.member_add` exemplar), **not** a nested `PrincipalRef {kind,id}` field. A nested object field does *not* trip the generators' top-level-ZodObject guard, so it would ship a broken `--subject` CLI flag and a misleading MCP arg silently. `PrincipalRefSchema` is reserved for internal/handler composition only.
+
+### The ceiling rule (the crux)
+
+Within a Space, **Doc grants may only NARROW (subtract) from the Space baseline.** (Collections hold no ACL in v1.) The **only** way to grant a principal who is not a Space member is an explicit **Guest grant** on that item. Therefore:
+
+> **who-can-read(X) = (Space-baseline members − narrowing grants on X) ∪ (enumerable guest grants on X)**
+
+This stays a **local, provable lookup** — indexed reads on stored rows, **never a recursive graph walk**. The reconciliation, stated precisely so the resolver has a single spec and no surface re-derives it (invariant 5):
+
+1. Compute the **Space baseline** for the principal: membership role → baseline access (and, reserved, Team-derived grants on the Space).
+2. **Subtract** any narrowing Doc grants that restrict that principal below the baseline (`is_guest=false`).
+3. **Union** any guest grants on the item for that principal (`is_guest=true`).
+4. The **cross-tenant hard-deny is unchanged and orthogonal** (architecture §8.3(a)): if `Principal.workspace_id ≠ AccessPath.workspace_id`, deny at Layer 1 before any of the above.
+
+This **inverts** the documented resolution algebra. Architecture §3.12 and §8.1 Layer 1 describe a **most-permissive union** (`role_default ⊕ workspace_default ⊕ collection_acls ⊕ doc_acls`). Under Model B that becomes **narrow-then-guest-union**. ADR 0015 and architecture §8.1/§3.12 are amended accordingly (see Relationship to existing ADRs).
+
+> **Blocker B1 — why Collections hold no ACL in v1.** If a Collection could carry a narrowing grant *and* a doc inherited its Collection's baseline at read time, then moving a doc between two differently-permissioned Collections **in the same Space** would silently change the doc's *resolved* access with **no stored-row mutation → no audit row → no prompt** — a silent privacy change the model forbids. v1 resolves this the smallest, provable way: **Collections are pure navigation and cannot hold grants**, so "move within a Space = no ACL change" is *literally* true. Collection-level grants are a reserved extension; if they land, a same-Space move that changes the resolved set becomes an audited transition like a cross-boundary move (below).
+
+### Privacy invariant
+
+Privacy tightens **downward**: a private Space cannot expose a Doc to the public **unless that Doc is explicitly published** (the deliberate, audited widening). No DB constraint expresses this — it is a **handler check** on `doc.publish` and a property test.
+
+### Drag-drop / move = audited ACL transition
+
+- **Moving WITHIN a Space** (reorder, or move between Collections in the same Space) = **no ACL change** — pure navigation, instant, no prompt. (True by construction: Collections hold no ACL in v1 — B1.)
+- **Moving ACROSS a boundary** (Space↔Space, Personal↔Space) = an **explicit, audited ACL transition.** The Web UI **prompts**: *"adopt the destination Space's baseline"* vs *"keep this doc's own grants."* **Never silent.**
+
+This rides the **existing `doc.move` capability** (verified metadata-only; its effect carries only `{doc_id, new_collection_id, new_order_key}` — zero ACL fields). The cross-boundary case extends the effect with a single `acl_transition` field `{adopt_baseline | keep_grants, before, after}` so it remains **exactly one audit row** (invariant 3) and the prompt's two-choice outcome is replay-deterministic. **Personal→Space promotion reuses this same branch** — not a separate capability. Splitting a move into two audit rows (move + acl) would break invariant 3.
+
+### Publish as an independent dimension
+
+Publish is decoupled from the ACL baseline. The existing `docs.visibility {workspace, public, private}` enum is **reinterpreted, not migrated**: `'workspace'` = "Space baseline applies," `'private'` = "owner-only," and **publish** is the orthogonal public dimension carried by new `published_slug`/`published_at` columns. A "guest editor" = a guest grant with `edit` on a published doc. This folds into the already-planned reader-path slice (continuation "What's next" #4), pre-designed as additive (architecture §3.5).
+
+### Agents as peer grant-targets
+
+`Grant.subject` accepts `agent_id` exactly like `user_id` (`subject_kind = agent`). An agent's **effective doc access** is intended to layer as:
+
+> `intersect(agent.scopes, delegator.permissions for acting_as)` ∩ ((Space-baseline − narrowing) ∪ guest-grants)
+
+**Honest status (corrected — H8): both conjuncts are unbuilt today.** `effectiveScopes()` returns an agent's `scopes` verbatim (no intersection with the delegator); `acting_as` is read **only for audit attribution**, never for narrowing; the gate docstring lists "agent↔delegator intersection for `acting_as`" as deferred. The ceiling term is likewise new. **Consequence for soundness:** until the intersection lands, a delegated agent holding `permission:grant` could escalate beyond its delegator. The `acting_as` intersection MUST therefore land **in or before** the `workspaceAwareGate` slice (the gate is the single composition point for both terms) — captured as a revisit trigger and a Step-6 gate. The `AgentPrincipal` type + gate branch exist; the `agents` table + api-key→agent resolver are a prerequisite slice before an agent can *use* a grant.
+
+### Open structural forks — resolved here
+
+1. **Org vs Space tenant-column (highest blast radius).** **Resolved: keep `workspace_id` as the physical tenant column; Space is a new table within the workspace.** Renaming `workspaces → spaces` would break all 7 scoped tables, branded IDs, `loadRoles`, the gate cross-workspace check, and every capability noun. No code-wide rename.
+2. **Cross-space guest-grant visibility vs the `WorkspaceScopingPlugin` (highest risk).** **Resolved: resolve guest-granted items through a dedicated, audited read path on the system/unscoped handle**, **not** by widening the hot-path scope predicate to `(scope_col = scope OR id IN <guest set>)` — the latter reaches into the exact cross-tenant-leak class the isolation fuzzer exists to catch. **Honest scope (corrected — H3/H9/H10):** in v1 guest grants are within the **single** Org (one `workspaces` row), so "cross-space" = cross-`spaces`-row *within one tenant* — the plugin's `workspace_id` predicate does **not** block same-Org cross-Space reads. **Therefore the Space ceiling is enforced ONLY at Layer-1 (the resolver) in v1; Layer-2 is workspace-grained and provides no Space-level isolation.** It follows that **the resolver must be the SOLE read authority for every Space-scoped `list`/`get`/`list_grants`** (it must filter *reads*, not only gate mutations), and **every read path that bypasses the gate — the event-rendered published path (§5.4) and the git-mirror (ADR 0020) — must be made ceiling-aware (or scope-restricted) *before* per-doc ACL gates reads.** The dedicated guest read path is the forward-compatible, auditable shape and is gated behind Codex + Opus red-team as its own seam.
+3. **Grants table shape.** **Resolved: one polymorphic `grants` table** (supersedes the §3.12 two-table sketch), so "who can read X" is one indexed query — with the explicit no-composite-FK fuzzer compensation above (H6).
+4. **Postgres RLS Layer-3.** **Resolved: formally RE-DEFER for SQLite-first v1, stated explicitly.** Architecture §8.1 / ADR 0015 assert a three-layer model, but **Layer-3 does not exist in code** (verified: zero `CREATE POLICY`, zero `ENABLE ROW LEVEL SECURITY`, no `app.workspace_id` GUC in `postgres-ddl.ts` *or* `postgres.ts`). **Layer-2 (the Kysely plugin) is the sole isolation floor on both backends today.** When RLS lands, it must be **co-designed with the guest-grant predicate** so Layer-2 and Layer-3 are one definition at two enforcement sites; shipping RLS *after* the guest model risks a silent correctness/security split. Until then, do **not** silently inherit the three-layer claim — ADR 0015 is amended to record Layer-3 as specified-but-unbuilt.
+
+## Scenarios → mechanism
+
+Walking all eight scenarios from section 03 of `docs/ia/tenancy-models.html`:
+
+1. **Solo user.** Sign up → auto-minted Org + **Personal** space (the signup hook extended to seed the Personal `spaces` row). Everything private to the owner. *Mechanism: Personal space.*
+2. **Personal that expands into a team.** Create a **Space**, **move** drafts in. *Mechanism: cross-boundary `doc.move` (Personal→Space) with the audited ACL transition.*
+3. **Small team: shared + private drafts.** The team works in one **Space** (all members see all its docs via the baseline); each member keeps a **Personal** space for private drafts. *Mechanism: Space baseline + Personal space.*
+4. **Private doc shared with specific people.** Doc in Personal → add a **grant** to specific members (or, when they're outside the Space, a guest grant). They see just that doc; the ceiling stops sibling leakage. *Mechanism: item grant / guest grant.*
+5. **Cross-space sharing.** Doc in Space A; share with someone in Space B (or in no Space) → **guest grant.** They do *not* join Space A; it appears in their "Shared with me." Enumerable, revocable, audited. *Mechanism: guest grant (`is_guest=true`), resolved via the dedicated audited read path (fork #2).* **You can share both within and across Spaces** — within = a grant inside the baseline; across = a guest grant.
+6. **Publishing.** Flip the Doc's **publish** dimension → public read at a slug. Independent of who can edit. *Mechanism: reframed `doc.publish`/`unpublish` + `published_slug`/`published_at`.*
+7. **Guest editors on a published doc.** A published doc needing outside editing → **guest grant with `edit`** to a specific external principal. Public still reads; the guest edits just that doc; the grant can't be re-shared (bounded blast radius). *Mechanism: guest grant (`edit`) ∘ publish dimension. Live-edit collab for an external guest inherits the three open WS-attach write blockers — see Evolution path.*
+8. **Invite an org guest (future).** A **Guest principal** in the Org directory but not a member — sees only what it's explicitly granted. *Mechanism (reserved): a zero-membership Better Auth `user`; "sees only what it's granted" falls out of the grant resolver. Agents reuse the same scoping.*
+
+## Invariant interactions
+
+The model preserves every hard invariant. Where the supporting machinery is **not yet built**, this is stated plainly rather than assumed:
+
+- **Invariant 3 (one audit row; audit reconstructs state).** Every grant/revoke/guest/space mutation emits exactly one `AuditEffect`; the cross-boundary move carries a single compound `acl_transition` effect, never two rows. **Load-bearing reality (corrected — H2):** the replay property test that §9.1 cites as the proof of invariant 3a **does not exist** — and neither does the reducer, the `apply()` function, the `PersistentWorkspaceState` builder, nor the arch-lint exhaustiveness rule. **Invariant 3a is currently unproven for the existing model, not just for Model B.** The `PersistentWorkspaceState` tuple also does not list `spaces`/`space_members`/`grants`. Sequencing is therefore non-negotiable: **build the replay engine + property test against today's ~50 effect kinds FIRST** (Step 2), then extend the tuple in the same commit as the tables (Step 4), then add each new effect with its reducer branch in the same commit (Step 7). Adding machine-speed agent ACL effects onto an unproven replay is the single riskiest ordering in the rollout.
+- **Invariant 4 (capability parity on all surfaces).** **Honest status (corrected — H11): the four-way matrix is not mechanically enforced today.** `packages/contract-tests` (ADR 0033 §3) and the Web UI surface (`apps/app`) **do not exist yet**; the only parity test is CLI↔route (`apps/cli/.../parity.unit.test.ts`), plus an MCP self-consistency check. Declaring `surfaces:['api','cli','mcp','ui']` on a new capability today would pass every existing test while having **zero `ui` binding** — a silent hole. **v1 capabilities declare only the surfaces they actually bind (`api`/`cli`/`mcp`); the `ui` cell is added per-capability as the Web UI surface + the `contract-tests` harness land** (with task #13). The harness is a **hard prerequisite** for any honest `ui` parity claim.
+- **Invariant 5 (no surface re-implements permission logic).** The ceiling rule lives entirely in the composed `workspaceAwareGate` — a single read-only resolver injected once at composition (the gate docstring already reserves exactly this). Surfaces and the dispatcher pipeline do not move. Because the ceiling is Layer-1-only in v1 (fork #2), the resolver must be the **sole read authority** for Space-scoped reads, or "who can read X" silently enumerates the whole tenant.
+- **Invariant 6 (soft-deletes recoverable).** Space is a new deletable container. **Corrected (B2/H7): Space soft-delete does NOT cascade.** It **refuses on live descendants** — matching the shipped `collection.delete` (which refuses with a `HasLiveDescendantsError` counts payload rather than cascading, precisely to keep restore a 1:1 inverse and avoid N audit rows). `space.archive` refuses if the Space has live Collections/docs/members; the caller empties first; `space.restore` checks a live path (a `ParentDeletedError` analogue). One audit row per op (inv 3), bit-identical 1:1 restore (inv 6). Grants need no `deleted_at` — they ride with their resource (above), so a delete-restore cycle cannot silently change access.
+- **Invariant 7 (content vs metadata write paths).** Every Model B mutator (`space.*`, `permission.grant/revoke`, guest grant, `doc.move`-across-space) is relational-metadata-only — no Y.Doc — so each joins `METADATA_ONLY_CAPABILITIES` and takes the dispatcher single-tx `withSystemTx` path. Zero `ctx.transact` calls. Extends the proven `doc.publish`/`collection.*` precedent (ADR 0018); no amendment needed.
+- **Invariant 8 (agents are first-class).** Agents are peer grant-targets (`subject_kind = agent`), with their existing distinct rate limits, attribution, and revocation (ADR 0016). The agent's effective access is intended to intersect scopes with the ceiling — **both halves unbuilt today** (see Decision → agents-as-peer-grant-targets); the `acting_as` intersection is gated to land with the resolver.
+
+## Relationship to existing ADRs
+
+ADR 0040 **extends ADR 0024 and supersedes nothing.** It instantiates reserved scaffolding rather than inventing structure.
+
+- **Extends ADR 0024 (workspace-membership-shape).** ADR 0024's Revisit triggers explicitly pre-authorize Model B's deltas (orgs-above, teams-within, invite-flow, platform-admin). ADR 0040 cashes out the **org + teams** axes in v1 form. **Vocabulary reconciliation:** ADR 0024's `workspace` is *not* renamed; Space is a new sub-table. The product **label** is "Space"; the API **path** and tenant column stay `workspace_id` (deliberate label-vs-path split — see Consequences). **v1:** Space (new table), Personal (auto-mint), per-doc ACL via `grants`, agents-as-grant-targets, publish-dimension. **Reserved:** Teams-as-target, Guest-principal, multi-org.
+- **Amends ADR 0015 (permission-enforcement).** (a) Corrects the record: Layer-3 Postgres RLS is specified-but-**unbuilt** (zero `CREATE POLICY`); Layer-2 is the sole floor on both backends. (b) Inverts the Layer-1 algebra from most-permissive union to ceiling (narrow-then-guest-union). (c) States resolution stays a **local** lookup, replayable from audit, and that the resolver filters **reads**, not only mutations. The §8.3(a) cross-tenant hard-deny is unchanged.
+- **References ADR 0016 (principal-model).** `Grant.subject` accepts `agent_id` like `user_id`. States the layered effective-access formula **and that both conjuncts are unbuilt** (the `acting_as` intersection must land with the resolver). The `agents` table + api-key credential + agent resolver are a prerequisite slice.
+- **Amends ADR 0017 (soft-delete-recovery).** Adds Space as a deletable container that **refuses-on-live-descendants** (NOT cascade — aligning with `collection.delete`); `space.archive`/`space.restore` are 1:1 inverses with one audit row each. Grants need no `deleted_at` (hard-delete on revoke; ride with the resource on soft-delete); a cascading Space delete, if ever wanted, is a separate explicitly-designed capability with its own inverse story.
+- **References ADR 0018 (write-path).** All Model B mutators are metadata-only → `METADATA_ONLY_CAPABILITIES`, single-tx `withSystemTx`. No amendment.
+- **Amends ADR 0009 / capability matrix.** Reserved rows `permission.grant`/`revoke`/`list` are reconciled with the ceiling/guest model; new rows for `space.*`, `doc.add_guest`/`remove_guest`/`list_grants` land **with their capabilities (Step 8)**, each naming a real `AuditEffect` variant (coherence Check 6) added in the same commit, each declaring the surfaces it actually binds (invariant 4 — see the parity note above). `team.*` rows are reserved.
+- **References ADR 0027 (web-ui-topology) + ADR 0030 (better-auth-mount).** Publish rides the event-rendered static published path (ADR 0027). External **guest-editor live collab** is write-capable collab and is gated on ADR 0030's three open WS-attach blockers (role-aware `readOnly`, Origin check, `onAuthenticate` revocation-freshness — task #15). Guest-**read** works on today's auth-free published path; guest-**edit** is reserved-future behind #15.
+- **Amends ADR 0020 (git-mirror-export).** The mirror is mirror-ALL and ACL-unaware; under per-doc ACL it would leak private/guest-only docs. An export-scope decision (mirror-by-publish-state vs Space-baseline vs mirror-all) **must land before the resolver gates reads.** Reserved-future but flagged. The published-render path (§5.4) is likewise ACL-unaware and must assert no guest-only leak before per-doc ACL enforcement.
+- **References ADR 0034 (schemas SSOT).** Every new capability gets one `@editorzero/schemas` module imported verbatim by both the capability and its route (verified pattern: `workspace/member_add`). `GRANT_ROLES` is a distinct `as const`. **Grant subjects are flat `subject_kind`/`subject_id` fields, not a nested `PrincipalRef`** (H12). Inputs stay flat `z.object().strict()` or the CLI/parity generators throw — a richer shape is an explicit 0034 revisit, not a silent hack.
+- **References ADR 0035 / ADR 0039 (SPA scaffold / PWA).** The UI vocabulary lock must precede the shell scaffold (task #13). The reserved-prefix SSOT is `[/auth, /mcp, /collab, /infra, /docs, /collections, /workspaces, /audit]` (ADR 0035's reserved-prefix decision; ADR 0039 derives its offline service-worker denylist from that same list, with a security-relevant drift test). **Recommendation: UI label "Space" / client route `/spaces`, API path stays `/workspaces`** — stated once here so the rename does not churn the reserved-prefix SSOT, the PWA denylist, or `api-client`. New `/spaces`, `/permissions` prefixes are additive to that SSOT + its equality test.
+- **References docs/adr/README.md + docs/continuation.md.** Add the ADR 0040 index row + a continuation entry. Coherence Check 1 requires `docs/adr/0040-*.md` to exist before any `.md` cites "ADR 0040" — so the ADR file lands first.
+
+## Evolution & delivery path
+
+Ordered, non-breaking, cohesive with the in-flight Web UI shell. The repo is **greenfield** (ADR 0024 §3 "pre-production tree") — no production data, so every schema change is a clean-slate edit of the three lockstep files (`schema.ts` + `sqlite-ddl.ts` + `postgres-ddl.ts`) at one commit, **no backfill, no dual-write.** The 7 live tenant tables are untouched; everything Model B needs is additive. Labels: **v1-now** / **next-slice** / **reserved-future.**
+
+**Step 1 — Author ADR 0040 (this doc) + control-plane amendments. [v1-now]**
+Prose + schema-reshape only, no capability code. Settle the four structural forks (resolved above). Add dated amendment notes to architecture §8.1 / §3.12 (union→ceiling) and §9.1 (the `PersistentWorkspaceState` tuple gains the new tables when they land). Create the ADR file + README row + continuation entry; commit `docs/ia/tenancy-models.html` as the source-of-record visual. Run `pnpm coherence`. **Mandate Codex cross-model review** on the ceiling resolution + the workspace→Space blast-radius (ADR-level + control-plane). *Must land before the #13 shell scaffold commits its sidebar/route tree.* Fully reversible (docs only).
+
+**Step 2 — Build the audit replay engine + `replay.prop.ts` against TODAY's effect union. [v1-now]**
+This is **not a pure test addition (H2)** — it builds the reducer + `apply()` + `PersistentWorkspaceState` builder from zero for the current ~50 effect kinds, proving invariant 3a on the known-good model (`foldl(apply, ∅, allow-rows by created_at) ≡ live`, both SQLite and Postgres). Establish the ratchet **before** any ACL effect lands on it. Optionally stub the arch-lint exhaustiveness rule. Reversible.
+
+**Step 3 — Additive foundations, zero behaviour change. [v1-now]**
+Add `SpaceId`/`GrantId` brands (`parseV7`; no `OrgId`, no `TeamId` in v1). Add `SUBJECT_KINDS` entries `space`/`grant` (not `team`); `GRANT_ROLES` as-const; new `METADATA_ONLY_CAPABILITIES` entries (`permission:grant`/`revoke` scopes already exist). Add `@editorzero/schemas` shared modules (`GrantRoleSchema`, new ID schemas; `PrincipalRefSchema` internal-only). Registry untouched, so `default-registry.unit.test.ts` stays green. Reversible.
+
+**Step 4 — NEW-TABLE schema slice across the 3 lockstep files at ONE commit. [v1-now]**
+`spaces`, `space_members`, `grants` (single polymorphic) — each registered in `TENANT_SCOPE_COLUMNS` (scope = `workspace_id`). **Teams tables are NOT built here (H13)** — `teams`/`team_members` are reserved (Step 9). `collections` gains nullable `space_id`. Add the **schema↔DDL↔TENANT_SCOPE_COLUMNS coherence check in this same commit**, and **fix coherence Check 7's index regex (H5)** to match `CREATE [UNIQUE] INDEX`, capture+diff the `WHERE` predicate, and record UNIQUE-ness — otherwise the new partial-unique indexes are invisible to SQLite↔Postgres parity. Purely additive — non-breaking on both backends. Reversible.
+
+**Step 5 — Reader-path slice (folds in publish-orthogonality). [v1-now, parallel-safe]**
+ADD-COLUMN `published_slug`/`published_at` on `docs` + the partial unique index `ON (workspace_id, published_slug) WHERE published_slug IS NOT NULL AND deleted_at IS NULL` (both dialects, guarded by the fixed Check 7). Outbox→render consumer; reframe visibility as ACL-baseline + orthogonal publish dimension. **Must NOT enable Space-scoped listing before Step 6** (the resolver is the sole read authority — fork #2/H9): publish filtering is orthogonal, but any *Space*-scoped `doc.list` waits for the resolver. Reversible.
+
+**Step 6 — Build `workspaceAwareGate`. [next-slice; BLOCKER-class]**
+Compose `scopeOnlyGate` (unchanged) ∩ a **read-only** ACL/ceiling/guest resolver — **local lookup only, never a graph walk** — that filters **reads** (`doc.list`/`get`/`list_grants`), not only mutations. Add `space_id` (and likely `collection_id`) to `AccessPath`. **Commit to the F88 post-parse `PermissionDeniedError` handler-deny channel as the v1 mechanism (H4/H10)** — it is already proven (rolls back + writes one deny audit row) — rather than the unbuilt `AccessPath`-derivation codegen; guest cross-space reads bypass the gate's `workspace_id`-equality assertion by construction and flow through the dedicated audited read path (fork #2) **outside** the gate, red-teamed as its own seam. Land the **`acting_as` ∩ delegator intersection** here too (the gate is the single composition point — H8). Build/extend the cross-tenant fuzzer (architecture §8.1a, itself unbuilt) with the ceiling, privacy, the `resource_id`-resolves-within-`workspace_id` property (H6), and the ACL-audit-replay property. **Gate behind Codex + Opus red-team.** Does not block #13 or #15.
+
+**Step 7 — Extend `AuditEffect` union + replay reducer + fixtures TOGETHER, one family per commit. [next-slice]**
+Append-only — get post-state shapes right the first time. Add `{space_id}` to the `acl.*` scope union; `space.create/update/archive/restore`, `space.member_add/remove/update_role`; the guest-grant marker; the `doc.move` `acl_transition`. Each carries **post-state (a SET, not a delta)**. Coherence Check 6 gates union-vs-matrix; the replay test gates replay-sufficiency. Amend the §9.1 tuple in lockstep. Effectively irreversible.
+
+**Step 8 — Ship capabilities + routes. [next-slice]**
+Order: `permission.grant/revoke/list` first (already reserved), then `space.*`, then `doc.add_guest`/`remove_guest`/`list_grants`, then the `doc.move` cross-boundary branch. Each = `registerCapability` + `EXPECTED_IDS` sibling + one `@editorzero/schemas` module (flat `z.object().strict()`, imported verbatim) + a hand-written route mirroring `member_add.ts` + a `METADATA_ONLY_CAPABILITIES` entry + a matrix row. **Surfaces declared = those actually bound** (`api`/`cli`/`mcp`); `ui` added per-capability as the shell + `contract-tests` harness land (H11). CLI/MCP derive for free. Extend the signup hook to seed the Personal space. Each capability independently reversible.
+
+**Step 9 — Reserved-future, explicit deferrals with named triggers. [reserved-future]**
+Do **not** build v1: Postgres RLS Layer-3 (co-design with the guest-grant predicate); the git-mirror + published-render export-scope decision (must precede enforcing per-doc ACL on reads); `teams`/`team_members` + `team.*` + un-gating the Teams UI; Guest-principal (non-member directory entry); multi-org `organizations`; external guest-**editor** live collab (gated on WS-attach hardening task #15). Each its own later ADR + slice. Guest-**read** on published docs works today; guest-**edit** inherits the WS-attach write blockers, so it sequences *after* #15 — do not fork #15.
+
+**Web UI shell (task #13) interaction.** The shell builds the sidebar + Spaces grid + Collections tree **first**, binding to the existing `workspace.*`/`collection.*`/`doc.*` capabilities — it proceeds independently. The **only** hard ordering against #13 is the Step-1 vocabulary lock. Deferred to later slices (bind to unbuilt caps): the per-doc Share+Publish dialog, sidebar drag-drop + the cross-boundary ACL-transition prompt, the "Shared with me" route, Personal-space + space-type affordances, and the (feature-gated) Teams UI. Note: the Owned Tree (ADR 0037) now needs drag-reorder in v1 (was a revisit trigger) — budget it larger or re-weigh the native-Tree fallback. None of this blocks the #13 scaffold itself.
+
+## Consequences
+
+**Easier.**
+- "Who can read doc X?" is a bounded, indexed, audit-reconstructable lookup — safe at agent speed. This is the whole point.
+- Solo → team → large-org scales on one model; Personal space gives drafts a first-class home.
+- Cross-boundary moves become reconstructable events, not silent leaks.
+- The model is a repositioning of the existing schema; the 7 live tenant tables are untouched and additivity makes "non-breaking on both backends" trivially true.
+- Agents and Teams are grant targets with no new principal kind and no parallel permission system.
+
+**Harder.**
+- Two access algebras now exist in the docs (union vs ceiling); the §8.1/§3.12 amendment must be precise or the resolver loses its single spec (invariant 5).
+- **The model rests on enforcement machinery that does not exist yet** — the audit-replay engine (inv 3a), the cross-tenant + ceiling fuzzer, the four-way contract-tests harness, and the `acting_as` intersection are **all unbuilt**, for the *current* model as well as Model B. This ADR is honest about that and sequences each as a hard gate (Steps 2, 4, 6, 8). The biggest risk is treating any of them as already-done.
+- The guest grant is the one deliberately cross-boundary row-type; its read path (fork #2) is the highest-risk new code and is gated behind Codex + Opus red-team. In v1 the ceiling is Layer-1-only, so the resolver must be the sole read authority and the published-render + git-mirror paths must be made ceiling-aware before reads are gated.
+- The label-vs-path split (UI "Space" / API `/workspaces`) is permanent, deliberate cognitive overhead, stated once here to prevent a code-wide rename.
+
+## Revisit triggers
+
+- **Multi-customer isolation becomes a real product need** → build the reserved `organizations` table (Org becomes physical); revisit whether the scope column stays `workspace_id` or gains `organization_id`.
+- **Teams ship** → land `teams`/`team_members` + `team.*` capabilities + un-gate the Teams UI; widen `grants.subject_kind` to include `team`; confirm resolution in the gate and the fuzzer.
+- **Collection-level grants are needed** → widen `grants.resource_kind` to include `collection` and make a same-Space move that changes the resolved set an audited transition (the B1 escape hatch).
+- **The ceiling proves too rigid** (guest grants become the common case) → re-evaluate a soft-baseline mode behind an explicit, audited, still-local widening — only if "who can read X" stays bounded.
+- **Postgres RLS is implemented** → co-design the guest-grant predicate as one definition across Layer-2 and Layer-3; flip ADR 0015's Layer-3-unbuilt note.
+- **The `acting_as` ∩ delegator intersection slips past the resolver slice** → stop: a delegated agent with `permission:grant` can escalate beyond its delegator until it lands (H8).
+- **Guest-principal (non-member directory entry) is needed** → extend the ADR 0016 Principal union; until then the zero-membership `user` modeling holds.
+- **External guest-editor live collab is requested** → gated on WS-attach hardening (#15); sequence after, do not fork.
+- **The flat-ACL `AccessPath` derivation can't be made local** (a doc-level decision needs a graph walk) → stop and redesign before enforcing the ceiling on reads; the locality guarantee is the model's load-bearing assumption.
+- **A cross-model review (Codex, at this ADR boundary) rejects the ceiling algebra or the guest read path on grounds this ADR doesn't anticipate** → revisit.

@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>editorzero — Tenancy & IA models</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Archivo:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../brand/v2/meridian-zero.css" />
+<style>
+  body{ max-width:1180px; margin:0 auto; padding:40px 28px 120px; }
+  .doc-h{ border-bottom:var(--rule-2) solid var(--ink); padding-bottom:14px; margin-bottom:8px; display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  h1{ font-size:27px; letter-spacing:-0.03em; }
+  h2{ font-size:18px; margin:40px 0 14px; padding-top:18px; border-top:var(--rule) solid var(--hair); }
+  h2 .ord{ margin-right:8px; }
+  h3{ font-size:14px; font-family:var(--display); margin:18px 0 8px; }
+  p{ margin:8px 0; max-width:74ch; color:var(--ink-1); }
+  .lede{ color:var(--ink-2); font-size:14.5px; max-width:80ch; }
+  .mono{ font-family:var(--mono); }
+  code{ font-family:var(--mono); font-size:12px; background:var(--surface-2); padding:1px 5px; border:var(--rule) solid var(--hair); }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  @media(max-width:880px){ .grid2,.grid3{ grid-template-columns:1fr; } }
+
+  /* box-diagram primitives */
+  .box{ border:var(--rule) solid var(--hair-strong); background:var(--surface); padding:10px 12px; }
+  .box .lbl{ font-family:var(--mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--steel); display:block; margin-bottom:4px; }
+  .box.org{ border-color:var(--ink-1); border-width:var(--rule-2); background:var(--surface); }
+  .box.space{ border-color:var(--ultra-edge); background:var(--ultra-wash); }
+  .box.personal{ border-color:var(--hair-strong); background:var(--surface-2); border-style:dashed; }
+  .box.doc{ border-color:var(--hair-strong); background:var(--surface); font-size:12px; padding:5px 8px; }
+  .box.agent{ border-color:var(--agent-edge); background:var(--agent-wash); }
+  .box.guest{ border-color:var(--warn-ink); background:var(--warn-wash); border-style:dashed; }
+  .stack{ display:flex; flex-direction:column; gap:8px; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .row > *{ flex:1 1 0; min-width:120px; }
+  .arrow{ font-family:var(--mono); color:var(--steel); font-size:11px; text-align:center; padding:2px 0; }
+
+  /* glossary */
+  .gloss{ display:grid; grid-template-columns:repeat(2,1fr); gap:0; border:var(--rule) solid var(--hair); }
+  @media(max-width:880px){ .gloss{ grid-template-columns:1fr; } }
+  .gloss .g{ padding:9px 12px; border-bottom:var(--rule) solid var(--hair); border-right:var(--rule) solid var(--hair); }
+  .gloss .g b{ font-family:var(--display); font-size:13px; }
+  .gloss .g .agent-tag{ color:var(--agent-ink); }
+  .gloss .g span{ display:block; color:var(--ink-2); font-size:12.5px; margin-top:2px; }
+
+  /* model cards */
+  .model{ border:var(--rule) solid var(--hair-strong); background:var(--surface); padding:0; display:flex; flex-direction:column; }
+  .model.rec{ border-color:var(--ultra); border-width:var(--rule-2); box-shadow:0 0 0 4px var(--ultra-wash); }
+  .model .mhead{ padding:10px 12px; border-bottom:var(--rule) solid var(--hair); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .model .mhead .tag{ font-family:var(--mono); font-size:9px; letter-spacing:.12em; text-transform:uppercase; padding:2px 6px; border:var(--rule) solid var(--hair-strong); color:var(--steel); }
+  .model.rec .mhead .tag{ color:var(--on-accent); background:var(--ultra); border-color:var(--ultra); }
+  .model .mhead h3{ margin:0; font-size:14px; }
+  .model .mbody{ padding:12px; display:flex; flex-direction:column; gap:9px; flex:1; }
+  .model .diag{ background:var(--surface-2); border:var(--rule) solid var(--hair); padding:10px; }
+  .pc{ font-size:12px; color:var(--ink-1); }
+  .pc.pro::before{ content:"+ "; color:var(--ok-ink); font-family:var(--mono); font-weight:600; }
+  .pc.con::before{ content:"− "; color:var(--warn-ink); font-family:var(--mono); font-weight:600; }
+  .pc.use::before{ content:"▸ "; color:var(--ultra-ink); font-family:var(--mono); }
+
+  /* scenario table */
+  table{ border-collapse:collapse; width:100%; font-size:12.5px; margin-top:6px; }
+  th,td{ border:var(--rule) solid var(--hair); padding:8px 10px; text-align:left; vertical-align:top; }
+  th{ font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--steel); background:var(--surface-2); font-weight:500; }
+  td .s{ font-family:var(--display); font-weight:600; font-size:12.5px; color:var(--ink); }
+  td .how{ color:var(--ink-2); display:block; margin-top:2px; }
+  td.mech{ font-family:var(--mono); font-size:11px; color:var(--ultra-ink); white-space:nowrap; }
+
+  .note{ display:block; border-left:var(--rule-2) solid var(--ultra); background:var(--ultra-wash); padding:12px 16px; margin:16px 0; }
+  .note.decide{ border-left-color:var(--agent); background:var(--agent-wash); }
+  .note b{ font-family:var(--display); }
+  .pill{ display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase; padding:2px 7px; border:var(--rule) solid var(--hair-strong); }
+  .pill.rec{ color:var(--on-accent); background:var(--ultra); border-color:var(--ultra); }
+  .src{ font-size:11px; color:var(--steel); }
+  .src a{ color:var(--ultra-ink); text-decoration:underline; }
+  .legend{ display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--ink-2); margin:10px 0; }
+  .legend .k{ display:inline-flex; align-items:center; gap:6px; }
+  .sw{ width:22px; height:13px; border:var(--rule) solid var(--hair-strong); display:inline-block; }
+</style>
+</head>
+<body>
+
+<div class="doc-h">
+  <div class="logo"><span class="mark"><span class="cross"></span><span class="cross-ring"></span></span><span class="word">editor<b>zero</b></span></div>
+  <span class="kicker">Tenancy &amp; IA · decision brief for ADR 0040</span>
+</div>
+<h1>How should orgs, spaces, teams &amp; sharing work?</h1>
+<p class="lede">Grounded in how <b>Notion</b>, <b>Linear</b>, Slack, Confluence, Google Drive &amp; GitHub actually model this (live-verified June 2026). editorzero already commits to <b>per-doc granular ACLs</b>, <b>one-audit-entry-per-mutation</b>, and <b>humans + AI agents as peer principals</b> — so the container can&rsquo;t be the <i>only</i> source of access. The real fork is how strong the <b>Space ceiling</b> is. This page lays out the vocabulary, three candidate models, and your exact scenarios.</p>
+
+<div class="legend">
+  <span class="k"><span class="sw" style="border-color:var(--ink-1);border-width:1.5px"></span> Org (tenant)</span>
+  <span class="k"><span class="sw" style="border-color:var(--ultra-edge);background:var(--ultra-wash)"></span> Space (membership boundary)</span>
+  <span class="k"><span class="sw" style="border-color:var(--hair-strong);background:var(--surface-2);border-style:dashed"></span> Personal (private)</span>
+  <span class="k"><span class="sw" style="border-color:var(--agent-edge);background:var(--agent-wash)"></span> Agent principal</span>
+  <span class="k"><span class="sw" style="border-color:var(--warn-ink);background:var(--warn-wash);border-style:dashed"></span> Guest grant (item-scoped)</span>
+</div>
+
+<h2><span class="ord">01</span>Vocabulary — one cohesive set</h2>
+<div class="gloss">
+  <div class="g"><b>Org</b><span>The self-hosted deployment. <b>One by default</b> (multi-org stays possible later). Holds the member directory + all agents. ≈ Notion workspace / Linear workspace.</span></div>
+  <div class="g"><b>Member</b><span>A human in the org directory — a full principal who can be added to Spaces &amp; Teams.</span></div>
+  <div class="g"><b class="agent-tag">Agent</b><span>An AI principal in the org. Receives grants <b>exactly like a member</b> (peer), with its own attribution, rate limits &amp; revocation.</span></div>
+  <div class="g"><b>Space</b><span>A <b>membership boundary</b> inside the org — a team&rsquo;s shared home. Has members (+ Teams) and a default access baseline. Types: <span class="mono">Open · Closed · Private</span>.</span></div>
+  <div class="g"><b>Personal</b><span>Each member&rsquo;s <b>private Space</b> (owner-only by default). Drafts &amp; scratch live here; promote by moving into a shared Space. (The thing Linear lacks.)</span></div>
+  <div class="g"><b>Collection</b><span>A folder tree <b>inside</b> a Space. <b>Pure navigation in v1</b> — it holds no ACL of its own (so a move between Collections in the same Space changes nothing; collection-level grants are reserved). The existing <code>collections</code> table.</span></div>
+  <div class="g"><b>Doc</b><span>The leaf. Carries its <b>own ACL</b> (inherits the <b>Space</b> baseline — Collections add no ACL; can narrow within the Space, or widen past it only via an explicit guest grant).</span></div>
+  <div class="g"><b>Team</b><span>A named group of members used as a <b>grant target</b> — grant a Team access to a Space / Collection / Doc. ≈ Notion groups / GitHub teams.</span></div>
+  <div class="g"><b>Guest grant</b><span>An <b>item-scoped</b> ACL entry to a principal <i>outside</i> the Space — the only way to widen past the ceiling. Enumerable, revocable, audited.</span></div>
+  <div class="g"><b>Publish</b><span>An <b>independent visibility dimension</b> on a Doc (public-read link / published site) — orthogonal to the ACL. A &ldquo;guest editor&rdquo; = a guest grant with <i>edit</i> on a published doc.</span></div>
+</div>
+
+<h2><span class="ord">02</span>The three candidate models</h2>
+<div class="grid3">
+
+  <!-- Model A -->
+  <div class="model">
+    <div class="mhead"><h3>A · Flat org + per-doc ACL</h3><span class="tag">simplest</span></div>
+    <div class="mbody">
+      <div class="diag stack">
+        <div class="box org"><span class="lbl">Org · everyone is a member</span>
+          <div class="stack" style="margin-top:6px">
+            <div class="box" style="border-style:dashed"><span class="lbl">Collection (folder — nav only)</span>
+              <div class="row" style="margin-top:5px"><div class="box doc">Doc · ACL</div><div class="box doc">Doc · ACL</div></div>
+            </div>
+            <div class="box doc">Doc · ACL</div>
+          </div>
+        </div>
+      </div>
+      <div class="pc use">Solo &amp; very small teams</div>
+      <div class="pc pro">Dead simple; matches per-doc ACL literally</div>
+      <div class="pc con">&ldquo;What can Alice see?&rdquo; = walk every doc</div>
+      <div class="pc con">No team homes; big orgs drown in per-doc grants</div>
+      <div class="pc con">No membership grouping to onboard/offboard against</div>
+    </div>
+  </div>
+
+  <!-- Model B -->
+  <div class="model rec">
+    <div class="mhead"><h3>B · Org → Spaces + Personal</h3><span class="tag">recommended</span></div>
+    <div class="mbody">
+      <div class="diag stack">
+        <div class="box org"><span class="lbl">Org · member directory + agents</span>
+          <div class="stack" style="margin-top:6px">
+            <div class="box space"><span class="lbl">Space &ldquo;Product&rdquo; · members = baseline (ceiling)</span>
+              <div class="row" style="margin-top:5px">
+                <div class="box doc">Collection → Docs</div>
+                <div class="box doc">Doc · ACL ≤ ceiling</div>
+              </div>
+            </div>
+            <div class="box personal"><span class="lbl">Personal (Alice) · owner-only</span>
+              <div class="box doc" style="margin-top:5px">private drafts</div>
+            </div>
+            <div class="row">
+              <div class="box agent" style="flex:0 0 auto"><span class="lbl">Agent</span>granted like a member</div>
+              <div class="box guest" style="flex:0 0 auto"><span class="lbl">Guest grant</span>1 doc, cross-boundary</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pc use">Solo → small → big org, one model</div>
+      <div class="pc pro">&ldquo;What can X see?&rdquo; = Space members − narrowing + listed guest grants → <b>bounded &amp; auditable</b></div>
+      <div class="pc pro">Clean cross-boundary + guest + publish story</div>
+      <div class="pc pro">Matches the brand IA (&ldquo;Spaces&rdquo;) &amp; today&rsquo;s schema</div>
+      <div class="pc con">More concepts; needs the guest-grant escape hatch so the ceiling isn&rsquo;t rigid</div>
+    </div>
+  </div>
+
+  <!-- Model C -->
+  <div class="model">
+    <div class="mhead"><h3>C · Multi-workspace tenancy</h3><span class="tag">today / heavy</span></div>
+    <div class="mbody">
+      <div class="diag stack">
+        <div class="box" style="border-color:var(--hair-strong)"><span class="lbl">Deployment</span>
+          <div class="row" style="margin-top:6px">
+            <div class="box org" style="flex:1"><span class="lbl">Workspace A (tenant)</span><div class="box doc" style="margin-top:5px">tree</div></div>
+            <div class="box org" style="flex:1"><span class="lbl">Workspace B (tenant)</span><div class="box doc" style="margin-top:5px">tree</div></div>
+          </div>
+          <div class="arrow">↕ cross-workspace = federation (v2+)</div>
+        </div>
+      </div>
+      <div class="pc use">Agencies / true multi-customer isolation</div>
+      <div class="pc pro">Hard isolation; least change from today</div>
+      <div class="pc con">Solo→team &amp; &ldquo;share one doc out&rdquo; get awkward</div>
+      <div class="pc con">Identity/agents duplicated per tenant</div>
+      <div class="pc con">Over-built for one self-hosted org</div>
+    </div>
+  </div>
+</div>
+
+<div class="note decide">
+  <b>The one decision that&rsquo;s yours to make.</b> In Model B, is a Space a <b>hard ceiling</b> (Confluence-style: doc ACLs can only <i>narrow</i> inside a Space; the <i>only</i> way to grant a non-member is an explicit guest grant) — or a <b>soft baseline</b> (Notion-style &ldquo;broadest-wins&rdquo;: any grant anywhere can widen)? <br><br>
+  <b>My recommendation: hard ceiling + guest-grant escape hatch.</b> With agents mutating ACLs programmatically, &ldquo;can principal X read doc Y?&rdquo; must stay a <i>local, provable</i> lookup. A soft baseline makes it a whole-graph walk — un-auditable at machine speed. The hard ceiling keeps it bounded; the explicit guest grant keeps it from feeling rigid (and is itself an audited, revocable, enumerable row).
+</div>
+
+<h2><span class="ord">03</span>Your scenarios — how Model B handles each</h2>
+<table>
+  <thead><tr><th style="width:23%">Scenario</th><th style="width:30%">What happens</th><th style="width:18%">Mechanism</th><th>vs A / C</th></tr></thead>
+  <tbody>
+    <tr><td><span class="s">1 · Solo user</span></td><td><span class="how">Sign up → your <b>Personal</b> space. Everything private to you. No Spaces needed yet.</span></td><td class="mech">Personal space</td><td>A: same (a folder). C: a whole workspace just for you — heavy.</td></tr>
+    <tr><td><span class="s">2 · Personal that expands</span></td><td><span class="how">Invite a collaborator → create a <b>Space</b>, move drafts in. Personal stays private; shared work lives in the Space.</span></td><td class="mech">move Personal→Space</td><td>C: must spin a new tenant + re-add identity. Linear: no personal stage at all.</td></tr>
+    <tr><td><span class="s">3 · Small team: shared + private</span></td><td><span class="how">Team works in one <b>Space</b> (all members see all its docs). Each person also keeps a <b>Personal</b> space for private drafts.</span></td><td class="mech">Space baseline + Personal</td><td>Linear can&rsquo;t do private drafts; Notion can. A: no &ldquo;all team sees all&rdquo; default.</td></tr>
+    <tr><td><span class="s">4 · Private doc → share with specific people</span></td><td><span class="how">Doc in your <b>Personal</b> space → add a <b>grant</b> to specific people (or, when they sit outside the Space, a <b>guest grant</b>). They see just that doc.</span></td><td class="mech">item grant</td><td>All hybrid tools do this; the ceiling keeps it from leaking siblings.</td></tr>
+    <tr><td><span class="s">5 · Cross-space sharing</span></td><td><span class="how">Doc lives in Space A; share with someone in Space B (or no space) → <b>guest grant</b>. They <i>don&rsquo;t</i> join Space A; it appears in their &ldquo;Shared with me.&rdquo; This is the one widening past the ceiling.</span></td><td class="mech">guest grant (item ACL)</td><td>Confluence forbids this (must grant space access). Notion/GitHub/Google allow it as an item grant — we copy that, audited.</td></tr>
+    <tr><td><span class="s">6 · Publishing</span></td><td><span class="how">Flip the Doc&rsquo;s <b>publish</b> dimension → public read at a slug. Independent of who can edit. Publish/unpublish are audited capabilities (already in your schema).</span></td><td class="mech">publish dimension</td><td>Linear has <i>no</i> native publish; Notion/Coda/Google treat publish + edit as independent — we do too.</td></tr>
+    <tr><td><span class="s">7 · Guest editors (on a published doc)</span></td><td><span class="how">Published doc that needs outside editing → <b>guest grant</b> with <i>edit</i> to a specific external principal. Public still reads; the guest edits just that doc.</span></td><td class="mech">guest grant · edit</td><td>= Notion guest + publish, composed. Bounded blast radius (Linear: shared item can&rsquo;t re-share — copy that).</td></tr>
+    <tr><td><span class="s">8 · Invite an org guest (future)</span></td><td><span class="how">A <b>Guest</b> principal lives in the org directory but is <i>not</i> a member — sees only what it&rsquo;s explicitly granted (item/space). Distinct from a full member.</span></td><td class="mech">guest principal</td><td>Slack&rsquo;s clean split: a guest is <i>yours</i> (your audit/revocation), not federation. Agents reuse the same scoping.</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="ord">04</span>Drag-and-drop reorg — fixing the universal footgun</h2>
+<div class="grid2">
+  <div>
+    <p>Every tool we studied <b>silently mishandles moving content across a permission boundary</b> — Google drops inherited shares with no warning; Confluence applies the new parent&rsquo;s permissions (they patched a CVE for it); Notion re-privatizes the parent but strands subpages. Nobody prompts well.</p>
+    <p>Because editorzero has per-doc ACLs <i>and</i> audits everything, a move becomes a <b>first-class, reconstructable event</b> — not a silent side effect.</p>
+  </div>
+  <div class="stack">
+    <div class="box" style="border-color:var(--ok-edge);background:var(--ok-wash)"><span class="lbl">Within a Space</span>Reorder / move freely — <b>no ACL change</b>. Drag is pure nav. Instant, no prompt.</div>
+    <div class="box" style="border-color:var(--ultra-edge);background:var(--ultra-wash)"><span class="lbl">Across a boundary (Space↔Space, Personal↔Space)</span>An <b>explicit, audited ACL transition</b>. The UI <b>prompts</b>: &ldquo;adopt the destination Space&rsquo;s baseline&rdquo; vs &ldquo;keep this doc&rsquo;s own grants.&rdquo; Never silent.</div>
+    <div class="box guest"><span class="lbl">Invariant</span>A doc inside a private <b>Space</b> stays private until its <b>publish</b> dimension is explicitly flipped — privacy tightens downward, publish is the one deliberate, audited exception (Linear&rsquo;s rule; property-tested).</div>
+  </div>
+</div>
+
+<h2><span class="ord">05</span>How this maps onto what&rsquo;s already built</h2>
+<p>Model B is mostly a <b>repositioning</b>, not a rewrite, of today&rsquo;s schema (architecture §3):</p>
+<div class="gloss">
+  <div class="g"><b>workspaces</b><span>Becomes the <b>Space</b> (membership boundary). The single-<b>Org</b> wrapper sits above; multi-org stays the reserved evolution axis (ADR 0024) — not v1.</span></div>
+  <div class="g"><b>workspace_members</b><span>Becomes Space membership (role per principal). Already the SSOT for roles (ADR 0024). Gains <b>Teams</b> as a grant-target grouping (a reserved axis).</span></div>
+  <div class="g"><b>collections / docs</b><span>Unchanged tree. <code>docs.visibility</code> (<span class="mono">workspace|public|private</span>) generalises to the ACL + publish dimension.</span></div>
+  <div class="g"><b>Personal space</b><span>The auto-minted-on-signup workspace (ADR 0024) <i>is</i> the Personal space — keep it, reframed as a private default, not a separate tenant.</span></div>
+  <div class="g"><b>agents</b><span>Already first-class principals (ADR 0016) — they become grant/guest-grant targets with no new principal kind.</span></div>
+  <div class="g"><b>Guest principal</b><span>New: a directory entry that is <i>not</i> a member. The reserved &ldquo;platform-admin / membership evolution&rdquo; axis in ADR 0024 already anticipated this shape.</span></div>
+</div>
+
+<p class="src" style="margin-top:24px">Sources (live-verified June 2026): Notion <a href="https://www.notion.com/help/sharing-and-permissions">sharing &amp; permissions</a>, <a href="https://www.notion.com/help/intro-to-teamspaces">teamspaces</a>, <a href="https://www.notion.com/help/whos-who-in-a-workspace">guests</a> · Linear <a href="https://linear.app/docs/conceptual-model">conceptual model</a>, <a href="https://linear.app/docs/private-teams">private teams &amp; issue-share</a>, <a href="https://linear.app/docs/members-roles">members &amp; roles</a> · Slack <a href="https://slack.com/help/articles/202518103-Understand-guest-roles-in-Slack">guest roles</a> · Confluence <a href="https://support.atlassian.com/confluence-cloud/docs/what-are-confluence-cloud-permissions-and-restrictions/">permissions</a> · Google <a href="https://developers.google.com/workspace/drive/api/guides/about-shareddrives">shared drives</a> · GitHub <a href="https://docs.github.com/en/organizations/managing-user-access-to-your-organizations-repositories/managing-outside-collaborators/adding-outside-collaborators-to-repositories-in-your-organization">outside collaborators</a>. Research runs: 3 Opus agents (Notion / Linear / cross-tool).</p>
+
+</body>
+</html>

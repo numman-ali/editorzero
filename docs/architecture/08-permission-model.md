@@ -22,6 +22,8 @@ Layer 3 — Postgres RLS (Postgres mode only)
 
 SQLite mode has Layer 1 + 2; Postgres mode adds Layer 3 as a database-level backstop.
 
+> **Amended by [ADR 0040](../adr/0040-tenancy-ia-model.md) (2026-06-01) — built-vs-specified correction + algebra inversion.** As of today **Layer 3 (RLS) does not exist in code** (zero `CREATE POLICY`; the driver sets no `app.workspace_id` GUC) and the §8.1a cross-tenant fuzzer is **also unbuilt** — so **Layer 2 is the sole tenant-isolation floor on _both_ backends** right now, not just SQLite. Treat the Layer-3 / fuzzer text above and in §8.1a as the target, not the current state. Separately, ADR 0040 **inverts the Layer-1 resolution algebra** for in-Space access: the `(role_default ⊕ workspace_override ⊕ collection_acls ⊕ doc_acls)` most-permissive union becomes a **ceiling** — `(Space-baseline − narrowing) ∪ enumerable guest-grants` — a local, audit-reconstructable lookup, never a graph walk. Collections hold no ACL in v1. The cross-tenant hard-deny (§8.3) is unchanged and orthogonal.
+
 ### 8.1a SQLite hardening — Layer-2-as-floor (F4 fix)
 
 SQLite has no RLS. Layer 2 (`TenantScopedDb`) is the last line of defense. That's adequate only if Layer 2 is **actually unbypassable**, and that requires more than a wrapper — it requires:

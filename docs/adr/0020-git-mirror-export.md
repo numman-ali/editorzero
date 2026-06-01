@@ -4,6 +4,8 @@
 **Date:** 2026-04-17
 **Deciders:** @numman
 
+> **Amended by [ADR 0040](0040-tenancy-ia-model.md) (2026-06-01).** The mirror is mirror-ALL and **ACL-unaware**; under Model B's per-doc ACL it would leak private / guest-only docs (and mirrored attachment URLs would 403 for guest-only docs). An explicit **export-scope decision** (mirror-by-publish-state vs Space-baseline vs mirror-all) **must land before the resolver gates reads.** Reserved-future, flagged here so it isn't forgotten. The event-rendered published-render path (architecture §5.4) is likewise ACL-unaware and must assert no guest-only leak before per-doc ACL enforcement.
+
 ## Context
 The user initially proposed "Markdown in a versioned folder" as the storage model (retracted — see ADR 0013 v2). The underlying workflow desire is real: some users want a versioned-Markdown view of their docs for diff/PR/CI workflows; others want compliance snapshots. We decouple the workflow from the storage: CRDT stays the source of truth; projections land in external systems as **opt-in, one-way, downstream mirrors**.
 

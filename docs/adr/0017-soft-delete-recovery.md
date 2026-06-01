@@ -4,6 +4,8 @@
 **Date:** 2026-04-17
 **Deciders:** @numman
 
+> **Amended by [ADR 0040](0040-tenancy-ia-model.md) (2026-06-01).** Model B adds **Space** as a deletable container between workspace and collection. Per this ADR's non-cascading container rule, `space.archive` **refuses on live descendants** (like `collection.delete` — surfacing a `HasLiveDescendantsError` counts payload); it does **not** cascade, and `space.restore` is the 1:1 inverse with one audit row each. `grants` / guest-grants carry **no `deleted_at`** — revoke is a hard `DELETE`, and grant rows ride with their resource through soft-delete, so a delete→restore cycle recovers the exact grant set without a preimage (state-as-of-delete). A cascading Space delete, if ever wanted, is a separate explicitly-designed capability with its own inverse story.
+
 ## Context
 The Phase 0 brief claimed "soft-deletes are recoverable; hard deletes are separate and audited." Red-team (#16) flagged that "recoverable" is underspecified: over what window? across which entity types? with which cascade rules? Can a doc be restored if its parent workspace was hard-deleted? An invariant the test harness must actually verify.
 

@@ -25,6 +25,8 @@ Explicitly **out of scope** (derivable from above + CRDT or external input; cove
 
 Proven by `packages/audit/test/replay.prop.ts`: fuzz N random workspace histories; for each, reconstruct PersistentWorkspaceState from audit alone; diff against live. Exhaustive over `AuditEffect` `kind` values — any new variant without a replay reducer is a compile error (§16.3 `audit-effect-exhaustiveness` lint).
 
+> **Status correction — see [ADR 0040](../adr/0040-tenancy-ia-model.md) (2026-06-01).** This proof is **aspirational, not yet built**: `packages/audit/test/replay.prop.ts`, the replay reducer / `apply()`, the `PersistentWorkspaceState` builder, and the `audit-effect-exhaustiveness` lint **do not exist in the tree today** — invariant 3a is currently unproven for the *existing* model, not just for Model B. ADR 0040 sequences building this proof engine against today's ~50 effect kinds **first** (its Step 2), as a hard gate before any ACL effect lands. When Model B's tables land, the tuple above gains `spaces`, `space_members`, and `grants` **in the same commit** as the tables (replacing the `doc_acls`/`collection_acls` line — those tables are superseded by `grants`), or invariant 3a silently stops meaning "audit reconstructs ACL + membership state."
+
 #### Invariant 3b — CRDT state is reproducible from snapshots + updates
 
 > For any doc D and any snapshot_seq S: applying `doc_snapshots[D].latest_before(S)` followed by `doc_updates[D, seq ∈ (snapshot_seq, S]]` in seq order produces a Y.Doc equal to the live Y.Doc after every accepted update ≤ S.
