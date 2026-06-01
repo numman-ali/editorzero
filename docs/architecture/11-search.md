@@ -35,7 +35,7 @@ return fused.map(f => { doc_id, block_id, score, snippet })
 - Workspace member: `visibility IN ('default','public','internal')` (internal visible to members).
 - Denied-block case (sparse `doc_acls` deny): excluded from candidates at query time.
 
-Tenant-scoping enforced by TenantScopedDb (Layer 2) + RLS (Layer 3 on Postgres).
+Tenant-scoping enforced by TenantScopedDb (Layer 2) today; Postgres RLS (Layer 3) is the planned database backstop — specified-but-unbuilt (see §8.1, corrected by ADR 0040).
 
 ### 11.3 Embedding model swap — atomic flip (F30 fix)
 
