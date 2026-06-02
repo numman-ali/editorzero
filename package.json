@@ -5,7 +5,7 @@
   "description": "Open-source, self-hostable, AI-native documentation and collaboration platform.",
   "license": "AGPL-3.0-only",
   "repository": "https://github.com/numman-ali/editorzero",
-  "packageManager": "pnpm@10.0.0",
+  "packageManager": "pnpm@10.34.1",
   "engines": {
     "node": ">=22.0.0",
     "pnpm": ">=10.0.0"
