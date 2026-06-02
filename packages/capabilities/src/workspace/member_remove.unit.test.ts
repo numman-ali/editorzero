@@ -245,7 +245,9 @@ describe("workspace.member_remove", () => {
     expect(subject).toEqual({ kind: "user", id: BOB });
   });
 
-  it("emits an allow effect with member.remove kind + workspace/user fields", () => {
+  it("emits an allow effect with member.remove kind + workspace/user/deleted_at fields", () => {
+    // The effect carries the handler's `deleted_at` so replay reconstructs the
+    // membership soft-delete timestamp precisely (Codex review HIGH 4).
     const effect = workspaceMemberRemove.audit.effectOnAllow(
       { user_id: BOB },
       { workspace_id: WORKSPACE_A, user_id: BOB, deleted_at: 7000 },
@@ -254,6 +256,7 @@ describe("workspace.member_remove", () => {
     if (effect.kind === "member.remove") {
       expect(effect.workspace_id).toBe(WORKSPACE_A);
       expect(effect.user_id).toBe(BOB);
+      expect(effect.deleted_at).toBe(7000);
     }
   });
 

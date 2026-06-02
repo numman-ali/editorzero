@@ -26,15 +26,18 @@
  * durability regression we don't want. Callers observing 404 on a
  * retry already have the confirmation "this is trashed".
  *
- * **Audit effect.** `{ kind: "doc.soft_delete", doc_id }`. The
- * audit-effect union carries no `deleted_at` field (the audit row's
- * own `created_at` envelope is authoritative for when); the `soft_`
- * prefix distinguishes this from the future `doc.purge` hard-delete
- * (ADR 0017 §Hard-delete). The capability's *id* stays `doc.delete`
- * (the user-facing verb); the *effect kind* is `doc.soft_delete` (the
- * audit-vocabulary term). That asymmetry is intentional — the
- * capability registry speaks to callers, the audit log speaks to
- * forensic readers who need to distinguish soft from hard deletion.
+ * **Audit effect.** `{ kind: "doc.soft_delete", doc_id, deleted_at }`.
+ * The effect carries the exact `deleted_at` the handler wrote (the
+ * handler's `ctx.now()`, NOT the audit row's own `created_at` — a
+ * different clock), so the replay reducer reconstructs the ADR 0017
+ * recovery-window anchor precisely (invariant 3a; Codex review HIGH 4).
+ * The `soft_` prefix distinguishes this from the future `doc.purge`
+ * hard-delete (ADR 0017 §Hard-delete). The capability's *id* stays
+ * `doc.delete` (the user-facing verb); the *effect kind* is
+ * `doc.soft_delete` (the audit-vocabulary term). That asymmetry is
+ * intentional — the capability registry speaks to callers, the audit
+ * log speaks to forensic readers who need to distinguish soft from
+ * hard deletion.
  *
  * **Public-route cache invalidation — `visibility_version` bumps.** The
  * public-route contract (architecture.md §5.4) keys its cache on
@@ -115,6 +118,7 @@ export const docDelete: Capability<DocDeleteInput, DocDeleteOutput> = {
     effectOnAllow: (_input, output): AuditEffect => ({
       kind: "doc.soft_delete",
       doc_id: output.doc_id,
+      deleted_at: output.deleted_at,
     }),
     effectOnDeny: (_input, reason: DenyReason): AuditDeny => ({
       kind: "deny",

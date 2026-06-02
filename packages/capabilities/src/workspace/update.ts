@@ -106,13 +106,20 @@ export const workspaceUpdate: Capability<WorkspaceUpdateInput, WorkspaceUpdateOu
       const patch: Partial<{
         name: string;
         trash_retention_days: number;
-        settings: unknown;
+        settings: Record<string, unknown>;
       }> = {};
       if (input.name !== undefined) patch.name = input.name;
       if (input.trash_retention_days !== undefined) {
         patch.trash_retention_days = input.trash_retention_days;
       }
-      if (input.settings !== undefined) patch.settings = input.settings;
+      // Carry `output.settings`, not `input.settings`: the handler stores
+      // `JSON.stringify(input.settings)` and the output is `JSON.parse` of that
+      // stored string, so `output.settings` is the exact post-round-trip object
+      // a reader (and the replay→DB compare) parses back. Carrying the raw
+      // input would diverge for non-JSON-clean values (undefined-valued keys,
+      // NaN). Still gated on `input.settings` so the patch stays a delta —
+      // settings only enters the patch when the caller actually changed it.
+      if (input.settings !== undefined) patch.settings = output.settings;
       return {
         kind: "workspace.update",
         // The audit row's top-level `workspace_id` column already

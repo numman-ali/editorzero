@@ -247,6 +247,7 @@ function docMutateCapability(): Capability<DocMutateInput, DocMutateOutput> {
         kind: "doc.rename",
         doc_id: DocId(input.doc_id),
         title: input.text,
+        slug: input.text,
       }),
       effectOnDeny: (_input, reason) => ({
         kind: "deny",

@@ -33,6 +33,7 @@ import {
   CollectionIdInputSchema,
   CollectionIdOutputSchema,
   DocIdOutputSchema,
+  UserIdOutputSchema,
   WorkspaceIdOutputSchema,
 } from "../shared/ids";
 
@@ -63,6 +64,13 @@ export const DocCreateOutputSchema = z.object({
   title: z.string(),
   slug: z.string(),
   order_key: z.string(),
+  // Carried on the response so the `doc.create` audit effect records the
+  // handler-resolved attribution (the human behind an agent — see the
+  // capability's `resolveCreatedBy`), not the envelope principal. Invariant
+  // 3a reconstructs `created_by` from this field, never from the audit row's
+  // `principal_id` — which for an agent write is the agent, not the human
+  // (Codex contract review HIGH 1).
+  created_by: UserIdOutputSchema,
   visibility: VisibilitySchema,
   seed_blocks: z.array(SeedBlockSchema),
 });

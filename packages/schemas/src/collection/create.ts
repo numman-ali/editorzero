@@ -33,6 +33,7 @@ import { TitleSchema } from "../shared/fields";
 import {
   CollectionIdInputSchema,
   CollectionIdOutputSchema,
+  UserIdOutputSchema,
   WorkspaceIdOutputSchema,
 } from "../shared/ids";
 
@@ -54,6 +55,12 @@ export const CollectionCreateOutputSchema = z.object({
   title: z.string(),
   slug: z.string(),
   order_key: z.string(),
+  // Carried on the response so the `collection.create` audit effect records
+  // the handler-resolved attribution (the human behind an agent — see the
+  // capability's `resolveCreatedBy`), not the envelope principal. Invariant
+  // 3a reconstructs `created_by` from this field, never from the audit row's
+  // `principal_id` (Codex contract review HIGH 1).
+  created_by: UserIdOutputSchema,
 });
 
 export type CollectionCreateWireInput = z.input<typeof CollectionCreateInputSchema>;

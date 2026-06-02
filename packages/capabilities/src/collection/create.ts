@@ -145,6 +145,7 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
       title: output.title,
       slug: output.slug,
       order_key: output.order_key,
+      created_by: output.created_by,
     }),
     effectOnDeny: (_input, reason: DenyReason): AuditDeny => ({
       kind: "deny",
@@ -264,6 +265,7 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
       title,
       slug,
       order_key,
+      created_by,
     };
   },
 };

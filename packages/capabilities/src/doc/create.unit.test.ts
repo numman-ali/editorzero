@@ -108,6 +108,9 @@ describe("doc.create handler", () => {
     expect(out.visibility).toBe("workspace");
     expect(out.collection_id).toBeNull();
     expect(out.order_key).toBe(out.doc_id);
+    // created_by is carried on the output so the audit effect can record it
+    // (invariant 3a attribution — Codex review HIGH 1).
+    expect(out.created_by).toBe(ALICE);
     // UUIDv7 parser asserts the shape: round-trip confirms branding.
     expect(DocId(out.doc_id)).toBe(out.doc_id);
 
@@ -471,8 +474,10 @@ describe("doc.create — agent principal attribution", () => {
       .selectFrom("docs")
       .selectAll()
       .executeTakeFirstOrThrow();
-    // Delegator (BOB) is the attribution target, not the agent.
+    // Delegator (BOB) is the attribution target, not the agent — on both the
+    // persisted row and the output the audit effect reads from.
     expect(row.created_by).toBe(BOB);
+    expect(out.created_by).toBe(BOB);
     expect(out.title).toBe("Delegated write");
   });
 
@@ -558,6 +563,7 @@ describe("doc.create audit projections", () => {
     title: "T",
     slug: "t",
     order_key: "018f0000-0000-7000-8000-0000000000d9",
+    created_by: ALICE,
     visibility: "workspace" as const,
     seed_blocks: sampleSeedBlocks,
   };
@@ -572,6 +578,7 @@ describe("doc.create audit projections", () => {
       expect(effect.title).toBe("T");
       expect(effect.slug).toBe("t");
       expect(effect.order_key).toBe(sampleOutput.order_key);
+      expect(effect.created_by).toBe(ALICE);
       expect(effect.visibility).toBe("workspace");
       // Invariant 3a: pre-minted block IDs land in the audit envelope
       // so a later replay can reconstruct the initial Y.Doc fragment.

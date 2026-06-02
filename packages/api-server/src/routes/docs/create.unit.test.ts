@@ -44,6 +44,7 @@ interface FixtureOutput {
   readonly title: string;
   readonly slug: string;
   readonly order_key: string;
+  readonly created_by: string;
   readonly visibility: "workspace" | "private";
   readonly seed_blocks: ReadonlyArray<{
     id: string;
@@ -79,6 +80,7 @@ describe("POST /docs/create", () => {
       title: "Hello",
       slug: "hello",
       order_key: "018f0000-0000-7000-8000-0000000000a1",
+      created_by: TEST_PRINCIPAL.id,
       visibility: "workspace",
       seed_blocks: [
         { id: "018f0000-0000-7000-8000-0000000000b1", type: "heading", props: { level: 1 } },

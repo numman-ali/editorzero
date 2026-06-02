@@ -59,17 +59,41 @@ export type AuditEffect =
       slug: string;
       name: string;
       created_by: UserId;
+      // Carried so replay reconstructs the full workspace projection rather
+      // than guessing DDL defaults: an admin who later changes retention or
+      // settings, followed by a truncated log, would otherwise mis-
+      // reconstruct (Codex review HIGH 3). `settings` is the *parsed* object
+      // (the form `workspace.get` / `workspace.update` expose), not the
+      // stored JSON string.
+      trash_retention_days: number;
+      settings: Record<string, unknown>;
     }
   | {
       kind: "workspace.update";
       workspace_id: WorkspaceId;
-      patch: Partial<{ name: string; trash_retention_days: number; settings: unknown }>;
+      // `settings` is the parsed object — tightened from `unknown` so the
+      // reducer applies it without a cast (Codex review HIGH 3). The handler
+      // carries the *post-JSON-round-trip* form (`JSON.parse` of the stringified
+      // column it just wrote), i.e. exactly what a reader parses back, so the
+      // replay→DB compare matches even for non-JSON-clean inputs.
+      patch: Partial<{
+        name: string;
+        trash_retention_days: number;
+        settings: Record<string, unknown>;
+      }>;
     }
-  | { kind: "workspace.soft_delete"; workspace_id: WorkspaceId }
+  // `deleted_at` is the exact `ctx.now()` the handler wrote to the row, carried
+  // so replay reconstructs the ADR 0017 recovery-window anchor (the audit row's
+  // own `created_at` is a different clock — Codex review HIGH 4). No shipped
+  // capability emits `workspace.soft_delete` yet; the shape is the forward
+  // guardrail for the eventual `workspace.delete` slice, which must return and
+  // carry the same handler clock (not the envelope's) like its doc/collection/
+  // member siblings.
+  | { kind: "workspace.soft_delete"; workspace_id: WorkspaceId; deleted_at: number }
   | { kind: "workspace.restore"; workspace_id: WorkspaceId }
   | { kind: "workspace.purge"; workspace_id: WorkspaceId; member_count_at_purge: number }
   | { kind: "member.add"; workspace_id: WorkspaceId; user_id: UserId; role: Role }
-  | { kind: "member.remove"; workspace_id: WorkspaceId; user_id: UserId }
+  | { kind: "member.remove"; workspace_id: WorkspaceId; user_id: UserId; deleted_at: number }
   | { kind: "member.update_role"; workspace_id: WorkspaceId; user_id: UserId; role: Role }
   // ── Collection (§3.5) ────────────────────────────────────────────────────
   | {
@@ -80,6 +104,11 @@ export type AuditEffect =
       title: string;
       slug: string;
       order_key: string;
+      // The handler-resolved human attribution (the human behind an agent —
+      // see the capability's `resolveCreatedBy`). Replay reads this, NOT the
+      // envelope `principal_id`, which for an agent write is the agent, not
+      // the human (Codex review HIGH 1).
+      created_by: UserId;
     }
   | {
       kind: "collection.update";
@@ -92,7 +121,7 @@ export type AuditEffect =
       new_parent_id: CollectionId | null;
       new_order_key: string;
     }
-  | { kind: "collection.soft_delete"; collection_id: CollectionId }
+  | { kind: "collection.soft_delete"; collection_id: CollectionId; deleted_at: number }
   | { kind: "collection.restore"; collection_id: CollectionId }
   // ── Doc (§3.5) ───────────────────────────────────────────────────────────
   // `seed_blocks` carries the pre-minted block IDs the handler passed
@@ -109,10 +138,20 @@ export type AuditEffect =
       title: string;
       slug: string;
       order_key: string;
+      // The handler-resolved human attribution (the human behind an agent —
+      // see the capability's `resolveCreatedBy`). Replay reads this, NOT the
+      // envelope `principal_id`, which for an agent write is the agent, not
+      // the human (Codex review HIGH 1).
+      created_by: UserId;
       visibility: DocVisibility;
       seed_blocks: SeedBlock[];
     }
-  | { kind: "doc.rename"; doc_id: DocId; title: string }
+  // `slug` is re-derived from the new title by the handler (slugify) and
+  // written to `docs.slug` in the same UPDATE as `title`, so replay must carry
+  // it — else a renamed doc reconstructs with its stale create-time slug while
+  // the live row moved on. Same effect-carries-the-handler-computed-value
+  // contract as `collection.update` (which carries `slug` in its patch).
+  | { kind: "doc.rename"; doc_id: DocId; title: string; slug: string }
   | {
       kind: "doc.move";
       doc_id: DocId;
@@ -121,7 +160,7 @@ export type AuditEffect =
     }
   | { kind: "doc.publish"; doc_id: DocId; published_at: number }
   | { kind: "doc.unpublish"; doc_id: DocId }
-  | { kind: "doc.soft_delete"; doc_id: DocId }
+  | { kind: "doc.soft_delete"; doc_id: DocId; deleted_at: number }
   | { kind: "doc.restore"; doc_id: DocId }
   | { kind: "doc.purge"; preimage: DocPurgePreimage }
   /** F66/F73 — transient; GC of expired tokens is auditable. */

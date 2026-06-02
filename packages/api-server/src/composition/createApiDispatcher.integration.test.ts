@@ -97,6 +97,7 @@ function buildFixture(
         kind: "doc.rename",
         doc_id: DocId(input.doc_id),
         title: input.title,
+        slug: input.title,
       }),
       effectOnDeny: (_input, reason) => ({
         kind: "deny",

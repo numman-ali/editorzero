@@ -34,6 +34,7 @@ interface FixtureOutput {
   readonly title: string;
   readonly slug: string;
   readonly order_key: string;
+  readonly created_by: string;
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
@@ -62,6 +63,7 @@ describe("POST /collections/create", () => {
       title: "Reference",
       slug: "reference",
       order_key: "018f0000-0000-7000-8000-0000000000c1",
+      created_by: TEST_PRINCIPAL.id,
     };
     const app = buildApp(async (invocation) => {
       captured = invocation;
@@ -98,6 +100,7 @@ describe("POST /collections/create", () => {
         title: "Child",
         slug: "child",
         order_key: "018f0000-0000-7000-8000-0000000000d2",
+        created_by: TEST_PRINCIPAL.id,
       };
     });
 

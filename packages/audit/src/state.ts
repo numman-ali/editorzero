@@ -10,36 +10,39 @@
  * are soft-deleted.
  *
  * It is a *projection*, not a row-for-row mirror of `@editorzero/db`. The
- * reducer folds the audit **row** (envelope + effect — see `ReplayRow`),
- * so `created_by` reconstructs from the envelope principal even though the
- * `doc.create` / `collection.create` effect bodies omit it. The exclusion
- * list below *is* the honesty surface of invariant 3a, so it is enumerated
- * here rather than left implicit:
+ * reducer folds the audit **row** (envelope + effect — see `ReplayRow`) and
+ * is *purely effect-driven*: every projected field reads from the effect
+ * body, never from the envelope principal. (`created_by` used to reconstruct
+ * from `principal_id`; that was wrong for an agent write — the effect now
+ * carries the handler-resolved human attribution. Codex review HIGH 1.) The
+ * boundary list below *is* the honesty surface of invariant 3a — what
+ * reconstructs, what doesn't, and why — so it is enumerated here rather than
+ * left implicit:
  *
- *  1. **Server-clock timestamps are NOT reconstructable — by construction.**
- *     - `*.created_at`, `*.updated_at`, and the *value* of `*.deleted_at`.
- *       Two independent clocks are involved: the handler stamps the entity
- *       row via `ctx.now()`, the audit writer stamps the audit row via its
- *       own `now()` — *different ticks*. And the create/soft_delete effect
- *       bodies do not carry a timestamp. So the audit log cannot reproduce
- *       these exact values. The projection therefore models soft-delete as
- *       a **boolean** (`deleted`), which IS reconstructable (a `soft_delete`
- *       effect sets it true, `restore`/`create` set it false), and drops
- *       `created_at`/`updated_at` entirely. **Open question for review:** if
- *       invariant 3a is meant to include timestamps, the create/delete
- *       effects must start carrying them — a deliberate effect-shape change,
- *       not a reducer change. Flagged, not silently assumed.
+ *  1. **`created_at` / `updated_at` are NOT reconstructable — by construction.**
+ *       The handler stamps the entity row via `ctx.now()`; the audit writer
+ *       stamps the audit row via its own `now()` — *different ticks* — and the
+ *       create effect bodies carry neither. So the audit log cannot reproduce
+ *       those exact values; the projection drops them.
+ *
+ *       `deleted_at` is the exception (Codex review HIGH 4): the soft-delete
+ *       handlers RETURN the exact `ctx.now()` they wrote to the row, the
+ *       `*.soft_delete` / `member.remove` effects now CARRY that value, and the
+ *       reducer projects it verbatim — so `deleted_at` reconstructs precisely
+ *       (the handler's clock, not the audit row's), preserving the ADR 0017
+ *       recovery-window anchor across replay. `restore` resets it to `null`;
+ *       `create` / `member.add` start it at `null`.
  *
  *  2. **Server-minted secrets — never audit-derived, by design.**
  *     - `workspaces.diagnostic_salt` (16 random bytes, F64). Not domain
  *       state; replaying the log must NOT reproduce a secret.
  *
- *  3. **Create-time defaults the create effect does not carry.**
- *     - `workspaces.trash_retention_days`, `workspaces.settings`.
- *       `workspace.create` carries only `{workspace_id, slug, name,
- *       created_by}`; the defaults live in the DDL. They enter the
- *       projection when `workspace.update` field-patch coverage lands (the
- *       update effect carries the patch). Until then: excluded, documented.
+ *  3. **`trash_retention_days` / `settings` ARE reconstructed (Codex review HIGH 3).**
+ *       `workspace.create` carries both (no longer DDL-default guesses) and
+ *       `workspace.update` carries them in its patch, so an admin who changes
+ *       retention or settings is reflected in the projection. `settings` is
+ *       the parsed object (the form `workspace.get` exposes), not the stored
+ *       JSON string.
  *
  *  4. **Monotonic bookkeeping — derivable, deferred.**
  *     - `docs.visibility_version` (count of publish/unpublish/delete/
@@ -50,10 +53,12 @@
  * the `workspaces` row + the owner `workspace_members` row directly via
  * `driver.system()` in a Better Auth after-hook — it does NOT dispatch a
  * capability, so it emits NO `audit_events`. Those rows are therefore part
- * of *genesis* state, not audit-reconstructable. Either the bootstrap
- * should emit `workspace.create` + `member.add` effects (closing invariant
- * 3 for signup), or genesis is an accepted exception that replay must be
- * seeded with. Flagged for the same reason as the timestamp question.
+ * of *genesis* state, not audit-reconstructable. The resolution (Codex
+ * review HIGH 2) is to EMIT `workspace.create` + `member.add` from the
+ * bootstrap under an audited `workspace.bootstrap` system-mutation marker —
+ * closing invariant 3 for signup — rather than seed replay with genesis.
+ * That lands in its own slice; until it does, a replay over a freshly-
+ * signed-up workspace will not contain the root workspace / owner rows.
  *
  * **The `docs` read-scope field is the ADR 0040 Step-5 seam.** Today it is
  * the live overloaded `visibility ∈ {workspace, public, private}` column;
@@ -67,13 +72,17 @@
 import type { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { AuditRecord, DocVisibility, Role } from "./types";
 
-/** Reconstructed `workspaces` projection (excludes salt/defaults/timestamps). */
+/** Reconstructed `workspaces` projection (excludes salt + create/update timestamps). */
 export interface WorkspaceState {
   readonly id: WorkspaceId;
   readonly slug: string;
   readonly name: string;
+  readonly trash_retention_days: number;
+  /** Parsed settings object (the form `workspace.get` exposes), not the stored JSON string. */
+  readonly settings: Record<string, unknown>;
   readonly created_by: UserId;
-  readonly deleted: boolean;
+  /** Epoch-ms the workspace was soft-deleted, or `null` if live (ADR 0017 recovery anchor). */
+  readonly deleted_at: number | null;
 }
 
 /** Reconstructed `workspace_members` projection. */
@@ -81,7 +90,8 @@ export interface MemberState {
   readonly workspace_id: WorkspaceId;
   readonly user_id: UserId;
   readonly role: Role;
-  readonly deleted: boolean;
+  /** Epoch-ms the membership was soft-deleted, or `null` if live. */
+  readonly deleted_at: number | null;
 }
 
 /** Reconstructed `collections` projection. */
@@ -93,7 +103,8 @@ export interface CollectionState {
   readonly slug: string;
   readonly order_key: string;
   readonly created_by: UserId;
-  readonly deleted: boolean;
+  /** Epoch-ms the collection was soft-deleted, or `null` if live (ADR 0017). */
+  readonly deleted_at: number | null;
 }
 
 /** Reconstructed `docs` metadata projection. */
@@ -120,7 +131,8 @@ export interface DocState {
    */
   readonly visibility: DocVisibility;
   readonly created_by: UserId;
-  readonly deleted: boolean;
+  /** Epoch-ms the doc was soft-deleted, or `null` if live (ADR 0017 recovery anchor). */
+  readonly deleted_at: number | null;
 }
 
 /**
@@ -151,17 +163,21 @@ export function memberKey(workspace_id: WorkspaceId, user_id: UserId): string {
 
 /**
  * One audit-log row, as the replay reducer consumes it: the persisted
- * `audit_events` envelope fields the reducer reads, plus the parsed
- * `AuditRecord` (outcome-discriminated effect).
+ * `audit_events` envelope fields plus the parsed `AuditRecord`
+ * (outcome-discriminated effect).
  *
  * Defined here — not imported from `@editorzero/db`'s `AuditEventsTable`
  * — so the dependency direction stays `db → audit`. A recording
  * `AuditWriter` (in the integration property test) captures the typed
  * `AuditWriteInput` directly into this shape, so no `effect`-column JSON
- * is narrowed back to `AuditEffect` (no cast). The reducer reads:
- *   - `record` — outcome + effect (only `outcome: "allow"` mutates state).
- *   - `principal_kind` / `principal_id` — source for `created_by` on the
- *     create effects (`doc.create`, `collection.create`) whose bodies omit it.
+ * is narrowed back to `AuditEffect` (no cast).
+ *
+ * State reconstruction reads ONLY `record` (outcome + effect; only
+ * `outcome: "allow"` mutates state). `principal_kind` / `principal_id` are
+ * the forensic envelope fields (who acted) — the reducer no longer reads
+ * them, since `created_by` now comes from the effect body, not the envelope
+ * (Codex review HIGH 1). They stay on the row because it models a real
+ * `audit_events` row and the integration property captures them.
  */
 export interface ReplayRow {
   readonly principal_kind: "user" | "agent";

@@ -121,6 +121,7 @@ function buildDocInsertCapability(
         kind: "doc.rename",
         doc_id: DocId(input.doc_id),
         title: input.title,
+        slug: input.title,
       }),
       effectOnDeny: (_input, reason) => ({
         kind: "deny",
@@ -372,6 +373,7 @@ function buildDocMutateCapability(
         kind: "doc.rename",
         doc_id: DocId(input.doc_id),
         title: input.text,
+        slug: input.text,
       }),
       effectOnDeny: (_input, reason) => ({
         kind: "deny",
@@ -918,6 +920,7 @@ describe("write-path tx + content mutation (P3.6c)", () => {
           kind: "doc.rename",
           doc_id: DocId(input.doc_id),
           title: input.text,
+          slug: input.text,
         }),
         effectOnDeny: (_input, reason) => ({
           kind: "deny",

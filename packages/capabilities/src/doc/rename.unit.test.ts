@@ -329,7 +329,7 @@ describe("doc.rename", () => {
     expect(subject).toEqual({ kind: "doc", id: DOC_A1 });
   });
 
-  it("emits doc.rename on allow with doc_id + title", () => {
+  it("emits doc.rename on allow with doc_id + title + slug", () => {
     const effect = docRename.audit.effectOnAllow(
       { doc_id: DOC_A1, title: "New Title" },
       { doc_id: DOC_A1, title: "New Title", slug: "new-title", updated_at: 2_000_000 },
@@ -338,6 +338,9 @@ describe("doc.rename", () => {
     if (effect.kind === "doc.rename") {
       expect(effect.doc_id).toBe(DOC_A1);
       expect(effect.title).toBe("New Title");
+      // The handler-derived slug rides the effect so replay reconstructs it
+      // (the projection reads it; carrying only title would strand the slug).
+      expect(effect.slug).toBe("new-title");
     }
   });
 

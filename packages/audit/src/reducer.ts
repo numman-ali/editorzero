@@ -33,17 +33,19 @@
  *
  *   1. `REPLAY_CLASS satisfies Record<AuditEffect["kind"], ReplayClass>` —
  *      a new `AuditEffect` variant fails to compile until it is classified.
- *   2. `applyStateEffect`'s `default` throws — a kind classified `"state"`
- *      with no transition fails the per-kind reducer unit test (which
- *      feeds one representative effect per `"state"` kind). So a new kind
- *      cannot land as `"state"` without a *proven* transition.
+ *   2. A new `"state"` kind must also gain a representative fixture: the
+ *      reducer unit test's `STATE_KIND_FIXTURES` is itself
+ *      `satisfies Record<StateKind, …>` (compile error otherwise), and it
+ *      drives every fixture through the reducer. A kind that is classified
+ *      `"state"` and fixtured but has no transition hits
+ *      `applyStateEffect`'s `default` throw — a red test, not a silent gap.
  *
- * Together: a new effect kind won't pass CI until it is both classified
- * and (if state-bearing) transitioned and proven.
+ * Together: a new effect kind won't pass CI until it is classified, and (if
+ * `"state"`) fixtured and transitioned — the missing transition surfaces as a
+ * failing assertion, never a quiet no-op.
  */
 
-import type { CollectionId, DocId, WorkspaceId } from "@editorzero/ids";
-import { UserId } from "@editorzero/ids";
+import type { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { AuditEffect } from "./effect";
 import {
   type CollectionState,
@@ -201,11 +203,14 @@ function patchDoc(
  * `REPLAY_CLASS` gate, so the `default` branch fires exactly when a kind is
  * classified `"state"` without a transition — the per-kind unit test makes
  * that a failing test, not a silent gap.
+ *
+ * Purely effect-driven: every projected field reads from `effect`, never
+ * from the audit-row envelope (`created_by` comes from the effect body, not
+ * `principal_id` — Codex review HIGH 1).
  */
 function applyStateEffect(
   state: PersistentWorkspaceState,
   effect: AuditEffect,
-  row: ReplayRow,
 ): PersistentWorkspaceState {
   switch (effect.kind) {
     // ── workspace ──────────────────────────────────────────────────────────
@@ -214,30 +219,39 @@ function applyStateEffect(
         id: effect.workspace_id,
         slug: effect.slug,
         name: effect.name,
+        trash_retention_days: effect.trash_retention_days,
+        settings: effect.settings,
         created_by: effect.created_by,
-        deleted: false,
+        deleted_at: null,
       });
     case "workspace.update":
-      // v1 reconstructs `name` only; `trash_retention_days` / `settings`
-      // are excluded-by-contract (see state.ts file doc).
-      return effect.patch.name !== undefined
-        ? patchWorkspace(state, effect.workspace_id, { name: effect.patch.name })
-        : state;
+      // Apply every field the patch carries — name, retention, settings.
+      // (Codex review HIGH 3: the projection previously reconstructed `name`
+      // only, dropping retention / settings mutations on the floor.)
+      return patchWorkspace(state, effect.workspace_id, {
+        ...(effect.patch.name !== undefined ? { name: effect.patch.name } : {}),
+        ...(effect.patch.trash_retention_days !== undefined
+          ? { trash_retention_days: effect.patch.trash_retention_days }
+          : {}),
+        ...(effect.patch.settings !== undefined ? { settings: effect.patch.settings } : {}),
+      });
     case "workspace.soft_delete":
-      return patchWorkspace(state, effect.workspace_id, { deleted: true });
+      return patchWorkspace(state, effect.workspace_id, { deleted_at: effect.deleted_at });
     case "workspace.restore":
-      return patchWorkspace(state, effect.workspace_id, { deleted: false });
+      return patchWorkspace(state, effect.workspace_id, { deleted_at: null });
 
-    // ── members (revive-in-place collapses to the same fields: no timestamp) ──
+    // ── members (revive-in-place resets deleted_at to null) ──────────────────
     case "member.add":
       return setMember(state, {
         workspace_id: effect.workspace_id,
         user_id: effect.user_id,
         role: effect.role,
-        deleted: false,
+        deleted_at: null,
       });
     case "member.remove":
-      return patchMember(state, effect.workspace_id, effect.user_id, { deleted: true });
+      return patchMember(state, effect.workspace_id, effect.user_id, {
+        deleted_at: effect.deleted_at,
+      });
     case "member.update_role":
       return patchMember(state, effect.workspace_id, effect.user_id, { role: effect.role });
 
@@ -250,8 +264,8 @@ function applyStateEffect(
         title: effect.title,
         slug: effect.slug,
         order_key: effect.order_key,
-        created_by: UserId(row.principal_id),
-        deleted: false,
+        created_by: effect.created_by,
+        deleted_at: null,
       });
     case "collection.update":
       return patchCollection(state, effect.collection_id, {
@@ -265,9 +279,9 @@ function applyStateEffect(
         order_key: effect.new_order_key,
       });
     case "collection.soft_delete":
-      return patchCollection(state, effect.collection_id, { deleted: true });
+      return patchCollection(state, effect.collection_id, { deleted_at: effect.deleted_at });
     case "collection.restore":
-      return patchCollection(state, effect.collection_id, { deleted: false });
+      return patchCollection(state, effect.collection_id, { deleted_at: null });
 
     // ── docs ─────────────────────────────────────────────────────────────────
     case "doc.create":
@@ -279,11 +293,14 @@ function applyStateEffect(
         slug: effect.slug,
         order_key: effect.order_key,
         visibility: effect.visibility,
-        created_by: UserId(row.principal_id),
-        deleted: false,
+        created_by: effect.created_by,
+        deleted_at: null,
       });
     case "doc.rename":
-      return patchDoc(state, effect.doc_id, { title: effect.title });
+      // Both fields move together: the handler slugifies the new title and
+      // writes title + slug in one UPDATE, so replay applies both (parallel to
+      // `collection.update`). Projecting `title` alone left a stale slug.
+      return patchDoc(state, effect.doc_id, { title: effect.title, slug: effect.slug });
     case "doc.move":
       return patchDoc(state, effect.doc_id, {
         collection_id: effect.new_collection_id,
@@ -298,9 +315,9 @@ function applyStateEffect(
     case "doc.unpublish":
       return patchDoc(state, effect.doc_id, { visibility: "workspace" });
     case "doc.soft_delete":
-      return patchDoc(state, effect.doc_id, { deleted: true });
+      return patchDoc(state, effect.doc_id, { deleted_at: effect.deleted_at });
     case "doc.restore":
-      return patchDoc(state, effect.doc_id, { deleted: false });
+      return patchDoc(state, effect.doc_id, { deleted_at: null });
 
     default:
       /* v8 ignore start -- @preserve defensive: applyAuditRow's REPLAY_CLASS
@@ -327,7 +344,7 @@ export function applyAuditRow(
   if (record.outcome !== "allow") return state;
   const { effect } = record;
   if (REPLAY_CLASS[effect.kind] !== "state") return state;
-  return applyStateEffect(state, effect, row);
+  return applyStateEffect(state, effect);
 }
 
 /** Replays an ordered audit log into the reconstructed projection. */

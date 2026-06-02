@@ -132,6 +132,9 @@ describe("collection.create handler", () => {
     expect(out.title).toBe("Reference");
     expect(out.slug).toBe("reference");
     expect(out.order_key).toBe(out.collection_id);
+    // created_by is carried on the output so the audit effect can record it
+    // (invariant 3a attribution — Codex review HIGH 1).
+    expect(out.created_by).toBe(ALICE);
     // UUIDv7 round-trip pins the brand — a freshly-minted non-v7 would throw.
     expect(CollectionId(out.collection_id)).toBe(out.collection_id);
 
@@ -379,6 +382,7 @@ describe("collection.create — agent principal attribution", () => {
       .where("id", "=", out.collection_id)
       .executeTakeFirstOrThrow();
     expect(row.created_by).toBe(BOB);
+    expect(out.created_by).toBe(BOB);
   });
 
   it("falls back to `owner_user_id` when `acting_as` is absent", async () => {
@@ -440,6 +444,7 @@ describe("collection.create audit projections", () => {
     title: "T",
     slug: "t",
     order_key: "018f0000-0000-7000-8000-0000000000d9",
+    created_by: ALICE,
   };
 
   it("effectOnAllow projects the collection.create audit kind with every field", () => {
@@ -452,6 +457,7 @@ describe("collection.create audit projections", () => {
       expect(effect.title).toBe("T");
       expect(effect.slug).toBe("t");
       expect(effect.order_key).toBe(sampleOutput.order_key);
+      expect(effect.created_by).toBe(ALICE);
     }
   });
 

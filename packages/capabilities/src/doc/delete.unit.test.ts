@@ -244,10 +244,14 @@ describe("doc.delete", () => {
     expect(subject).toEqual({ kind: "doc", id: DOC_A1 });
   });
 
-  it("emits doc.soft_delete on allow with doc_id (no timestamp field — envelope owns that)", () => {
+  it("emits doc.soft_delete on allow carrying doc_id + the handler deleted_at", () => {
     // Intentional asymmetry: capability id is `doc.delete` (user-
     // facing verb), audit effect kind is `doc.soft_delete`
     // (forensic-reader term; distinguishes from future `doc.purge`).
+    // The effect carries the exact `deleted_at` the handler wrote so the
+    // replay reducer reconstructs the ADR 0017 recovery anchor precisely —
+    // the handler's clock, not the audit row's `created_at` (Codex review
+    // HIGH 4).
     const effect = docDelete.audit.effectOnAllow(
       { doc_id: DOC_A1 },
       {
@@ -259,9 +263,7 @@ describe("doc.delete", () => {
     expect(effect.kind).toBe("doc.soft_delete");
     if (effect.kind === "doc.soft_delete") {
       expect(effect.doc_id).toBe(DOC_A1);
-      // No `deleted_at` field on the effect union; audit row's own
-      // `created_at` is authoritative for "when this happened".
-      expect((effect as { deleted_at?: number }).deleted_at).toBeUndefined();
+      expect(effect.deleted_at).toBe(2_000_000);
     }
   });
 

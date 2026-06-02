@@ -5,6 +5,11 @@
  *   - every `"state"`-classed kind has a real transition (the per-kind
  *     gate — a kind classified `"state"` without a transition would hit
  *     `applyStateEffect`'s `default` throw and fail here);
+ *   - `created_by` reconstructs from the effect body, NOT the envelope
+ *     principal — correct for an agent write, where the principal is the
+ *     agent but the attribution is the human behind it (Codex review HIGH 1);
+ *   - `deleted_at` reconstructs the exact handler timestamp the soft_delete
+ *     effect carries (ADR 0017 recovery anchor — Codex review HIGH 4);
  *   - deny/error rows and every non-`"state"` class are no-ops;
  *   - patches to absent entities are safe (truncated-log resilience);
  *   - `REPLAY_CLASS` partitions all kinds into the four classes.
@@ -26,6 +31,9 @@ const USER2 = UserId("018f0000-0000-7000-8000-000000000003");
 const COLL = CollectionId("018f0000-0000-7000-8000-0000000000c1");
 const COLL2 = CollectionId("018f0000-0000-7000-8000-0000000000c2");
 const DOC = DocId("018f0000-0000-7000-8000-0000000000d1");
+// A non-user principal id, used to prove `created_by` comes from the effect
+// body, not the envelope `principal_id` (agent writes attribute to a human).
+const AGENT_PRINCIPAL = "018f0000-0000-7000-8000-0000000000f1";
 
 function allow(effect: AuditEffect, principal_id: string = USER): ReplayRow {
   return { principal_kind: "user", principal_id, record: { outcome: "allow", effect } };
@@ -39,6 +47,8 @@ describe("replay reducer — state transitions", () => {
         workspace_id: WS,
         slug: "acme",
         name: "Acme",
+        trash_retention_days: 30,
+        settings: {},
         created_by: USER,
       }),
       allow({ kind: "member.add", workspace_id: WS, user_id: USER, role: "owner" }),
@@ -52,6 +62,7 @@ describe("replay reducer — state transitions", () => {
         title: "Docs",
         slug: "docs",
         order_key: "a",
+        created_by: USER,
       }),
       allow({
         kind: "doc.create",
@@ -61,31 +72,34 @@ describe("replay reducer — state transitions", () => {
         title: "Hello",
         slug: "hello",
         order_key: "a",
+        created_by: USER,
         visibility: "workspace",
         seed_blocks: [],
       }),
       allow({ kind: "doc.publish", doc_id: DOC, published_at: 123 }),
-      allow({ kind: "doc.rename", doc_id: DOC, title: "Hello World" }),
+      allow({ kind: "doc.rename", doc_id: DOC, title: "Hello World", slug: "hello-world" }),
     ]);
 
     expect(state.workspaces[WS]).toEqual({
       id: WS,
       slug: "acme",
       name: "Acme",
+      trash_retention_days: 30,
+      settings: {},
       created_by: USER,
-      deleted: false,
+      deleted_at: null,
     });
     expect(state.members[memberKey(WS, USER)]).toEqual({
       workspace_id: WS,
       user_id: USER,
       role: "owner",
-      deleted: false,
+      deleted_at: null,
     });
     expect(state.members[memberKey(WS, USER2)]).toEqual({
       workspace_id: WS,
       user_id: USER2,
       role: "admin",
-      deleted: false,
+      deleted_at: null,
     });
     expect(state.collections[COLL]).toEqual({
       id: COLL,
@@ -95,48 +109,129 @@ describe("replay reducer — state transitions", () => {
       slug: "docs",
       order_key: "a",
       created_by: USER,
-      deleted: false,
+      deleted_at: null,
     });
     expect(state.docs[DOC]).toEqual({
       id: DOC,
       workspace_id: WS,
       collection_id: COLL,
       title: "Hello World",
-      slug: "hello",
+      // Follows the rename: the effect carries the handler-slugified value, so
+      // replay moves the slug off the create-time "hello" (the drop this
+      // assertion previously masked).
+      slug: "hello-world",
       order_key: "a",
       visibility: "public",
       created_by: USER,
-      deleted: false,
+      deleted_at: null,
     });
   });
 
-  it("workspace.update patches name; non-name patch + soft_delete/restore", () => {
+  it("reconstructs created_by from the effect, not the envelope principal (agent write)", () => {
+    // An agent write: the audit envelope's `principal_id` is the AGENT, but
+    // the handler attributes the doc/collection to the human behind it
+    // (`acting_as` / `owner_user_id`). The effect carries that human id;
+    // replay must read the effect, never the envelope — else an
+    // agent-created entity reconstructs with the wrong owner (Codex review
+    // HIGH 1). Reconstructing from `principal_id` (the old behaviour) would
+    // put the agent's id in `created_by`, breaking the brand and the
+    // attribution.
+    const docRow: ReplayRow = {
+      principal_kind: "agent",
+      principal_id: AGENT_PRINCIPAL,
+      record: {
+        outcome: "allow",
+        effect: {
+          kind: "doc.create",
+          doc_id: DOC,
+          workspace_id: WS,
+          collection_id: null,
+          title: "Agent doc",
+          slug: "agent-doc",
+          order_key: "a",
+          created_by: USER, // the human behind the agent
+          visibility: "workspace",
+          seed_blocks: [],
+        },
+      },
+    };
+    const collRow: ReplayRow = {
+      principal_kind: "agent",
+      principal_id: AGENT_PRINCIPAL,
+      record: {
+        outcome: "allow",
+        effect: {
+          kind: "collection.create",
+          collection_id: COLL,
+          workspace_id: WS,
+          parent_id: null,
+          title: "Agent coll",
+          slug: "agent-coll",
+          order_key: "a",
+          created_by: USER,
+        },
+      },
+    };
+    const state = replay([docRow, collRow]);
+    expect(state.docs[DOC]?.created_by).toBe(USER);
+    expect(state.collections[COLL]?.created_by).toBe(USER);
+    // Definitely NOT the agent principal id (the envelope is ignored).
+    expect(state.docs[DOC]?.created_by).not.toBe(AGENT_PRINCIPAL);
+    expect(state.collections[COLL]?.created_by).not.toBe(AGENT_PRINCIPAL);
+  });
+
+  it("workspace.update applies name + retention + settings; soft_delete/restore set deleted_at", () => {
     let s = replay([
-      allow({ kind: "workspace.create", workspace_id: WS, slug: "a", name: "A", created_by: USER }),
+      allow({
+        kind: "workspace.create",
+        workspace_id: WS,
+        slug: "a",
+        name: "A",
+        trash_retention_days: 30,
+        settings: {},
+        created_by: USER,
+      }),
     ]);
+    // name patch
     s = applyAuditRow(
       s,
       allow({ kind: "workspace.update", workspace_id: WS, patch: { name: "B" } }),
     );
     expect(s.workspaces[WS]?.name).toBe("B");
-    // Non-name patch (excluded-by-contract field only) is a no-op for v1.
+    expect(s.workspaces[WS]?.trash_retention_days).toBe(30);
+    // retention patch (was an excluded-by-contract no-op before HIGH 3)
     s = applyAuditRow(
       s,
       allow({ kind: "workspace.update", workspace_id: WS, patch: { trash_retention_days: 7 } }),
     );
-    expect(s.workspaces[WS]?.name).toBe("B");
-    s = applyAuditRow(s, allow({ kind: "workspace.soft_delete", workspace_id: WS }));
-    expect(s.workspaces[WS]?.deleted).toBe(true);
+    expect(s.workspaces[WS]?.trash_retention_days).toBe(7);
+    expect(s.workspaces[WS]?.name).toBe("B"); // unspecified field untouched
+    // settings patch — carried as the parsed object
+    s = applyAuditRow(
+      s,
+      allow({ kind: "workspace.update", workspace_id: WS, patch: { settings: { theme: "dark" } } }),
+    );
+    expect(s.workspaces[WS]?.settings).toEqual({ theme: "dark" });
+    // soft_delete carries the handler timestamp; restore clears it
+    s = applyAuditRow(
+      s,
+      allow({ kind: "workspace.soft_delete", workspace_id: WS, deleted_at: 555 }),
+    );
+    expect(s.workspaces[WS]?.deleted_at).toBe(555);
     s = applyAuditRow(s, allow({ kind: "workspace.restore", workspace_id: WS }));
-    expect(s.workspaces[WS]?.deleted).toBe(false);
+    expect(s.workspaces[WS]?.deleted_at).toBeNull();
   });
 
-  it("member.remove flips deleted", () => {
+  it("member.remove sets deleted_at to the carried timestamp", () => {
     let s = replay([
       allow({ kind: "member.add", workspace_id: WS, user_id: USER2, role: "member" }),
     ]);
-    s = applyAuditRow(s, allow({ kind: "member.remove", workspace_id: WS, user_id: USER2 }));
-    expect(s.members[memberKey(WS, USER2)]?.deleted).toBe(true);
+    expect(s.members[memberKey(WS, USER2)]?.deleted_at).toBeNull();
+    s = applyAuditRow(
+      s,
+      allow({ kind: "member.remove", workspace_id: WS, user_id: USER2, deleted_at: 777 }),
+    );
+    expect(s.members[memberKey(WS, USER2)]?.deleted_at).toBe(777);
   });
 
   it("collection lifecycle: update (partial), move, soft_delete, restore", () => {
@@ -149,6 +244,7 @@ describe("replay reducer — state transitions", () => {
         title: "C",
         slug: "c",
         order_key: "a",
+        created_by: USER,
       }),
     ]);
     s = applyAuditRow(
@@ -171,10 +267,13 @@ describe("replay reducer — state transitions", () => {
       }),
     );
     expect(s.collections[COLL]).toMatchObject({ parent_id: COLL2, order_key: "z" });
-    s = applyAuditRow(s, allow({ kind: "collection.soft_delete", collection_id: COLL }));
-    expect(s.collections[COLL]?.deleted).toBe(true);
+    s = applyAuditRow(
+      s,
+      allow({ kind: "collection.soft_delete", collection_id: COLL, deleted_at: 888 }),
+    );
+    expect(s.collections[COLL]?.deleted_at).toBe(888);
     s = applyAuditRow(s, allow({ kind: "collection.restore", collection_id: COLL }));
-    expect(s.collections[COLL]?.deleted).toBe(false);
+    expect(s.collections[COLL]?.deleted_at).toBeNull();
   });
 
   it("doc lifecycle: create (root), move, unpublish, soft_delete, restore", () => {
@@ -187,6 +286,7 @@ describe("replay reducer — state transitions", () => {
         title: "D",
         slug: "d",
         order_key: "a",
+        created_by: USER,
         visibility: "workspace",
         seed_blocks: [],
       }),
@@ -200,7 +300,7 @@ describe("replay reducer — state transitions", () => {
       order_key: "a",
       visibility: "workspace",
       created_by: USER,
-      deleted: false,
+      deleted_at: null,
     });
     s = applyAuditRow(
       s,
@@ -211,10 +311,10 @@ describe("replay reducer — state transitions", () => {
     expect(s.docs[DOC]?.visibility).toBe("public");
     s = applyAuditRow(s, allow({ kind: "doc.unpublish", doc_id: DOC }));
     expect(s.docs[DOC]?.visibility).toBe("workspace");
-    s = applyAuditRow(s, allow({ kind: "doc.soft_delete", doc_id: DOC }));
-    expect(s.docs[DOC]?.deleted).toBe(true);
+    s = applyAuditRow(s, allow({ kind: "doc.soft_delete", doc_id: DOC, deleted_at: 999 }));
+    expect(s.docs[DOC]?.deleted_at).toBe(999);
     s = applyAuditRow(s, allow({ kind: "doc.restore", doc_id: DOC }));
-    expect(s.docs[DOC]?.deleted).toBe(false);
+    expect(s.docs[DOC]?.deleted_at).toBeNull();
   });
 });
 
@@ -284,13 +384,93 @@ describe("replay reducer — no-ops", () => {
         allow({ kind: "collection.update", collection_id: COLL, patch: { title: "x" } }),
       ),
     ).toBe(EMPTY_STATE);
-    expect(applyAuditRow(EMPTY_STATE, allow({ kind: "doc.rename", doc_id: DOC, title: "x" }))).toBe(
-      EMPTY_STATE,
-    );
+    expect(
+      applyAuditRow(EMPTY_STATE, allow({ kind: "doc.rename", doc_id: DOC, title: "x", slug: "x" })),
+    ).toBe(EMPTY_STATE);
   });
 
   it("replay of an empty log is EMPTY_STATE", () => {
     expect(replay([])).toBe(EMPTY_STATE);
+  });
+});
+
+// ── Per-kind transition coverage (the runtime half of reducer.ts §forcing) ──
+//
+// `StateKind` is exactly the set of kinds `REPLAY_CLASS` classifies `"state"`.
+// `STATE_KIND_FIXTURES` `satisfies` a total record over it, so a newly-added
+// `"state"` kind that lacks a fixture fails to COMPILE here. `it.each` then
+// drives every fixture through `applyAuditRow` → `applyStateEffect`; a fixtured
+// `"state"` kind with no transition hits the `default` throw — a red test. The
+// two locks together back the contract docstring in `reducer.ts`.
+type StateKind = {
+  [K in keyof typeof REPLAY_CLASS]: (typeof REPLAY_CLASS)[K] extends "state" ? K : never;
+}[keyof typeof REPLAY_CLASS];
+
+const STATE_KIND_FIXTURES = {
+  "workspace.create": {
+    kind: "workspace.create",
+    workspace_id: WS,
+    slug: "acme",
+    name: "Acme",
+    trash_retention_days: 30,
+    settings: {},
+    created_by: USER,
+  },
+  "workspace.update": { kind: "workspace.update", workspace_id: WS, patch: { name: "B" } },
+  "workspace.soft_delete": { kind: "workspace.soft_delete", workspace_id: WS, deleted_at: 1 },
+  "workspace.restore": { kind: "workspace.restore", workspace_id: WS },
+  "member.add": { kind: "member.add", workspace_id: WS, user_id: USER, role: "owner" },
+  "member.remove": { kind: "member.remove", workspace_id: WS, user_id: USER, deleted_at: 1 },
+  "member.update_role": {
+    kind: "member.update_role",
+    workspace_id: WS,
+    user_id: USER,
+    role: "admin",
+  },
+  "collection.create": {
+    kind: "collection.create",
+    collection_id: COLL,
+    workspace_id: WS,
+    parent_id: null,
+    title: "Docs",
+    slug: "docs",
+    order_key: "a",
+    created_by: USER,
+  },
+  "collection.update": { kind: "collection.update", collection_id: COLL, patch: { title: "x" } },
+  "collection.move": {
+    kind: "collection.move",
+    collection_id: COLL,
+    new_parent_id: null,
+    new_order_key: "z",
+  },
+  "collection.soft_delete": { kind: "collection.soft_delete", collection_id: COLL, deleted_at: 1 },
+  "collection.restore": { kind: "collection.restore", collection_id: COLL },
+  "doc.create": {
+    kind: "doc.create",
+    doc_id: DOC,
+    workspace_id: WS,
+    collection_id: null,
+    title: "Hello",
+    slug: "hello",
+    order_key: "a",
+    created_by: USER,
+    visibility: "workspace",
+    seed_blocks: [],
+  },
+  "doc.rename": { kind: "doc.rename", doc_id: DOC, title: "Hello World", slug: "hello-world" },
+  "doc.move": { kind: "doc.move", doc_id: DOC, new_collection_id: null, new_order_key: "m" },
+  "doc.publish": { kind: "doc.publish", doc_id: DOC, published_at: 1 },
+  "doc.unpublish": { kind: "doc.unpublish", doc_id: DOC },
+  "doc.soft_delete": { kind: "doc.soft_delete", doc_id: DOC, deleted_at: 1 },
+  "doc.restore": { kind: "doc.restore", doc_id: DOC },
+} satisfies { [K in StateKind]: Extract<AuditEffect, { kind: K }> };
+
+describe('replay reducer — every "state" kind has a transition', () => {
+  it.each(
+    Object.entries(STATE_KIND_FIXTURES),
+  )("%s is a real transition, not the unclassified-state throw", (_kind, effect) => {
+    expect(() => applyAuditRow(EMPTY_STATE, allow(effect))).not.toThrow();
   });
 });
 

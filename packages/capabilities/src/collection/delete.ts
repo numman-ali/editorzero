@@ -86,6 +86,7 @@ export const collectionDelete: Capability<CollectionDeleteInput, CollectionDelet
     effectOnAllow: (_input, output): AuditEffect => ({
       kind: "collection.soft_delete",
       collection_id: output.collection_id,
+      deleted_at: output.deleted_at,
     }),
     effectOnDeny: (_input, reason: DenyReason): AuditDeny => ({
       kind: "deny",

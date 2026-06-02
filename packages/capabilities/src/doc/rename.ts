@@ -128,6 +128,11 @@ export const docRename: Capability<DocRenameInput, DocRenameOutput> = {
       kind: "doc.rename",
       doc_id: output.doc_id,
       title: output.title,
+      // The handler re-derived this from the new title and wrote it to
+      // `docs.slug` in the same UPDATE; carry it so replay reconstructs the
+      // slug instead of retaining the stale create-time value (the effect must
+      // carry every handler-computed field the projection reads).
+      slug: output.slug,
     }),
     effectOnDeny: (_input, reason: DenyReason): AuditDeny => ({
       kind: "deny",

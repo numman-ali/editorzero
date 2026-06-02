@@ -352,7 +352,9 @@ describe("collection.delete", () => {
       expect(collectionDelete.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     });
 
-    it("emits the collection.soft_delete effect on allow", () => {
+    it("emits the collection.soft_delete effect on allow (carrying deleted_at)", () => {
+      // The effect carries the handler's `deleted_at` so replay reconstructs
+      // the ADR 0017 recovery anchor precisely (Codex review HIGH 4).
       const effect = collectionDelete.audit.effectOnAllow(
         { collection_id: EMPTY },
         { collection_id: EMPTY, deleted_at: 42 },
@@ -360,6 +362,7 @@ describe("collection.delete", () => {
       expect(effect.kind).toBe("collection.soft_delete");
       if (effect.kind === "collection.soft_delete") {
         expect(effect.collection_id).toBe(EMPTY);
+        expect(effect.deleted_at).toBe(42);
       }
     });
 

@@ -209,6 +209,7 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
       title: output.title,
       slug: output.slug,
       order_key: output.order_key,
+      created_by: output.created_by,
       visibility: output.visibility,
       seed_blocks: output.seed_blocks,
     }),
@@ -397,6 +398,7 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
       title,
       slug,
       order_key,
+      created_by,
       visibility,
       seed_blocks,
     };

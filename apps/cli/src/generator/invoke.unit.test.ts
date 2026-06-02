@@ -106,6 +106,7 @@ describe("runCapability", () => {
       title: "Hello",
       slug: "hello",
       order_key: "a",
+      created_by: "018f0000-0000-7000-8000-000000000002",
       visibility: "workspace",
       seed_blocks: [],
     };

@@ -70,6 +70,7 @@ export const workspaceMemberRemove: Capability<
       kind: "member.remove",
       workspace_id: output.workspace_id,
       user_id: output.user_id,
+      deleted_at: output.deleted_at,
     }),
     effectOnDeny: (_input, reason) => ({
       kind: "deny",
