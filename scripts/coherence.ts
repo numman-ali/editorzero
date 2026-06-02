@@ -522,6 +522,31 @@ async function checkAppendixACoherence(report: Report): Promise<void> {
     }
   }
 
+  // ── Check 5b: system-audit markers must not shadow a real capability ──
+  // `SYSTEM_AUDIT_CAPABILITY_IDS` (@editorzero/scopes, ADR 0041) are
+  // non-dispatch provenance labels on `audit_events` rows written OUTSIDE the
+  // dispatcher (genesis bootstrap; future import / repair jobs). They must
+  // stay DISJOINT from the implemented capability ids — a marker that collides
+  // with (or later becomes) a registered capability would let a dispatchable
+  // id masquerade as a system mutation, or vice versa. Enforces ADR 0041's
+  // "reserved, non-dispatchable" guarantee.
+  const scopesSrc = await readIfExists(join(ROOT, "packages", "scopes", "src", "index.ts"));
+  if (scopesSrc) {
+    const implementedById = new Set(implemented.map((i) => i.id));
+    for (const marker of parseSystemAuditMarkers(scopesSrc)) {
+      if (implementedById.has(marker)) {
+        report.add({
+          severity: "error",
+          message:
+            `system-audit marker drift: \`${marker}\` is in SYSTEM_AUDIT_CAPABILITY_IDS ` +
+            `(@editorzero/scopes, ADR 0041) but is ALSO implemented as a CapabilityId under ` +
+            `packages/capabilities/src/** — a system-audit marker must never be a dispatchable ` +
+            `capability. Rename one of them.`,
+        });
+      }
+    }
+  }
+
   // ── Check 6: Appendix A effect kinds must exist in AuditEffect ─────────
   const effectPath = join(ROOT, "packages", "audit", "src", "effect.ts");
   const effectSrc = await readIfExists(effectPath);
@@ -633,6 +658,34 @@ async function collectImplementedCapabilityIds(dir: string): Promise<Implemented
     }
   }
   return out;
+}
+
+/**
+ * Parse the system-audit marker SSOT (`SYSTEM_AUDIT_CAPABILITY_IDS`, ADR 0041)
+ * from `@editorzero/scopes` source. The array members are `export const FOO =
+ * "x.y"` identifiers; resolve each to its string literal so the disjointness
+ * check reflects the real SSOT rather than a duplicated copy. Reading source
+ * (not the built dist) keeps coherence build-independent.
+ */
+function parseSystemAuditMarkers(scopesSrc: string): string[] {
+  const arrayMatch = /SYSTEM_AUDIT_CAPABILITY_IDS\s*=\s*\[([^\]]*)\]/.exec(scopesSrc);
+  if (arrayMatch?.[1] === undefined) return [];
+  const members = arrayMatch[1]
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const markers: string[] = [];
+  for (const member of members) {
+    const inline = /^"([^"]+)"$/.exec(member);
+    if (inline?.[1] !== undefined) {
+      markers.push(inline[1]);
+      continue;
+    }
+    // Identifier reference → resolve `export const <ident> = "x.y"`.
+    const constMatch = new RegExp(`\\b${member}\\s*=\\s*"([^"]+)"`).exec(scopesSrc);
+    if (constMatch?.[1] !== undefined) markers.push(constMatch[1]);
+  }
+  return markers;
 }
 
 /**

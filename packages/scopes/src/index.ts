@@ -149,6 +149,41 @@ export function isMetadataOnlyCapability(id: string): id is MetadataOnlyCapabili
   return METADATA_ONLY_CAPABILITY_SET.has(id);
 }
 
+// ── System-audit provenance markers (ADR 0041) ─────────────────────────────
+//
+// Synthetic `capability_id` values that may appear on `audit_events` rows
+// produced OUTSIDE the dispatcher — system mutations that must still land in
+// the audit log to keep invariant 3 ("the log alone reconstructs final state")
+// whole. The canonical case is signup genesis: `create-auth.ts`'s post-commit
+// hook writes the `workspaces` anchor + owner `workspace_members` row via
+// `driver.system()`, neither through a capability dispatch, yet both create
+// durable authority that replay must reconstruct.
+//
+// These ids are **non-dispatchable**: no `Capability` carries one, they have
+// no scopes/handler/surfaces, and they never appear in Appendix A. The id is
+// the provenance label on the audit envelope, not a dispatch target. The
+// `system.` prefix (vs a `workspace.`-domain name) makes that unmistakable —
+// system, not dispatch — and one marker labels both genesis rows (they differ
+// by `effect` + `subject`).
+//
+// `scripts/coherence.ts` enforces that this set is DISJOINT from the
+// implemented capability ids, so a marker can never silently become — or be
+// shadowed by — a real capability. Reusable for future import / repair-job
+// markers as those slices land.
+export const SYSTEM_WORKSPACE_BOOTSTRAP = "system.workspace_bootstrap";
+
+export const SYSTEM_AUDIT_CAPABILITY_IDS = [SYSTEM_WORKSPACE_BOOTSTRAP] as const;
+
+export type SystemAuditCapabilityId = (typeof SYSTEM_AUDIT_CAPABILITY_IDS)[number];
+
+// `Set<string>` widens the narrow tuple at assignment time (not via a cast) so
+// `.has(arbitraryString)` is well-typed — same posture as the metadata-only set.
+const SYSTEM_AUDIT_CAPABILITY_SET: ReadonlySet<string> = new Set(SYSTEM_AUDIT_CAPABILITY_IDS);
+
+export function isSystemAuditCapabilityId(id: string): id is SystemAuditCapabilityId {
+  return SYSTEM_AUDIT_CAPABILITY_SET.has(id);
+}
+
 // ── Default agent scope tiers (§8.4) ───────────────────────────────────────
 
 export type AgentScopeTier = "read-only" | "author" | "editor" | "admin";

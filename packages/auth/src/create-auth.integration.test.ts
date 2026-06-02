@@ -21,6 +21,7 @@
  * stack.
  */
 
+import { type AuditEffect, memberKey, type ReplayRow, replay } from "@editorzero/audit";
 import {
   createLoadRoles,
   createSqliteDriver,
@@ -28,7 +29,8 @@ import {
   SQLITE_FULL_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
-import { WorkspaceId } from "@editorzero/ids";
+import { UserId, WorkspaceId } from "@editorzero/ids";
+import { SYSTEM_WORKSPACE_BOOTSTRAP } from "@editorzero/scopes";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { composeWorkspaceSlug, createAuth } from "./create-auth";
@@ -193,6 +195,116 @@ describe("@editorzero/auth", () => {
     expect(principal.token_id).toBeNull();
     expect(principal.session_id).not.toBeNull();
     expect(principal.workspace_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
+  });
+
+  it("genesis bootstrap is audited: workspace.create + member.add replay to the live state (invariant 3, ADR 0041)", async () => {
+    // ADR 0041: the post-commit bootstrap emits two `audit_events` rows under
+    // the non-dispatch marker `system.workspace_bootstrap`, so the audit log
+    // ALONE reconstructs the genesis workspace + owner — closing invariant 3
+    // for signup. This is the unit-level proof; the dispatcher property suite
+    // (#23) carries the across-the-whole-system version.
+    const auth = buildAuth();
+    await runAuthMigrations(auth);
+
+    await auth.api.signUpEmail({
+      body: {
+        email: "eve@example.com",
+        password: "correct-horse-battery-staple",
+        name: "Eve",
+      },
+    });
+
+    // The signing-up user is the genesis principal AND the workspace owner.
+    const userRow = await driver
+      .system()
+      // biome-ignore lint/suspicious/noExplicitAny: user table is Better Auth's, outside our Database type.
+      .selectFrom("user" as any)
+      .select(["id" as never, "workspaceId" as never])
+      .executeTakeFirstOrThrow();
+    const { id: rawUserId, workspaceId: rawWorkspaceId } = userRow as {
+      id: string;
+      workspaceId: string;
+    };
+    const userId = UserId(rawUserId);
+    const wsId = WorkspaceId(rawWorkspaceId);
+
+    // Exactly two genesis audit rows, both under the system-bootstrap marker.
+    const auditRows = await driver
+      .system()
+      .selectFrom("audit_events")
+      .select([
+        "capability_id",
+        "category",
+        "principal_kind",
+        "principal_id",
+        "subject_kind",
+        "subject_id",
+        "outcome",
+        "effect",
+        "input_hash",
+      ])
+      .where("workspace_id", "=", wsId)
+      .orderBy("created_at")
+      .orderBy("id")
+      .execute();
+
+    expect(auditRows).toHaveLength(2);
+    for (const row of auditRows) {
+      expect(row.capability_id).toBe(SYSTEM_WORKSPACE_BOOTSTRAP);
+      expect(row.category).toBe("mutation");
+      expect(row.principal_kind).toBe("user");
+      expect(row.principal_id).toBe(userId);
+      expect(row.outcome).toBe("allow");
+      expect(row.input_hash).toMatch(/^[0-9a-f]{64}$/u); // sha256 hex of the effect
+    }
+
+    // Subjects mirror the capability conventions: workspace.create → the
+    // workspace (carried by the row's workspace_id column, so subject_id null);
+    // member.add → the target user (member_add's subjectFrom).
+    const byKind = (kind: string) =>
+      auditRows.find((r) => (JSON.parse(r.effect) as { kind: string }).kind === kind);
+    const wsCreate = byKind("workspace.create");
+    const memberAdd = byKind("member.add");
+    expect(wsCreate?.subject_kind).toBe("workspace");
+    expect(wsCreate?.subject_id).toBeNull();
+    expect(memberAdd?.subject_kind).toBe("user");
+    expect(memberAdd?.subject_id).toBe(userId);
+
+    // Each audit INSERT pairs with an `outbox(audit.appended)` row (the writer's
+    // fan-out) — genesis is observable downstream, not silently swallowed.
+    const outboxRows = await driver
+      .system()
+      .selectFrom("outbox")
+      .select(["event"])
+      .where("workspace_id", "=", wsId)
+      .where("event", "=", "audit.appended")
+      .execute();
+    expect(outboxRows).toHaveLength(2);
+
+    // The invariant-3 proof: replay the genesis rows and assert the
+    // reconstructed semantic projection equals the live workspace + owner.
+    const replayRows: ReplayRow[] = auditRows.map((r) => ({
+      principal_kind: r.principal_kind,
+      principal_id: r.principal_id,
+      record: { outcome: "allow", effect: JSON.parse(r.effect) as AuditEffect },
+    }));
+    const state = replay(replayRows);
+
+    expect(state.workspaces[wsId]).toEqual({
+      id: wsId,
+      slug: composeWorkspaceSlug("eve", wsId),
+      name: "eve's workspace",
+      trash_retention_days: 30,
+      settings: {},
+      created_by: userId,
+      deleted_at: null,
+    });
+    expect(state.members[memberKey(wsId, userId)]).toEqual({
+      workspace_id: wsId,
+      user_id: userId,
+      role: "owner",
+      deleted_at: null,
+    });
   });
 
   it("resolver returns null when the session is valid but no workspace_members row exists (ADR 0024 strict-on-missing)", async () => {

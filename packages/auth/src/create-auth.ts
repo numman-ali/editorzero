@@ -54,8 +54,10 @@
 
 import { createHash, randomBytes } from "node:crypto";
 
-import type { SqliteDriver } from "@editorzero/db";
-import { generateWorkspaceId, UserId, uuidV7, WorkspaceId } from "@editorzero/ids";
+import type { AuditEffect, AuditWriteInput } from "@editorzero/audit";
+import { asAuditTx, createAuditWriter, type SqliteDriver } from "@editorzero/db";
+import { CapabilityId, generateWorkspaceId, UserId, uuidV7, WorkspaceId } from "@editorzero/ids";
+import { SYSTEM_WORKSPACE_BOOTSTRAP } from "@editorzero/scopes";
 import { betterAuth } from "better-auth";
 
 /**
@@ -107,6 +109,51 @@ export function composeWorkspaceSlug(localPart: string, workspaceId: WorkspaceId
   const prefix = normalizeSlug(localPart);
   const suffix = slugSuffix(workspaceId);
   return prefix.length > 0 ? `${prefix}-${suffix}` : `workspace-${suffix}`;
+}
+
+// ── Genesis audit (ADR 0041) ───────────────────────────────────────────────
+//
+// Signup bootstrap writes the `workspaces` anchor + owner `workspace_members`
+// row OUTSIDE the dispatcher, so each needs an audit row carrying a non-dispatch
+// provenance marker to keep invariant 3 whole (the log alone reconstructs final
+// state). The marker is `system.workspace_bootstrap` (`@editorzero/scopes`,
+// coherence-validated disjoint from real capabilities). Reusing the shared
+// `AuditWriter` keeps the `audit_events` row shape + its paired
+// `outbox(audit.appended)` fan-out single-sourced rather than hand-rolled.
+const BOOTSTRAP_CAPABILITY_ID = CapabilityId(SYSTEM_WORKSPACE_BOOTSTRAP);
+const bootstrapAuditWriter = createAuditWriter();
+
+/**
+ * Build a genesis `AuditWriteInput`. Principal = the signing-up user; no
+ * session / token / acting-as (the user is mid-creation). `input_hash`
+ * fingerprints the effect's canonical JSON — genesis has no dispatch input, but
+ * the column is NOT NULL and a deterministic, content-identifying value is the
+ * honest analog.
+ */
+function bootstrapAuditRow(params: {
+  workspace_id: WorkspaceId;
+  user_id: UserId;
+  subject_kind: "workspace" | "user";
+  subject_id: string | null;
+  effect: AuditEffect;
+}): AuditWriteInput {
+  return {
+    workspace_id: params.workspace_id,
+    capability_id: BOOTSTRAP_CAPABILITY_ID,
+    category: "mutation",
+    principal_kind: "user",
+    principal_id: params.user_id,
+    acting_as_user_id: null,
+    session_id: null,
+    token_id: null,
+    subject_kind: params.subject_kind,
+    subject_id: params.subject_id,
+    input_hash: createHash("sha256").update(JSON.stringify(params.effect)).digest("hex"),
+    duration_ms: 0,
+    trace_id: null,
+    collapsed_count: 1,
+    record: { outcome: "allow", effect: params.effect },
+  };
 }
 
 /**
@@ -255,8 +302,10 @@ export function createAuth(options: CreateAuthOptions) {
           // recovery requires the caller to delete the orphan user
           // row or use a reconcile job; neither is in scope for the
           // MVP — the current lever is "signup throws, surface to UI,
-          // ask user to retry" (bad once, bad rarely; audit log will
-          // show the orphaned user + failed audit in the next slice).
+          // ask user to retry" (bad once, bad rarely). The genesis
+          // writes + their two audit rows are one atomic tx (ADR 0041),
+          // so a failure leaves only the orphan BA `user` row — no
+          // partial workspace, and no orphan audit.
           //
           // **Idempotent on conflict.** Both inserts use `doNothing`
           // against their natural uniqueness key (workspaces.id PK;
@@ -293,36 +342,94 @@ export function createAuth(options: CreateAuthOptions) {
             const slug = composeWorkspaceSlug(localPart, wsId);
             const displayName = `${localPart}'s workspace`;
 
-            await driver
-              .system()
-              .insertInto("workspaces")
-              .values({
-                id: wsId,
-                slug,
-                name: displayName,
-                trash_retention_days: 30,
-                diagnostic_salt: randomBytes(16),
-                created_by: UserId(user.id),
-                created_at: now,
-                deleted_at: null,
-                settings: "{}",
-              })
-              .onConflict((oc) => oc.column("id").doNothing())
-              .execute();
+            const userId = UserId(user.id);
 
-            await driver
-              .system()
-              .insertInto("workspace_members")
-              .values({
-                workspace_id: wsId,
-                user_id: UserId(user.id),
-                role: "owner",
-                created_at: now,
-                updated_at: now,
-                deleted_at: null,
-              })
-              .onConflict((oc) => oc.columns(["workspace_id", "user_id"]).doNothing())
-              .execute();
+            // **Post-commit app bootstrap transaction (ADR 0041).** This
+            // `withSystemTx` makes the genesis tuple — `workspaces` +
+            // `workspace_members` + their two audit rows — atomic AMONG
+            // THEMSELVES, closing invariant 3 for signup (replay reconstructs
+            // the root workspace + owner from the log alone). It is NOT atomic
+            // with the already-committed BA `user` row: the user-without-
+            // workspace gap above is unchanged. Each audit row emits ONLY when
+            // its insert actually mutated — `.onConflict().doNothing()` returns
+            // no row on a debounced retry-collision — so "exactly one audit
+            // entry per mutation" holds across retries rather than double-
+            // auditing. Reuses the shared `AuditWriter` (row shape + the
+            // `outbox(audit.appended)` fan-out are single-sourced).
+            await driver.withSystemTx(async (tx) => {
+              const wsRow = await tx
+                .insertInto("workspaces")
+                .values({
+                  id: wsId,
+                  slug,
+                  name: displayName,
+                  trash_retention_days: 30,
+                  diagnostic_salt: randomBytes(16),
+                  created_by: userId,
+                  created_at: now,
+                  deleted_at: null,
+                  settings: "{}",
+                })
+                .onConflict((oc) => oc.column("id").doNothing())
+                .returning("id")
+                .executeTakeFirst();
+
+              const memberRow = await tx
+                .insertInto("workspace_members")
+                .values({
+                  workspace_id: wsId,
+                  user_id: userId,
+                  role: "owner",
+                  created_at: now,
+                  updated_at: now,
+                  deleted_at: null,
+                })
+                .onConflict((oc) => oc.columns(["workspace_id", "user_id"]).doNothing())
+                .returning("workspace_id")
+                .executeTakeFirst();
+
+              if (wsRow !== undefined) {
+                await bootstrapAuditWriter.write(
+                  asAuditTx(tx),
+                  bootstrapAuditRow({
+                    workspace_id: wsId,
+                    user_id: userId,
+                    subject_kind: "workspace",
+                    subject_id: null,
+                    // `settings: {}` is the parsed form of the stored "{}" — the
+                    // workspace.create effect carries the parsed object (the
+                    // #25 round-trip rule); genesis settings is always empty.
+                    effect: {
+                      kind: "workspace.create",
+                      workspace_id: wsId,
+                      slug,
+                      name: displayName,
+                      created_by: userId,
+                      trash_retention_days: 30,
+                      settings: {},
+                    },
+                  }),
+                );
+              }
+
+              if (memberRow !== undefined) {
+                await bootstrapAuditWriter.write(
+                  asAuditTx(tx),
+                  bootstrapAuditRow({
+                    workspace_id: wsId,
+                    user_id: userId,
+                    subject_kind: "user",
+                    subject_id: userId,
+                    effect: {
+                      kind: "member.add",
+                      workspace_id: wsId,
+                      user_id: userId,
+                      role: "owner",
+                    },
+                  }),
+                );
+              }
+            });
           },
         },
       },

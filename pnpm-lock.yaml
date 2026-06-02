@@ -305,6 +305,9 @@ importers:
 
   packages/auth:
     dependencies:
+      '@editorzero/audit':
+        specifier: workspace:*
+        version: link:../audit
       '@editorzero/db':
         specifier: workspace:*
         version: link:../db
@@ -314,6 +317,9 @@ importers:
       '@editorzero/principal':
         specifier: workspace:*
         version: link:../principal
+      '@editorzero/scopes':
+        specifier: workspace:*
+        version: link:../scopes
       better-auth:
         specifier: ^1.6.5
         version: 1.6.5(@opentelemetry/api@1.9.1)(better-sqlite3@12.9.0)(pg@8.20.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(vitest@3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.8.3))

@@ -68,6 +68,7 @@ import {
   type SqliteDriver,
 } from "@editorzero/db";
 import { DocId, UserId } from "@editorzero/ids";
+import { SYSTEM_AUDIT_CAPABILITY_IDS } from "@editorzero/scopes";
 import { HocuspocusSync } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -78,6 +79,16 @@ import { createApiDispatcher } from "./createApiDispatcher";
 
 let driver: SqliteDriver;
 const openSyncs: HocuspocusSync[] = [];
+
+// Genesis signup now writes `system.workspace_bootstrap` audit rows — the
+// workspace anchor + owner membership are durable authority replay must
+// reconstruct (ADR 0041). Those rows are proven directly in
+// `auth/create-auth.integration.test.ts`; the dispatch-behaviour assertions in
+// THIS file scope to dispatched capabilities by excluding the system-audit
+// provenance markers, so each test still asserts purely about the operation it
+// exercises. Spreading the readonly SSOT tuple yields a `string[]` operand for
+// Kysely's `not in` (no cast); the column is plain `string`.
+const DISPATCH_AUDIT_FILTER: string[] = [...SYSTEM_AUDIT_CAPABILITY_IDS];
 
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
@@ -631,6 +642,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -673,7 +685,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     // No audit row — the zod validator rejected the body before the
     // dispatcher was invoked (route-level `.strict()` is stricter than
     // the capability's own input schema would reach).
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -721,6 +738,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const slugAudits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -822,7 +840,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
 
     // No audit row — route-level zod param validation rejected before
     // the dispatcher was invoked.
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -897,7 +920,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     });
     expect(res.status).toBe(400);
 
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -927,6 +955,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .execute();
     expect(audits).toHaveLength(1);
@@ -1044,6 +1073,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -1085,7 +1115,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     });
     expect(res.status).toBe(400);
 
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -1110,6 +1145,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .execute();
     expect(audits).toHaveLength(1);
@@ -1218,6 +1254,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -1259,7 +1296,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     });
     expect(res.status).toBe(400);
 
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -1284,6 +1326,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .execute();
     expect(audits).toHaveLength(1);
@@ -1387,6 +1430,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -1426,7 +1470,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     });
     expect(res.status).toBe(400);
 
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -1447,6 +1496,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .execute();
     expect(audits).toHaveLength(1);
@@ -1564,6 +1614,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -1610,7 +1661,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     });
     expect(res.status).toBe(400);
 
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -1632,7 +1688,12 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
 
     // Route-level zod body validation rejected before the dispatcher
     // — no audit row.
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -1660,6 +1721,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .execute();
     expect(audits).toHaveLength(1);
@@ -1748,6 +1810,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -1781,6 +1844,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .execute();
     expect(audits).toHaveLength(1);
@@ -1842,7 +1906,12 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     });
     expect(res.status).toBe(400);
 
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -1862,7 +1931,12 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     });
     expect(res.status).toBe(400);
 
-    const audits = await driver.system().selectFrom("audit_events").select("outcome").execute();
+    const audits = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
+      .select("outcome")
+      .execute();
     expect(audits).toHaveLength(0);
   });
 
@@ -1897,6 +1971,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .execute();
     expect(audits).toHaveLength(1);
@@ -1993,6 +2068,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -2031,6 +2107,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .execute();
     expect(audits).toHaveLength(1);
@@ -2107,6 +2184,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();
@@ -2164,6 +2242,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const audits = await driver
       .system()
       .selectFrom("audit_events")
+      .where("capability_id", "not in", DISPATCH_AUDIT_FILTER)
       .select(["capability_id", "outcome"])
       .orderBy("created_at")
       .execute();

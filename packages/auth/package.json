@@ -18,9 +18,11 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@editorzero/audit": "workspace:*",
     "@editorzero/db": "workspace:*",
     "@editorzero/ids": "workspace:*",
     "@editorzero/principal": "workspace:*",
+    "@editorzero/scopes": "workspace:*",
     "better-auth": "^1.6.5"
   },
   "devDependencies": {
