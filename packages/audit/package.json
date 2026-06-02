@@ -13,8 +13,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
-    "clean": "rm -rf dist *.tsbuildinfo",
-    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo .tsbuildinfo.test",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

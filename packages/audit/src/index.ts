@@ -3,10 +3,12 @@
  *
  * `AuditEffect` is the load-bearing discriminated union for invariant 3a
  * (§9.1): replaying `effect` rows in `created_at` order reproduces
- * `PersistentWorkspaceState`. Any new `kind` must add a reducer branch
- * in the replay test; the planned `audit-effect-exhaustiveness`
- * arch-lint rule will backstop it once `@editorzero/arch-lint` ships
- * (F89 — not yet implemented).
+ * `PersistentWorkspaceState` (`./state.ts`) via the reducer (`./reducer.ts`).
+ * Every `kind` is classified in `REPLAY_CLASS`; a new variant fails to
+ * compile until it is classified (`satisfies`) and, if state-bearing,
+ * given a transition. The forcing function is compile-time + the per-kind
+ * reducer test — stronger than the once-planned `audit-effect-
+ * exhaustiveness` arch-lint (F89).
  *
  * `AuditRecord` is the envelope actually persisted; `outcome ∈ {allow,
  * deny, error}` discriminates whether the `effect` is an `AuditEffect`,
@@ -14,6 +16,17 @@
  */
 
 export type { AuditEffect } from "./effect";
+export { applyAuditRow, REPLAY_CLASS, type ReplayClass, replay } from "./reducer";
+export {
+  type CollectionState,
+  type DocState,
+  EMPTY_STATE,
+  type MemberState,
+  memberKey,
+  type PersistentWorkspaceState,
+  type ReplayRow,
+  type WorkspaceState,
+} from "./state";
 export type {
   AuditDeny,
   AuditError,
