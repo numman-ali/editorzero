@@ -208,6 +208,14 @@ export interface DocPurgePreimage {
 
 // AuditEffect carries everything needed to replay PersistentWorkspaceState
 // (invariant 3a). See §9.1 / §9.2.
+// NOTE (ADR 0040 Step 5): the *doc-level* `visibility {workspace,public,private}`
+// fields below (doc.create, DocPurgePreimage) are the live shape. Step 5
+// de-overloads them into `access_mode {space,private}` (read scope) + `published_at`
+// (orthogonal publish) — the `public` value retires; "published" = `published_at
+// IS NOT NULL` — which reshapes `doc.create`. The replay engine (Step 2) is built
+// against the live shape first; this catalog moves with the schema. (Block-level
+// `visibility {default,internal,public}` above is the search-redaction axis — a
+// separate column, unaffected by 0040.)
 export type AuditEffect =
   // Lifecycle ---------------------------------------------------------------
   | { kind: "workspace.create"; workspace_id: WorkspaceId; slug: string; name: string; created_by: UserId }

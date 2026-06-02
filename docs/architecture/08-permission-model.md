@@ -1,28 +1,36 @@
 ## 8. Permission model
 
-### 8.1 Three-layer enforcement (ADR 0015)
+### 8.1 Enforcement layers (ADR 0015; algebra + RLS amended by ADR 0040)
 
 ```
-Layer 1 — Capability dispatch
-  dispatcher resolves Principal → evaluates requires against
-  (role_default ⊕ workspace_override ⊕ collection_acls ⊕ doc_acls) →
+Layer 1 — Capability dispatch + ceiling resolver   [committed authority]
+  dispatcher resolves Principal → evaluates requires →
+  ceiling resolver decides reads AND mutations (never a graph walk):
+    ( access_mode(doc)='space' ? Space-baseline-members(space)
+                              : {created_by} )
+      ∪ explicit grants ∪ guest grants        (positive-only roles)
   agentAllowed / humanOnly flags checked →
-  scopes intersected (agent.scopes ∩ human.permissions when acting_as) →
+  scopes intersected (agent.scopes ∩ delegator.permissions when acting_as) →
   allow | deny (+ audit row for deny)
+  The resolver is the SOLE read path for Space-scoped reads (lint-enforced).
 
-Layer 2 — TenantScopedDb (Kysely wrapper + AsyncLocalStorage)
+Layer 2 — TenantScopedDb (Kysely wrapper + AsyncLocalStorage)  [committed floor]
   every query against a tenant-scoped table auto-injects
   workspace_id = ctx.workspace_id; build-time type error
   + runtime assertion if a TenantContext is missing.
 
-Layer 3 — Postgres RLS (Postgres mode only)
-  SET app.workspace_id on connection checkout;
-  every tenant-scoped table has a policy USING (workspace_id = current_setting('app.workspace_id')).
+Cross-backend equivalence — the cross-tenant/ceiling isolation fuzzer (§8.1a)
+  asserts correct RESULTS (not merely zero rows) on BOTH SQLite and Postgres.
+
+Layer 3 — Postgres RLS                         [TRIGGERED-FUTURE — not committed]
+  Not built. Per ADR 0040 fork #4 it is NOT a committed layer: multi-tenant is
+  a product non-goal and workspace_id-keyed RLS cannot guard the cross-Space
+  boundary anyway. Add only if a raw-SQL / BI / external-query path appears.
 ```
 
-SQLite mode has Layer 1 + 2; Postgres mode adds Layer 3 as a database-level backstop.
+Both backends run Layer 1 + Layer 2 — that is the committed enforcement floor, equal on SQLite and Postgres. Layer 3 (RLS) is a triggered-future option, not part of the shipped model.
 
-> **Amended by [ADR 0040](../adr/0040-tenancy-ia-model.md) (2026-06-01) — built-vs-specified correction + algebra inversion.** As of today **Layer 3 (RLS) does not exist in code** (zero `CREATE POLICY`; the driver sets no `app.workspace_id` GUC) and the §8.1a cross-tenant fuzzer is **also unbuilt** — so **Layer 2 is the sole tenant-isolation floor on _both_ backends** right now, not just SQLite. Treat the Layer-3 / fuzzer text above and in §8.1a as the target, not the current state. Separately, ADR 0040 **inverts the Layer-1 resolution algebra** for in-Space access: the `(role_default ⊕ workspace_override ⊕ collection_acls ⊕ doc_acls)` most-permissive union becomes a **ceiling** — a doc's `access_mode` (the de-overloaded successor to `visibility`) selects the baseline term (`'space'` = Space members, `'private'` = `created_by`-only), unioned with explicit grants + enumerable guest-grants (positive-only roles, no deny rows) — a local, audit-reconstructable lookup, never a graph walk. Collections hold no ACL. Per ADR 0040 fork #4, **RLS (Layer 3) is not a committed layer** — multi-tenant is a product non-goal; the app-layer floor on both backends is the enforcement design. The cross-tenant hard-deny (§8.3) is unchanged and orthogonal.
+> **Amended by [ADR 0040](../adr/0040-tenancy-ia-model.md) (2026-06-01).** ADR 0015 originally specified a *three-layer* model (capability + tenant plugin + Postgres RLS). Two changes, reflected affirmatively above: **(1) RLS is no longer a committed layer** (fork #4); the app-layer floor is the design. **(2) the Layer-1 algebra inverts** from the old most-permissive union (`role_default ⊕ workspace_override ⊕ collection_acls ⊕ doc_acls`) to the **ceiling** shown. **Build status (honest):** the ceiling resolver and the §8.1a isolation fuzzer are the committed design but **not yet built** — until they land, Layer 2 alone is the live floor; ADR 0040 sequences the resolver (Step 6) + replay/fuzzer gates before any ACL capability ships. The cross-tenant hard-deny (§8.3) is unchanged and orthogonal.
 
 ### 8.1a SQLite hardening — Layer-2-as-floor (F4 fix)
 
@@ -31,7 +39,7 @@ SQLite has no RLS. Layer 2 (`TenantScopedDb`) is the last line of defense. That'
 - **Architecture lint rule `no-raw-kysely-outside-db`:** `Kysely`, `sql<T>` raw template, and `db.connection()` are importable only inside `packages/db/**`. Anywhere else, an import failure at pre-commit. Today this is enforced by `scripts/coherence.ts` via import-string grep; when `@editorzero/arch-lint` ships (F89) the rule moves to a proper static check, but the invariant is gated from day one. Capabilities and services reach the DB through `ctx.db` (a `TenantScopedDb`) or through `dbRepo.<method>` (which internally uses `TenantScopedDb`).
 - **`OpsDb` escape hatch is opt-in, audited, and enumerated.** `OpsDb` is a distinct type that requires a `@ops-audited("reason")` decorator at the call site. The planned `ops-db-audit` rule in `@editorzero/arch-lint` will fail the commit on an un-audited construction once the package ships (F89 — not yet implemented; discipline + review today). Each legitimate use site is listed in `ops/ops-db-registry.md` with owner + rationale.
 - **Cross-tenant leak fuzzer is a first-class invariant test.** `packages/db/test/tenant-isolation.prop.ts` runs against **both** SQLite and Postgres drivers: for every `(capability, principal_workspace, target_workspace)` combination, assert that no tenant-scoped row from `target_workspace ≠ principal_workspace` is reachable through any capability call. Default fuzz: 1k rounds per driver per commit; 100k nightly.
-- **Postgres RLS is enabled-by-default on Postgres mode** but verified the same way the fuzzer verifies SQLite. The fuzzer's invariant is stronger than RLS — it also asserts that the capability returns the correct result, not merely zero rows.
+- **The fuzzer — not RLS — is the cross-backend guarantee.** RLS is not built (triggered-future, ADR 0040 fork #4); the isolation fuzzer's invariant is stronger than RLS anyway — it asserts the capability returns the **correct result**, not merely zero rows, identically on SQLite and Postgres.
 
 The combination means "SQLite mode has no RLS" does not mean "SQLite mode has weaker tenant isolation." The fuzzer enforces equivalent behavior.
 
@@ -57,14 +65,14 @@ Alice (workspace A member) requests `doc.get(doc_id=D)` where D is in workspace 
 1. Hono resolves Alice's session → `Principal{ kind: "user", id: Alice, workspace_id: A }`.
 2. Dispatcher fetches `D.workspace_id = B`; `AccessPath.workspace_id = B` but `Principal.workspace_id = A`.
 3. Layer 1 denies: `Principal.workspace_id ≠ AccessPath.workspace_id`. Audit row written with `outcome=deny`, `deny_reason="cross_workspace"`.
-4. Layer 2 never reached. (If Layer 1 were bypassed, Layer 2's query would still scope to A and return empty. Layer 3 RLS would also return empty.)
+4. Layer 2 never reached. (If Layer 1 were bypassed, Layer 2's query would still scope to A and return empty — the committed two-layer floor; RLS, if ever triggered, would too.)
 
 #### (b) Public publish strips internal blocks
 
 Alice runs `doc.publish(doc_id=D)` on a doc with some `block.visibility='internal'` rows.
 
 1. Dispatcher checks `Alice` has `doc:publish` on D. Allowed.
-2. Handler: sets `docs.visibility='public'`, `published_at=now()`. Enqueues `projection_blocks` job.
+2. Handler: sets `published_at=now()` + `published_slug` (publish is orthogonal — `access_mode` is unchanged; ADR 0040). Enqueues `projection_blocks` job.
 3. Published render path reads blocks WHERE `visibility != 'internal'` and is regenerated to static HTML by the outbox consumer (ADR 0027) — keyed on a composite (`visibility_version` + content-hash), served with `ETag`/`must-revalidate`, so the render is deterministic per snapshot.
 4. Audit row on the publish itself; per-block visibility enforcement is not audited per-read (would flood the log).
 

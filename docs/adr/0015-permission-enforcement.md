@@ -1,6 +1,6 @@
 # ADR 0015 — Permission enforcement: capability-layer + Postgres RLS
 
-**Status:** Accepted (post-red-team; `AccessPath.markdown_anchor` reserved per [ADR 0022](0022-agent-editing-constraints.md))
+**Status:** Accepted (post-red-team; `AccessPath.markdown_anchor` reserved per [ADR 0022](0022-agent-editing-constraints.md)) — **partially amended by [ADR 0040](0040-tenancy-ia-model.md) (2026-06-01): Postgres RLS (Layer 3) is NOT a committed layer (multi-tenant is a product non-goal; the app-layer floor is the design), and the Layer-1 algebra inverts to a ceiling. The capability-layer + tenant-plugin enforcement below stands; read the "Layer 3" note + the blockquote there before treating RLS as present.**
 **Date:** 2026-04-17
 **Deciders:** @numman
 
@@ -16,7 +16,7 @@ Red-team (#9, #13) flagged that "permission checks centralized in the capability
 - **Layered: capability dispatch + tenant-aware query wrapper + Postgres RLS.**
 
 ## Decision
-**Three-layer enforcement, each independently sufficient for the common case:**
+**Three-layer enforcement, each independently sufficient for the common case:** *(amended by [ADR 0040](0040-tenancy-ia-model.md), 2026-06-01 — Layer 3 / Postgres RLS is **not a committed layer**; the committed design is two layers + the cross-tenant/ceiling isolation fuzzer. "Independently sufficient" was the original intent, not the built floor — only Layer 2 is the live tenant-isolation floor today, on both backends. Read the Status line and the Layer 3 note before treating RLS as present.)*
 
 ### Layer 1 — Capability dispatch
 Every capability (ADR 0009) declares `requires`. The dispatcher resolves the current `Principal` (ADR 0016), evaluates permissions against the capability's `requires`, and calls the handler. No surface (API, CLI, MCP, Web UI) invokes handlers directly.
@@ -30,7 +30,7 @@ Every Kysely `query` constructed against a tenant-scoped table (`docs`, `blocks`
 - The `TenantContext` is carried through request-scoped async storage (Node `AsyncLocalStorage`) set by the capability dispatcher after permission check. Any code path that escapes the capability dispatch (ad-hoc script, one-off admin tool) must construct its own `TenantContext` — there is no default-fall-through.
 - Ops / super-admin code uses a distinct `OpsDb` that does not auto-inject predicates; its use sites are audited.
 
-### Layer 3 — Postgres Row-Level Security (Postgres mode only)
+### Layer 3 — Postgres Row-Level Security (Postgres mode only) — ⚠ NOT COMMITTED (amended by ADR 0040; see blockquote below)
 On Postgres, RLS policies on every tenant-scoped table enforce the same `workspace_id = current_setting('app.workspace_id')` predicate at the database itself. The capability dispatcher sets the session variable on checkout. **Even if Layer 1 and Layer 2 were both bypassed, RLS is the last line of defense.**
 
 SQLite has no RLS; we rely on Layer 2 and the conformance test suite (ADR 0007) to catch divergence.
@@ -57,7 +57,7 @@ type AccessPath = {
 
 In v1, granularity is workspace / doc / block. The `selector` field is **reserved but unused** — always `null`. Policy evaluation short-circuits the sub-block tier when `selector` is null, so there is zero runtime cost.
 
-**Reserved for future:** sub-block ACLs (e.g., "this paragraph is draft and hidden from agents," "this table row is PII and only the compliance role may read it," "this comment thread is private to HR"). When/if introduced, the `selector` encodes the sub-structure (block-local position, CRDT fragment path, tagged range) and policy evaluation grows a sub-block tier that reads like the block tier does today. **The three-layer enforcement pattern (dispatch → tenant wrapper → Postgres RLS) does not change shape.**
+**Reserved for future:** sub-block ACLs (e.g., "this paragraph is draft and hidden from agents," "this table row is PII and only the compliance role may read it," "this comment thread is private to HR"). When/if introduced, the `selector` encodes the sub-structure (block-local position, CRDT fragment path, tagged range) and policy evaluation grows a sub-block tier that reads like the block tier does today. **The enforcement pattern (dispatch → tenant wrapper → resolver/fuzzer) does not change shape.** *(Amended by ADR 0040: Layer-3 RLS is dropped as a committed layer and the Layer-1 algebra inverts to a ceiling — a sub-block-ACL extension still slots into the dispatch/resolver tier.)*
 
 Not a v1 deliverable. Shape is reserved so adding sub-block ACLs is a clean additive change — new capability metadata field, new policy-rule selector, new property tests — not a permission-layer rewrite.
 

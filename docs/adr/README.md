@@ -48,7 +48,7 @@ Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 b
 | [0012](0012-deploy-artifact.md) | Deploy artifact: docker-compose primary + Bun-compiled CLI | Accepted (v2) |
 | [0013](0013-block-model.md) | **Block model: CRDT-as-source-of-truth with per-block-type Markdown fidelity** | **Accepted (v2, supersedes v1 Markdown-AST)** |
 | [0014](0014-job-queue.md) | Job queue: pg-boss on Postgres, custom in-DB on SQLite | Accepted |
-| [0015](0015-permission-enforcement.md) | Permission enforcement: capability-layer + Postgres RLS | Accepted |
+| [0015](0015-permission-enforcement.md) | Permission enforcement: capability-layer + tenant plugin (Postgres RLS **amended → not committed** by [0040](0040-tenancy-ia-model.md)) | Accepted (RLS layer + Layer-1 algebra amended by 0040) |
 | [0016](0016-principal-model.md) | Principal model: humans and agents as peer types | Accepted (v2) |
 | [0017](0017-soft-delete-recovery.md) | Soft-delete and recovery semantics | Accepted |
 | [0018](0018-unified-write-path.md) | Unified write path via ServerBlockNoteEditor | Accepted (v2) |

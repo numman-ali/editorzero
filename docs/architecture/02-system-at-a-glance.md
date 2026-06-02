@@ -46,7 +46,7 @@
   │ ┌──────────────────────┐ ┌──────────────────────┐                  │
   │ │ Hocuspocus (ADR 0006)│ │ TenantScopedDb       │                  │
   │ │   WebSocket sync     │ │ (Kysely + ALS ctx)   │                  │
-  │ │   onChange: durable  │ │ + Postgres RLS       │                  │
+  │ │   onChange: durable  │ │ + tenant fuzzer      │                  │
   │ │   write to           │ │ (ADR 0015)           │                  │
   │ │   doc_updates        │ │                      │                  │
   │ └──────────┬───────────┘ └──────────┬───────────┘                  │

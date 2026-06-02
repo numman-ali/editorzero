@@ -128,10 +128,10 @@ docs(
   slug            TEXT NOT NULL,                    -- URL segment within collection
   published_slug  TEXT,                             -- URL segment on (public) route; unique per workspace when not null
   order_key       TEXT NOT NULL,                    -- fractional index
-  visibility      TEXT NOT NULL DEFAULT 'workspace',-- workspace | public | private
-  published_at    INTEGER,                          -- for (public) route
+  access_mode     TEXT NOT NULL DEFAULT 'space',    -- space | private (read scope; publish is orthogonal — ADR 0040)
+  published_at    INTEGER,                          -- non-null ⇒ published (the orthogonal publish dimension)
   latest_snapshot_seq INTEGER,                      -- pointer for mirror/reconcilers
-  visibility_version  INTEGER NOT NULL DEFAULT 0,   -- bumped on set_visibility / publish / unpublish / delete / restore (F5 cache key)
+  visibility_version  INTEGER NOT NULL DEFAULT 0,   -- render/cache-invalidation counter; bumped on access_mode / publish / unpublish / delete / restore (F5 cache key). Legacy-named — rename to render_version is a Step-5 decision (ADR 0040)
   created_by      TEXT NOT NULL,
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL,
@@ -154,7 +154,7 @@ CREATE UNIQUE INDEX docs_published_slug_unique
 
 **Published URL resolution** (red-team F20 fix). The `(public)/[domain]/[slug]` route resolves `(custom_domain → workspace_id, slug → published_slug)`. `published_slug` is populated on `doc.publish` (default: copy of `slug`, collision-resolved by appending `-2`, `-3`, …) and cleared on `doc.unpublish`. Workspace-internal `slug` can collide across collections (intentional — two collections can each have "Getting started"); public URLs cannot.
 
-**v1 implementation scope (P3.7 — `doc.publish` + `doc.unpublish` landed 2026-04-20).** `published_slug` and `published_at` are the *target* DDL above but not yet in the live schema (`packages/db/src/schema.ts` → `DocsTable` has `slug`, `visibility`, `visibility_version`, no `published_*`). Both capabilities are **visibility-only**: publish flips `visibility="public"` + bumps `visibility_version` + emits `doc.publish` audit; unpublish flips back to `"workspace"` + bumps + emits `doc.unpublish`. `published_slug` collision handling + `published_at` column population (on publish) and `published_slug = null` clearing (on unpublish) land with the public-route renderer slice; until then the `(public)/[domain]/[slug]` route itself does not exist and `doc.list` / `doc.get` return every non-deleted doc regardless of `visibility`. The publish capability's response shape + audit effect already carry a `published_at` field sourced from `ctx.now()`, so the later schema widening is an additive migration (DDL adds columns; publish's UPDATE grows to set them, unpublish's UPDATE grows to clear `published_slug`; API contract unchanged on either side).
+**Live schema vs target (ADR 0040 Step 5 reshape).** The DDL above is the *target*. The **live** schema (`packages/db/src/schema.ts` → `DocsTable`) currently has `slug`, `visibility` (`workspace | public | private`), `visibility_version` — **no `access_mode`, no `published_*`**. ADR 0040 Step 5 **splits the overloaded `visibility`** into the orthogonal pair shown above: `access_mode ∈ {space, private}` (read scope) + `published_slug`/`published_at` (publish). The old `'public'` value is **retired** — "published" becomes `published_at IS NOT NULL`, independent of `access_mode` (a `private` doc can be published; a `space` doc can be unpublished). Greenfield, so this is a clean enum split with **no backfill**. *Until Step 5 lands*, the shipped `doc.publish`/`doc.unpublish` (P3.7, 2026-04-20) remain visibility-only (publish flips `visibility="public"`, unpublish flips back), the `(public)/[domain]/[slug]` route does not exist, and `doc.list`/`doc.get` return every non-deleted doc — superseded by Step 5 + the resolver (Step 6), after which `doc.list` is gated by the ceiling resolver.
 
 ### 3.6 Blocks (projected-read-only)
 

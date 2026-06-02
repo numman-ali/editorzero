@@ -35,7 +35,7 @@ return fused.map(f => { doc_id, block_id, score, snippet })
 - Workspace member: `visibility IN ('default','public','internal')` (internal visible to members).
 - Denied-block case (sparse `doc_acls` deny): excluded from candidates at query time.
 
-Tenant-scoping enforced by TenantScopedDb (Layer 2) today; Postgres RLS (Layer 3) is the planned database backstop — specified-but-unbuilt (see §8.1, corrected by ADR 0040).
+Tenant-scoping enforced by TenantScopedDb (Layer 2) + the resolver/ceiling isolation fuzzer (§8.1a) on both backends; RLS is triggered-future, **not** a committed backstop (ADR 0040 fork #4). Search is a path that can bypass the resolver accidentally, so Space-scoped result filtering must route through the same ceiling resolver (ADR 0040 Step 6), not re-implement access logic.
 
 ### 11.3 Embedding model swap — atomic flip (F30 fix)
 
