@@ -1,3 +1,4 @@
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react-swc";
 import { defineConfig } from "vite";
 
@@ -15,7 +16,10 @@ import { RESERVED_API_PREFIXES } from "./src/lib/reserved-prefixes";
 const TRUNK_ORIGIN = "http://localhost:3000";
 
 export default defineConfig({
-  plugins: [react()],
+  // `tanstackRouter` MUST precede `react()` (load-bearing per the plugin docs,
+  // ADR 0035 §4): it codegens `src/routeTree.gen.ts` from `src/routes/**` and
+  // applies the auto-code-splitting transform before React Fast Refresh runs.
+  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react()],
   server: {
     proxy: Object.fromEntries(
       RESERVED_API_PREFIXES.map((prefix) => [

@@ -2,6 +2,17 @@ packages:
   - "apps/*"
   - "packages/*"
 
+# Frontend supply-chain posture (ADR 0035 §5). A version published fewer than
+# `minimumReleaseAge` minutes ago can never resolve on a dependency bump, so a
+# package that is compromised and yanked within the hour (the documented norm
+# for the 2026 npm attacks, incl. the CVSS-9.6 @tanstack/* compromise) is never
+# selected. 4320 = 3 days. `minimumReleaseAgeExclude` is the escape hatch for an
+# urgent in-window security patch. Requires pnpm >= 10.16.0 (see `engines` +
+# `packageManager`). Pins already in the lockfile are replayed unaffected; this
+# governs only future version *changes*.
+minimumReleaseAge: 4320
+minimumReleaseAgeExclude: []
+
 catalog:
   typescript: ^5.7.0
   "@types/node": ^22.10.0

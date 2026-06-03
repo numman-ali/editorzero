@@ -1,7 +1,20 @@
+import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { App } from "./App";
+import { routeTree } from "./routeTree.gen";
+
+const router = createRouter({ routeTree });
+
+// Register the router instance for type-safe routing (ADR 0028). The generated
+// (gitignored) `routeTree.gen.ts` is the SSOT for route types; this module
+// augmentation threads it through every `Link` / route hook, so a bad `to=` is
+// a compile error rather than a runtime 404.
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
 
 const rootElement = document.getElementById("root");
 if (rootElement === null) {
@@ -10,6 +23,6 @@ if (rootElement === null) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <RouterProvider router={router} />
   </StrictMode>,
 );

@@ -6,15 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "clean": "rm -rf dist *.tsbuildinfo .tsbuildinfo.test",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run --coverage"
+    "clean": "rm -rf dist *.tsbuildinfo .tsbuildinfo.test src/routeTree.gen.ts",
+    "routes:generate": "tsr generate",
+    "typecheck": "tsr generate && tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "tsr generate && vitest run --coverage"
   },
   "dependencies": {
+    "@tanstack/react-router": "1.170.10",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@tanstack/router-cli": "1.167.12",
+    "@tanstack/router-plugin": "1.168.13",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react-swc": "4.3.1",
