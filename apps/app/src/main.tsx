@@ -13,7 +13,10 @@ import { routeTree } from "./routeTree.gen";
 // of truth and keeps the in-memory app aligned with the stored preference.
 initTheme();
 
-const router = createRouter({ routeTree });
+// `context` is type-required now that `__root` is `createRootRouteWithContext`
+// (it threads the query-client singleton to route `beforeLoad` guards, e.g.
+// `_authed`'s session prefetch). This and `__root.tsx` change together.
+const router = createRouter({ routeTree, context: { queryClient } });
 
 // Register the router instance for type-safe routing (ADR 0028). The generated
 // (gitignored) `routeTree.gen.ts` is the SSOT for route types; this module
