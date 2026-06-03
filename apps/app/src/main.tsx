@@ -1,8 +1,15 @@
+import "./styles/index.css";
+
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-
+import { initTheme } from "./lib/theme";
 import { routeTree } from "./routeTree.gen";
+
+// Apply the persisted theme before React mounts. A tiny inline guard in
+// index.html already does this pre-paint; this is the post-hydration source
+// of truth and keeps the in-memory app aligned with the stored preference.
+initTheme();
 
 const router = createRouter({ routeTree });
 

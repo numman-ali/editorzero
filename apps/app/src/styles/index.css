@@ -1,0 +1,27 @@
+/*
+ * Web UI style entry (ADR 0036/0037 — Meridian Zero).
+ *
+ * `meridian-zero.css` and `themes.css` below are VERBATIM copies of the
+ * design-token SSOT in `docs/brand/v2/`. Do not edit them here — edit the
+ * SSOT and re-copy. `scripts/coherence.ts` (Check 9) fails the commit if a
+ * copy drifts, and Biome does not format `.css` so the bytes stay stable.
+ *
+ * Cascade: the entire design system loads into one low-priority
+ * `@layer meridian`. Component styles authored for the React app (unlayered,
+ * or in a later-declared layer) therefore win without specificity battles.
+ * The sheet's internal source order is preserved within the layer, so
+ * meridian-zero.css's AA-remediation tail ("later in source -> wins") still
+ * overrides the rules it patches. Theme blocks are `html[data-theme="…"]`-
+ * scoped and out-specify `:root`, so dark / contrast / ultraviolet win when
+ * the attribute is set (see src/lib/theme.ts).
+ */
+@layer meridian;
+
+/* Self-hosted variable fonts backing the --display / --text / --mono token
+   families (no external network fetch; cooldown-pinned in package.json). */
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/archivo";
+@import "@fontsource-variable/jetbrains-mono";
+
+@import "./meridian-zero.css" layer(meridian);
+@import "./themes.css" layer(meridian);

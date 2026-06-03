@@ -46,6 +46,15 @@
  *       (INTEGER↔BIGINT, BLOB↔BYTEA) and are deliberately not compared.
  *       ADR 0023 §4 flagged this as a follow-up; the check closes it
  *       until Atlas + kysely-codegen collapse the two files into one.
+ *   [8] api-client materialized client type — no lazy `ReturnType<typeof
+ *       hc<…>>` alias under `packages/api-client/src/**` (ADR 0028); the
+ *       typed-RPC client shape must come from the materialized seam in
+ *       `client-type.ts`, never a per-consumer re-instantiation.
+ *   [9] Design-token SSOT byte-match — `apps/app/src/styles/{meridian-zero,
+ *       themes}.css` must be byte-identical to their `docs/brand/v2/`
+ *       origin (ADR 0036/0037). The Web UI ships a self-contained copy of
+ *       the token sheets; this fails the commit if a copy drifts from the
+ *       SSOT (Biome does not format `.css`, so the bytes stay stable).
  *
  * Deferred checks (no-ops today; activate when the real comparison is
  * implemented, not when a source file merely exists):
@@ -1028,6 +1037,48 @@ async function checkApiClientMaterializedType(report: Report): Promise<void> {
   }
 }
 
+// ── Check 9 — design-token SSOT byte-match ─────────────────────────────────
+//
+// The Web UI (`apps/app`) ships a *copy* of the Meridian Zero design-token
+// sheets so the bundle is self-contained — no cross-package `@import`
+// reaching into `docs/`. The SSOT stays `docs/brand/v2/` (ADR 0036/0037).
+// A copy is a duplicate, and duplicates drift, so this fails the commit
+// unless each app copy is byte-for-byte identical to its origin. Edit the
+// SSOT and re-copy; never hand-edit the copy. Biome does not format `.css`
+// (see biome.json `files.includes`), so nothing silently rewrites the bytes.
+
+async function checkDesignTokenCopies(report: Report): Promise<void> {
+  const sheets = ["meridian-zero.css", "themes.css"];
+  for (const name of sheets) {
+    const ssot = join(ROOT, "docs", "brand", "v2", name);
+    const copy = join(ROOT, "apps", "app", "src", "styles", name);
+    const copySrc = await readIfExists(copy);
+    // Binds only once the app copy exists; before the Web UI styles slice
+    // there is nothing to drift against, so skip silently.
+    if (copySrc === null) continue;
+    const ssotSrc = await readIfExists(ssot);
+    if (ssotSrc === null) {
+      report.add({
+        severity: "error",
+        file: copy,
+        message:
+          `design-token SSOT missing: ${relative(ROOT, copy)} exists but its source ` +
+          `${relative(ROOT, ssot)} does not — restore the SSOT (the app sheet is a copy).`,
+      });
+      continue;
+    }
+    if (ssotSrc !== copySrc) {
+      report.add({
+        severity: "error",
+        file: copy,
+        message:
+          `design-token drift: ${relative(ROOT, copy)} is not byte-identical to its SSOT ` +
+          `${relative(ROOT, ssot)} (ADR 0036/0037). Re-copy from the SSOT; never hand-edit the copy.`,
+      });
+    }
+  }
+}
+
 // ── Entrypoint ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -1040,6 +1091,7 @@ async function main(): Promise<void> {
     checkAppendixACoherence(report),
     checkDdlParity(report),
     checkApiClientMaterializedType(report),
+    checkDesignTokenCopies(report),
   ]);
   report.print();
   if (report.errorCount > 0) {

@@ -12,6 +12,9 @@
     "test": "tsr generate && vitest run --coverage"
   },
   "dependencies": {
+    "@fontsource-variable/archivo": "5.2.8",
+    "@fontsource-variable/jetbrains-mono": "5.2.8",
+    "@fontsource-variable/space-grotesk": "5.2.10",
     "@tanstack/react-router": "1.170.10",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -23,6 +26,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react-swc": "4.3.1",
     "@vitest/coverage-v8": "catalog:",
+    "happy-dom": "catalog:",
     "typescript": "catalog:",
     "vite": "8.0.14",
     "vitest": "catalog:"

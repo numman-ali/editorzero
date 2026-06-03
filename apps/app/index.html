@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>editorzero</title>
+    <script>
+      // Pre-paint theme guard (mirrors src/lib/theme.ts): apply the persisted
+      // theme before first paint to avoid a flash of the default light theme.
+      // Keep the storage key + accepted values in sync with that module.
+      (function () {
+        try {
+          var t = localStorage.getItem("ez-theme");
+          if (t === "dark" || t === "contrast" || t === "ultraviolet") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {
+          // Storage unavailable (private mode) -> default theme. No-op.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
