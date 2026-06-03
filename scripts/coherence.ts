@@ -55,6 +55,15 @@
  *       origin (ADR 0036/0037). The Web UI ships a self-contained copy of
  *       the token sheets; this fails the commit if a copy drifts from the
  *       SSOT (Biome does not format `.css`, so the bytes stay stable).
+ *  [10] ApiErrorCode ↔ errorResponse — the client error vocabulary
+ *       (`API_ERROR_CODES` in packages/api-client/src/api-error.ts) must
+ *       match exactly the typed `{ error: "…" } as const` envelopes the API
+ *       surface emits from `errorResponse` (packages/api-server/src/lib/
+ *       errors.ts). The client union is hand-maintained (the kernel erases
+ *       the per-route error union behind `hc`, so there is nothing to derive
+ *       from); this fails the commit when a new server error class drifts the
+ *       two apart. `unauthenticated` + the untyped 5xx family are not typed
+ *       client arms and are excluded from both sides by construction.
  *
  * Deferred checks (no-ops today; activate when the real comparison is
  * implemented, not when a source file merely exists):
@@ -380,6 +389,7 @@ function diffLists(
   aItems: string[],
   bName: string,
   bItems: string[],
+  kind = "metadata-only",
 ): void {
   const aSet = new Set(aItems);
   const bSet = new Set(bItems);
@@ -387,7 +397,7 @@ function diffLists(
     if (!bSet.has(item)) {
       report.add({
         severity: "error",
-        message: `metadata-only drift: "${item}" in ${aName} but not ${bName}`,
+        message: `${kind} drift: "${item}" in ${aName} but not ${bName}`,
       });
     }
   }
@@ -395,7 +405,7 @@ function diffLists(
     if (!aSet.has(item)) {
       report.add({
         severity: "error",
-        message: `metadata-only drift: "${item}" in ${bName} but not ${aName}`,
+        message: `${kind} drift: "${item}" in ${bName} but not ${aName}`,
       });
     }
   }
@@ -1079,6 +1089,94 @@ async function checkDesignTokenCopies(report: Report): Promise<void> {
   }
 }
 
+// ── Check 10 — ApiErrorCode ↔ errorResponse typed envelope ─────────────────
+//
+// `API_ERROR_CODES` (packages/api-client/src/api-error.ts) is the client
+// projection of the typed `{ error: code }` envelopes the API surface emits
+// from `errorResponse` (packages/api-server/src/lib/errors.ts). It is
+// hand-maintained — the kernel erases the per-route error union behind `hc`, so
+// there is no single type to derive from — and a hand-maintained mirror drifts:
+// add a 14th `EditorZeroError` subclass + envelope and the client union
+// silently lags. This fails the commit when the two SETS diverge (order is not
+// compared). `unauthenticated` (the middleware 401) and the untyped 5xx family
+// are not typed client arms; `errorResponse` never emits them via a
+// `c.json({ error } as const)` line, so they are excluded from both sides by
+// construction.
+
+async function checkApiErrorCodes(report: Report): Promise<void> {
+  const clientPath = join(ROOT, "packages", "api-client", "src", "api-error.ts");
+  const serverPath = join(ROOT, "packages", "api-server", "src", "lib", "errors.ts");
+  const clientSrc = await readIfExists(clientPath);
+  const serverSrc = await readIfExists(serverPath);
+  if (clientSrc === null || serverSrc === null) {
+    report.add({
+      severity: "warn",
+      message: "api-error.ts or errors.ts not found — skipping ApiErrorCode coherence check",
+    });
+    return;
+  }
+
+  const clientCodes = parseApiErrorCodes(clientSrc);
+  if (clientCodes === null) {
+    report.add({
+      severity: "error",
+      file: clientPath,
+      message:
+        "API_ERROR_CODES export not parseable — expected `export const API_ERROR_CODES = [ ... ] as const`",
+    });
+    return;
+  }
+
+  const serverCodes = parseServerErrorEnvelopes(serverSrc);
+  if (serverCodes.length === 0) {
+    report.add({
+      severity: "error",
+      file: serverPath,
+      message:
+        'no `c.json({ error: "…" } as const, …)` envelopes found in errors.ts — check errorResponse',
+    });
+    return;
+  }
+
+  diffLists(
+    report,
+    "packages/api-server errors.ts",
+    serverCodes,
+    "packages/api-client API_ERROR_CODES",
+    clientCodes,
+    "ApiErrorCode",
+  );
+}
+
+function parseApiErrorCodes(src: string): string[] | null {
+  const re = /export\s+const\s+API_ERROR_CODES\s*=\s*\[([\s\S]*?)\]\s*as\s+const/;
+  const m = re.exec(src);
+  if (!m?.[1]) return null;
+  return extractStringItems(m[1]);
+}
+
+/**
+ * Pull every `{ error: "code" } as const` envelope literal out of
+ * `errorResponse`. That exact shape is the only one `hc` infers as a typed
+ * client error arm (ADR 0029 §4); `errEnvelope("unauthenticated")` lives in a
+ * `describeRoute` declaration (whoami.ts), not here, and rethrown 5xx never
+ * take this form — so the match set is exactly the typed client arms.
+ */
+function parseServerErrorEnvelopes(src: string): string[] {
+  // `[a-z][a-z0-9_]*` matches the canonical identifier alphabet the sibling
+  // parsers already use (CapabilityId literals, audit-effect kinds, Appendix A
+  // rows) — digits-after-first allowed. The client-side `extractStringItems`
+  // accepts any quoted string, so a narrower class here would FALSE-POSITIVE on
+  // a future digit-bearing code (e.g. `oauth2_denied`) mirrored correctly in
+  // both files — a phantom drift that blocks a correct commit (review finding).
+  const re = /\{\s*error:\s*"([a-z][a-z0-9_]*)"\s*\}\s*as\s+const/g;
+  const out: string[] = [];
+  for (const { match } of findMatches(src, re)) {
+    if (match[1]) out.push(match[1]);
+  }
+  return out;
+}
+
 // ── Entrypoint ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -1092,6 +1190,7 @@ async function main(): Promise<void> {
     checkDdlParity(report),
     checkApiClientMaterializedType(report),
     checkDesignTokenCopies(report),
+    checkApiErrorCodes(report),
   ]);
   report.print();
   if (report.errorCount > 0) {
