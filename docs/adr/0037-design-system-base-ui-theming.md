@@ -44,8 +44,8 @@ ShadCN is Radix-derived + copy-in components; Mantine ships its own CSS-variable
   | Package | Pin | Note |
   |---|---|---|
   | `@base-ui/react` | `1.5.0` | Exact, **hyphenated scope**. Renamed from the now-deprecated `@base-ui-components/react` (frozen at `1.0.0-rc.0`); the new scope's version line begins at `1.0.0-rc.1`. **Avoid the underscore typosquat `@base_ui/react`** (a one-time lockfile grep guard). |
-  | `date-fns` | `^4.0.0` | **MANDATORY `peerDependency` of `@base-ui/react@1.5.0`** (date/calendar components) — *install errors if absent.* New since v1.0.0. Pin exact in the lockfile (ADR 0035). |
-  | `@date-fns/tz` | `^1.2.0` | **MANDATORY `peerDependency`** alongside `date-fns`. Same install-or-error condition. |
+  | `date-fns` | `^4.0.0` | **OPTIONAL `peerDependency`** of `@base-ui/react@1.5.0` (`peerDependenciesMeta.optional: true`) — only the date/calendar primitives import it; install does **not** error when absent. **Not installed in v1** (the shell uses no calendar primitive). Pin exact *if/when* a calendar lands (ADR 0035). See the 2026-06-03 amendment below. |
+  | `@date-fns/tz` | `^1.2.0` | **OPTIONAL `peerDependency`** (`peerDependenciesMeta.optional: true`) alongside `date-fns`; same calendar-only condition. **Not installed in v1.** |
   | `cmdk` | `1.1.1` | Command palette (Base UI has none). |
   | `@tanstack/react-table` | `8.21.3` | Headless data grid. A `9.0.0-alpha` line exists — **do not pin alpha**. |
   | `react-aria-components` | `1.18.0` | **NOT installed** — recorded fallback only (native Tree + Table). |
@@ -57,7 +57,7 @@ ShadCN is Radix-derived + copy-in components; Mantine ships its own CSS-variable
 ## Consequences
 
 - **The token layers own 100% of the visual surface.** Theming + white-labeling are pure-data (`:root` overrides); user themes need no build step. This is the structural pay-off of choosing a zero-CSS shell.
-- **`date-fns@4` becomes an app-wide transitive dependency** via Base UI's calendar components (open question: standardise on it app-wide, or confine to calendar usage).
+- **`date-fns@4` is *not* pulled in by v1.** It is an *optional* peer Base UI references only from its date/calendar primitives, which the shell does not use; it enters the tree only if/when a calendar primitive is adopted (then decide: app-wide date library, or confine to calendar usage). See the 2026-06-03 amendment.
 - **A net-new owned Tree** must be built and tested (WCAG 2.1 AA + keyboard tree-walk) — the accepted cost of one-vendor-for-overlays + not adopting RAC. Budget it at the collections-pane slice.
 - **Base UI v1.x is young** (v1.0.0 Dec 2025) with a **~monthly minor cadence** (28–36-day gaps — *observed velocity, not a published SLA*), so expect more cooldown-gated bumps than a mature library (ADR 0035's 3-day cooldown).
 - **Agent-buildability bias.** Base UI's `llms.txt` + token-as-data theming + schema-derived blocks/capabilities (ADR 0009/0033) all point toward a future *"generate the UI / a brand theme from a skill"* workflow — forward-looking rationale, not a v1 deliverable.
@@ -73,6 +73,10 @@ ShadCN is Radix-derived + copy-in components; Mantine ships its own CSS-variable
 ## Cross-references
 
 - **Realises** ADR 0036 (Meridian Zero = the default curated theme). **Pairs with** ADR 0038 (owned editor — Floating-UI convergence; Tiptap menus) and ADR 0039 (PWA — Base UI `Drawer` for mobile nav; the Floating-UI keyboard/safe-area gap is hand-owned).
-- **Supply-chain:** ADR 0035's exact-pin + lockfile + pnpm-cooldown posture **extends to these pins**, including the mandatory `date-fns` / `@date-fns/tz` peer-deps.
+- **Supply-chain:** ADR 0035's exact-pin + lockfile + pnpm-cooldown posture **extends to these pins**. The `date-fns` / `@date-fns/tz` peers are *optional* and uninstalled in v1 (see the Pins table + the 2026-06-03 amendment); the posture applies if/when a calendar primitive pulls them in.
 - **Supersedes** the Mantine-via-BlockNote styling assumption in ADR 0005 / 0031. **Audited under** ADR 0033 (a11y).
 - **Research:** `wf_734a602e-3d6` Verdict 0 (Base UI / shell stack, live npm 2026-05-31) + the design-system synthesis memo + cross-cutting theming architecture.
+
+## Amendments
+
+- **2026-06-03 — `date-fns` / `@date-fns/tz` peers are OPTIONAL, not mandatory (factual correction).** The original Pins table + Consequences (and `wf_734a602e-3d6` Verdict 0 correction *iii*) called these **mandatory, install-breaking** peers. That is wrong for `@base-ui/react@1.5.0`: its `peerDependenciesMeta` marks `date-fns`, `@date-fns/tz`, **and** `@types/react` as `optional: true` (verified `npm view @base-ui/react@1.5.0 peerDependenciesMeta` → all three `{ "optional": true }`). The earlier spot-check read `peerDependencies` but missed the `optional` flag in the sibling `peerDependenciesMeta` block. **Consequence:** the AppShell installs `@base-ui/react` **alone** — the two date peers stay out of the dependency tree until a calendar/date primitive (none in v1) needs them, avoiding two unused deps + their cooldown churn. The decision (Base UI as the headless shell) is **unchanged**; only the dependency-footprint claim is corrected. Surfaced by the AppShell research workflow (`wce2vf7hl`).
