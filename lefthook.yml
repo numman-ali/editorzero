@@ -23,8 +23,13 @@ pre-commit:
       # Fails the commit on: section references missing, capability IDs
       # out of sync across Appendix A / registry / AuditEffect, numeric
       # constants referenced as literals instead of named imports, ADR
-      # cross-refs missing.
-      glob: "{docs/**,packages/**,AGENTS.md}"
+      # cross-refs missing, and the Web UI design-token sheets drifting
+      # from their docs/brand/v2 SSOT (Check 9). The glob lists every input
+      # a check reads, so editing EITHER the SSOT (docs/**) or the app copy
+      # (apps/app/src/styles/**) triggers the byte-match — otherwise a
+      # hand-edit of the copy alone, the exact drift the guard targets,
+      # would slip past.
+      glob: "{docs/**,packages/**,apps/app/src/styles/**,AGENTS.md}"
       run: pnpm coherence
     unit-affected:
       # Scope is narrowed at the workspace-filter level (pnpm -r --filter
