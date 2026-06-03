@@ -98,6 +98,18 @@ describe("createHttpClient", () => {
     expect(typeof body.now).toBe("number");
   });
 
+  it("sends credentials so the same-origin session cookie rides along", async () => {
+    let seenCredentials: string | undefined;
+    const probe: typeof fetch = async (input, init) => {
+      seenCredentials = init?.credentials;
+      return app.request(input as Request | string, init);
+    };
+    const client = createHttpClient({ baseUrl: "http://test.local", fetch: probe });
+    const res = await client.infra.health.$get();
+    expect(res.status).toBe(200);
+    expect(seenCredentials).toBe("include");
+  });
+
   it("auth resolver attaches its headers to every request", async () => {
     let seenAuth: string | null = null;
     const probe: typeof fetch = async (input, init) => {

@@ -41,7 +41,12 @@ export function createHttpClient(options: HttpClientOptions): ApiClient {
       headers.set(k, v);
     }
     const effectiveFetch = fetchImpl ?? fetch;
-    return effectiveFetch(input, { ...init, headers });
+    // `credentials: "include"` so the Better Auth session cookie rides along on
+    // the SPA's same-origin (and dev-proxy) requests — the browser default
+    // ("same-origin") would otherwise drop it through the dev proxy (ADR 0030,
+    // Lax cookie). Placed before `...init` so a caller can still override it,
+    // and harmless for the CLI/server clients (Node fetch has no cookie jar).
+    return effectiveFetch(input, { credentials: "include", ...init, headers });
   };
   return hc<AppType>(baseUrl, { fetch: wrapped });
 }
