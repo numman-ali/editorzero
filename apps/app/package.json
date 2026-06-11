@@ -12,6 +12,7 @@
     "test": "tsr generate && vitest run --coverage"
   },
   "dependencies": {
+    "@base-ui/react": "1.5.0",
     "@editorzero/api-client": "workspace:*",
     "@editorzero/ids": "workspace:*",
     "@fontsource-variable/archivo": "5.2.8",

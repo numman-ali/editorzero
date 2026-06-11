@@ -1,0 +1,97 @@
+/* Chrome additions for the responsive shell (ADR 0036/0037; mock
+   01-dashboard.html). The token sheet owns every nav/sidebar atom
+   (.side/.nav/.bar/.foot…); this file adds only what the SSOT screens
+   kept screen-local: the mobile off-canvas drawer, its scrim, and the
+   hamburger. Base UI's Drawer is unstyled — open/close/swipe states
+   arrive as data-attributes + CSS vars, styled here with tokens. */
+
+.shell-burger {
+  display: none;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ink-1);
+  background: var(--surface);
+  border: var(--rule) solid var(--hair-strong);
+  border-radius: var(--radius-chip);
+  cursor: pointer;
+}
+
+.shell-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: var(--ink);
+  opacity: 0.32;
+  transition: opacity 0.22s ease;
+}
+.shell-scrim[data-starting-style],
+.shell-scrim[data-ending-style] {
+  opacity: 0;
+}
+
+.shell-drawer-viewport {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.shell-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 288px;
+  max-width: 86vw;
+  background: var(--paper);
+  box-shadow: 2px 0 0 var(--hair-strong);
+  /* Track the finger during a swipe; rest position is 0. */
+  transform: translateX(var(--drawer-swipe-movement-x, 0px));
+  transition: transform 0.22s ease;
+}
+.shell-drawer[data-swiping] {
+  transition: none;
+}
+.shell-drawer[data-starting-style],
+.shell-drawer[data-ending-style] {
+  transform: translateX(-100%);
+}
+
+/* The drawer hosts the same `.side` interior as the static aside, but the
+   token sheet's ≤1120px rule (`.side{display:none}`) — written for the
+   STATIC aside — would hide it here too. Re-assert layout with higher
+   specificity; the drawer panel carries the edge shadow, so the aside's
+   own border is redundant inside it. */
+.shell-drawer .side {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  border-right: 0;
+}
+
+/* Visually-hidden dialog title (axe: role=dialog needs an accessible
+   name; the drawer's heading is structural, not visual). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 1120px) {
+  .shell-burger {
+    display: flex;
+  }
+}
+
+/* Reduced motion: the global guard in the token sheet already forces
+   `transition:none !important` everywhere, drawer + scrim included. */

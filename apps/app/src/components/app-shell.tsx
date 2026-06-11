@@ -1,53 +1,56 @@
+import { Drawer } from "@base-ui/react/drawer";
 import type { ReactNode } from "react";
+import { useState } from "react";
 
-import { describePrincipal } from "../lib/principal";
 import type { WhoamiSession } from "../lib/session";
+import { SideContent } from "./side-content";
+
+import "./app-shell.css";
 
 /**
- * Authed shell chrome (ADR 0036 Meridian Zero / 0037). The strict 3-zone frame:
- * a sidebar (`<aside>` — brand lockup, primary nav, principal chip) and a main
- * column (`<header>` breadcrumb bar + `<main>` body). Presentational only — the
- * `_authed` route guard resolves the session before this renders, and passes it
- * in. Navigation, the Space switcher, search, the command palette, and the
- * responsive Drawer land in later #13 slices; this is the bare frame that proves
- * protected routing end-to-end under the Meridian Zero tokens.
+ * Authed shell chrome (ADR 0036 Meridian Zero / 0037). The strict 3-zone
+ * frame: a sidebar (`<aside>` — brand lockup, primary nav, principal chip)
+ * and a main column (`<header>` breadcrumb bar + `<main>` body).
+ * Presentational only — the `_authed` route guard resolves the session
+ * before this renders, and passes it in.
  *
- * Coverage: exercised by the Playwright + axe e2e lane (ADR 0033), excluded from
- * vitest unit coverage like `routes/**`; the testable display logic lives in
- * `lib/principal.ts`.
+ * Responsive: under the token sheet's 1120px breakpoint the static aside
+ * is hidden, so the SAME `SideContent` re-renders inside a Base UI Drawer
+ * (ADR 0037's one-vendor-for-overlays rule; swipe-to-dismiss left). The
+ * hamburger is the Drawer.Trigger — Base UI wires aria-haspopup/expanded/
+ * controls on it and renders the popup as a named modal dialog (focus
+ * trap + scroll lock + Escape). The Space switcher, search, command
+ * palette, and further nav entries land with their capability cells.
+ *
+ * Coverage: exercised by the Playwright + axe e2e lane (ADR 0033;
+ * `chrome.spec.ts` drives the drawer), excluded from vitest unit coverage
+ * like `routes/**`; the testable display logic lives in `lib/principal.ts`.
  */
 export function AppShell({ session, children }: { session: WhoamiSession; children: ReactNode }) {
-  const principal = describePrincipal(session);
-  const avatarClass = principal.kind === "agent" ? "av av--agent" : "av av--u";
+  const [navOpen, setNavOpen] = useState(false);
   return (
     <div className="win">
       <aside className="side">
-        <div className="top">
-          <div className="logo">
-            <span className="mark" aria-hidden="true">
-              <span className="cross" />
-              <span className="cross-ring" />
-            </span>
-            <span className="word">
-              editor<b>zero</b>
-            </span>
-          </div>
-        </div>
-        <nav className="nav" aria-label="Primary">
-          {/* Primary navigation + the Space switcher land in the IA slice (#13). */}
-        </nav>
-        <div className="foot">
-          <span className={avatarClass} aria-hidden="true">
-            {principal.monogram}
-          </span>
-          <div>
-            <div className="nm">{principal.label}</div>
-            <div className="rl">{principal.detail}</div>
-          </div>
-        </div>
+        <SideContent session={session} />
       </aside>
       <div className="main">
         <header className="bar">
+          <Drawer.Root swipeDirection="left" open={navOpen} onOpenChange={setNavOpen}>
+            <Drawer.Trigger className="shell-burger" aria-label="Open navigation">
+              <span aria-hidden="true">≡</span>
+            </Drawer.Trigger>
+            <Drawer.Portal>
+              <Drawer.Backdrop className="shell-scrim" />
+              <Drawer.Viewport className="shell-drawer-viewport">
+                <Drawer.Popup className="shell-drawer">
+                  <Drawer.Title className="sr-only">Navigation</Drawer.Title>
+                  <Drawer.Content className="side">
+                    <SideContent session={session} onNavigate={() => setNavOpen(false)} />
+                  </Drawer.Content>
+                </Drawer.Popup>
+              </Drawer.Viewport>
+            </Drawer.Portal>
+          </Drawer.Root>
           <div className="crumb">
             <b>editorzero</b>
           </div>
