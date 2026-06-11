@@ -22,13 +22,29 @@ Include `reply-to="surface:<my-N>"` on the message envelope so Codex doesn't hav
 cmux send --surface surface:<codex-N> "$(cat <<'XML'
 <message from="claude" reply-to="surface:<my-N>">
 ...body in markdown...
+
+Reply with:
+cmux send --surface surface:<my-N> "$(cat <<'EOM'
+<message from="codex" reply-to="surface:<codex-N>">
+...findings...
+</message>
+EOM
+)"
+sleep 1
+cmux send-key --surface surface:<my-N> Enter
 </message>
 XML
 )"
+sleep 1
 cmux send-key --surface surface:<codex-N> Enter
 ```
 
 `<codex-N>` is Codex's surface ID from `cmux tree`; `<my-N>` is my own, grepped from `◀ here` in the same tree output.
+
+**Two hard rules, both learned the hard way (2026-06-11 — a review brief sat unsubmitted in his composer until Nomi noticed):**
+
+1. **`sleep 1` between `send` and `send-key Enter`, always.** Enter races the paste otherwise — `send-key` returns `OK` but the Enter lands before the text settles and nothing submits. `OK` means the key was delivered, *not* that the message went through. If Codex hasn't acknowledged within the expected window, re-send Enter (on an empty composer it's a no-op).
+2. **Every message body ends with explicit reply mechanics** (as in the template above). Codex does not see this file and does not know the channel protocol — the envelope `reply-to` alone tells him *where*, not *how*. Spell out the exact `cmux send` + `sleep 1` + `cmux send-key Enter` commands, with the heredoc form for multi-line bodies.
 
 ### Receive
 
