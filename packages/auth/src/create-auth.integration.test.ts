@@ -23,6 +23,7 @@
 
 import { type AuditEffect, memberKey, type ReplayRow, replay } from "@editorzero/audit";
 import {
+  countTableRows,
   createLoadRoles,
   createSqliteDriver,
   type LoadRoles,
@@ -55,6 +56,8 @@ function buildAuth() {
     // 32-byte secret for tests — production gets this from
     // `packages/config/secrets.ts`.
     secret: "test-secret-do-not-use-in-production-at-all",
+    // Multi-user fixtures below; the first-user gate has its own block.
+    registrationMode: "open",
     trustedOrigins: ["http://localhost:3000"],
   });
 }
@@ -374,6 +377,7 @@ describe("@editorzero/auth", () => {
       driver,
       baseURL: "http://localhost:3000",
       secret: "test-secret-do-not-use-in-production-at-all",
+      registrationMode: "open",
     });
     await runAuthMigrations(auth);
     // Sanity: instance exposes the same session API.
@@ -443,5 +447,69 @@ describe("@editorzero/auth", () => {
     const wsId = WorkspaceId("018f0000-0000-7000-8000-000000000001");
     const slug = composeWorkspaceSlug("Alice.Example+test", wsId);
     expect(slug).toMatch(/^alice-example-test-[0-9a-f]{12}$/u);
+  });
+});
+
+describe("registration gate (registrationMode — Codex 2026-06-11 HIGH)", () => {
+  const GATE_BASE = "http://localhost:3000";
+  const GATE_SECRET = "test-secret-do-not-use-in-production-at-all";
+
+  function countUsers(): Promise<number> {
+    return countTableRows(driver.system(), "user");
+  }
+
+  it("first-user: genesis passes; the second sign-up is rejected on the wire and creates nothing", async () => {
+    const auth = createAuth({
+      driver,
+      baseURL: GATE_BASE,
+      secret: GATE_SECRET,
+      registrationMode: "first-user",
+    });
+    await runAuthMigrations(auth);
+
+    // Genesis sign-up — the ADR 0041 bootstrap — is permitted.
+    await auth.api.signUpEmail({
+      body: { email: "genesis@example.com", password: "genesis-pass-123", name: "Genesis" },
+    });
+    expect(await countUsers()).toBe(1);
+
+    // Second attempt through the raw handler — exactly what the trunk
+    // delegates to — must surface a wire-visible rejection: no session
+    // cookie, no user row, and a message the sign-up form can display.
+    const res = await auth.handler(
+      new Request(`${GATE_BASE}/auth/sign-up/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: GATE_BASE },
+        body: JSON.stringify({
+          email: "intruder@example.com",
+          password: "intruder-pass-123",
+          name: "Intruder",
+        }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    const body: unknown = await res.json();
+    expect(body).toMatchObject({
+      message: "Registration is closed. Ask the instance owner for an invite.",
+    });
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(await countUsers()).toBe(1);
+  });
+
+  it("open: later sign-ups stay permitted (dev/test posture)", async () => {
+    const auth = createAuth({
+      driver,
+      baseURL: GATE_BASE,
+      secret: GATE_SECRET,
+      registrationMode: "open",
+    });
+    await runAuthMigrations(auth);
+    await auth.api.signUpEmail({
+      body: { email: "first@example.com", password: "first-pass-123", name: "First" },
+    });
+    await auth.api.signUpEmail({
+      body: { email: "second@example.com", password: "second-pass-123", name: "Second" },
+    });
+    expect(await countUsers()).toBe(2);
   });
 });

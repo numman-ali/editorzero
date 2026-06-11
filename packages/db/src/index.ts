@@ -11,6 +11,7 @@
  */
 
 export { asAuditTx, createAuditWriter } from "./audit-writer";
+export { countTableRows } from "./count-rows";
 export { createDocUpdatesReader, type DocUpdatesReader } from "./doc-updates-reader";
 export {
   createDocUpdatesWriter,

@@ -137,6 +137,7 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     baseURL: config.public_origin,
     secret,
     trustedOrigins: [config.public_origin],
+    registrationMode: config.registration_mode,
   });
   await runAuthMigrations(auth);
 

@@ -146,6 +146,7 @@ async function buildStack(
     baseURL: "http://localhost:3000",
     secret: "test-secret-do-not-use-in-production-at-all",
     trustedOrigins: ["http://localhost:3000"],
+    registrationMode: "open",
   });
   await runAuthMigrations(auth);
   // Registry is empty by default (the probe route exercises middleware-

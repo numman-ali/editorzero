@@ -190,6 +190,7 @@ describe("ez CLI — compiled-binary round-trip against a real HTTP trunk", () =
       baseURL: loopbackOrigin,
       secret: "test-secret-do-not-use-in-production-at-all",
       trustedOrigins: [loopbackOrigin],
+      registrationMode: "open",
     });
     await runAuthMigrations(auth);
     const loadRoles = createLoadRoles(driver);

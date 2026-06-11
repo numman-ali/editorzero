@@ -66,6 +66,9 @@ function boot(): Promise<BootedApp> {
     config: parseRuntimeConfig({
       EDITORZERO_PUBLIC_ORIGIN: "http://localhost:3000",
       DATABASE_URL: ":memory:",
+      // The smoke signs up multiple principals; the first-user gate
+      // has its own coverage in packages/auth.
+      EDITORZERO_REGISTRATION_MODE: "open",
     }),
     secret: TEST_SECRET,
   });

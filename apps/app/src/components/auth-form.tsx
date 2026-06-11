@@ -79,10 +79,14 @@ export function AuthForm({ onAuthenticated }: { onAuthenticated: () => Promise<v
           <h1 className="title">
             editor<b>zero</b>
           </h1>
+          {/* "instance", not "workspace" — the ADR 0040 vocabulary lock
+              reserves user-facing entity nouns ("Space"), and sign-in
+              addresses the whole self-hosted deployment, matching the
+              agent footnote's "instance owner" language. */}
           <p className="lede">
             {signUp
-              ? "Set up your workspace. Real-time docs, co-edited by humans and agents."
-              : "Sign in to your workspace. Real-time docs, co-edited by humans and agents."}
+              ? "Set up this instance. Real-time docs, co-edited by humans and agents."
+              : "Sign in to your instance. Real-time docs, co-edited by humans and agents."}
           </p>
         </div>
 

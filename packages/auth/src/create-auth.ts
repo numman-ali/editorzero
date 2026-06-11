@@ -55,10 +55,11 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import type { AuditEffect, AuditWriteInput } from "@editorzero/audit";
-import { asAuditTx, createAuditWriter, type SqliteDriver } from "@editorzero/db";
+import { asAuditTx, countTableRows, createAuditWriter, type SqliteDriver } from "@editorzero/db";
 import { CapabilityId, generateWorkspaceId, UserId, uuidV7, WorkspaceId } from "@editorzero/ids";
 import { SYSTEM_WORKSPACE_BOOTSTRAP } from "@editorzero/scopes";
 import { betterAuth } from "better-auth";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 
 /**
  * Lowercased, non-alphanumeric collapsed to single dash, trimmed,
@@ -188,10 +189,20 @@ export interface CreateAuthOptions {
    * same-origin deployments.
    */
   readonly trustedOrigins?: ReadonlyArray<string>;
+  /**
+   * Registration policy (config `registration_mode`; Codex 2026-06-11
+   * HIGH). `first-user` permits exactly the genesis sign-up — the
+   * ADR 0041 audited bootstrap — and closes `/auth/sign-up/email`
+   * the moment any `user` row exists; `open` is the dev/test/demo
+   * posture. Required (no default) so every composition root and
+   * test chooses its posture explicitly; the deployment default
+   * (`first-user`) lives in `@editorzero/config`.
+   */
+  readonly registrationMode: "first-user" | "open";
 }
 
 export function createAuth(options: CreateAuthOptions) {
-  const { driver, baseURL, secret, trustedOrigins } = options;
+  const { driver, baseURL, secret, trustedOrigins, registrationMode } = options;
 
   // Better Auth's internal `createKyselyAdapter` accepts
   // `Kysely<any>` at runtime — the types carry its own schema. Our
@@ -233,6 +244,29 @@ export function createAuth(options: CreateAuthOptions) {
       // verification becomes required once
       // `sendVerificationEmail` is wired.
       requireEmailVerification: false,
+    },
+    hooks: {
+      // Registration gate (server-side — the sign-up form is UX, not
+      // enforcement; Codex 2026-06-11 HIGH). Request-level rather than
+      // `databaseHooks.user.create.before` deliberately: the database
+      // hook runs inside Better Auth's adapter transaction, which holds
+      // the single pooled SQLite connection — a count query through
+      // `driver.system()` there deadlocks (empirically, 2026-06-11).
+      // Here the request hasn't opened the tx yet. The count→insert
+      // pair is policy, not a uniqueness constraint: two genesis
+      // sign-ups racing a fresh install could both pass, each landing
+      // in its own workspace — harmless on a private box, and the
+      // invite slice replaces this ceiling anyway.
+      before: createAuthMiddleware(async (ctx) => {
+        if (registrationMode !== "first-user" || ctx.path !== "/sign-up/email") {
+          return;
+        }
+        if ((await countTableRows(driver.system(), "user")) > 0) {
+          throw new APIError("FORBIDDEN", {
+            message: "Registration is closed. Ask the instance owner for an invite.",
+          });
+        }
+      }),
     },
     user: {
       additionalFields: {

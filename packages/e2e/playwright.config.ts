@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig, devices } from "@playwright/test";
 
+import { TRUNK_ORIGIN, TRUNK_PORT, WEB_ORIGIN, WEB_PORT } from "./test/servers";
+
 /**
  * Web UI e2e harness (ADR 0033; verification stack step 7). Two real
  * servers, one browser origin:
@@ -21,11 +23,6 @@ import { defineConfig, devices } from "@playwright/test";
  * developer's running dev session never collides with the lane.
  */
 const here = path.dirname(fileURLToPath(import.meta.url));
-
-const TRUNK_PORT = 3897;
-const WEB_PORT = 5183;
-const TRUNK_ORIGIN = `http://localhost:${TRUNK_PORT}`;
-const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
 
 /** Test-only Better Auth secret (≥ 32 bytes). Never a real credential. */
 const E2E_BETTER_AUTH_SECRET = "editorzero-e2e-only-better-auth-secret";

@@ -133,6 +133,7 @@ async function buildStack() {
     baseURL: "http://localhost:3000",
     secret: "test-secret-do-not-use-in-production-at-all",
     trustedOrigins: ["http://localhost:3000"],
+    registrationMode: "open",
   });
   await runAuthMigrations(auth);
   // Register the full P3.7 production doc capability set. The literal

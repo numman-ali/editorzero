@@ -70,6 +70,7 @@ async function buildTrunk() {
     baseURL: BASE_URL,
     secret: "test-secret-do-not-use-in-production-at-all",
     trustedOrigins: [BASE_URL],
+    registrationMode: "open",
   });
   await runAuthMigrations(auth);
   const loadRoles = createLoadRoles(driver);

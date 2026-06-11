@@ -62,16 +62,50 @@ describe("authenticate", () => {
 });
 
 describe("safeRedirectTarget", () => {
-  it("passes through internal paths", () => {
-    expect(safeRedirectTarget("/docs-home?x=1")).toBe("/docs-home?x=1");
-    expect(safeRedirectTarget("/")).toBe("/");
+  const ORIGIN = "http://app.test";
+
+  it("passes through internal paths, preserving query and hash", () => {
+    expect(safeRedirectTarget("/docs-home?x=1", ORIGIN)).toBe("/docs-home?x=1");
+    expect(safeRedirectTarget("/", ORIGIN)).toBe("/");
+    expect(safeRedirectTarget("/a/b?q=a%2Fb#frag", ORIGIN)).toBe("/a/b?q=a%2Fb#frag");
   });
 
   it("clamps missing, external, and protocol-relative targets to home", () => {
-    expect(safeRedirectTarget(undefined)).toBe("/");
-    expect(safeRedirectTarget("")).toBe("/");
-    expect(safeRedirectTarget("https://evil.example")).toBe("/");
-    expect(safeRedirectTarget("//evil.example")).toBe("/");
-    expect(safeRedirectTarget("javascript:alert(1)")).toBe("/");
+    expect(safeRedirectTarget(undefined, ORIGIN)).toBe("/");
+    expect(safeRedirectTarget("https://evil.example", ORIGIN)).toBe("/");
+    expect(safeRedirectTarget("//evil.example", ORIGIN)).toBe("/");
+    expect(safeRedirectTarget("javascript:alert(1)", ORIGIN)).toBe("/");
+  });
+
+  it("clamps backslash and encoded-separator forms that normalize to an authority", () => {
+    // `new URL("/\\evil.com", base)` resolves to http://evil.com/ — the
+    // browser treats the backslash as a slash.
+    expect(safeRedirectTarget("/\\evil.com", ORIGIN)).toBe("/");
+    expect(safeRedirectTarget("\\/evil.com", ORIGIN)).toBe("/");
+    expect(safeRedirectTarget("/%5Cevil.com", ORIGIN)).toBe("/");
+    expect(safeRedirectTarget("/%5cevil.com", ORIGIN)).toBe("/");
+    // Same-origin after parsing, but an encoded slash in the *path* can
+    // decode into `//evil.com` downstream — reject; legit encoded
+    // slashes live in the query, which stays allowed above.
+    expect(safeRedirectTarget("/%2Fevil.com", ORIGIN)).toBe("/");
+    expect(safeRedirectTarget("///evil.com", ORIGIN)).toBe("/");
+  });
+
+  it("canonicalizes: the returned value is the re-assembled path, never the input", () => {
+    // An empty string resolves to the base origin root.
+    expect(safeRedirectTarget("", ORIGIN)).toBe("/");
+    // A bare relative segment resolves inside the origin.
+    expect(safeRedirectTarget("docs", ORIGIN)).toBe("/docs");
+  });
+
+  it("falls back to home when the base origin itself is unparseable", () => {
+    expect(safeRedirectTarget("/fine", "not a url")).toBe("/");
+  });
+
+  it("defaults the base origin to the live environment origin", () => {
+    // Under the node test runner the default resolves to the parseable
+    // placeholder; an internal path passes through unchanged regardless
+    // of the specific host.
+    expect(safeRedirectTarget("/inside")).toBe("/inside");
   });
 });

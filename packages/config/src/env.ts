@@ -59,6 +59,17 @@ export const runtimeConfigSchema = z.object({
     .default(100 * 1024 * 1024),
   /** Allow SVG uploads — XSS risk via embedded script; opt-in only (§3.10a). */
   allow_svg_uploads: z.coerce.boolean().default(false),
+  /**
+   * Who may self-register via `/auth/sign-up/email` (ADR 0030; Codex
+   * 2026-06-11 HIGH). `first-user` — the safe self-hosted default —
+   * permits exactly the genesis sign-up (the ADR 0041 audited
+   * bootstrap) and closes registration the moment any user row
+   * exists; later humans arrive via the invite slice. `open` is the
+   * dev/test posture (multi-user fixtures, demo boxes). Enforced
+   * server-side in `@editorzero/auth`'s user-create hook — hiding
+   * the sign-up form would not protect the endpoint.
+   */
+  registration_mode: z.enum(["first-user", "open"]).default("first-user"),
   /** Hocuspocus per-process Y.Doc RAM cap in bytes (F38 — §10.5). */
   hocuspocus_max_ram_bytes: z.coerce.number().int().positive().optional(),
   /** Disaster-recovery mode — raises ACME re-issuance cap for 24h (F59). */
@@ -85,6 +96,7 @@ const ENV_MAP = {
   caddy_admin_endpoint: "CADDY_ADMIN_ENDPOINT",
   max_attachment_bytes: "EDITORZERO_MAX_ATTACHMENT_BYTES",
   allow_svg_uploads: "ALLOW_SVG_UPLOADS",
+  registration_mode: "EDITORZERO_REGISTRATION_MODE",
   hocuspocus_max_ram_bytes: "EDITORZERO_HOCUSPOCUS_MAX_RAM_BYTES",
   dr_mode: "EDITORZERO_DR_MODE",
 } as const satisfies Record<keyof RuntimeConfig, string>;

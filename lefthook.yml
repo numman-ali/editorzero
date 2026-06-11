@@ -97,9 +97,13 @@ pre-push:
       # Both are unconditional: the packages exist and their `test:e2e`
       # scripts are authoritative. A scaffold check would be a
       # silent-skip foot-gun if someone deleted a test dir.
-      run: |
-        pnpm -C apps/cli test:e2e
-        pnpm -C packages/e2e test:e2e
+      #
+      # `&&`-chained on purpose — lefthook runs `run: |` via sh without
+      # errexit, so a multi-line block's exit code is the LAST line's
+      # and a failing CLI lane would be masked whenever the Playwright
+      # lane passes (adversarial review 2026-06-11, reproduced against
+      # lefthook 1.13.6).
+      run: pnpm -C apps/cli test:e2e && pnpm -C packages/e2e test:e2e
 
 # ── Commit message hook: DCO sign-off enforcement ──────────────────────────
 commit-msg:
