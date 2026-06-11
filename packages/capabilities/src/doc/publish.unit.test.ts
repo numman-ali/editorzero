@@ -292,7 +292,7 @@ describe("doc.publish", () => {
     expect(docPublish.id).toBe("doc.publish");
     expect(docPublish.category).toBe("mutation");
     expect(docPublish.requires).toEqual(["doc:publish"]);
-    expect(docPublish.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(docPublish.surfaces).toEqual(["api", "cli", "mcp"]);
     // Present so agents with `doc:publish` in their tier can dispatch.
     expect(docPublish.agentAllowed).toBeDefined();
   });

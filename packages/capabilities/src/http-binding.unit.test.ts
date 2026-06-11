@@ -1,3 +1,6 @@
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { deriveHttpBinding, expandPathTemplate } from "./http-binding";
 import {
   collectionCreate,
   collectionDelete,
@@ -16,11 +19,7 @@ import {
   docUnpublish,
   docUpdate,
   registerCapability,
-} from "@editorzero/capabilities";
-import { describe, expect, it } from "vitest";
-import { z } from "zod";
-
-import { deriveHttpBinding, expandPathTemplate } from "./http-binding";
+} from "./index";
 
 describe("deriveHttpBinding", () => {
   it("doc.list → GET /docs/list with no param / no body", () => {

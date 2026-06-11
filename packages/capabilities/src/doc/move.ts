@@ -82,7 +82,7 @@ export const docMove: Capability<DocMoveInput, DocMoveOutput> = {
   output: DocMoveOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

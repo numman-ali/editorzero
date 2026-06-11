@@ -204,7 +204,7 @@ describe("collection.list", () => {
     expect(collectionList.id).toBe("collection.list");
     expect(collectionList.category).toBe("read");
     expect(collectionList.requires).toEqual(["doc:read"]);
-    expect(collectionList.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(collectionList.surfaces).toEqual(["api", "cli", "mcp"]);
   });
 
   it("emits the audit.access_log effect on allow", () => {

@@ -42,11 +42,15 @@
  *      CLI — the trust boundary is the wire.)
  */
 
-import type { AnyCapability } from "@editorzero/capabilities";
+import {
+  type AnyCapability,
+  deriveHttpBinding,
+  expandPathTemplate,
+  type HttpBinding,
+} from "@editorzero/capabilities";
 
 import type { AuthCredentialStore } from "../credential-store";
 import { emit, emitError } from "../io";
-import { deriveHttpBinding, expandPathTemplate, type HttpBinding } from "./http-binding";
 
 export interface RunCapabilityArgs {
   readonly baseUrl: string;

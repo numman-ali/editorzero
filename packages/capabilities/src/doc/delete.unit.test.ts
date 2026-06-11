@@ -235,7 +235,7 @@ describe("doc.delete", () => {
     expect(docDelete.id).toBe("doc.delete");
     expect(docDelete.category).toBe("mutation");
     expect(docDelete.requires).toEqual(["doc:delete"]);
-    expect(docDelete.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(docDelete.surfaces).toEqual(["api", "cli", "mcp"]);
     expect(docDelete.agentAllowed).toBeDefined();
   });
 

@@ -97,7 +97,7 @@ export const docGet: Capability<DocGetInput, DocGetOutput> = {
   input: DocGetInputSchema,
   output: DocGetOutputSchema,
   requires: ["doc:read"],
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

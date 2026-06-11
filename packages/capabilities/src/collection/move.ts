@@ -101,7 +101,7 @@ export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutpu
   output: CollectionMoveOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({ kind: "collection", id: input.collection_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

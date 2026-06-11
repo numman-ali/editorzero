@@ -382,7 +382,7 @@ describe("doc.restore", () => {
     expect(docRestore.id).toBe("doc.restore");
     expect(docRestore.category).toBe("mutation");
     expect(docRestore.requires).toEqual(["doc:delete"]);
-    expect(docRestore.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(docRestore.surfaces).toEqual(["api", "cli", "mcp"]);
     expect(docRestore.agentAllowed).toBeDefined();
   });
 

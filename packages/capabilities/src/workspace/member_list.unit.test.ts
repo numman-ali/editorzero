@@ -212,7 +212,7 @@ describe("workspace.member_list", () => {
     expect(workspaceMemberList.id).toBe("workspace.member_list");
     expect(workspaceMemberList.category).toBe("read");
     expect(workspaceMemberList.requires).toEqual(["workspace:admin"]);
-    expect(workspaceMemberList.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(workspaceMemberList.surfaces).toEqual(["api", "cli", "mcp"]);
   });
 
   // ── Audit projections ──────────────────────────────────────────────────

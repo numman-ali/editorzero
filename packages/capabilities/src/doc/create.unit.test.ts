@@ -544,7 +544,7 @@ describe("doc.create registry metadata", () => {
     expect(docCreate.id).toBe("doc.create");
     expect(docCreate.category).toBe("mutation");
     expect(docCreate.requires).toEqual(["doc:write"]);
-    expect(docCreate.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(docCreate.surfaces).toEqual(["api", "cli", "mcp"]);
     expect(docCreate.agentAllowed).toBeDefined();
   });
 });

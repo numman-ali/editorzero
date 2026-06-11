@@ -429,7 +429,7 @@ describe("collection.create registry metadata", () => {
     expect(collectionCreate.id).toBe("collection.create");
     expect(collectionCreate.category).toBe("mutation");
     expect(collectionCreate.requires).toEqual(["doc:write"]);
-    expect(collectionCreate.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(collectionCreate.surfaces).toEqual(["api", "cli", "mcp"]);
     expect(collectionCreate.agentAllowed).toBeDefined();
   });
 });

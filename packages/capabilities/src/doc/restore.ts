@@ -100,7 +100,7 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
   output: DocRestoreOutputSchema,
   requires: ["doc:delete"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

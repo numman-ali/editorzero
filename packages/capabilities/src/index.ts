@@ -3,6 +3,8 @@
  */
 
 export { createDefaultRegistry } from "./default-registry";
+export type { HttpBinding } from "./http-binding";
+export { deriveHttpBinding, expandPathTemplate } from "./http-binding";
 export type {
   AgentAllowance,
   AnyCapability,

@@ -162,7 +162,7 @@ describe("audit.get", () => {
     expect(auditGet.id).toBe("audit.get");
     expect(auditGet.category).toBe("read");
     expect(auditGet.requires).toEqual(["workspace:admin"]);
-    expect(auditGet.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(auditGet.surfaces).toEqual(["api", "cli", "mcp"]);
   });
 
   // ── Audit projections ──────────────────────────────────────────────────

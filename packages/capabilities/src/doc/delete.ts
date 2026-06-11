@@ -112,7 +112,7 @@ export const docDelete: Capability<DocDeleteInput, DocDeleteOutput> = {
   output: DocDeleteOutputSchema,
   requires: ["doc:delete"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

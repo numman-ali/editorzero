@@ -446,7 +446,7 @@ describe("collection.restore", () => {
       expect(collectionRestore.id).toBe("collection.restore");
       expect(collectionRestore.category).toBe("mutation");
       expect(collectionRestore.requires).toEqual(["doc:delete"]);
-      expect(collectionRestore.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+      expect(collectionRestore.surfaces).toEqual(["api", "cli", "mcp"]);
     });
 
     it("emits the collection.restore effect on allow", () => {

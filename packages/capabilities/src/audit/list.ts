@@ -90,7 +90,7 @@ export const auditList: Capability<AuditListInput, AuditListOutput> = {
   input: AuditListInputSchema,
   output: AuditListOutputSchema,
   requires: ["workspace:admin"],
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

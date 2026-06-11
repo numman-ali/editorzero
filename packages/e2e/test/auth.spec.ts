@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { expectNoAxeViolations } from "./axe";
+import { CREDENTIALS } from "./credentials";
 
 /**
  * Browser round-trip for the credential flow (ADR 0030 / 0033) against
@@ -14,12 +15,6 @@ import { expectNoAxeViolations } from "./axe";
  * its tmp/ per run, so the suite is idempotent.
  */
 test.describe.configure({ mode: "serial" });
-
-const CREDENTIALS = {
-  email: "founder@e2e.editorzero.test",
-  password: "e2e-password-123",
-  name: "Founding User",
-};
 
 test("an unauthenticated visit bounces to /login carrying the redirect target", async ({
   page,

@@ -563,7 +563,7 @@ describe("collection.move", () => {
       expect(collectionMove.id).toBe("collection.move");
       expect(collectionMove.category).toBe("mutation");
       expect(collectionMove.requires).toEqual(["doc:write"]);
-      expect(collectionMove.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+      expect(collectionMove.surfaces).toEqual(["api", "cli", "mcp"]);
     });
 
     it("emits the collection.move effect on allow with new_parent + new_order_key", () => {

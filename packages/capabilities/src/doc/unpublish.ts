@@ -94,7 +94,7 @@ export const docUnpublish: Capability<DocUnpublishInput, DocUnpublishOutput> = {
   output: DocUnpublishOutputSchema,
   requires: ["doc:publish"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

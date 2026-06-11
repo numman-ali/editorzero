@@ -35,11 +35,11 @@
 import { PassThrough } from "node:stream";
 
 import { app, openApiDocument } from "@editorzero/api-server";
+import { deriveHttpBinding } from "@editorzero/capabilities";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AuthCredentialStore } from "../credential-store";
 import { cliRegistry } from "../registry";
-import { deriveHttpBinding } from "./http-binding";
 import { createRootCommands } from "./root";
 
 interface RouteKey {

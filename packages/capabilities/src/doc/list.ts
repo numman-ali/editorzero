@@ -54,6 +54,11 @@ export const docList: Capability<DocListInput, DocListOutput> = {
   input: DocListInputSchema,
   output: DocListOutputSchema,
   requires: ["doc:read"],
+  // "ui" is declared because the Web UI actually binds this capability
+  // (the authed home renders it; proven by the marked Playwright spec in
+  // packages/e2e). Declared surfaces = bound surfaces (ADR 0040 H11) —
+  // packages/contract-tests fails the build if "ui" appears here without
+  // a proving spec, or vice versa.
   surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),

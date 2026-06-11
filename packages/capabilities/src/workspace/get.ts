@@ -62,7 +62,7 @@ export const workspaceGet: Capability<WorkspaceGetInput, WorkspaceGetOutput> = {
   input: WorkspaceGetInputSchema,
   output: WorkspaceGetOutputSchema,
   requires: ["workspace:read"],
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     // Subject is the workspace itself; the audit row's workspace_id
     // column already carries the tenant, so subject_id is left off

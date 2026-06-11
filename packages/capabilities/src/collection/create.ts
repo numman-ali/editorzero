@@ -134,7 +134,7 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
   output: CollectionCreateOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: () => ({ kind: "collection" }),
     effectOnAllow: (_input, output): AuditEffect => ({

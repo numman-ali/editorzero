@@ -236,7 +236,7 @@ describe("doc.get", () => {
     expect(docGet.id).toBe("doc.get");
     expect(docGet.category).toBe("read");
     expect(docGet.requires).toEqual(["doc:read"]);
-    expect(docGet.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(docGet.surfaces).toEqual(["api", "cli", "mcp"]);
   });
 
   it("projects a doc subject (per-doc audit granularity)", () => {

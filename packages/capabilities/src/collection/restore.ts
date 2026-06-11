@@ -91,7 +91,7 @@ export const collectionRestore: Capability<CollectionRestoreInput, CollectionRes
   output: CollectionRestoreOutputSchema,
   requires: ["doc:delete"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({ kind: "collection", id: input.collection_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

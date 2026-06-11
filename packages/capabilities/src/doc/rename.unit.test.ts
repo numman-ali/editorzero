@@ -320,7 +320,7 @@ describe("doc.rename", () => {
     expect(docRename.id).toBe("doc.rename");
     expect(docRename.category).toBe("mutation");
     expect(docRename.requires).toEqual(["doc:write"]);
-    expect(docRename.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(docRename.surfaces).toEqual(["api", "cli", "mcp"]);
     expect(docRename.agentAllowed).toBeDefined();
   });
 

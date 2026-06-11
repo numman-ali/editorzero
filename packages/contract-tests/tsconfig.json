@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No build output — the matrix specs are typechecked only (`pnpm -r
+    // typecheck` runs the package script). `composite: false` keeps this
+    // package out of `tsc -b` project-reference graphs, like packages/e2e.
+    "composite": false,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["vitest.config.ts", "test/**/*"]
+}

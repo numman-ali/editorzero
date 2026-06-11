@@ -224,7 +224,7 @@ export const docUpdate: Capability<Input, Output> = {
   output: DocUpdateOutputSchema,
   requires: ["doc:write", "block:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

@@ -198,7 +198,7 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
   output: DocCreateOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (_input) => ({ kind: "doc" }),
     effectOnAllow: (_input, output): AuditEffect => ({

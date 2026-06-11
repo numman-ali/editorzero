@@ -234,7 +234,7 @@ describe("workspace.member_remove", () => {
     expect(workspaceMemberRemove.id).toBe("workspace.member_remove");
     expect(workspaceMemberRemove.category).toBe("mutation");
     expect(workspaceMemberRemove.requires).toEqual(["workspace:admin"]);
-    expect(workspaceMemberRemove.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(workspaceMemberRemove.surfaces).toEqual(["api", "cli", "mcp"]);
     expect(workspaceMemberRemove.agentAllowed).toEqual({});
   });
 

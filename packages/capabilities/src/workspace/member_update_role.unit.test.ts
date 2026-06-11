@@ -255,7 +255,7 @@ describe("workspace.member_update_role", () => {
     expect(workspaceMemberUpdateRole.id).toBe("workspace.member_update_role");
     expect(workspaceMemberUpdateRole.category).toBe("mutation");
     expect(workspaceMemberUpdateRole.requires).toEqual(["workspace:admin"]);
-    expect(workspaceMemberUpdateRole.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(workspaceMemberUpdateRole.surfaces).toEqual(["api", "cli", "mcp"]);
     expect(workspaceMemberUpdateRole.agentAllowed).toEqual({});
   });
 

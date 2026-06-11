@@ -99,6 +99,58 @@ describe("createCapabilityCommand", () => {
     expect(fetch).toHaveBeenCalledWith("https://example.test/docs/list", expect.any(Object));
   });
 
+  it("rejects a capability id without a <domain>.<action> shape", () => {
+    const { stream } = captured();
+    const listCap = registerCapability(docList);
+    // biome-ignore lint/suspicious/noExplicitAny: malformed-id stub for the throw path; the real kernel enforces the shape.
+    const badIdCap: any = { ...listCap, id: "weird" };
+    expect(() =>
+      createCapabilityCommand(badIdCap, {
+        storeFactory: () => makeStoreFake(),
+        fetch: vi.fn(),
+        stdout: stream,
+      }),
+    ).toThrow(/does not match <domain>\.<action>/);
+  });
+
+  it("forwards derived flag values into the capability input (and defaults a non-string base-url)", async () => {
+    const { stream } = captured();
+    const serverResponse = {
+      doc_id: "018f0000-0000-7000-8000-0000000000d1",
+      workspace_id: "018f0000-0000-7000-8000-000000000001",
+      collection_id: null,
+      title: "Hello",
+      slug: "hello",
+      order_key: "a",
+      created_by: "018f0000-0000-7000-8000-000000000002",
+      visibility: "workspace",
+      seed_blocks: [],
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(JSON.stringify(serverResponse), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const cmd = createCapabilityCommand(registerCapability(docCreate), {
+      storeFactory: () => makeStoreFake(),
+      fetch,
+      stdout: stream,
+    });
+    const run = (cmd as { run: (ctx: { args: Record<string, unknown> }) => Promise<void> }).run;
+    // citty would never deliver a numeric base-url, but the runtime guard
+    // (`typeof === "string"`) falls back to the default — exercise it.
+    await run({ args: { title: "Hello", "base-url": 42 } });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:3000/docs/create",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const init = fetch.mock.calls[0]?.[1];
+    expect(typeof init?.body).toBe("string");
+    expect(JSON.parse(String(init?.body))).toMatchObject({ title: "Hello" });
+  });
+
   it("sets process.exitCode from the run-capability exit code on failure", async () => {
     const { stream } = captured();
     // No credential → runCapability returns 1 before any fetch.

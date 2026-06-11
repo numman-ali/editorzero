@@ -55,7 +55,7 @@ export const collectionList: Capability<CollectionListInput, CollectionListOutpu
   input: CollectionListInputSchema,
   output: CollectionListOutputSchema,
   requires: ["doc:read"],
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

@@ -1,16 +1,86 @@
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 
+import {
+  docListQueryOptions,
+  docVisibilityLabel,
+  formatUpdated,
+  visibilityTagClass,
+} from "../lib/docs";
+
 /**
- * `/` — the app home, now nested under the authed layout (`_authed`), so it
- * renders inside the shell `<main>` and only reaches a signed-in principal.
- * Placeholder body until the `doc.list × Web UI` parity cell (the next #13
- * increment) replaces it with the real Space landing (ADR 0040 vocabulary:
- * "Space" in the UI; the API call underneath hits `/workspaces` + `/docs`).
+ * `/` — the Space landing: the `doc.list × Web UI` parity cell (invariant 4,
+ * ADR 0033 §3 / 0040 H11). The loader warms the query cache before the
+ * screen renders (`ensureQueryData` — rejects on error, so a failed list
+ * lands in the route error boundary, never a half-rendered table), and the
+ * component reads it back with `useSuspenseQuery` — no loading-state UI to
+ * design at the bare-cell stage; the Base UI chrome slice owns that.
+ *
+ * Markup is the Meridian Zero `.panel` + `.tt` tabular-doc pattern straight
+ * from the landed token sheet (03-documents mock vocabulary) — zero new
+ * CSS. Vocabulary lock (ADR 0040): copy says "Space"; the wire call
+ * underneath is `GET /docs/list` against the `/workspaces`-rooted tenancy.
+ *
+ * Coverage: render-only by design — every decision (query options, labels,
+ * tag classes, date shape) lives unit-tested in `lib/docs.ts`; this file is
+ * in the e2e-covered set, proven by the marked Playwright spec
+ * (`packages/e2e/test/docs.spec.ts`, `proves-capability-cell: doc.list`).
  */
 export const Route = createFileRoute("/_authed/")({
+  loader: ({ context }) => context.queryClient.ensureQueryData(docListQueryOptions()),
   component: Home,
 });
 
 function Home() {
-  return <p className="ord">Home — the Space landing arrives with the doc.list parity cell.</p>;
+  const { data } = useSuspenseQuery(docListQueryOptions());
+  const docs = data.docs;
+  return (
+    <section className="panel" aria-labelledby="docs-heading">
+      <div className="ph">
+        <h2 className="t" id="docs-heading">
+          Docs
+        </h2>
+      </div>
+      {docs.length === 0 ? (
+        <p className="ord" style={{ padding: "15px" }}>
+          No docs in this Space yet.
+        </p>
+      ) : (
+        <table className="tt">
+          <thead>
+            <tr>
+              <th scope="col">Doc</th>
+              <th scope="col">Visibility</th>
+              <th scope="col" className="num">
+                Updated
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {docs.map((doc, index) => (
+              <tr key={doc.id}>
+                <td>
+                  <div className="doc">
+                    <span className="ord">{String(index + 1).padStart(2, "0")}</span>
+                    <div>
+                      <div className="nm">{doc.title}</div>
+                      <div className="pth">{doc.slug}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span className={visibilityTagClass(doc.visibility)}>
+                    {docVisibilityLabel(doc.visibility)}
+                  </span>
+                </td>
+                <td className="num">
+                  <span className="when">{formatUpdated(doc.updated_at)}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
 }

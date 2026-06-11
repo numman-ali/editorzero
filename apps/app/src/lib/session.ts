@@ -18,6 +18,7 @@ import { type ApiClient, ApiError } from "@editorzero/api-client";
 import { useQuery } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
+import { readErrorCode } from "./wire-error";
 
 // `WhoamiSession` is DERIVED from the materialized client type (SSOT): the
 // route's response zod schemas (whoami.ts) are not exported, so the `hc` client
@@ -35,40 +36,6 @@ type WhoamiResponse = Awaited<ReturnType<ApiClient["infra"]["whoami"]["$get"]>>;
 export type WhoamiSession = Awaited<ReturnType<WhoamiResponse["json"]>>;
 
 export const SESSION_QUERY_KEY = ["session"] as const;
-
-/**
- * Read a `{ error: string }` envelope from an unknown body, cast-free: the `in`
- * operator narrows `body` to `{ error: unknown }` (TS 4.9+), so `body.error` is
- * a named-property access — no `as`, and not an index-signature access.
- */
-function readStringError(body: unknown): string | undefined {
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    "error" in body &&
-    typeof body.error === "string"
-  ) {
-    return body.error;
-  }
-  return undefined;
-}
-
-/**
- * Best-effort wire error code for a non-ok whoami response. Prefers the
- * `{ error }` envelope; falls back to `"unauthenticated"` for a 401 (the
- * middleware shape) or `"request_failed"` for an untyped / non-JSON response.
- */
-async function readErrorCode(res: Response): Promise<string> {
-  try {
-    const fromBody = readStringError(await res.json());
-    if (fromBody !== undefined) {
-      return fromBody;
-    }
-  } catch {
-    // Non-JSON error body (e.g. an HTML 5xx from the trunk). Fall through.
-  }
-  return res.status === 401 ? "unauthenticated" : "request_failed";
-}
 
 /**
  * Fetch + project the calling principal. Takes the client as a parameter

@@ -305,7 +305,7 @@ describe("collection.update", () => {
       expect(collectionUpdate.id).toBe("collection.update");
       expect(collectionUpdate.category).toBe("mutation");
       expect(collectionUpdate.requires).toEqual(["doc:write"]);
-      expect(collectionUpdate.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+      expect(collectionUpdate.surfaces).toEqual(["api", "cli", "mcp"]);
     });
 
     it("emits the collection.update effect on allow with a patch carrying title+slug", () => {

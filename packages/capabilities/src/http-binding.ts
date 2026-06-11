@@ -3,15 +3,15 @@
  *
  * The registry does not record HTTP verb or path — those live on the
  * route files in `packages/api-server/src/routes/<domain>/<action>.ts`.
- * But the convention the server follows is tight enough that the CLI
- * can derive the binding from the capability alone:
+ * But the convention the server follows is tight enough that any
+ * surface can derive the binding from the capability alone:
  *
  *   - `id = "<domain>.<action>"` (e.g. `"doc.list"`, `"doc.get"`).
  *   - Plural-domain prefix: `<domain>s` (naïve: adds `s`). Irregular
- *     plurals will break this rule; the parity contract test in the
- *     next slice catches the mismatch at commit time, and the
- *     capability can grow an explicit `http` binding if the
- *     convention stops being sufficient.
+ *     plurals will break this rule; the parity tests catch the
+ *     mismatch at commit time, and the capability can grow an
+ *     explicit `http` binding if the convention stops being
+ *     sufficient.
  *   - Verb: `"read"` → GET, `"mutation"` → POST.
  *   - Path param: if the input has a `<domain>_id` field, the path
  *     is `/<plural>/<action>/:<domain>_id` and the field is a path
@@ -30,13 +30,17 @@
  *   - `POST /docs/rename/:doc_id`              (doc.rename; body={title})
  *   - `POST /docs/update/:doc_id`              (doc.update; body={ops})
  *
- * All nine derive correctly from the rules above. The `deriveHttpBinding`
- * tests assert that; the parity contract test closes the loop against
- * the real registered routes.
+ * This module lives in the capability package (not in a surface) because
+ * it IS registry convention: the CLI generator derives its HTTP calls
+ * from it (`apps/cli/src/generator/invoke.ts`) and the cross-surface
+ * matrix asserts every `api`-declaring capability resolves to a real
+ * trunk route through it (`packages/contract-tests`). One derivation,
+ * two consumers — no surface-local copy to drift (SSOT, ADR 0034 spirit).
  */
 
-import type { AnyCapability } from "@editorzero/capabilities";
 import { ZodObject, type ZodType } from "zod";
+
+import type { AnyCapability } from "./kernel";
 
 export interface HttpBinding {
   readonly verb: "GET" | "POST";
@@ -103,18 +107,19 @@ export function expandPathTemplate(
  * Narrow a capability's `input` schema to its object shape. Every
  * capability we ship today uses `z.object({...}).strict()` at the top
  * level (enforced by the capability kernel convention). If a future
- * capability wraps its input in a ZodEffects / ZodUnion, the generator
+ * capability wraps its input in a ZodEffects / ZodUnion, the derivation
  * needs to grow — but it should grow explicitly, not silently. The
  * throw path here fires that signal. Zod 4's `ZodObject.shape` is a
- * public property (typed `Record<string, ZodType>`), and `instanceof
- * ZodObject` is the public narrowing hook.
+ * public property, and `instanceof ZodObject` is the public narrowing
+ * hook — the only consumer need is `Object.keys`, so the narrowed
+ * shape type is used as-is (no cast).
  */
-function getObjectShape(schema: ZodType<unknown>): Record<string, ZodType<unknown>> {
+function getObjectShape(schema: ZodType<unknown>): Readonly<Record<string, unknown>> {
   if (schema instanceof ZodObject) {
-    return schema.shape as Record<string, ZodType<unknown>>;
+    return schema.shape;
   }
   throw new Error(
     `deriveHttpBinding: capability input is not a ZodObject (typeName=${schema.constructor.name}); ` +
-      "the registry-driven CLI generator currently supports only top-level object schemas.",
+      "the registry-driven binding derivation currently supports only top-level object schemas.",
   );
 }

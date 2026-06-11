@@ -93,7 +93,7 @@ export const workspaceUpdate: Capability<WorkspaceUpdateInput, WorkspaceUpdateOu
   output: WorkspaceUpdateOutputSchema,
   requires: ["workspace:admin"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     // Subject is the workspace itself; `id` omitted because the audit
     // row's `workspace_id` column already carries the tenant.

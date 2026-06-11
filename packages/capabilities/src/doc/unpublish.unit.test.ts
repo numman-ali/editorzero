@@ -311,7 +311,7 @@ describe("doc.unpublish", () => {
     expect(docUnpublish.id).toBe("doc.unpublish");
     expect(docUnpublish.category).toBe("mutation");
     expect(docUnpublish.requires).toEqual(["doc:publish"]);
-    expect(docUnpublish.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(docUnpublish.surfaces).toEqual(["api", "cli", "mcp"]);
     expect(docUnpublish.agentAllowed).toBeDefined();
   });
 

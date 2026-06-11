@@ -56,7 +56,7 @@ export const workspaceMemberList: Capability<WorkspaceMemberListInput, Workspace
     input: WorkspaceMemberListInputSchema,
     output: WorkspaceMemberListOutputSchema,
     requires: ["workspace:admin"],
-    surfaces: ["api", "cli", "mcp", "ui"],
+    surfaces: ["api", "cli", "mcp"],
     audit: {
       subjectFrom: () => ({ kind: "workspace" }),
       effectOnAllow: () => ({ kind: "audit.access_log" }),

@@ -53,7 +53,7 @@ export const auditGet: Capability<AuditGetInput, AuditGetOutput> = {
   input: AuditGetInputSchema,
   output: AuditGetOutputSchema,
   requires: ["workspace:admin"],
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

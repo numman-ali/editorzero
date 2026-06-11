@@ -80,7 +80,7 @@ export const workspaceMemberUpdateRole: Capability<
   output: WorkspaceMemberUpdateRoleOutputSchema,
   requires: ["workspace:admin"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp", "ui"],
+  surfaces: ["api", "cli", "mcp"],
   audit: {
     subjectFrom: (input) => ({
       kind: "user",

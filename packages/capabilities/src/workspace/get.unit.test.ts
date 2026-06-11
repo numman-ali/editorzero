@@ -193,7 +193,7 @@ describe("workspace.get", () => {
     expect(workspaceGet.id).toBe("workspace.get");
     expect(workspaceGet.category).toBe("read");
     expect(workspaceGet.requires).toEqual(["workspace:read"]);
-    expect(workspaceGet.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
+    expect(workspaceGet.surfaces).toEqual(["api", "cli", "mcp"]);
   });
 
   it("projects a workspace subject without id (tenant already on the audit row)", () => {
