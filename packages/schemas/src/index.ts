@@ -14,5 +14,7 @@
 
 export * from "./shared/audit";
 export * from "./shared/fields";
+export * from "./shared/grant";
 export * from "./shared/ids";
+export * from "./shared/principal-ref";
 export * from "./shared/visibility";

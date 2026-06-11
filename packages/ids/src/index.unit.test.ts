@@ -13,6 +13,7 @@ import {
   __resetUuidV7StateForTesting,
   CapabilityId,
   DocId,
+  GrantId,
   generateAgentId,
   generateAttachmentId,
   generateBlockId,
@@ -20,13 +21,16 @@ import {
   generateCommentId,
   generateCustomDomainId,
   generateDocId,
+  generateGrantId,
   generateMirrorId,
+  generateSpaceId,
   generateUploadId,
   generateVersionId,
   generateWebhookId,
   generateWorkspaceId,
   JobId,
   SessionId,
+  SpaceId,
   uuidV7,
   WorkspaceId,
 } from "./index";
@@ -162,6 +166,8 @@ describe("generateDocId and sibling generators", () => {
     expect(() => generateMirrorId()).not.toThrow();
     expect(() => generateCustomDomainId()).not.toThrow();
     expect(() => generateWebhookId()).not.toThrow();
+    expect(() => generateSpaceId()).not.toThrow();
+    expect(() => generateGrantId()).not.toThrow();
   });
 });
 
@@ -196,5 +202,14 @@ describe("brand parsers (sanity — full coverage in call-site tests)", () => {
 
   it("JobId is driver-specific: no runtime assertion, brand cast only", () => {
     expect(JobId("whatever-the-queue-emits")).toBe("whatever-the-queue-emits");
+  });
+
+  it("SpaceId / GrantId are product-owned v7 parsers (ADR 0040 Step 3)", () => {
+    const raw = "018f0000-0000-7000-8000-000000000001";
+    expect(SpaceId(raw)).toBe(raw);
+    expect(GrantId(raw)).toBe(raw);
+    const v4 = "018f0000-0000-4000-a000-000000000001";
+    expect(() => SpaceId(v4)).toThrow(/non-v7/);
+    expect(() => GrantId(v4)).toThrow(/non-v7/);
   });
 });

@@ -59,9 +59,15 @@ export const ROLES = ["owner", "admin", "member", "guest"] as const;
 export type Role = (typeof ROLES)[number];
 
 // ── Subject kind (§3.11 audit) ─────────────────────────────────────────────
+//
+// `space` / `grant` joined with ADR 0040 Step 3 (audit subjects for the
+// Step-7/8 `space.*` / `permission.*` effects; `team` lands with the
+// Teams slice). Widening is additive: the only schema consumer is the
+// audit-list filter enum, so existing values keep their meaning.
 
 export const SUBJECT_KINDS = [
   "workspace",
+  "space",
   "collection",
   "doc",
   "block",
@@ -70,10 +76,39 @@ export const SUBJECT_KINDS = [
   "agent",
   "user",
   "token",
+  "grant",
   "mirror",
   "system",
 ] as const;
 export type SubjectKind = (typeof SUBJECT_KINDS)[number];
+
+// ── Grant role + access mode (ADR 0040) ────────────────────────────────────
+
+/**
+ * Per-resource grant vocabulary (`grants.role`) — DISTINCT from the
+ * workspace-membership `ROLES` above. The two share the word "owner"
+ * but are different vocabularies with different semantics; conflating
+ * them is a real drift hazard, so tests pin `GRANT_ROLES` separately
+ * (ADR 0040, structural fork #3).
+ *
+ * Positive-only by design (fork #5): there are no deny rows, so
+ * "who-can-read X" stays a positive union — audit- and replay-friendly.
+ * Narrowing below the Space baseline is expressed by flipping the doc to
+ * `access_mode = "private"` + an explicit allow-list, never by a
+ * per-member deny.
+ */
+export const GRANT_ROLES = ["owner", "edit", "comment", "view"] as const;
+export type GrantRole = (typeof GRANT_ROLES)[number];
+
+/**
+ * Doc-level access mode (ADR 0040 fork #5 resolution — the Codex HIGH 1
+ * fork): `"space"` = the Space baseline applies and grants may only
+ * raise; `"private"` = allow-list of `created_by` + explicit grants +
+ * guests. Becomes the `docs.access_mode` column at Step 5 (the
+ * visibility de-overload split).
+ */
+export const ACCESS_MODES = ["space", "private"] as const;
+export type AccessMode = (typeof ACCESS_MODES)[number];
 
 // ── Queue name (§3.14) ─────────────────────────────────────────────────────
 
@@ -135,6 +170,23 @@ export const METADATA_ONLY_CAPABILITIES = [
   "workspace.member_add",
   "workspace.member_remove",
   "workspace.member_update_role",
+  // ADR 0040 Step 3 — Model B mutators, reserved ahead of their Step-8
+  // capabilities so the write-path posture (dispatcher-tx-only, no
+  // Hocuspocus connection) is settled before any handler exists. None
+  // is dispatchable until its `registerCapability` lands, so membership
+  // here is zero-behaviour-change today. Coherence Check 3 keeps this
+  // list in lockstep with architecture §6.5.
+  "permission.grant",
+  "permission.revoke",
+  "space.create",
+  "space.update",
+  "space.archive",
+  "space.restore",
+  "space.member_add",
+  "space.member_remove",
+  "space.member_update_role",
+  "doc.add_guest",
+  "doc.remove_guest",
 ] as const;
 
 export type MetadataOnlyCapabilityId = (typeof METADATA_ONLY_CAPABILITIES)[number];

@@ -759,8 +759,14 @@ function extractEffectKindFromCell(cell: string): string | null {
 //   - Same NOT NULL status per column
 //   - Same table-level constraints (UNIQUE / FOREIGN KEY / PRIMARY KEY)
 //
-// Indexes declared next to a CREATE TABLE (`CREATE INDEX … ON table(…)`)
-// are also diffed: index names + column lists must match between files.
+// Indexes declared next to a CREATE TABLE (`CREATE [UNIQUE] INDEX … ON
+// table(…) [WHERE …]`) are also diffed: index names + full signatures
+// (UNIQUE-ness, column list, WHERE predicate) must match between files.
+// The partial-unique slug indexes carry their uniqueness *inside* the
+// index declaration, so a regex that ignored the UNIQUE keyword and the
+// predicate left all five invisible to dialect parity (ADR 0040 H5).
+// Both dialects spell these identically, so whitespace-normalized
+// string comparison suffices — no SQL parsing.
 
 interface DdlTable {
   readonly name: string;
@@ -885,7 +891,7 @@ async function checkDdlParity(report: Report): Promise<void> {
         report.add({
           severity: "error",
           file: pgPath,
-          message: `DDL parity: index \`${idxName}\` column list differs — sqlite=\`${cols}\`, postgres=\`${pCols2}\``,
+          message: `DDL parity: index \`${idxName}\` signature differs — sqlite=\`${cols}\`, postgres=\`${pCols2}\``,
         });
       }
     }
@@ -905,11 +911,14 @@ async function checkDdlParity(report: Report): Promise<void> {
  * Parse a `*-ddl.ts` source into `{ tableName → DdlTable }`.
  *
  * Extracts every `CREATE TABLE <name> ( … );` body and every
- * `CREATE INDEX <idx> ON <table>(<cols>);` declaration, then walks the
- * body to split constraint rows (UNIQUE / FOREIGN KEY / PRIMARY KEY) from
- * column rows. Types are deliberately not captured — dialect-type
- * divergence is the point of having two files, and types would make this
- * check noisy for every schema touch.
+ * `CREATE [UNIQUE] INDEX <idx> ON <table>(<cols>) [WHERE <pred>];`
+ * declaration, then walks the body to split constraint rows (UNIQUE /
+ * FOREIGN KEY / PRIMARY KEY) from column rows. Each index is stored as a
+ * whitespace-normalized signature — `[UNIQUE ](<cols>)[ WHERE <pred>]` —
+ * so uniqueness and partial-index predicates participate in the diff.
+ * Types are deliberately not captured — dialect-type divergence is the
+ * point of having two files, and types would make this check noisy for
+ * every schema touch.
  */
 function parseDdl(src: string): Map<string, DdlTable> {
   const out = new Map<string, DdlTable>();
@@ -928,19 +937,26 @@ function parseDdl(src: string): Map<string, DdlTable> {
     tMatch = tableRe.exec(src);
   }
 
-  const indexRe = /CREATE\s+INDEX\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)\s*;/g;
+  const indexRe =
+    /CREATE\s+(UNIQUE\s+)?INDEX\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)(?:\s+WHERE\s+([^;]+))?\s*;/g;
   let iMatch: RegExpExecArray | null = indexRe.exec(src);
   while (iMatch !== null) {
-    const idxName = iMatch[1];
-    const tableName = iMatch[2];
-    const cols = iMatch[3];
+    const unique = iMatch[1]; // optional — undefined for a plain index
+    const idxName = iMatch[2];
+    const tableName = iMatch[3];
+    const cols = iMatch[4];
+    const where = iMatch[5]; // optional — undefined for a full index
     if (idxName === undefined || tableName === undefined || cols === undefined) {
       iMatch = indexRe.exec(src);
       continue;
     }
     const table = out.get(tableName);
     if (table) {
-      table.indexes.set(idxName, cols.replace(/\s+/g, " ").trim());
+      const signature =
+        (unique === undefined ? "" : "UNIQUE ") +
+        `(${cols.replace(/\s+/g, " ").trim()})` +
+        (where === undefined ? "" : ` WHERE ${where.replace(/\s+/g, " ").trim()}`);
+      table.indexes.set(idxName, signature);
     }
     iMatch = indexRe.exec(src);
   }

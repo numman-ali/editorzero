@@ -163,9 +163,16 @@ metadata-only set = {
   collection.create, collection.update, collection.move,
   collection.delete, collection.restore,
   workspace.update,
-  workspace.member_add, workspace.member_remove, workspace.member_update_role
+  workspace.member_add, workspace.member_remove, workspace.member_update_role,
+  -- reserved ahead of their capabilities (ADR 0040 Step 3; handlers land at Step 8) --
+  permission.grant, permission.revoke,
+  space.create, space.update, space.archive, space.restore,
+  space.member_add, space.member_remove, space.member_update_role,
+  doc.add_guest, doc.remove_guest
 }
 ```
+
+**Reserved members (2026-06-12, ADR 0040 Step 3).** The Model B mutators below the divider are *reserved*: each mutates only relational rows (`spaces`, `space_members`, `grants`, `docs.access_mode`), so their write-path posture — dispatcher-owned tx, no Hocuspocus connection — is settled here before any handler exists. None is dispatchable until its `registerCapability` lands at Step 8; until then membership is zero-behaviour-change. Coherence Check 3 keeps this block in lockstep with `METADATA_ONLY_CAPABILITIES` in `packages/scopes`.
 
 **`doc.rename` is NOT metadata-only (F54).** The doc title lives in the title block of the Y.Doc; `doc.rename` opens `ctx.transact(doc_id, editor => editor.updateBlock(titleBlockId, { content: newTitle }))` like any other content mutation. `docs.title` is a projected column (§3.5) rebuilt from the title block; `doc.rename`'s audit effect continues to be `doc.rename` (§16.3) but the write path is standard CRDT.
 

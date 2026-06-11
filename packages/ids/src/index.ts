@@ -14,6 +14,11 @@ export type AgentId = Branded<string, "AgentId">;
 export type DocId = Branded<string, "DocId">;
 export type BlockId = Branded<string, "BlockId">;
 export type CollectionId = Branded<string, "CollectionId">;
+// ADR 0040 (Space/Grant tenancy model). `TeamId` lands with the Teams
+// slice; there is deliberately no `OrgId` — multi-org is a product
+// non-goal (ADR 0040 Step 9).
+export type SpaceId = Branded<string, "SpaceId">;
+export type GrantId = Branded<string, "GrantId">;
 export type CapabilityId = Branded<string, "CapabilityId">;
 export type SessionId = Branded<string, "SessionId">;
 export type TokenId = Branded<string, "TokenId">;
@@ -68,6 +73,8 @@ export const AgentId = (s: string): AgentId => parseV7("AgentId", s);
 export const DocId = (s: string): DocId => parseV7("DocId", s);
 export const BlockId = (s: string): BlockId => parseV7("BlockId", s);
 export const CollectionId = (s: string): CollectionId => parseV7("CollectionId", s);
+export const SpaceId = (s: string): SpaceId => parseV7("SpaceId", s);
+export const GrantId = (s: string): GrantId => parseV7("GrantId", s);
 export const CommentId = (s: string): CommentId => parseV7("CommentId", s);
 export const AttachmentId = (s: string): AttachmentId => parseV7("AttachmentId", s);
 export const UploadId = (s: string): UploadId => parseV7("UploadId", s);
@@ -190,6 +197,8 @@ export function uuidV7(): string {
 export const generateDocId = (): DocId => DocId(uuidV7());
 export const generateWorkspaceId = (): WorkspaceId => WorkspaceId(uuidV7());
 export const generateCollectionId = (): CollectionId => CollectionId(uuidV7());
+export const generateSpaceId = (): SpaceId => SpaceId(uuidV7());
+export const generateGrantId = (): GrantId => GrantId(uuidV7());
 export const generateBlockId = (): BlockId => BlockId(uuidV7());
 export const generateAgentId = (): AgentId => AgentId(uuidV7());
 export const generateCommentId = (): CommentId => CommentId(uuidV7());

@@ -46,6 +46,8 @@ import {
   BlockId,
   CollectionId,
   DocId,
+  GrantId,
+  SpaceId,
   TokenId,
   UserId,
   WorkspaceId,
@@ -78,6 +80,18 @@ export const AgentIdInputSchema = z
   .uuid({ version: "v7", message: "must be a UUIDv7" })
   .transform((s): AgentId => AgentId(s));
 export const AgentIdOutputSchema = z.string().transform((s): AgentId => AgentId(s));
+
+// Space / Grant (ADR 0040 Step 3) — consumed by the Step-8 capability
+// schemas (`space.*`, `permission.*`, `doc.add_guest`/`remove_guest`).
+export const SpaceIdInputSchema = z
+  .uuid({ version: "v7", message: "must be a UUIDv7" })
+  .transform((s): SpaceId => SpaceId(s));
+export const SpaceIdOutputSchema = z.string().transform((s): SpaceId => SpaceId(s));
+
+export const GrantIdInputSchema = z
+  .uuid({ version: "v7", message: "must be a UUIDv7" })
+  .transform((s): GrantId => GrantId(s));
+export const GrantIdOutputSchema = z.string().transform((s): GrantId => GrantId(s));
 
 // ── Better-Auth-owned IDs (may be UUIDv4; §3.3) ────────────────────────────
 
