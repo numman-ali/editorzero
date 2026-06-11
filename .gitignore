@@ -57,3 +57,7 @@ venv/
 *.db
 .cache/
 tmp/
+
+# Playwright (packages/e2e)
+test-results/
+playwright-report/

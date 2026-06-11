@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No build output — specs + config are typechecked only (`pnpm -r
+    // typecheck` runs the package script). `composite: false` keeps this
+    // package out of `tsc -b` project-reference graphs, like the apps.
+    "composite": false,
+    "noEmit": true,
+    // DOM lib for code that runs INSIDE the browser via Playwright
+    // (`page.addInitScript(() => localStorage…)`).
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["playwright.config.ts", "scripts/**/*", "test/**/*"]
+}

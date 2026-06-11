@@ -89,19 +89,17 @@ pre-push:
       #     actually round-trips over a real TCP listener. Unlike the
       #     in-process integration tests, this spawns the shipping
       #     binary and asserts AXI stdout over a real subprocess pipe.
-      #   • Playwright + axe (§17.2 step 7) — Web UI e2e, still
-      #     scaffold-gated until `packages/e2e/` lands.
+      #   • Playwright + axe (§17.2 step 7) — Web UI e2e in
+      #     `packages/e2e`: bundled trunk + Vite dev proxy + Chromium.
+      #     Requires `pnpm -C packages/e2e exec playwright install
+      #     chromium` once per machine (see CONTRIBUTING).
       #
-      # The CLI e2e is unconditional: `apps/cli` exists and its
-      # `test:e2e` script is authoritative. A scaffold check would be
-      # a silent-skip foot-gun if someone deleted the test dir.
+      # Both are unconditional: the packages exist and their `test:e2e`
+      # scripts are authoritative. A scaffold check would be a
+      # silent-skip foot-gun if someone deleted a test dir.
       run: |
         pnpm -C apps/cli test:e2e
-        if [ -d packages/e2e/test ]; then
-          pnpm -C packages/e2e test
-        else
-          echo "skip: playwright suite not yet scaffolded"
-        fi
+        pnpm -C packages/e2e test:e2e
 
 # ── Commit message hook: DCO sign-off enforcement ──────────────────────────
 commit-msg:

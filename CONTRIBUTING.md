@@ -32,7 +32,7 @@ Commits without DCO sign-off don't land — the pre-commit gate enforces `Signed
 The project is **solo-author + agent** today, so the current flow is **direct-push-to-`main`** (no PRs; a bad commit is fix-forward; `main` is never force-pushed). The PR-based steps below apply once multiple external humans contribute.
 
 1. **Propose before you build.** Non-trivial changes begin with an ADR in `docs/adr/`. The ADR template is in [`docs/adr/README.md`](docs/adr/README.md). Small bug fixes do not need an ADR; feature work does.
-2. **Verification stack.** Every change passes, in order: types → lint → unit → property → integration → contract → e2e → smoke deploy → observability check, locally via pre-commit / pre-push hooks. See [`AGENTS.md`](AGENTS.md) for the full list. "I'll fix it in the next commit" is not acceptable — the hook doesn't let it land.
+2. **Verification stack.** Every change passes, in order: types → lint → unit → property → integration → contract → e2e → smoke deploy → observability check, locally via pre-commit / pre-push hooks. See [`AGENTS.md`](AGENTS.md) for the full list. "I'll fix it in the next commit" is not acceptable — the hook doesn't let it land. One-time machine setup for the pre-push e2e lane: `pnpm -C packages/e2e exec playwright install chromium` (the Web UI suite boots the real trunk + Vite and drives Chromium); the CLI e2e additionally needs [bun](https://bun.sh) on `PATH`, and the Postgres-backed suites need Docker running (`EDITORZERO_SKIP_POSTGRES_TESTS=1` to bypass when working Docker-less).
 3. **Commits are terse and imperative.** Context, decision, consequence. No filler.
 4. **Reference the ADRs you implement** in the commit body, with test evidence.
 

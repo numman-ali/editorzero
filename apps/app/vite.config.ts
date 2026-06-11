@@ -13,7 +13,11 @@ import { RESERVED_API_PREFIXES } from "./src/lib/reserved-prefixes";
  * The proxy targets are derived from `RESERVED_API_PREFIXES`, the same list the
  * client-route guard uses, so the two can never drift.
  */
-const TRUNK_ORIGIN = "http://localhost:3000";
+// Overridable so the e2e harness (packages/e2e) can point the proxy at its
+// own trunk on a non-default port. Build-tool config, not a secret — the
+// `packages/config` secrets rule governs runtime credential loads.
+const { EDITORZERO_TRUNK_ORIGIN } = process.env;
+const TRUNK_ORIGIN = EDITORZERO_TRUNK_ORIGIN ?? "http://localhost:3000";
 
 export default defineConfig({
   // `tanstackRouter` MUST precede `react()` (load-bearing per the plugin docs,

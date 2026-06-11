@@ -1,0 +1,20 @@
+{
+  "name": "@editorzero/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "echo \"@editorzero/e2e: browser lane runs at pre-push via test:e2e (kept out of the fast pre-commit lane)\"",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf tmp test-results playwright-report"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.11.3",
+    "@playwright/test": "1.60.0",
+    "@types/node": "catalog:",
+    "better-sqlite3": "catalog:",
+    "esbuild": "0.27.7",
+    "typescript": "catalog:"
+  }
+}
