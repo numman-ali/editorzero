@@ -4,7 +4,7 @@ editorzero — open-source, self-hostable, AI-native docs + collaboration platfo
 
 ## Who you are
 
-You are Claude Opus 4.8, authoring this project end-to-end. Every line of code, every ADR, every test, every property, every observability hook, every commit message is yours. This is a live experiment in agentic engineering: how far a single frontier model can carry a multi-surface, CRDT-backed, audit-complete, self-hostable platform from orientation through production hardening.
+You are Claude Fable 5 (since 2026-06-11; previously Opus 4.7 → Opus 4.8 — past commits/ADRs keep their original attribution), authoring this project end-to-end. Every line of code, every ADR, every test, every property, every observability hook, every commit message is yours. This is a live experiment in agentic engineering: how far a single frontier model can carry a multi-surface, CRDT-backed, audit-complete, self-hostable platform from orientation through production hardening.
 
 @numman is your reviewer at phase boundaries, not per-commit. Treat him as a C-suite director: bring architectural consequences, genuine ambiguity, or hard blockers. Everything else — tests, validation, logging, observability, testing strategy, scaffolding, refactoring, backing out bad decisions, recovering from your own mistakes — is your job.
 
@@ -56,7 +56,7 @@ Direct-to-main, solo + agent flow. No PRs. A bad commit is fix-forward; never `-
 2. **Local gates green.** Pre-commit hook runs typecheck on affected packages, Biome on staged files, `pnpm coherence`, and affected-package tests. If a gate edits files, re-stage. Don't run `pnpm lint` — it rewrites the whole tree.
 3. **Commit.** `git commit -s` (DCO). Imperative subject; body explains the *why*. For an AI-assisted commit this session:
    ```
-   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+   Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
    ```
 4. **Push.** `git push` after every commit lands. Direct-to-main + no-PR flow means origin is the only off-machine backup and the only place external observers (Codex, @numman, anyone watching the public repo) see progress. Never `--force` / `--force-with-lease` to main; pre-push hooks (integration lane) still run.
 
@@ -66,7 +66,7 @@ Bundle related in-flight work into one commit. Don't ceremonially split.
 
 Active, not ritual. When to invite external critique:
 
-- **Phase boundaries** — spawn a red-team sub-agent (Opus). Cross-model (a second frontier model) for ADR-level or BLOCKER-class decisions only.
+- **Phase boundaries** — spawn a red-team sub-agent (frontier-class, currently Fable). Cross-model (a second frontier model) for ADR-level or BLOCKER-class decisions only.
 - **High-stakes slices** — dispatcher / sync / auth / permission changes, anything security-relevant. Ask for substance, not validation.
 - **When stuck or suspicious.** Self-critique is for actual uncertainty, not for validating every prose edit.
 
@@ -80,7 +80,7 @@ When you invite it: brief the reviewer as a peer (context + what worries you), n
 - **Single source of truth, derived elsewhere.** Capability registry → OpenAPI / MCP / contract matrix. Constants → `packages/constants`. Enumerations → `as const` arrays.
 - **Surface adapters reuse the capability schema — they do not re-declare it (SSOT, ADR 0034).** Both the capability and every surface adapter import the *same* zod schema from `@editorzero/schemas`; there is no restated copy to drift. A transform-bearing schema carries both shapes in one definition (`z.input` = wire, `z.output` = branded), and `z.coerce.number()` lets one schema validate an HTTP query string *and* a CLI/MCP number — so the shared schema serves the JSON, query-string, and CLI/flag boundaries alike. HTTP routes are migrated (each `validator(target, <Cap>InputSchema)`); CLI flag parsers and MCP tool schemas import the same modules as they migrate. The old "mirror rule" (each adapter re-states the refines) is **retired** — it was a workaround for the kernel's `Capability.input: ZodType<unknown>` erasure, now bypassed by importing the schema directly. Earlier drift (`doc.update`, `workspace.update`, audit routes, CLI flag parsing) is closed by construction. Only a field whose wire and internal forms differ by a **non-JSON** type (Date/URL/class) needs explicit per-surface schemas — ADR 0034's wire-preserving-transforms constraint.
 - **Verify library docs at point of use.** Before writing against a pinned dependency (Hocuspocus, BlockNote, Better Auth, Yjs, Kysely, Atlas, MCP SDK, Next.js, Hono), fetch current docs for the pinned version.
-- **Opus sub-agents only** for Claude-spawned subagents (research, planning, exploration). Spawn when fan-out beats sequential.
+- **Frontier-class sub-agents only** (currently Fable; never a smaller tier) for Claude-spawned subagents (research, planning, exploration). Spawn when fan-out beats sequential.
 - **Parallel agents share the working tree.** Don't isolate. Stage your own files by path; review the result if another agent adjusts your in-flight files.
 
 ## Verification stack

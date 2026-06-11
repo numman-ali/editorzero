@@ -29,6 +29,9 @@ out/
 # Agent-local (Claude Code skills, workspace config)
 .claude/
 
+# Scratch design explorations (committed work lives in docs/brand/)
+.design/
+
 # Logs / coverage
 *.log
 npm-debug.log*

@@ -41,7 +41,7 @@ Per AGENTS.md § Self-critique:
 - ADR-level second opinions.
 - Delegated implementation when I want an independent attempt.
 - Remediation when Codex flagged something and the fix is mechanical.
-- Phase-boundary red-team (alongside the Opus red-team subagent).
+- Phase-boundary red-team (alongside the frontier-class red-team subagent).
 
 **Not for**: docs, ADR prose, AGENTS.md edits, status matrices, routine commits.
 
@@ -51,4 +51,4 @@ Peer engineer, not checklist runner. Lead with context + what worries you. Engag
 
 ### Sub-agent coexistence
 
-I also have Opus sub-agents (Plan / general-purpose / Explore) for parallel research, planning, exploration. Use those for fan-out; use Codex for second-opinion / delegated coding. Don't double-staff a question.
+I also have frontier-class sub-agents (Plan / general-purpose / Explore — currently Fable) for parallel research, planning, exploration. Use those for fan-out; use Codex for second-opinion / delegated coding. Don't double-staff a question.
