@@ -1,0 +1,434 @@
+/* Login screen CSS — extracted from the visual spec docs/brand/v2/screens/
+   12-login.html (State 2 "Returning sign-in" card, tokens only, prefix
+   login-). Deliberately UNLAYERED so it wins over the low-priority
+   `@layer meridian` design-system sheet (see styles/index.css). Additions
+   beyond the mock are marked [app]: the single-card centered stage, the
+   error line, and the mode-toggle link-button. */
+
+.login-field {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--paper);
+  background-image:
+    linear-gradient(var(--grid-line) var(--rule), transparent var(--rule)),
+    linear-gradient(90deg, var(--grid-line) var(--rule), transparent var(--rule));
+  background-size: 32px 32px;
+  background-position: -1px -1px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* engineering coordinate strip across the very top */
+.login-topstrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 22px;
+  border-bottom: var(--rule) solid var(--ink);
+  background: var(--paper);
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+.login-topstrip .lhs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.login-topstrip .div {
+  width: var(--rule);
+  height: 26px;
+  background: var(--hair-strong);
+  flex: 0 0 var(--rule);
+}
+.login-topstrip .coord {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--steel);
+  letter-spacing: 0.06em;
+}
+.login-topstrip .coord b {
+  color: var(--ink-1);
+  font-weight: 500;
+}
+
+/* [app] centered single-card stage — the mock's three-state gallery grid
+   collapses to one live state in the product. */
+.login-stage {
+  flex: 1;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 34px 24px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  justify-content: center;
+}
+.login-stage-h h1 {
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.login-stage-h h1 .z {
+  color: var(--ultra-ink);
+}
+.login-stage-h .sub {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--steel);
+  letter-spacing: 0.05em;
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* [app] the single state card (mock: .login-set/.login-col collapsed) */
+.login-panel {
+  border: var(--rule) solid var(--hair-strong);
+  background: var(--surface);
+}
+
+/* per-state coordinate header */
+.login-ch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  border-bottom: var(--rule) solid var(--ink);
+  background: var(--paper);
+}
+.login-ch .id {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.login-ch .tag {
+  margin-left: auto;
+}
+
+/* the card body */
+.login-card {
+  padding: 20px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* brand lockup centered on the card */
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  text-align: center;
+  padding: 4px 0 2px;
+}
+.login-brand .markwrap {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: var(--rule) solid var(--hair-strong);
+  background: var(--surface);
+}
+.login-brand .markwrap .cross {
+  width: 30px;
+  height: 30px;
+  color: var(--ultra);
+}
+.login-brand .markwrap .cross-ring {
+  inset: 6px;
+}
+/* corner ticks on the mark frame — drawing registration marks */
+.login-brand .markwrap::before,
+.login-brand .markwrap::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border: var(--rule) solid var(--ultra);
+}
+.login-brand .markwrap::before {
+  left: -3px;
+  top: -3px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.login-brand .markwrap::after {
+  right: -3px;
+  bottom: -3px;
+  border-left: 0;
+  border-top: 0;
+}
+.login-brand .title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+.login-brand .title b {
+  color: var(--ultra-ink);
+}
+.login-brand .lede {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  max-width: 34ch;
+}
+
+/* form atoms */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.login-fl {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.login-lbl {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--steel);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.login-lbl .req {
+  color: var(--ultra-ink);
+}
+.login-input {
+  font-family: var(--text);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: var(--rule) solid var(--hair-strong);
+  padding: 9px 11px;
+  width: 100%;
+  border-radius: var(--radius);
+  transition: border-color 0.12s, box-shadow 0.12s;
+  min-height: 40px;
+}
+.login-input::placeholder {
+  color: var(--steel-2);
+}
+.login-input:focus {
+  outline: none;
+  border-color: var(--ultra);
+  box-shadow: inset 0 0 0 var(--rule) var(--ultra);
+}
+.login-input.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+/* input with a trailing affix (reveal-password button) */
+.login-affix {
+  display: flex;
+  align-items: stretch;
+  border: var(--rule) solid var(--hair-strong);
+  background: var(--surface);
+}
+.login-affix:focus-within {
+  border-color: var(--ultra);
+  box-shadow: inset 0 0 0 var(--rule) var(--ultra);
+}
+.login-affix .login-input {
+  border: 0;
+  box-shadow: none;
+}
+.login-affix .login-input:focus {
+  box-shadow: none;
+}
+.login-affix .ax {
+  display: flex;
+  align-items: center;
+  padding: 0 11px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--steel);
+  background: var(--paper);
+  border-left: var(--rule) solid var(--hair-strong);
+  white-space: nowrap;
+}
+.login-affix .ax.btn-ax {
+  cursor: pointer;
+  color: var(--ink-2);
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+.login-affix .ax.btn-ax:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+/* [app] failure line — the form's single error channel */
+.login-error {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--warn-ink);
+  background: var(--warn-wash);
+  border: var(--rule) solid var(--warn-ink);
+  padding: 9px 11px;
+}
+
+/* primary submit + meta row */
+.login-actions {
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.login-submit {
+  width: 100%;
+  justify-content: center;
+  min-height: 44px;
+  font-size: 11.5px;
+}
+.login-foot-line {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--steel);
+  letter-spacing: 0.03em;
+  text-align: center;
+}
+
+/* [app] mode toggle — a real button styled as the mock's foot-line link */
+.login-link {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--ultra-ink);
+  font-weight: 500;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.login-link:hover {
+  text-decoration: underline;
+}
+
+/* the agent footnote — repeated trust statement */
+.login-agentnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border: var(--rule) solid var(--agent-edge);
+  background: var(--agent-wash);
+}
+.login-agentnote .ic {
+  flex: 0 0 22px;
+}
+.login-agentnote .tx {
+  font-size: 11px;
+  color: var(--agent-ink);
+  line-height: 1.5;
+}
+.login-agentnote .tx b {
+  font-weight: 700;
+}
+.login-agentnote .tx code {
+  font-family: var(--mono);
+  font-size: 10px;
+  background: var(--surface);
+  border: var(--rule) solid var(--agent-edge);
+  padding: 0 4px;
+  color: var(--agent-ink);
+}
+
+/* footer credit strip */
+.login-footer {
+  border-top: var(--rule) solid var(--hair-strong);
+  background: var(--paper);
+  padding: 13px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--steel);
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+}
+.login-footer .ms {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.login-footer b {
+  color: var(--ink-1);
+  font-weight: 500;
+}
+.login-footer .rhs {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+/* ============================================================
+   RESPONSIVE (mock's ≤640px block, kept atoms only)
+   ============================================================ */
+@media (max-width: 640px) {
+  .login-field {
+    background-size: 24px 24px;
+  }
+  .login-topstrip {
+    padding: 10px 14px;
+  }
+  .login-topstrip .coord.hideS,
+  .login-topstrip .div.hideS {
+    display: none;
+  }
+  .login-stage {
+    padding: 18px 12px 20px;
+    gap: 13px;
+  }
+  .login-stage-h h1 {
+    font-size: 21px;
+  }
+  .login-card {
+    padding: 16px 14px;
+    gap: 13px;
+  }
+  .login-footer {
+    padding: 12px 14px;
+    justify-content: flex-start;
+    gap: 10px;
+  }
+  /* ≥44px touch targets on phones; 16px also stops iOS zoom-on-focus */
+  .login-input {
+    min-height: 46px;
+    font-size: 16px;
+  }
+  .login-input.mono {
+    font-size: 14px;
+  }
+  .login-affix .ax.btn-ax {
+    min-width: 52px;
+    justify-content: center;
+  }
+}
+
+/* honor reduced motion: kill transitions on this screen */
+@media (prefers-reduced-motion: reduce) {
+  .login-input,
+  .login-submit {
+    transition: none !important;
+  }
+}

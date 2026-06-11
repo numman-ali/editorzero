@@ -16,6 +16,10 @@
  * `ApiError` / `ApiErrorCode` (re-exported from `./api-error`) are the
  * client projection of the server's typed `{ error: code }` envelope —
  * the throwable every consumer rejects with, and the SSOT code union.
+ *
+ * `signInEmail` / `signUpEmail` (re-exported from `./auth`) are the one
+ * sanctioned raw-fetch seam for Better Auth's `/auth/*` routes, which sit
+ * outside the typed `hc<AppType>` surface (ADR 0030; see `./auth`).
  */
 
 export {
@@ -25,6 +29,14 @@ export {
   isApiError,
   isApiErrorCode,
 } from "./api-error";
+export {
+  type AuthCallOptions,
+  type AuthResult,
+  type SignInEmailInput,
+  type SignUpEmailInput,
+  signInEmail,
+  signUpEmail,
+} from "./auth";
 export type { ApiClient } from "./client-type";
 export { createHttpClient, type HttpClientOptions } from "./http-client";
 export { createServerClient, type ServerClient, type ServerClientOptions } from "./server-client";

@@ -1,18 +1,25 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+
+import { AuthForm } from "../components/auth-form";
+import { safeRedirectTarget } from "../lib/auth";
+import { SESSION_QUERY_KEY } from "../lib/session";
 
 /**
- * `/login` — sign-in. Stays top-level (reachable signed-out, *outside* the
- * `_authed` layout). `validateSearch` captures an optional post-sign-in
- * `redirect` target — the href the `_authed` guard bounced from — cast-free:
- * the `in`-operator narrowing makes `search.redirect` a *named* access (not an
- * index-signature one), satisfying both `noPropertyAccessFromIndexSignature`
- * (TS) and `useLiteralKeys` (Biome), the same standoff `session.ts`/`theme.ts`
- * navigate. The target is the router's internal href (path + search + hash, not
- * a full URL), so it is safe to round-trip; an open-redirect guard is only
- * needed if a future path ever sets it from an external URL.
+ * `/login` — sign-in + sign-up. Stays top-level (reachable signed-out,
+ * *outside* the `_authed` layout). `validateSearch` captures an optional
+ * post-sign-in `redirect` target — the href the `_authed` guard bounced
+ * from — cast-free: the `in`-operator narrowing makes `search.redirect` a
+ * *named* access (not an index-signature one), satisfying both
+ * `noPropertyAccessFromIndexSignature` (TS) and `useLiteralKeys` (Biome),
+ * the same standoff `session.ts`/`theme.ts` navigate. The param is still
+ * attacker-writable in a crafted link, so `safeRedirectTarget` clamps it
+ * to an internal path before navigation.
  *
- * The actual Better Auth sign-in call (ADR 0030, via `@editorzero/api-client`)
- * lands in a later increment; this renders the frame.
+ * On success: invalidate the cached session (the guard's 401 left an error
+ * entry; a stale success from a previous principal must not survive a
+ * user switch), then navigate by raw `href` — the target is a full
+ * internal href (path + search + hash), which typed `to` can't express.
  */
 export const Route = createFileRoute("/login")({
   validateSearch: (search: unknown): { redirect?: string } => {
@@ -30,9 +37,47 @@ export const Route = createFileRoute("/login")({
 });
 
 function Login() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { redirect } = Route.useSearch();
   return (
-    <main className="viewport">
-      <h1>Sign in</h1>
-    </main>
+    <div className="login-field">
+      <header className="login-topstrip">
+        <div className="lhs">
+          <div className="logo">
+            <span className="mark" aria-hidden="true">
+              <span className="cross" />
+              <span className="cross-ring" />
+            </span>
+            <span className="word">
+              editor<b>zero</b>
+            </span>
+          </div>
+          <span className="div hideS" />
+          <span className="coord hideS">
+            SELF-HOSTED · <b>ENTRY</b>
+          </span>
+        </div>
+      </header>
+      <main className="login-stage">
+        <AuthForm
+          onAuthenticated={async () => {
+            await queryClient.invalidateQueries({ queryKey: SESSION_QUERY_KEY });
+            await navigate({ href: safeRedirectTarget(redirect) });
+          }}
+        />
+      </main>
+      <footer className="login-footer">
+        <div className="ms">
+          <span>
+            editor<b>zero</b> · AGPL-3.0
+          </span>
+        </div>
+        <div className="rhs">
+          <span className="dot dot--agent" aria-hidden="true" />
+          <span>HUMANS + AGENTS AS PEERS</span>
+        </div>
+      </footer>
+    </div>
   );
 }
