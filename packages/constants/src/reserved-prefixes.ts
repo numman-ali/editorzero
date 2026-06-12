@@ -27,11 +27,21 @@
  * internal import added here breaks the Vite config (and with it the
  * dev loop + e2e lane).
  *
- * TODO(registry-derive): ADR 0035 §2 wants this derived from the
- * capability route domains so it cannot drift from the *trunk* either.
- * Hardcoded for now; a follow-up should source the five capability
- * domains from the registry and keep `/auth`, `/mcp`, `/collab` as the
- * framework-owned tail.
+ * This module stays hand-written (it must remain import-free, so it
+ * cannot import the registry), but it can no longer drift from the
+ * trunk: `packages/contract-tests` asserts every registry-derived HTTP
+ * binding falls under one of these prefixes, so landing a new route
+ * domain without its entry here fails the build. That gate exists
+ * because the drift HAPPENED — `/permissions` (Step-8 slice 1) and
+ * `/spaces` (slice 2a) landed as trunk domains without joining this
+ * list (the ADR 0040 vocabulary-lock section explicitly called both
+ * "additive to that SSOT + its equality test"), leaving the dev proxy
+ * blind to them, the SPA fallback serving shell HTML for their
+ * unmatched GETs, and the SW denylist passing their navigations to the
+ * app-shell cache. The gate's first run then exposed a third, older
+ * instance: this list said `/audit` while the trunk has always mounted
+ * the domain at `/audits` — a dead entry shadowing a missing one. All
+ * three fixed 2026-06-12.
  */
 
 export const RESERVED_API_PREFIXES = [
@@ -39,7 +49,9 @@ export const RESERVED_API_PREFIXES = [
   "/docs",
   "/collections",
   "/workspaces",
-  "/audit",
+  "/audits",
+  "/permissions",
+  "/spaces",
   "/auth",
   "/mcp",
   "/collab",

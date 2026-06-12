@@ -43,6 +43,7 @@ import { fileURLToPath } from "node:url";
 
 import { app, openApiDocument } from "@editorzero/api-server";
 import { createDefaultRegistry, deriveHttpBinding } from "@editorzero/capabilities";
+import { isReservedApiPath } from "@editorzero/constants";
 import { isMcpTool, toToolConfig } from "@editorzero/mcp-server";
 import { describe, expect, it } from "vitest";
 
@@ -134,6 +135,27 @@ describe("capability parity matrix", () => {
       const binding = deriveHttpBinding(cap);
       const expected = `${binding.verb} ${binding.pathTemplate}`;
       expect(served, `unbound api cell: "${cap.id}" derives ${expected}`).toContain(expected);
+    }
+  });
+
+  it("every api-declaring capability's route domain is in RESERVED_API_PREFIXES (ADR 0035 §2)", () => {
+    // The reserved-prefix SSOT must stay import-free (vite.config loads
+    // it at config-eval time), so it cannot derive from the registry —
+    // this gate is the drift-killer instead. A trunk route domain
+    // missing from the SSOT leaves the dev proxy blind to it, lets the
+    // production SPA fallback serve shell HTML for its unmatched GETs,
+    // and lets the PWA service worker answer its navigations from the
+    // app-shell cache. Exactly that happened to /permissions and
+    // /spaces when their slices landed (fixed 2026-06-12); this test
+    // makes the next new domain unlandable without its SSOT entry.
+    const apiCaps = capabilities.filter((c) => c.surfaces.includes("api"));
+    expect(apiCaps.length).toBeGreaterThan(0);
+    for (const cap of apiCaps) {
+      const binding = deriveHttpBinding(cap);
+      expect(
+        isReservedApiPath(binding.pathTemplate),
+        `"${cap.id}" derives ${binding.pathTemplate}, which falls under no reserved prefix — add its domain to RESERVED_API_PREFIXES (packages/constants) so the dev proxy, SPA fallback, and SW denylist see it`,
+      ).toBe(true);
     }
   });
 

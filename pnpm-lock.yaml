@@ -562,6 +562,9 @@ importers:
       '@editorzero/capabilities':
         specifier: workspace:*
         version: link:../capabilities
+      '@editorzero/constants':
+        specifier: workspace:*
+        version: link:../constants
       '@editorzero/mcp-server':
         specifier: workspace:*
         version: link:../mcp-server
