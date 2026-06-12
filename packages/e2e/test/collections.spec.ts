@@ -5,12 +5,14 @@ import { CREDENTIALS } from "./credentials";
 
 /**
  * proves-capability-cell: collection.list
+ * proves-capability-cell: collection.create
  *
- * The `collection.list × Web UI` parity cell (invariant 4, ADR 0033 §3 /
- * 0040 H11): the sidebar Collections tree, rendered on every authed
- * screen by the `_authed` layout. The marker line above is load-bearing —
- * `packages/contract-tests` binds the capability's `"ui"` declaration to
- * this spec.
+ * The `collection.list` + `collection.create` × Web UI parity cells
+ * (invariant 4, ADR 0033 §3 / 0040 H11): the sidebar Collections tree,
+ * rendered on every authed screen by the `_authed` layout, and the
+ * section header's "+" disclosure that creates into it. The marker
+ * lines above are load-bearing — `packages/contract-tests` binds each
+ * capability's `"ui"` declaration to this spec.
  *
  * The wire is a FLAT `order_key`-ordered array; the nesting is the
  * client's `flattenCollectionTree` (unit-tested in apps/app). This spec
@@ -31,10 +33,14 @@ async function signIn(page: Page): Promise<void> {
   expect(res.ok()).toBe(true);
 }
 
-test("an empty workspace renders no Collections section at all", async ({ page }) => {
+test("an empty workspace renders the create affordance but no tree", async ({ page }) => {
   await signIn(page);
   await page.goto("/");
+  // The tree <nav> is honestly absent (the rows ARE the navigation),
+  // but the section header + "+" trigger render — with a create cell,
+  // an empty workspace is a starting point, not a dead section.
   await expect(page.getByRole("navigation", { name: "Collections" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New collection" })).toBeVisible();
 });
 
 test("collections created over the API render as a nested tree in DFS order", async ({ page }) => {
@@ -72,4 +78,41 @@ test("collections created over the API render as a nested tree in DFS order", as
   await expect(rows.nth(2).locator(".tw")).toHaveCount(0);
 
   await expectNoAxeViolations(page);
+});
+
+test("collection.create: the sidebar disclosure creates a root collection into the tree", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/");
+
+  // Trigger morphs into the inline form; focus lands in the input.
+  await page.getByRole("button", { name: "New collection" }).click();
+  const input = page.getByRole("textbox", { name: "Collection title" });
+  await expect(input).toBeFocused();
+  await input.fill("Receipts");
+  await expectNoAxeViolations(page); // the open form is part of the audited surface
+  await page.getByRole("button", { name: "Create" }).click();
+
+  // The invalidation re-renders the tree with the new root LAST (wire
+  // order is order_key = creation order); the form closes back to the
+  // trigger.
+  const rows = page.getByRole("navigation", { name: "Collections" }).locator(".row");
+  await expect(rows).toHaveText([/Field Guides/, /Sub Guides/, /Archive/, /Receipts/]);
+  await expect(page.getByRole("button", { name: "New collection" })).toBeVisible();
+
+  // Server-state proof: a full reload renders the same tree — the row
+  // exists in the DB, not in client cache.
+  await page.reload();
+  await expect(rows).toHaveText([/Field Guides/, /Sub Guides/, /Archive/, /Receipts/]);
+
+  // The 409 sibling-slug arm: an existing root title refuses with the
+  // typed alert and the form stays open for a different title.
+  await page.getByRole("button", { name: "New collection" }).click();
+  await page.getByRole("textbox", { name: "Collection title" }).fill("Field Guides");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("alert")).toContainText("already exists");
+  await expect(rows).toHaveCount(4);
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("button", { name: "New collection" })).toBeVisible();
 });

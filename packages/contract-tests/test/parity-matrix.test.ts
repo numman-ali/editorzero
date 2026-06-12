@@ -59,7 +59,6 @@ const capabilities = registry.list();
 const UI_PENDING: readonly string[] = [
   "audit.get",
   "audit.list",
-  "collection.create",
   "collection.delete",
   "collection.move",
   "collection.restore",

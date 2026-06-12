@@ -4,6 +4,7 @@ import { type CollectionSummary, flattenCollectionTree, treeRowIndent } from "..
 import { describePrincipal } from "../lib/principal";
 import type { WhoamiSession } from "../lib/session";
 import { type WorkspaceGet, workspaceMonogram } from "../lib/workspace";
+import { NewCollection } from "./new-collection";
 
 /**
  * Sidebar interior — one source for both hosts: the static desktop
@@ -28,8 +29,11 @@ import { type WorkspaceGet, workspaceMonogram } from "../lib/workspace";
  * to link to, and drag-reorder is its own later cell (ADR 0037's Owned
  * Tree note budgets it; it binds collection.move/doc.move). Always
  * expanded — the `.tw` caret marks rows that HAVE children, it is not a
- * toggle yet. The section is absent entirely when no collections exist
- * (nothing to navigate — same honesty bar as the nav entries).
+ * toggle yet. The section HEADER (inside `NewCollection`, the
+ * `collection.create` cell) renders always — with a create affordance,
+ * an empty workspace is a starting point — while the tree `<nav>`
+ * itself stays absent until rows exist (the honesty bar applies to
+ * navigation, and the rows are the navigation).
  */
 export function SideContent({
   session,
@@ -90,36 +94,34 @@ export function SideContent({
           Spaces
         </Link>
       </nav>
+      <NewCollection />
       {tree.length > 0 && (
-        <>
-          <div className="nav-h kicker">Collections</div>
-          <nav className="tree" aria-label="Collections">
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {tree.map((node) => {
-                const indent = treeRowIndent(node.depth);
-                return (
-                  <li
-                    className={indent.className}
-                    key={node.id}
-                    {...(indent.padding !== undefined && {
-                      style: { paddingLeft: indent.padding },
-                    })}
-                  >
-                    {node.hasChildren && (
-                      <span className="tw" aria-hidden="true">
-                        ▾
-                      </span>
-                    )}
-                    <span className="ic" aria-hidden="true">
-                      ▯
+        <nav className="tree" aria-label="Collections">
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {tree.map((node) => {
+              const indent = treeRowIndent(node.depth);
+              return (
+                <li
+                  className={indent.className}
+                  key={node.id}
+                  {...(indent.padding !== undefined && {
+                    style: { paddingLeft: indent.padding },
+                  })}
+                >
+                  {node.hasChildren && (
+                    <span className="tw" aria-hidden="true">
+                      ▾
                     </span>
-                    {node.title}
-                  </li>
-                );
-              })}
-            </ul>
-          </nav>
-        </>
+                  )}
+                  <span className="ic" aria-hidden="true">
+                    ▯
+                  </span>
+                  {node.title}
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
       )}
       <div className="foot">
         <span className={avatarClass} aria-hidden="true">

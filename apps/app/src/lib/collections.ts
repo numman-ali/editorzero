@@ -1,6 +1,7 @@
 /**
- * `collection.list` data-layer — the sidebar Collections tree's
- * capability cell (invariant 4, ADR 0033 §3 / 0040 H11).
+ * `collection.list` + `collection.create` data-layer — the sidebar
+ * Collections tree's capability cells (invariant 4, ADR 0033 §3 / 0040
+ * H11).
  *
  * Same split as `workspace.ts`: `fetchCollectionList` is the testable
  * plain function, `collectionListQueryOptions` the react-query binding
@@ -11,7 +12,7 @@
  * assembly, so it lives here where it is unit-testable and the chrome
  * component stays render-only.
  */
-import { type ApiClient, ApiError } from "@editorzero/api-client";
+import { type ApiClient, ApiError, isApiError } from "@editorzero/api-client";
 import { queryOptions } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
@@ -37,6 +38,48 @@ export function collectionListQueryOptions(client: ApiClient = apiClient) {
     queryKey: COLLECTION_LIST_QUERY_KEY,
     queryFn: () => fetchCollectionList(client),
   });
+}
+
+type CollectionCreateResponse = Awaited<ReturnType<ApiClient["collections"]["create"]["$post"]>>;
+// 201 Created, matching doc.create — extract that arm from the union.
+type CollectionCreateSuccess = Extract<CollectionCreateResponse, { status: 201 }>;
+export type CollectionCreated = Awaited<ReturnType<CollectionCreateSuccess["json"]>>;
+
+/**
+ * Create a collection at the workspace root (the bare cell sends
+ * `title` only — a parent/space picker is a later increment with the
+ * tree screens; omitted `parent_id` = root, omitted `space_id` = the
+ * legacy no-space bucket). Success re-renders the tree via the list
+ * invalidation; there is no collection screen to navigate to yet.
+ */
+export async function createCollection(
+  title: string,
+  client: ApiClient = apiClient,
+): Promise<CollectionCreated> {
+  const res = await client.collections.create.$post({ json: { title } });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type CollectionCreateFailure = "duplicate_title" | "create_failed";
+
+/**
+ * Same 409 rule as the doc forms: the capability refuses a sibling-slug
+ * collision (collection.create has the NULL-aware pre-check — it was
+ * the originating pattern doc.create mirrored), so retrying the same
+ * title can never succeed; everything else is a generic retryable
+ * failure.
+ */
+export function classifyCollectionCreateError(error: unknown): CollectionCreateFailure {
+  return isApiError(error) && error.status === 409 ? "duplicate_title" : "create_failed";
+}
+
+export function collectionCreateFailureMessage(kind: CollectionCreateFailure): string {
+  return kind === "duplicate_title"
+    ? "A collection with this title already exists here. Pick a different title."
+    : "Create failed. Try again.";
 }
 
 /** One renderable tree row: the summary plus its computed depth. */

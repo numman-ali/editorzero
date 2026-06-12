@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 import {
   COLLECTION_LIST_QUERY_KEY,
   type CollectionSummary,
+  classifyCollectionCreateError,
+  collectionCreateFailureMessage,
   collectionListQueryOptions,
+  createCollection,
   fetchCollectionList,
   flattenCollectionTree,
   treeRowIndent,
@@ -140,5 +143,62 @@ describe("treeRowIndent", () => {
   it("continues the 10 + 16·depth scale inline past depth 2", () => {
     expect(treeRowIndent(3)).toEqual({ className: "row", padding: "58px" });
     expect(treeRowIndent(5)).toEqual({ className: "row", padding: "90px" });
+  });
+});
+
+const CREATED = {
+  collection_id: "018f0000-0000-7000-8000-0000000000c9",
+  workspace_id: "018f0000-0000-7000-8000-0000000000aa",
+  parent_id: null,
+  space_id: null,
+  title: "Receipts",
+  slug: "receipts",
+  order_key: "a0",
+  created_by: "018f0000-0000-7000-8000-0000000000bb",
+};
+
+describe("createCollection", () => {
+  it("resolves the 201 echo (the tree re-renders via list invalidation)", async () => {
+    const created = await createCollection("Receipts", jsonClient(201, CREATED));
+    expect(created.collection_id).toBe(CREATED.collection_id);
+    expect(created.slug).toBe("receipts");
+  });
+
+  it("throws ApiError with the typed envelope code on a 409 slug collision", async () => {
+    await expect(
+      createCollection("Receipts", jsonClient(409, { error: "slug_collision" })),
+    ).rejects.toMatchObject({ status: 409, code: "slug_collision" });
+  });
+
+  it("throws an ApiError instance on a 400", async () => {
+    await expect(
+      createCollection("", jsonClient(400, { error: "validation_failed" })),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("classifyCollectionCreateError (the doc-form 409 rule)", () => {
+  it("maps a 409 ApiError to duplicate_title", () => {
+    expect(classifyCollectionCreateError(new ApiError(409, "slug_collision"))).toBe(
+      "duplicate_title",
+    );
+  });
+
+  it("maps other ApiErrors to create_failed", () => {
+    expect(classifyCollectionCreateError(new ApiError(500, "internal"))).toBe("create_failed");
+  });
+
+  it("maps non-ApiError throwables (network faults) to create_failed", () => {
+    expect(classifyCollectionCreateError(new TypeError("fetch failed"))).toBe("create_failed");
+  });
+});
+
+describe("collectionCreateFailureMessage", () => {
+  it("tells the user to pick a different title on duplicate_title", () => {
+    expect(collectionCreateFailureMessage("duplicate_title")).toContain("already exists");
+  });
+
+  it("offers a retry on create_failed", () => {
+    expect(collectionCreateFailureMessage("create_failed")).toContain("Try again");
   });
 });

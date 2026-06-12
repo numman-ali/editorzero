@@ -163,7 +163,11 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
   output: CollectionCreateOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the sidebar Collections section's "+" disclosure
+  // (the collection.create × Web UI cell) — proven end-to-end by the
+  // marked Playwright spec in packages/e2e (proves-capability-cell:
+  // collection.create).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "collection" }),
     effectOnAllow: (_input, output): AuditEffect => ({
