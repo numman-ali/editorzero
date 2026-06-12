@@ -897,6 +897,65 @@ describe("replay reducer — collection space binding + doc.move acl_transition"
     seed_blocks: [],
   });
 
+  it("collection.move crossing (adopt_baseline) rebinds the subtree AND drops the listed grants", () => {
+    const state = replay([
+      mkColl(COLL, null),
+      mkColl(COLL2, COLL),
+      docCreate, // doc lives in COLL — inside the moved subtree
+      grantOnDoc,
+      allow({
+        kind: "collection.move",
+        collection_id: COLL,
+        new_parent_id: null,
+        new_order_key: "z",
+        new_space_id: SPACE,
+        acl_transition: {
+          policy: "adopt_baseline",
+          before_space_id: null,
+          after_space_id: SPACE,
+          dropped_grants: [
+            {
+              grant_id: GRANT,
+              workspace_id: WS,
+              resource_kind: "doc",
+              resource_id: DOC,
+              subject_kind: "user",
+              subject_id: USER2,
+              role: "view",
+              is_guest: 0,
+              created_by: USER,
+            },
+          ],
+        },
+      }),
+    ]);
+    expect(state.collections[COLL]?.space_id).toBe(SPACE);
+    expect(state.collections[COLL2]?.space_id).toBe(SPACE);
+    expect(state.grants).toEqual({});
+  });
+
+  it("collection.move crossing (keep_grants — empty dropped list) leaves grants intact", () => {
+    const state = replay([
+      mkColl(COLL, null),
+      docCreate,
+      grantOnDoc,
+      allow({
+        kind: "collection.move",
+        collection_id: COLL,
+        new_parent_id: null,
+        new_order_key: "z",
+        new_space_id: SPACE,
+        acl_transition: {
+          policy: "keep_grants",
+          before_space_id: null,
+          after_space_id: SPACE,
+          dropped_grants: [],
+        },
+      }),
+    ]);
+    expect(state.grants[GRANT]?.id).toBe(GRANT);
+  });
+
   it("doc.move adopt_baseline drops exactly the listed grants (removal by preimage id)", () => {
     const state = replay([
       docCreate,

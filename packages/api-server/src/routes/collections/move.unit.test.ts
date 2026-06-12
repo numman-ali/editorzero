@@ -32,6 +32,7 @@ const TEST_PRINCIPAL: UserPrincipal = {
 
 const TARGET_ID = "018f0000-0000-7000-8000-0000000000c1";
 const NEW_PARENT_ID = "018f0000-0000-7000-8000-0000000000c2";
+const SPACE_ID = "018f0000-0000-7000-8000-0000000000e1";
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
   const app = new Hono<ApiEnv>();
@@ -67,7 +68,9 @@ describe("POST /collections/move", () => {
     const res = await app.request(`/collections/move/${TARGET_ID}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: NEW_PARENT_ID }),
+      body: JSON.stringify({
+        destination: { kind: "collection", collection_id: NEW_PARENT_ID },
+      }),
     });
 
     expect(res.status).toBe(200);
@@ -76,34 +79,79 @@ describe("POST /collections/move", () => {
     expect(captured?.capability_id).toBe(CapabilityId("collection.move"));
     expect(captured?.input).toEqual({
       collection_id: TARGET_ID,
-      new_parent_id: NEW_PARENT_ID,
+      destination: { kind: "collection", collection_id: NEW_PARENT_ID },
     });
     expect(captured?.access).toEqual({ workspace_id: TEST_PRINCIPAL.workspace_id });
   });
 
-  it("accepts explicit null new_parent_id (move to workspace root)", async () => {
-    let captured: DispatchInvocation | undefined;
+  it("accepts every destination arm + threads acl_policy through", async () => {
+    for (const body of [
+      { destination: { kind: "legacy_root" } },
+      { destination: { kind: "space_root", space_id: SPACE_ID } },
+      {
+        destination: { kind: "collection", collection_id: NEW_PARENT_ID },
+        acl_policy: "adopt_baseline",
+      },
+    ]) {
+      let captured: DispatchInvocation | undefined;
+      const app = buildApp(async (invocation) => {
+        captured = invocation;
+        return {
+          collection_id: TARGET_ID,
+          new_parent_id: null,
+          new_order_key: "018f0000-0000-7000-8000-000000000111",
+          new_space_id: null,
+          updated_at: 42,
+        };
+      });
+      const res = await app.request(`/collections/move/${TARGET_ID}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(200);
+      expect(captured?.input).toEqual({ collection_id: TARGET_ID, ...body });
+    }
+  });
+
+  it("echoes an acl_transition-bearing output verbatim (crossing receipt)", async () => {
     const output = {
       collection_id: TARGET_ID,
       new_parent_id: null,
       new_order_key: "018f0000-0000-7000-8000-000000000111",
-      new_space_id: null,
+      new_space_id: SPACE_ID,
       updated_at: 42,
+      acl_transition: {
+        policy: "adopt_baseline",
+        before_space_id: null,
+        after_space_id: SPACE_ID,
+        dropped_grants: [
+          {
+            grant_id: "018f0000-0000-7000-8000-0000000000aa",
+            workspace_id: "018f0000-0000-7000-8000-000000000001",
+            resource_kind: "doc",
+            resource_id: "018f0000-0000-7000-8000-0000000000f1",
+            subject_kind: "user",
+            subject_id: "018f0000-0000-7000-8000-0000000000a2",
+            role: "view",
+            is_guest: 0,
+            created_by: "018f0000-0000-7000-8000-0000000000a1",
+            created_at: 7,
+          },
+        ],
+      },
     };
-    const app = buildApp(async (invocation) => {
-      captured = invocation;
-      return output;
-    });
+    const app = buildApp(async () => output);
     const res = await app.request(`/collections/move/${TARGET_ID}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: null }),
+      body: JSON.stringify({
+        destination: { kind: "space_root", space_id: SPACE_ID },
+        acl_policy: "adopt_baseline",
+      }),
     });
     expect(res.status).toBe(200);
-    expect(captured?.input).toEqual({
-      collection_id: TARGET_ID,
-      new_parent_id: null,
-    });
+    expect(await res.json()).toEqual(output);
   });
 
   it("malformed uuid in path → 400", async () => {
@@ -115,14 +163,14 @@ describe("POST /collections/move", () => {
     const res = await app.request("/collections/move/not-a-uuid", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: null }),
+      body: JSON.stringify({ destination: { kind: "legacy_root" } }),
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "validation_failed" });
     expect(dispatchCalled).toBe(false);
   });
 
-  it("missing new_parent_id field → 400 (body schema is .strict)", async () => {
+  it("missing destination field → 400 (body schema is .strict)", async () => {
     let dispatchCalled = false;
     const app = buildApp(async () => {
       dispatchCalled = true;
@@ -147,7 +195,7 @@ describe("POST /collections/move", () => {
     const res = await app.request(`/collections/move/${TARGET_ID}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: null, stray: 1 }),
+      body: JSON.stringify({ destination: { kind: "legacy_root" }, stray: 1 }),
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "validation_failed" });

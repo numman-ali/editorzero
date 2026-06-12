@@ -593,7 +593,7 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       ),
     );
     await step(collectionUpdate.id, { collection_id: c1, title: "Alpha Renamed" });
-    await step(collectionMove.id, { collection_id: c2, new_parent_id: null });
+    await step(collectionMove.id, { collection_id: c2, destination: { kind: "legacy_root" } });
 
     const d1 = DocId(readIdField(await step(docCreate.id, { title: "Doc One" }), "doc_id"));
     const d2 = DocId(
@@ -790,7 +790,7 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
     });
     await step(docMove.id, { doc_id: d1, new_collection_id: c4, acl_policy: "adopt_baseline" });
     await step(docMove.id, { doc_id: d1, new_collection_id: c1, acl_policy: "keep_grants" });
-    // Same-bucket space re-parent (the collection.move rail's ALLOW
+    // Same-bucket space re-parent (the collection.move regime's ALLOW
     // arm): c4 moves from c3 to a fresh sibling root in the SAME
     // space — binding rides unchanged through the effect and replay.
     const c5 = CollectionId(
@@ -799,7 +799,33 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
         "collection_id",
       ),
     );
-    await step(collectionMove.id, { collection_id: c4, new_parent_id: c5 });
+    await step(collectionMove.id, {
+      collection_id: c4,
+      destination: { kind: "collection", collection_id: c5 },
+    });
+    // Collection-level CROSSING both ways (ADR 0040 crossing slice): c1
+    // (legacy, holding d1) crosses into s1's root under adopt_baseline —
+    // the re-granted edge on d1 hard-drops with its preimage riding the
+    // ONE collection.move effect (replay must apply the drop AND the
+    // rebind); the return crossing to the legacy root under keep_grants
+    // records the transition with ZERO grant writes.
+    await step(permissionGrant.id, {
+      resource_kind: "doc",
+      resource_id: d1,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+      role: "view",
+    });
+    await step(collectionMove.id, {
+      collection_id: c1,
+      destination: { kind: "space_root", space_id: s1 },
+      acl_policy: "adopt_baseline",
+    });
+    await step(collectionMove.id, {
+      collection_id: c1,
+      destination: { kind: "legacy_root" },
+      acl_policy: "keep_grants",
+    });
 
     await step(workspaceMemberRemove.id, { user_id: SECOND_USER });
 

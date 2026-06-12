@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { deriveFlags } from "./flags";
+import { deriveFlags, deriveJsonFlagKeys } from "./flags";
 
 describe("deriveFlags", () => {
   it("returns an empty ArgsDef for an empty-object schema", () => {
@@ -38,5 +38,51 @@ describe("deriveFlags", () => {
 
   it("rejects non-ZodObject schemas", () => {
     expect(() => deriveFlags(z.string())).toThrow(/not a ZodObject \(typeName=ZodString\)/);
+  });
+});
+
+describe("deriveJsonFlagKeys", () => {
+  it("returns the empty set when no field is structured", () => {
+    expect(
+      deriveJsonFlagKeys(
+        z.object({
+          doc_id: z.string(),
+          page_size: z.coerce.number().optional(),
+        }),
+      ),
+    ).toEqual(new Set());
+  });
+
+  it("marks object / discriminated-union / array fields (through optional + nullable)", () => {
+    expect(
+      deriveJsonFlagKeys(
+        z.object({
+          title: z.string(),
+          destination: z.discriminatedUnion("kind", [
+            z.object({ kind: z.literal("legacy_root") }).strict(),
+            z.object({ kind: z.literal("collection"), collection_id: z.string() }).strict(),
+          ]),
+          filters: z.object({ q: z.string() }).optional(),
+          tags: z.array(z.string()).nullable().optional(),
+        }),
+      ),
+    ).toEqual(new Set(["destination", "filters", "tags"]));
+  });
+
+  it("does NOT mark string-input transform pipelines (branded ids stay plain flags)", () => {
+    expect(
+      deriveJsonFlagKeys(
+        z.object({
+          collection_id: z
+            .string()
+            .uuid()
+            .transform((v) => v),
+        }),
+      ),
+    ).toEqual(new Set());
+  });
+
+  it("rejects non-ZodObject schemas", () => {
+    expect(() => deriveJsonFlagKeys(z.string())).toThrow(/not a ZodObject \(typeName=ZodString\)/);
   });
 });

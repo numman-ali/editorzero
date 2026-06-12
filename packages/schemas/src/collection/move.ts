@@ -13,49 +13,78 @@
  * is the reserved name for the response-wire side — add it under that
  * name (never a `RawOutput`/`SerializedOutput` synonym) if ever needed.
  *
- * `z.input` of each schema is the wire shape (plain strings); the
- * `.transform()` narrows to the branded internal shape (`z.output`). The
- * capability uses these as `Capability<CollectionMoveInput,
- * CollectionMoveOutput>`; the route feeds `CollectionMoveInputSchema` to
- * `validator` (→ wire-typed `hc` client, branded `c.req.valid`) and
- * `CollectionMoveOutputSchema` to `resolver` + `.parse(result)`.
+ * **`destination` is a tagged union, not a nullable parent id (ADR 0040
+ * space-collection crossing slice).** The old `new_parent_id:
+ * CollectionId | null` could not express "root of space S" — `null`
+ * collapsed two distinct destinations (legacy root, space root) into
+ * one, and a create-style `{ new_parent_id, space_id }` pair would need
+ * a both-set refine rail. The union makes illegal states
+ * unrepresentable and names each destination for surface copy:
+ *   - `{ kind: "legacy_root" }`               — workspace root, no-space bucket
+ *   - `{ kind: "space_root", space_id }`      — root level of a space
+ *   - `{ kind: "collection", collection_id }` — under an existing collection
+ * Each arm is `.strict()` so a stray `space_id` on a `collection` arm is
+ * a 400, not silently ignored. This was a pre-1.0 breaking reshape — all
+ * callers are in-repo and moved in the same commit.
  *
- * Branded-ID fields come from `../shared/ids`. `new_parent_id` is
- * `.nullable()` ONLY (NOT `.optional()`): `null` (explicit workspace root)
- * must be distinct from "missing" on the wire — move is an explicit
- * operation, and "omit to default to current parent" would make the common
- * mistake (forgetting the field) a silent no-op (see the capability header).
+ * **`acl_policy` is `.optional()`, conditionally REQUIRED by the handler
+ * (ADR 0040 §7).** A move whose destination bucket differs from the
+ * source bucket is an ACL transition for EVERY doc in the moved subtree
+ * and must carry the caller's explicit choice (`adopt_baseline` /
+ * `keep_grants` — vocabulary shared with `doc.move` via
+ * `../shared/grant`); absent on a crossing → typed 400
+ * (`acl_transition_policy_required`), present on a same-bucket move →
+ * typed 400 (`acl_policy_not_applicable`). Zod cannot express the
+ * conditionality (it depends on stored placement); the handler owns it.
+ *
+ * **`acl_transition` on the output** echoes the applied transition on a
+ * crossing (absent on same-bucket): the policy, both resolved space
+ * bindings, and the FULL preimage of every dropped grant row across the
+ * whole subtree (rows are hard-deleted — this echo is the caller's
+ * offboarding receipt). The audit effect projects from this echo.
+ *
+ * **`new_parent_id` on the output is derived row truth**: the
+ * destination collection's id, or `null` for either root destination —
+ * exactly what the `collections.parent_id` column now holds.
  */
 
 import { z } from "zod";
 
+import { AclTransitionOutputSchema, AclTransitionPolicySchema } from "../shared/grant";
 import {
   CollectionIdInputSchema,
   CollectionIdOutputSchema,
+  SpaceIdInputSchema,
   SpaceIdOutputSchema,
 } from "../shared/ids";
+
+export const CollectionMoveDestinationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("legacy_root") }).strict(),
+  z.object({ kind: z.literal("space_root"), space_id: SpaceIdInputSchema }).strict(),
+  z.object({ kind: z.literal("collection"), collection_id: CollectionIdInputSchema }).strict(),
+]);
 
 export const CollectionMoveInputSchema = z
   .object({
     collection_id: CollectionIdInputSchema,
-    // `null` (explicit workspace root) must be distinct from "missing"
-    // on the wire so the caller can unambiguously request root-parent.
-    // `.optional()` is rejected — move is an explicit operation, and
-    // "omit to default to current parent" would make the common mistake
-    // (forgetting the field) a silent no-op.
-    new_parent_id: CollectionIdInputSchema.nullable(),
+    destination: CollectionMoveDestinationSchema,
+    acl_policy: AclTransitionPolicySchema.optional(),
   })
   .strict();
 
 export const CollectionMoveOutputSchema = z.object({
   collection_id: CollectionIdOutputSchema,
+  // Derived row truth: `destination.collection_id` for a `collection`
+  // destination, `null` for either root. Kept on the output because it
+  // IS the persisted `parent_id` — the caller should not have to
+  // re-derive the row from the union they sent.
   new_parent_id: CollectionIdOutputSchema.nullable(),
   new_order_key: z.string(),
-  // Post-move space binding (`null` = legacy no-space bucket; ADR 0040
-  // Step 7). The shipped handler never rewrites the binding, so this
-  // echoes the row's current value; Step-8 cross-space moves change it.
+  // Post-move space binding (`null` = legacy no-space bucket). On a
+  // crossing this is the whole subtree's new binding, root included.
   new_space_id: SpaceIdOutputSchema.nullable(),
   updated_at: z.number(),
+  acl_transition: AclTransitionOutputSchema.optional(),
 });
 
 export type CollectionMoveWireInput = z.input<typeof CollectionMoveInputSchema>;

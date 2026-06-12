@@ -1,6 +1,12 @@
 import { PassThrough } from "node:stream";
 
-import { docCreate, docGet, docList, registerCapability } from "@editorzero/capabilities";
+import {
+  collectionMove,
+  docCreate,
+  docGet,
+  docList,
+  registerCapability,
+} from "@editorzero/capabilities";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -447,5 +453,73 @@ describe("runCapability", () => {
     expect(url).toContain("/things/search?");
     expect(url).toContain("limit=10");
     expect(url).toContain("q=hello+world");
+  });
+
+  it("collection.move — JSON-valued --destination flag decodes to an object body", async () => {
+    const store = makeStoreFake({ cookie: "session=x" });
+    const { stream, read } = captured();
+    const COLLECTION_ID = "018f0000-0000-7000-8000-0000000000c1";
+    const PARENT_ID = "018f0000-0000-7000-8000-0000000000c2";
+    const output = {
+      collection_id: COLLECTION_ID,
+      new_parent_id: PARENT_ID,
+      new_order_key: "018f0000-0000-7000-8000-000000000111",
+      new_space_id: null,
+      updated_at: 42,
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(JSON.stringify(output), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const exit = await runCapability(
+      registerCapability(collectionMove),
+      {
+        baseUrl: "http://localhost:3000",
+        rawArgs: {
+          collection_id: COLLECTION_ID,
+          destination: `{"kind": "collection", "collection_id": "${PARENT_ID}"}`,
+        },
+      },
+      { store, fetch, stdout: stream },
+    );
+
+    expect(exit).toBe(0);
+    const call = fetch.mock.calls[0];
+    if (call === undefined) throw new Error("unreachable");
+    expect(call[0]).toBe(`http://localhost:3000/collections/move/${COLLECTION_ID}`);
+    // The decoded flag rides the body as a real OBJECT (the shared
+    // schema's wire shape), not a doubly-encoded string.
+    const sent = JSON.parse(String(call[1]?.body)) as Record<string, unknown>;
+    expect(sent["destination"]).toEqual({ kind: "collection", collection_id: PARENT_ID });
+    const emitted = JSON.parse(read()) as { new_parent_id: string };
+    expect(emitted.new_parent_id).toBe(PARENT_ID);
+  });
+
+  it("collection.move — malformed --destination JSON is a typed CLI error (no network call)", async () => {
+    const store = makeStoreFake({ cookie: "session=x" });
+    const { stream, read } = captured();
+    const fetch = vi.fn();
+
+    const exit = await runCapability(
+      registerCapability(collectionMove),
+      {
+        baseUrl: "http://localhost:3000",
+        rawArgs: {
+          collection_id: "018f0000-0000-7000-8000-0000000000c1",
+          destination: "{kind: legacy_root",
+        },
+      },
+      { store, fetch, stdout: stream },
+    );
+
+    expect(exit).toBe(1);
+    expect(fetch).not.toHaveBeenCalled();
+    const body = JSON.parse(read()) as { error: { code: string; help: string } };
+    expect(body.error.code).toBe("cli_validation_error");
+    expect(body.error.help).toContain("--destination expects a JSON document");
   });
 });

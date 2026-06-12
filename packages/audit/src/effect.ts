@@ -242,15 +242,23 @@ export type AuditEffect =
       new_parent_id: CollectionId | null;
       new_order_key: string;
       // Post-move space binding of the moved collection (ADR 0040
-      // Step 7). The shipped handler never rewrites `space_id`, so this
-      // echoes the row's current binding (always null today); the
-      // Step-8 placement slice makes cross-space moves rewrite it. By
-      // the denormalization invariant (descendants always carry their
-      // root's binding) this single value is sufficient post-state for
-      // the WHOLE subtree — the reducer walks the projection's
-      // parent links and stamps every descendant, so replay stays
-      // one-row-per-mutation (invariant 3) even for subtree rebinds.
+      // Step 7; crossing branch rewrites it, same-bucket echoes the
+      // current value). By the denormalization invariant (descendants
+      // always carry their root's binding) this single value is
+      // sufficient post-state for the WHOLE subtree — the reducer walks
+      // the projection's parent links and stamps every descendant, so
+      // replay stays one-row-per-mutation (invariant 3) even for
+      // subtree rebinds.
       new_space_id: SpaceId | null;
+      // Present ONLY when the move crossed a space-bucket boundary (ADR
+      // 0040 §7 crossing branch): the policy + the full preimage of
+      // every doc-scoped grant dropped across the moved SUBTREE under
+      // `adopt_baseline` (empty under `keep_grants`). Absent on
+      // same-bucket moves. Unbounded by doc count — a deliberate
+      // self-hosted-v1 posture (one audit row per mutation, invariant
+      // 3, outranks row-size ceilings; spill tables would break
+      // "the audit log alone reconstructs final state").
+      acl_transition?: AclTransition;
     }
   | { kind: "collection.soft_delete"; collection_id: CollectionId; deleted_at: number }
   | { kind: "collection.restore"; collection_id: CollectionId }

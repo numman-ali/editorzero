@@ -16,7 +16,12 @@
 import { ACCESS_MODES, BASELINE_ACCESS_ROLES, GRANT_ROLES } from "@editorzero/scopes";
 import { z } from "zod";
 
-import { GrantIdOutputSchema, UserIdOutputSchema, WorkspaceIdOutputSchema } from "./ids";
+import {
+  GrantIdOutputSchema,
+  SpaceIdOutputSchema,
+  UserIdOutputSchema,
+  WorkspaceIdOutputSchema,
+} from "./ids";
 
 export const GrantRoleSchema = z.enum(GRANT_ROLES);
 
@@ -71,4 +76,29 @@ export const GrantRowOutputSchema = z.object({
   is_guest: z.union([z.literal(0), z.literal(1)]),
   created_by: UserIdOutputSchema,
   created_at: z.number(),
+});
+
+/**
+ * ACL-transition vocabulary + output echo (ADR 0040 §7) — shared by every
+ * capability that can carry content across a space-bucket boundary
+ * (`doc.move`, `collection.move`). The caller's explicit choice:
+ * `adopt_baseline` sheds every doc-scoped grant (guest edges included);
+ * `keep_grants` performs zero ACL writes. Conditionality (required on a
+ * crossing, rejected on same-bucket) is a HANDLER invariant — zod cannot
+ * see stored placement.
+ */
+export const AclTransitionPolicySchema = z.enum(["adopt_baseline", "keep_grants"]);
+
+/**
+ * The transition receipt echoed on a crossing (absent on same-bucket):
+ * the applied policy, both resolved space bindings, and the FULL
+ * preimage of every dropped grant row (rows are hard-deleted — this echo
+ * is the caller's offboarding receipt, the `permission.revoke` posture).
+ * The audit effect projects from this same shape.
+ */
+export const AclTransitionOutputSchema = z.object({
+  policy: AclTransitionPolicySchema,
+  before_space_id: SpaceIdOutputSchema.nullable(),
+  after_space_id: SpaceIdOutputSchema.nullable(),
+  dropped_grants: z.array(GrantRowOutputSchema),
 });

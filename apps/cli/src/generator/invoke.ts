@@ -51,6 +51,7 @@ import {
 
 import type { AuthCredentialStore } from "../credential-store";
 import { emit, emitError } from "../io";
+import { deriveJsonFlagKeys } from "./flags";
 
 export interface RunCapabilityArgs {
   readonly baseUrl: string;
@@ -85,6 +86,27 @@ export async function runCapability(
   const filtered: Record<string, unknown> = {};
   for (const key of shapeKeys) {
     if (rawArgs[key] !== undefined) filtered[key] = rawArgs[key];
+  }
+  // 1a. JSON-valued flags (structured fields — see `deriveJsonFlagKeys`):
+  //     decode the string transport before the zod parse, the same way
+  //     Hono decodes the HTTP body before the validator. A malformed
+  //     document is a typed CLI validation error, not a crash and not a
+  //     confusing zod "expected object, received string".
+  const jsonKeys = deriveJsonFlagKeys(capability.input);
+  for (const key of jsonKeys) {
+    const raw = filtered[key];
+    if (typeof raw !== "string") continue;
+    try {
+      filtered[key] = JSON.parse(raw);
+    } catch {
+      emitError(
+        "cli_validation_error",
+        `--${key} expects a JSON document (e.g. '{"kind": "..."}'); the value did not parse.`,
+        { issues: [{ path: [key], message: "invalid JSON" }] },
+        stdout,
+      );
+      return 1;
+    }
   }
   const parsed = capability.input.safeParse(filtered);
   if (!parsed.success) {

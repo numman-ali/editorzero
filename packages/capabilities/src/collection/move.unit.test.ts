@@ -19,6 +19,7 @@ import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
 import {
   COLLECTIONS_DDL,
   createSqliteDriver,
+  DOCS_DDL,
   GRANTS_DDL,
   SPACE_MEMBERS_DDL,
   SPACES_DDL,
@@ -30,7 +31,7 @@ import {
   SlugCollisionError,
   ValidationError,
 } from "@editorzero/errors";
-import { CollectionId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
+import { CollectionId, DocId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { Principal, UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -76,12 +77,14 @@ let driver: SqliteDriver;
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(COLLECTIONS_DDL);
-  // The step-2b same-bucket rail loads the ACL resolver (spaces /
-  // space_members / grants) whenever either end carries a stored
-  // space ref; all-legacy moves never touch these tables.
+  // The regime split loads the ACL resolver (spaces / space_members /
+  // grants) whenever some space machinery is in play, and the crossing
+  // branch enumerates subtree docs + drops doc grants; all-legacy moves
+  // never touch any of these tables.
   driver.exec(SPACES_DDL);
   driver.exec(SPACE_MEMBERS_DDL);
   driver.exec(GRANTS_DDL);
+  driver.exec(DOCS_DDL);
 });
 
 afterEach(async () => {
@@ -232,7 +235,7 @@ describe("collection.move", () => {
       const ctx = buildCtx(userPrincipal());
       const out = await collectionMove.handler(ctx, {
         collection_id: LEAF_A,
-        new_parent_id: null,
+        destination: { kind: "legacy_root" },
       });
       expect(out.collection_id).toBe(LEAF_A);
       expect(out.new_parent_id).toBeNull();
@@ -255,7 +258,7 @@ describe("collection.move", () => {
       const ctx = buildCtx(userPrincipal());
       await collectionMove.handler(ctx, {
         collection_id: MID_A,
-        new_parent_id: ROOT_B,
+        destination: { kind: "collection", collection_id: ROOT_B },
       });
       const row = await driver
         .scoped(WORKSPACE_A)
@@ -285,7 +288,7 @@ describe("collection.move", () => {
         .executeTakeFirst();
       const out = await collectionMove.handler(ctx, {
         collection_id: MID_A,
-        new_parent_id: ROOT_A, // same parent
+        destination: { kind: "collection", collection_id: ROOT_A }, // same parent
       });
       expect(out.new_order_key).not.toBe(before?.order_key);
       expect(out.updated_at).toBe(42);
@@ -297,7 +300,10 @@ describe("collection.move", () => {
       await seed();
       const ctx = buildCtx(userPrincipal());
       await expect(
-        collectionMove.handler(ctx, { collection_id: MISSING, new_parent_id: null }),
+        collectionMove.handler(ctx, {
+          collection_id: MISSING,
+          destination: { kind: "legacy_root" },
+        }),
       ).rejects.toBeInstanceOf(NotFoundError);
     });
 
@@ -305,7 +311,10 @@ describe("collection.move", () => {
       await seed();
       const ctx = buildCtx(userPrincipal());
       await expect(
-        collectionMove.handler(ctx, { collection_id: SOFT_DELETED, new_parent_id: null }),
+        collectionMove.handler(ctx, {
+          collection_id: SOFT_DELETED,
+          destination: { kind: "legacy_root" },
+        }),
       ).rejects.toBeInstanceOf(NotFoundError);
     });
 
@@ -313,7 +322,10 @@ describe("collection.move", () => {
       await seed();
       const ctx = buildCtx(userPrincipal());
       await expect(
-        collectionMove.handler(ctx, { collection_id: LEAF_A, new_parent_id: MISSING }),
+        collectionMove.handler(ctx, {
+          collection_id: LEAF_A,
+          destination: { kind: "collection", collection_id: MISSING },
+        }),
       ).rejects.toBeInstanceOf(NotFoundError);
     });
 
@@ -321,7 +333,10 @@ describe("collection.move", () => {
       await seed();
       const ctx = buildCtx(userPrincipal());
       await expect(
-        collectionMove.handler(ctx, { collection_id: LEAF_A, new_parent_id: SOFT_DELETED }),
+        collectionMove.handler(ctx, {
+          collection_id: LEAF_A,
+          destination: { kind: "collection", collection_id: SOFT_DELETED },
+        }),
       ).rejects.toBeInstanceOf(NotFoundError);
     });
   });
@@ -331,7 +346,10 @@ describe("collection.move", () => {
       await seed();
       const ctx = buildCtx(userPrincipal());
       await expect(
-        collectionMove.handler(ctx, { collection_id: MID_A, new_parent_id: MID_A }),
+        collectionMove.handler(ctx, {
+          collection_id: MID_A,
+          destination: { kind: "collection", collection_id: MID_A },
+        }),
       ).rejects.toSatisfy((err: unknown) => {
         if (!(err instanceof ValidationError)) return false;
         const issues = err.issues as ReadonlyArray<{ code?: string }>;
@@ -345,7 +363,10 @@ describe("collection.move", () => {
       // MID_A is ROOT_A's child → LEAF_A is MID_A's child. Moving
       // ROOT_A under LEAF_A would create a cycle.
       await expect(
-        collectionMove.handler(ctx, { collection_id: ROOT_A, new_parent_id: LEAF_A }),
+        collectionMove.handler(ctx, {
+          collection_id: ROOT_A,
+          destination: { kind: "collection", collection_id: LEAF_A },
+        }),
       ).rejects.toSatisfy((err: unknown) => {
         if (!(err instanceof ValidationError)) return false;
         const issues = err.issues as ReadonlyArray<{ code?: string }>;
@@ -358,7 +379,10 @@ describe("collection.move", () => {
       const ctx = buildCtx(userPrincipal());
       // Moving ROOT_A under MID_A (its direct child).
       await expect(
-        collectionMove.handler(ctx, { collection_id: ROOT_A, new_parent_id: MID_A }),
+        collectionMove.handler(ctx, {
+          collection_id: ROOT_A,
+          destination: { kind: "collection", collection_id: MID_A },
+        }),
       ).rejects.toSatisfy((err: unknown) => {
         if (!(err instanceof ValidationError)) return false;
         const issues = err.issues as ReadonlyArray<{ code?: string }>;
@@ -378,7 +402,7 @@ describe("collection.move", () => {
       await expect(
         collectionMove.handler(ctx, {
           collection_id: MID_A,
-          new_parent_id: DEEP_IDS[6]!,
+          destination: { kind: "collection", collection_id: DEEP_IDS[6]! },
         }),
       ).rejects.toSatisfy((err: unknown) => {
         if (!(err instanceof ValidationError)) return false;
@@ -395,7 +419,7 @@ describe("collection.move", () => {
       const ctx = buildCtx(userPrincipal());
       const out = await collectionMove.handler(ctx, {
         collection_id: LEAF_A,
-        new_parent_id: DEEP_IDS[6]!,
+        destination: { kind: "collection", collection_id: DEEP_IDS[6]! },
       });
       expect(out.new_parent_id).toBe(DEEP_IDS[6]);
     });
@@ -407,7 +431,7 @@ describe("collection.move", () => {
       const ctx = buildCtx(userPrincipal());
       const out = await collectionMove.handler(ctx, {
         collection_id: LEAF_A,
-        new_parent_id: DEEP_IDS[5]!,
+        destination: { kind: "collection", collection_id: DEEP_IDS[5]! },
       });
       expect(out.new_parent_id).toBe(DEEP_IDS[5]);
     });
@@ -422,7 +446,7 @@ describe("collection.move", () => {
       const ctx = buildCtx(userPrincipal());
       const out = await collectionMove.handler(ctx, {
         collection_id: MID_A,
-        new_parent_id: DEEP_IDS[5]!,
+        destination: { kind: "collection", collection_id: DEEP_IDS[5]! },
       });
       expect(out.new_parent_id).toBe(DEEP_IDS[5]);
     });
@@ -458,7 +482,10 @@ describe("collection.move", () => {
         .execute();
       const ctx = buildCtx(userPrincipal());
       await expect(
-        collectionMove.handler(ctx, { collection_id: LEAF_A, new_parent_id: ROOT_B }),
+        collectionMove.handler(ctx, {
+          collection_id: LEAF_A,
+          destination: { kind: "collection", collection_id: ROOT_B },
+        }),
       ).rejects.toBeInstanceOf(SlugCollisionError);
     });
 
@@ -485,7 +512,10 @@ describe("collection.move", () => {
         .execute();
       const ctx = buildCtx(userPrincipal());
       await expect(
-        collectionMove.handler(ctx, { collection_id: LEAF_A, new_parent_id: null }),
+        collectionMove.handler(ctx, {
+          collection_id: LEAF_A,
+          destination: { kind: "legacy_root" },
+        }),
       ).rejects.toBeInstanceOf(SlugCollisionError);
     });
 
@@ -510,7 +540,10 @@ describe("collection.move", () => {
         .execute();
       const ctx = buildCtx(userPrincipal());
       try {
-        await collectionMove.handler(ctx, { collection_id: LEAF_A, new_parent_id: ROOT_B });
+        await collectionMove.handler(ctx, {
+          collection_id: LEAF_A,
+          destination: { kind: "collection", collection_id: ROOT_B },
+        });
         throw new Error("expected SlugCollisionError");
       } catch (err) {
         expect(err).toBeInstanceOf(SlugCollisionError);
@@ -529,7 +562,7 @@ describe("collection.move", () => {
       const ctx = buildCtx(userPrincipal());
       const out = await collectionMove.handler(ctx, {
         collection_id: MID_A,
-        new_parent_id: ROOT_A,
+        destination: { kind: "collection", collection_id: ROOT_A },
       });
       expect(out.collection_id).toBe(MID_A);
     });
@@ -539,7 +572,7 @@ describe("collection.move", () => {
     it("rejects unknown fields via strict()", () => {
       const result = collectionMove.input.safeParse({
         collection_id: MID_A,
-        new_parent_id: null,
+        destination: { kind: "legacy_root" },
         stray: 1,
       });
       expect(result.success).toBe(false);
@@ -548,32 +581,68 @@ describe("collection.move", () => {
     it("rejects non-UUIDv7 collection_id", () => {
       const result = collectionMove.input.safeParse({
         collection_id: "not-a-uuid",
-        new_parent_id: null,
+        destination: { kind: "legacy_root" },
       });
       expect(result.success).toBe(false);
     });
 
-    it("rejects non-UUIDv7 new_parent_id", () => {
+    it("rejects a non-UUIDv7 destination collection_id", () => {
       const result = collectionMove.input.safeParse({
         collection_id: MID_A,
-        new_parent_id: "not-a-uuid",
+        destination: { kind: "collection", collection_id: "not-a-uuid" },
       });
       expect(result.success).toBe(false);
     });
 
-    it("requires new_parent_id explicitly (omitted → invalid)", () => {
+    it("requires destination explicitly (omitted → invalid)", () => {
       const result = collectionMove.input.safeParse({
         collection_id: MID_A,
       });
       expect(result.success).toBe(false);
     });
 
-    it("accepts explicit null for new_parent_id (workspace-root move)", () => {
+    it("rejects an unknown destination kind", () => {
       const result = collectionMove.input.safeParse({
         collection_id: MID_A,
-        new_parent_id: null,
+        destination: { kind: "workspace_root" },
       });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects stray fields on a destination arm (per-arm strict)", () => {
+      const result = collectionMove.input.safeParse({
+        collection_id: MID_A,
+        destination: { kind: "legacy_root", space_id: S_TEAM },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a space_root destination without space_id", () => {
+      const result = collectionMove.input.safeParse({
+        collection_id: MID_A,
+        destination: { kind: "space_root" },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts each well-formed destination arm", () => {
+      for (const destination of [
+        { kind: "legacy_root" },
+        { kind: "space_root", space_id: S_TEAM },
+        { kind: "collection", collection_id: ROOT_B },
+      ]) {
+        const result = collectionMove.input.safeParse({ collection_id: MID_A, destination });
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it("rejects an unknown acl_policy value", () => {
+      const result = collectionMove.input.safeParse({
+        collection_id: MID_A,
+        destination: { kind: "legacy_root" },
+        acl_policy: "drop_everything",
+      });
+      expect(result.success).toBe(false);
     });
   });
 
@@ -587,7 +656,7 @@ describe("collection.move", () => {
 
     it("emits the collection.move effect on allow with new_parent + new_order_key", () => {
       const effect = collectionMove.audit.effectOnAllow(
-        { collection_id: LEAF_A, new_parent_id: ROOT_B },
+        { collection_id: LEAF_A, destination: { kind: "collection", collection_id: ROOT_B } },
         {
           collection_id: LEAF_A,
           new_parent_id: ROOT_B,
@@ -608,7 +677,7 @@ describe("collection.move", () => {
     it("projects a per-collection subject", () => {
       const subject = collectionMove.audit.subjectFrom({
         collection_id: LEAF_A,
-        new_parent_id: null,
+        destination: { kind: "legacy_root" },
       });
       expect(subject.kind).toBe("collection");
       if (subject.kind === "collection") {
@@ -618,7 +687,7 @@ describe("collection.move", () => {
 
     it("emits a deny effect carrying the reason code", () => {
       const effect = collectionMove.audit.effectOnDeny(
-        { collection_id: LEAF_A, new_parent_id: null },
+        { collection_id: LEAF_A, destination: { kind: "legacy_root" } },
         { kind: "missing_scope", required: ["doc:write"], principal_scopes: [] },
       );
       expect(effect.kind).toBe("deny");
@@ -631,7 +700,7 @@ describe("collection.move", () => {
 
     it("preserves HandlerError kind via effectOnError", () => {
       const effect = collectionMove.audit.effectOnError(
-        { collection_id: LEAF_A, new_parent_id: null },
+        { collection_id: LEAF_A, destination: { kind: "legacy_root" } },
         { kind: "validation", issues: [] },
       );
       expect(effect.kind).toBe("error");
@@ -647,129 +716,250 @@ describe("collection.move", () => {
   });
 });
 
-// ── Same-bucket rail + placement standing (ADR 0040 space-collection) ────
+// ── Space-bucket regimes (ADR 0040 space-collection crossing slice) ──────
 //
-// `collection.move` is same-bucket-only until the crossing branch
-// lands: cross-bucket → typed 400 `cross_bucket_move_unsupported`;
-// same-space re-parents require baseline reach over the bucket;
-// anomalous refs (dangling/trashed space) fail closed on either end;
-// all-legacy moves never load the resolver (pinned structurally).
+// Same-bucket (both legacy, or both the same live space): a re-parent —
+// `acl_policy` must be ABSENT; space destinations need baseline reach;
+// all-legacy moves never load the resolver (pinned structurally below).
+// Crossing (buckets differ; anomalous source always crosses): per-doc
+// administer over the WHOLE subtree (live + trashed, sorted by doc_id),
+// destination standing, `acl_policy` REQUIRED, then subtree rebind +
+// grant drops in one tx.
 
-describe("collection.move — same-bucket rail", () => {
-  const BOB = UserId("018f0000-0000-7000-8000-0000000000a2");
-  const S_TEAM = SpaceId("018f0000-0000-7000-8000-0000000000e1");
-  const S_OTHER = SpaceId("018f0000-0000-7000-8000-0000000000e2");
-  const S_TRASHED = SpaceId("018f0000-0000-7000-8000-0000000000e3");
-  const S_GONE = SpaceId("018f0000-0000-7000-8000-0000000000e4"); // never inserted
-  const C_S_ROOT = CollectionId("018f0000-0000-7000-8000-0000000000b1");
-  const C_S_ROOT2 = CollectionId("018f0000-0000-7000-8000-0000000000b2");
-  const C_S_MID = CollectionId("018f0000-0000-7000-8000-0000000000b3");
-  const C_S_OTHER = CollectionId("018f0000-0000-7000-8000-0000000000b4");
-  const C_DANGLE = CollectionId("018f0000-0000-7000-8000-0000000000b5");
-  const C_TRASH_A = CollectionId("018f0000-0000-7000-8000-0000000000b6");
-  const C_TRASH_B = CollectionId("018f0000-0000-7000-8000-0000000000b7");
+const BOB = UserId("018f0000-0000-7000-8000-0000000000a2");
+const S_TEAM = SpaceId("018f0000-0000-7000-8000-0000000000e1");
+const S_OTHER = SpaceId("018f0000-0000-7000-8000-0000000000e2");
+const S_TRASHED = SpaceId("018f0000-0000-7000-8000-0000000000e3");
+const S_GONE = SpaceId("018f0000-0000-7000-8000-0000000000e4"); // never inserted
+const C_S_ROOT = CollectionId("018f0000-0000-7000-8000-0000000000b1");
+const C_S_ROOT2 = CollectionId("018f0000-0000-7000-8000-0000000000b2");
+const C_S_MID = CollectionId("018f0000-0000-7000-8000-0000000000b3");
+const C_S_OTHER = CollectionId("018f0000-0000-7000-8000-0000000000b4");
+const C_DANGLE = CollectionId("018f0000-0000-7000-8000-0000000000b5");
+const C_TRASH_A = CollectionId("018f0000-0000-7000-8000-0000000000b6");
+// Trashed LEGACY descendant under MID_A — proves trashed collections
+// rebind with their subtree.
+const C_TRASH_CHILD = CollectionId("018f0000-0000-7000-8000-0000000000b8");
 
-  function bobPrincipal(): UserPrincipal {
-    return { ...userPrincipal(), id: BOB };
+// Docs (ids ordered f1 < f2 < … so doc_id-sorted assertions are legible).
+const D_MID = DocId("018f0000-0000-7000-8000-0000000000f1"); // live, in MID_A
+const D_LEAF_TRASHED = DocId("018f0000-0000-7000-8000-0000000000f2"); // trashed, in LEAF_A
+const D_IN_TRASHED_COL = DocId("018f0000-0000-7000-8000-0000000000f3"); // live, in trashed C_TRASH_CHILD
+const D_OUT = DocId("018f0000-0000-7000-8000-0000000000f4"); // in ROOT_B — outside every moved subtree
+const D_S_LIVE = DocId("018f0000-0000-7000-8000-0000000000f5"); // live, in C_S_MID
+const D_S_TRASH = DocId("018f0000-0000-7000-8000-0000000000f6"); // trashed, in C_S_MID
+const D_ANOM_1 = DocId("018f0000-0000-7000-8000-0000000000f7"); // in C_DANGLE
+const D_ANOM_2 = DocId("018f0000-0000-7000-8000-0000000000f8"); // in C_DANGLE
+
+const G_MID = GrantId("018f0000-0000-7000-8000-0000000000aa");
+const G_LEAF = GrantId("018f0000-0000-7000-8000-0000000000ab");
+const G_GUEST = GrantId("018f0000-0000-7000-8000-0000000000ac");
+const G_OUT = GrantId("018f0000-0000-7000-8000-0000000000ad");
+const G_SPACE = GrantId("018f0000-0000-7000-8000-0000000000ae");
+const G_S_LIVE = GrantId("018f0000-0000-7000-8000-0000000000af");
+const G_S_TRASH = GrantId("018f0000-0000-7000-8000-0000000000b0");
+const G_ANOM = GrantId("018f0000-0000-7000-8000-0000000000ba");
+
+function bobPrincipal(): UserPrincipal {
+  return { ...userPrincipal(), id: BOB };
+}
+
+async function seedSpaceRow(id: SpaceId, opts: { deleted_at?: number | null } = {}) {
+  await driver
+    .scoped(WORKSPACE_A)
+    .insertInto("spaces")
+    .values({
+      id,
+      workspace_id: WORKSPACE_A,
+      kind: "team",
+      type: "closed",
+      owner_user_id: null,
+      name: `space-${id.slice(-2)}`,
+      slug: `space-${id.slice(-2)}`,
+      baseline_access: "view",
+      created_by: ALICE,
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: opts.deleted_at ?? null,
+    })
+    .execute();
+}
+
+async function seedBoundCollection(
+  id: CollectionId,
+  space_id: SpaceId | null,
+  parent_id: CollectionId | null = null,
+  opts: { deleted_at?: number | null } = {},
+) {
+  await driver
+    .scoped(WORKSPACE_A)
+    .insertInto("collections")
+    .values({
+      id,
+      workspace_id: WORKSPACE_A,
+      parent_id,
+      space_id,
+      title: `col-${id.slice(-2)}`,
+      slug: `col-${id.slice(-2)}`,
+      order_key: id,
+      created_by: ALICE,
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: opts.deleted_at ?? null,
+    })
+    .execute();
+}
+
+async function seedMembership(space_id: SpaceId, user_id: UserId = ALICE) {
+  await driver
+    .scoped(WORKSPACE_A)
+    .insertInto("space_members")
+    .values({
+      workspace_id: WORKSPACE_A,
+      space_id,
+      user_id,
+      role: "edit",
+      created_at: 1,
+      updated_at: 1,
+    })
+    .execute();
+}
+
+async function seedDoc(
+  id: DocId,
+  collection_id: CollectionId | null,
+  opts: { deleted_at?: number | null; created_by?: UserId } = {},
+) {
+  await driver
+    .scoped(WORKSPACE_A)
+    .insertInto("docs")
+    .values({
+      id,
+      workspace_id: WORKSPACE_A,
+      collection_id,
+      title: `doc-${id.slice(-2)}`,
+      slug: `doc-${id.slice(-2)}`,
+      order_key: id,
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
+      render_version: 0,
+      created_by: opts.created_by ?? ALICE,
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: opts.deleted_at ?? null,
+    })
+    .execute();
+}
+
+async function seedGrant(
+  id: GrantId,
+  resource: { kind: "doc"; id: DocId } | { kind: "space"; id: SpaceId },
+  subject_id: UserId,
+  opts: { role?: "view" | "edit" | "owner"; is_guest?: 0 | 1 } = {},
+) {
+  await driver
+    .scoped(WORKSPACE_A)
+    .insertInto("grants")
+    .values({
+      id,
+      workspace_id: WORKSPACE_A,
+      resource_kind: resource.kind,
+      resource_id: resource.id,
+      subject_kind: "user",
+      subject_id,
+      role: opts.role ?? "view",
+      is_guest: opts.is_guest ?? 0,
+      created_by: ALICE,
+      created_at: 7,
+    })
+    .execute();
+}
+
+async function seedSpaceWorld() {
+  await seedSpaceRow(S_TEAM);
+  await seedSpaceRow(S_OTHER);
+  await seedSpaceRow(S_TRASHED, { deleted_at: 99 });
+  await seedBoundCollection(C_S_ROOT, S_TEAM);
+  await seedBoundCollection(C_S_ROOT2, S_TEAM);
+  await seedBoundCollection(C_S_MID, S_TEAM, C_S_ROOT);
+  await seedBoundCollection(C_S_OTHER, S_OTHER);
+  await seedBoundCollection(C_DANGLE, S_GONE);
+  await seedBoundCollection(C_TRASH_A, S_TRASHED);
+}
+
+// The legacy ROOT_A subtree dressed with ACL-bearing state: a live doc,
+// a trashed doc, a trashed descendant collection holding a live doc,
+// plus control rows that must SURVIVE every transition (a space-scoped
+// grant and a doc grant outside the subtree).
+async function seedCrossingWorld() {
+  await seed();
+  await seedSpaceWorld();
+  await seedBoundCollection(C_TRASH_CHILD, null, MID_A, { deleted_at: 55 });
+  await seedDoc(D_MID, MID_A);
+  await seedDoc(D_LEAF_TRASHED, LEAF_A, { deleted_at: 66 });
+  await seedDoc(D_IN_TRASHED_COL, C_TRASH_CHILD);
+  await seedDoc(D_OUT, ROOT_B);
+  await seedGrant(G_MID, { kind: "doc", id: D_MID }, BOB, { role: "edit" });
+  await seedGrant(G_LEAF, { kind: "doc", id: D_LEAF_TRASHED }, BOB);
+  await seedGrant(G_GUEST, { kind: "doc", id: D_IN_TRASHED_COL }, BOB, { is_guest: 1 });
+  await seedGrant(G_OUT, { kind: "doc", id: D_OUT }, BOB);
+  await seedGrant(G_SPACE, { kind: "space", id: S_TEAM }, BOB);
+}
+
+// Full-table snapshot (the fuzzer's bit-identity idiom) — byte-identical
+// before/after proves a refused move wrote NOTHING.
+async function snapshotAclWorld(): Promise<string> {
+  const db = driver.scoped(WORKSPACE_A);
+  const collections = await db.selectFrom("collections").selectAll().orderBy("id").execute();
+  const grants = await db.selectFrom("grants").selectAll().orderBy("id").execute();
+  const docs = await db.selectFrom("docs").selectAll().orderBy("id").execute();
+  return JSON.stringify({ collections, grants, docs });
+}
+
+async function spaceIdOf(id: CollectionId): Promise<string | null> {
+  const row = await driver
+    .scoped(WORKSPACE_A)
+    .selectFrom("collections")
+    .select(["space_id"])
+    .where("id", "=", id)
+    .executeTakeFirstOrThrow();
+  return row.space_id;
+}
+
+// `ValidationError.issues` is `unknown` by design — narrow through a
+// parse (house rule: no casting) before asserting the typed code.
+const IssuesSchema = z.array(z.object({ code: z.string(), path: z.array(z.string()) }).loose());
+
+function expectPolicyIssue(err: unknown, code: string, path: string[]) {
+  expect(err).toBeInstanceOf(ValidationError);
+  if (err instanceof ValidationError) {
+    expect(err.httpStatus).toBe(400);
+    const issues = IssuesSchema.parse(err.issues);
+    expect(issues[0]?.code).toBe(code);
+    expect(issues[0]?.path).toEqual(path);
   }
+}
 
-  async function seedSpaceRow(id: SpaceId, opts: { deleted_at?: number | null } = {}) {
-    await driver
-      .scoped(WORKSPACE_A)
-      .insertInto("spaces")
-      .values({
-        id,
-        workspace_id: WORKSPACE_A,
-        kind: "team",
-        type: "closed",
-        owner_user_id: null,
-        name: `space-${id.slice(-2)}`,
-        slug: `space-${id.slice(-2)}`,
-        baseline_access: "view",
-        created_by: ALICE,
-        created_at: 1,
-        updated_at: 1,
-        deleted_at: opts.deleted_at ?? null,
-      })
-      .execute();
+function expectAclDeny(err: unknown, scope: Record<string, string>) {
+  expect(err).toBeInstanceOf(PermissionDeniedError);
+  if (err instanceof PermissionDeniedError) {
+    expect(err.reason).toEqual({ kind: "acl_deny", scope });
   }
+}
 
-  async function seedBoundCollection(
-    id: CollectionId,
-    space_id: SpaceId,
-    parent_id: CollectionId | null = null,
-  ) {
-    await driver
-      .scoped(WORKSPACE_A)
-      .insertInto("collections")
-      .values({
-        id,
-        workspace_id: WORKSPACE_A,
-        parent_id,
-        space_id,
-        title: `col-${id.slice(-2)}`,
-        slug: `col-${id.slice(-2)}`,
-        order_key: id,
-        created_by: ALICE,
-        created_at: 1,
-        updated_at: 1,
-        deleted_at: null,
-      })
-      .execute();
-  }
-
-  async function seedAliceMembership(space_id: SpaceId) {
-    await driver
-      .scoped(WORKSPACE_A)
-      .insertInto("space_members")
-      .values({
-        workspace_id: WORKSPACE_A,
-        space_id,
-        user_id: ALICE,
-        role: "edit",
-        created_at: 1,
-        updated_at: 1,
-      })
-      .execute();
-  }
-
-  async function seedSpaceWorld() {
-    await seedSpaceRow(S_TEAM);
-    await seedSpaceRow(S_OTHER);
-    await seedSpaceRow(S_TRASHED, { deleted_at: 99 });
-    await seedBoundCollection(C_S_ROOT, S_TEAM);
-    await seedBoundCollection(C_S_ROOT2, S_TEAM);
-    await seedBoundCollection(C_S_MID, S_TEAM, C_S_ROOT);
-    await seedBoundCollection(C_S_OTHER, S_OTHER);
-    await seedBoundCollection(C_DANGLE, S_GONE);
-    await seedBoundCollection(C_TRASH_A, S_TRASHED);
-    await seedBoundCollection(C_TRASH_B, S_TRASHED);
-  }
-
-  // `ValidationError.issues` is `unknown` by design — narrow through a
-  // parse (house rule: no casting) before asserting the typed code.
-  const IssuesSchema = z.array(z.object({ code: z.string(), path: z.array(z.string()) }).loose());
-
-  function expectCrossBucketRefusal(err: unknown) {
-    expect(err).toBeInstanceOf(ValidationError);
-    if (err instanceof ValidationError) {
-      expect(err.httpStatus).toBe(400);
-      const issues = IssuesSchema.parse(err.issues);
-      expect(issues[0]?.code).toBe("cross_bucket_move_unsupported");
-      expect(issues[0]?.path).toEqual(["new_parent_id"]);
-    }
-  }
-
+describe("collection.move — same-bucket regime", () => {
   it("same-space re-parent with reach succeeds; binding rides unchanged on row + output + effect", async () => {
     await seedSpaceWorld();
-    await seedAliceMembership(S_TEAM);
+    await seedMembership(S_TEAM);
     const ctx = buildCtx(userPrincipal());
     const out = await collectionMove.handler(ctx, {
       collection_id: C_S_MID,
-      new_parent_id: C_S_ROOT2,
+      destination: { kind: "collection", collection_id: C_S_ROOT2 },
     });
     expect(out.new_parent_id).toBe(C_S_ROOT2);
     expect(out.new_space_id).toBe(S_TEAM);
+    expect(out.acl_transition).toBeUndefined();
 
     const row = await driver
       .scoped(WORKSPACE_A)
@@ -781,12 +971,13 @@ describe("collection.move — same-bucket rail", () => {
     expect(row.space_id).toBe(S_TEAM);
 
     const effect = collectionMove.audit.effectOnAllow(
-      { collection_id: C_S_MID, new_parent_id: C_S_ROOT2 },
+      { collection_id: C_S_MID, destination: { kind: "collection", collection_id: C_S_ROOT2 } },
       out,
     );
     expect(effect.kind).toBe("collection.move");
     if (effect.kind === "collection.move") {
       expect(effect.new_space_id).toBe(S_TEAM);
+      expect(effect.acl_transition).toBeUndefined();
     }
   });
 
@@ -794,95 +985,74 @@ describe("collection.move — same-bucket rail", () => {
     await seedSpaceWorld();
     const ctx = buildCtx(bobPrincipal()); // no membership, no grant
     const err = await collectionMove
-      .handler(ctx, { collection_id: C_S_MID, new_parent_id: C_S_ROOT2 })
-      .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(PermissionDeniedError);
-    if (err instanceof PermissionDeniedError) {
-      expect(err.reason).toEqual({ kind: "acl_deny", scope: { collection_id: C_S_ROOT2 } });
-    }
-  });
-
-  it("legacy → space is refused (typed 400, the crossing branch is a future slice)", async () => {
-    await seed();
-    await seedSpaceWorld();
-    await seedAliceMembership(S_TEAM); // reach doesn't help — the rail fires first
-    const err = await collectionMove
-      .handler(buildCtx(userPrincipal()), { collection_id: MID_B, new_parent_id: C_S_ROOT })
-      .catch((e: unknown) => e);
-    expectCrossBucketRefusal(err);
-  });
-
-  it("space → legacy root is refused (`new_parent_id: null` means LEGACY root — space root is inexpressible)", async () => {
-    await seedSpaceWorld();
-    await seedAliceMembership(S_TEAM);
-    const err = await collectionMove
-      .handler(buildCtx(userPrincipal()), { collection_id: C_S_MID, new_parent_id: null })
-      .catch((e: unknown) => e);
-    expectCrossBucketRefusal(err);
-  });
-
-  it("space → legacy nested parent is refused", async () => {
-    await seed();
-    await seedSpaceWorld();
-    const err = await collectionMove
-      .handler(buildCtx(userPrincipal()), { collection_id: C_S_MID, new_parent_id: ROOT_B })
-      .catch((e: unknown) => e);
-    expectCrossBucketRefusal(err);
-  });
-
-  it("spaceA → spaceB is refused even with reach into both", async () => {
-    await seedSpaceWorld();
-    await seedAliceMembership(S_TEAM);
-    await seedAliceMembership(S_OTHER);
-    const err = await collectionMove
-      .handler(buildCtx(userPrincipal()), { collection_id: C_S_MID, new_parent_id: C_S_OTHER })
-      .catch((e: unknown) => e);
-    expectCrossBucketRefusal(err);
-  });
-
-  it("a DANGLING source binding fails closed against every target (anomaly has no bucket)", async () => {
-    await seed();
-    await seedSpaceWorld();
-    const toRoot = await collectionMove
-      .handler(buildCtx(userPrincipal()), { collection_id: C_DANGLE, new_parent_id: null })
-      .catch((e: unknown) => e);
-    expectCrossBucketRefusal(toRoot);
-    const toSpace = await collectionMove
-      .handler(buildCtx(userPrincipal()), { collection_id: C_DANGLE, new_parent_id: C_S_ROOT })
-      .catch((e: unknown) => e);
-    expectCrossBucketRefusal(toSpace);
-  });
-
-  it("both ends inside a TRASHED space fail closed (no restructuring a dead space's tree)", async () => {
-    await seedSpaceWorld();
-    const err = await collectionMove
-      .handler(buildCtx(userPrincipal()), { collection_id: C_TRASH_B, new_parent_id: C_TRASH_A })
-      .catch((e: unknown) => e);
-    expectCrossBucketRefusal(err);
-  });
-
-  it("refused moves leave the row untouched (rail before UPDATE)", async () => {
-    await seedSpaceWorld();
-    await expect(
-      collectionMove.handler(buildCtx(userPrincipal()), {
+      .handler(ctx, {
         collection_id: C_S_MID,
-        new_parent_id: null,
-      }),
-    ).rejects.toBeInstanceOf(ValidationError);
+        destination: { kind: "collection", collection_id: C_S_ROOT2 },
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(err, { collection_id: C_S_ROOT2 });
+  });
+
+  it("re-parent to the OWN space's root (now expressible) succeeds with reach", async () => {
+    await seedSpaceWorld();
+    await seedMembership(S_TEAM);
+    const out = await collectionMove.handler(buildCtx(userPrincipal()), {
+      collection_id: C_S_MID,
+      destination: { kind: "space_root", space_id: S_TEAM },
+    });
+    expect(out.new_parent_id).toBeNull();
+    expect(out.new_space_id).toBe(S_TEAM);
+    expect(out.acl_transition).toBeUndefined();
     const row = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("collections")
       .select(["parent_id", "space_id"])
       .where("id", "=", C_S_MID)
       .executeTakeFirstOrThrow();
-    expect(row.parent_id).toBe(C_S_ROOT);
+    expect(row.parent_id).toBeNull();
     expect(row.space_id).toBe(S_TEAM);
   });
 
+  it("re-parent to the OWN space's root WITHOUT reach → acl_deny scoped to the space", async () => {
+    await seedSpaceWorld();
+    const err = await collectionMove
+      .handler(buildCtx(bobPrincipal()), {
+        collection_id: C_S_MID,
+        destination: { kind: "space_root", space_id: S_TEAM },
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(err, { space_id: S_TEAM });
+  });
+
+  it("acl_policy on an all-legacy move → acl_policy_not_applicable (resolver-free path)", async () => {
+    await seed();
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), {
+        collection_id: LEAF_A,
+        destination: { kind: "collection", collection_id: ROOT_B },
+        acl_policy: "adopt_baseline",
+      })
+      .catch((e: unknown) => e);
+    expectPolicyIssue(err, "acl_policy_not_applicable", ["acl_policy"]);
+  });
+
+  it("acl_policy on a same-space move → acl_policy_not_applicable (resolver path)", async () => {
+    await seedSpaceWorld();
+    await seedMembership(S_TEAM);
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), {
+        collection_id: C_S_MID,
+        destination: { kind: "space_root", space_id: S_TEAM },
+        acl_policy: "keep_grants",
+      })
+      .catch((e: unknown) => e);
+    expectPolicyIssue(err, "acl_policy_not_applicable", ["acl_policy"]);
+  });
+
   it("all-legacy moves NEVER load the resolver (structural pin: no space tables exist at all)", async () => {
-    // A dedicated driver with ONLY the collections DDL — if the rail
-    // loaded the resolver on a legacy↔legacy move, the preload would
-    // throw `no such table: spaces` and this test would fail.
+    // A dedicated driver with ONLY the collections DDL — if the regime
+    // split loaded the resolver on a legacy↔legacy move, the preload
+    // would throw `no such table: spaces` and this test would fail.
     const bare = createSqliteDriver({ path: ":memory:" });
     bare.exec(COLLECTIONS_DDL);
     try {
@@ -932,12 +1102,350 @@ describe("collection.move — same-bucket rail", () => {
       };
       const out = await collectionMove.handler(ctx, {
         collection_id: MID_A,
-        new_parent_id: null,
+        destination: { kind: "legacy_root" },
       });
       expect(out.new_parent_id).toBeNull();
       expect(out.new_space_id).toBeNull();
     } finally {
       await bare.close();
     }
+  });
+});
+
+describe("collection.move — crossing branch", () => {
+  it("legacy → space collection under adopt_baseline: subtree rebinds (trashed included), subtree doc grants drop with full preimages, controls survive", async () => {
+    await seedCrossingWorld();
+    await seedMembership(S_TEAM);
+    const out = await collectionMove.handler(buildCtx(userPrincipal()), {
+      collection_id: ROOT_A,
+      destination: { kind: "collection", collection_id: C_S_ROOT },
+      acl_policy: "adopt_baseline",
+    });
+
+    expect(out.new_parent_id).toBe(C_S_ROOT);
+    expect(out.new_space_id).toBe(S_TEAM);
+    expect(out.acl_transition).toBeDefined();
+    expect(out.acl_transition?.policy).toBe("adopt_baseline");
+    expect(out.acl_transition?.before_space_id).toBeNull();
+    expect(out.acl_transition?.after_space_id).toBe(S_TEAM);
+    // Sorted by grant_id; G_GUEST (guest edge) and G_LEAF (trashed doc)
+    // both drop — trashed state is ACL-bearing. Full preimages.
+    expect(out.acl_transition?.dropped_grants.map((g) => g.grant_id)).toEqual([
+      G_MID,
+      G_LEAF,
+      G_GUEST,
+    ]);
+    expect(out.acl_transition?.dropped_grants[0]).toEqual({
+      grant_id: G_MID,
+      workspace_id: WORKSPACE_A,
+      resource_kind: "doc",
+      resource_id: D_MID,
+      subject_kind: "user",
+      subject_id: BOB,
+      role: "edit",
+      is_guest: 0,
+      created_by: ALICE,
+      created_at: 7,
+    });
+
+    // Whole subtree rebinds — root, both live descendants, AND the
+    // trashed descendant collection.
+    expect(await spaceIdOf(ROOT_A)).toBe(S_TEAM);
+    expect(await spaceIdOf(MID_A)).toBe(S_TEAM);
+    expect(await spaceIdOf(LEAF_A)).toBe(S_TEAM);
+    expect(await spaceIdOf(C_TRASH_CHILD)).toBe(S_TEAM);
+
+    // Controls survive: the space-scoped grant and the out-of-subtree
+    // doc grant.
+    const left = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("grants")
+      .select(["id"])
+      .orderBy("id")
+      .execute();
+    expect(left.map((r) => r.id)).toEqual([G_OUT, G_SPACE]);
+
+    // Effect projection mirrors the transition minus created_at.
+    const effect = collectionMove.audit.effectOnAllow(
+      {
+        collection_id: ROOT_A,
+        destination: { kind: "collection", collection_id: C_S_ROOT },
+        acl_policy: "adopt_baseline",
+      },
+      out,
+    );
+    expect(effect.kind).toBe("collection.move");
+    if (effect.kind === "collection.move") {
+      expect(effect.new_space_id).toBe(S_TEAM);
+      expect(effect.acl_transition?.policy).toBe("adopt_baseline");
+      expect(effect.acl_transition?.dropped_grants.map((g) => g.grant_id)).toEqual([
+        G_MID,
+        G_LEAF,
+        G_GUEST,
+      ]);
+      expect(effect.acl_transition?.dropped_grants[0]).not.toHaveProperty("created_at");
+    }
+  });
+
+  it("legacy → space_root under keep_grants: rebind without a single ACL write", async () => {
+    await seedCrossingWorld();
+    await seedMembership(S_TEAM);
+    const grantsBefore = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("grants")
+      .selectAll()
+      .orderBy("id")
+      .execute();
+    const out = await collectionMove.handler(buildCtx(userPrincipal()), {
+      collection_id: ROOT_A,
+      destination: { kind: "space_root", space_id: S_TEAM },
+      acl_policy: "keep_grants",
+    });
+    expect(out.new_parent_id).toBeNull();
+    expect(out.new_space_id).toBe(S_TEAM);
+    expect(out.acl_transition?.policy).toBe("keep_grants");
+    expect(out.acl_transition?.dropped_grants).toEqual([]);
+    expect(await spaceIdOf(LEAF_A)).toBe(S_TEAM);
+    const grantsAfter = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("grants")
+      .selectAll()
+      .orderBy("id")
+      .execute();
+    expect(grantsAfter).toEqual(grantsBefore);
+  });
+
+  it("space → legacy_root under adopt_baseline: bindings clear across the subtree, space-doc grants drop", async () => {
+    await seedSpaceWorld();
+    await seedMembership(S_TEAM);
+    await seedDoc(D_S_LIVE, C_S_MID);
+    await seedDoc(D_S_TRASH, C_S_MID, { deleted_at: 66 });
+    await seedGrant(G_S_LIVE, { kind: "doc", id: D_S_LIVE }, BOB);
+    await seedGrant(G_S_TRASH, { kind: "doc", id: D_S_TRASH }, BOB);
+    const out = await collectionMove.handler(buildCtx(userPrincipal()), {
+      collection_id: C_S_ROOT,
+      destination: { kind: "legacy_root" },
+      acl_policy: "adopt_baseline",
+    });
+    expect(out.new_parent_id).toBeNull();
+    expect(out.new_space_id).toBeNull();
+    expect(out.acl_transition?.before_space_id).toBe(S_TEAM);
+    expect(out.acl_transition?.after_space_id).toBeNull();
+    expect(out.acl_transition?.dropped_grants.map((g) => g.grant_id)).toEqual([
+      G_S_LIVE,
+      G_S_TRASH,
+    ]);
+    expect(await spaceIdOf(C_S_ROOT)).toBeNull();
+    expect(await spaceIdOf(C_S_MID)).toBeNull();
+  });
+
+  it("spaceA → spaceB under adopt_baseline: before/after carry both bindings", async () => {
+    await seedSpaceWorld();
+    await seedMembership(S_TEAM);
+    await seedMembership(S_OTHER);
+    const out = await collectionMove.handler(buildCtx(userPrincipal()), {
+      collection_id: C_S_OTHER,
+      destination: { kind: "collection", collection_id: C_S_ROOT },
+      acl_policy: "adopt_baseline",
+    });
+    expect(out.acl_transition?.before_space_id).toBe(S_OTHER);
+    expect(out.acl_transition?.after_space_id).toBe(S_TEAM);
+    expect(out.acl_transition?.dropped_grants).toEqual([]);
+    expect(await spaceIdOf(C_S_OTHER)).toBe(S_TEAM);
+  });
+
+  it("crossing without acl_policy → acl_transition_policy_required; nothing written (snapshot-identical)", async () => {
+    await seedCrossingWorld();
+    await seedMembership(S_TEAM);
+    const before = await snapshotAclWorld();
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), {
+        collection_id: ROOT_A,
+        destination: { kind: "collection", collection_id: C_S_ROOT },
+      })
+      .catch((e: unknown) => e);
+    expectPolicyIssue(err, "acl_transition_policy_required", ["acl_policy"]);
+    expect(await snapshotAclWorld()).toBe(before);
+  });
+
+  it("destination standing denies before the policy rail surfaces: empty subtree, no reach", async () => {
+    await seed();
+    await seedSpaceWorld();
+    // BOB moves an EMPTY legacy collection (no docs → per-doc authority
+    // is vacuous) without reach into S_TEAM — the deny is the
+    // destination term, and it fires even though no policy was sent
+    // (authority before rails, the doc.move order).
+    const toCollection = await collectionMove
+      .handler(buildCtx(bobPrincipal()), {
+        collection_id: MID_B,
+        destination: { kind: "collection", collection_id: C_S_ROOT },
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(toCollection, { collection_id: C_S_ROOT });
+    const toSpaceRoot = await collectionMove
+      .handler(buildCtx(bobPrincipal()), {
+        collection_id: MID_B,
+        destination: { kind: "space_root", space_id: S_TEAM },
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(toSpaceRoot, { space_id: S_TEAM });
+  });
+
+  it("per-doc administer denies on the FIRST doc in doc_id order, atomically", async () => {
+    await seedCrossingWorld();
+    await seedMembership(S_TEAM, BOB);
+    const before = await snapshotAclWorld();
+    // BOB has reach into S_TEAM but administers none of the subtree's
+    // docs (ALICE created them; BOB's edit grant on D_MID is not
+    // owner-tier) — deny names the LOWEST doc_id.
+    const err = await collectionMove
+      .handler(buildCtx(bobPrincipal()), {
+        collection_id: ROOT_A,
+        destination: { kind: "collection", collection_id: C_S_ROOT },
+        acl_policy: "adopt_baseline",
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(err, { doc_id: D_MID });
+    expect(await snapshotAclWorld()).toBe(before);
+
+    // Promoting BOB's existing edge on that first doc to owner-tier
+    // moves the deny to the NEXT doc in id order — the ladder is
+    // per-doc, the order is doc_id. (UPDATE, not a second edge: grants
+    // are unique per (resource, subject).)
+    await driver
+      .scoped(WORKSPACE_A)
+      .updateTable("grants")
+      .set({ role: "owner" })
+      .where("id", "=", G_MID)
+      .execute();
+    const err2 = await collectionMove
+      .handler(buildCtx(bobPrincipal()), {
+        collection_id: ROOT_A,
+        destination: { kind: "collection", collection_id: C_S_ROOT },
+        acl_policy: "adopt_baseline",
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(err2, { doc_id: D_LEAF_TRASHED });
+  });
+
+  it("anomalous subtree OUT (adopt_baseline): per-doc ladder runs BEFORE any drop; failure leaves the world byte-identical (Codex pin)", async () => {
+    await seed();
+    await seedSpaceWorld();
+    await seedDoc(D_ANOM_1, C_DANGLE);
+    await seedDoc(D_ANOM_2, C_DANGLE);
+    await seedGrant(G_ANOM, { kind: "doc", id: D_ANOM_1 }, BOB);
+    const before = await snapshotAclWorld();
+    // BOB: workspace member, but anomaly placement contributes no
+    // authority term and BOB created nothing — the per-doc ladder
+    // refuses on the first doc and NOTHING is dropped or rebound.
+    const err = await collectionMove
+      .handler(buildCtx(bobPrincipal()), {
+        collection_id: C_DANGLE,
+        destination: { kind: "legacy_root" },
+        acl_policy: "adopt_baseline",
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(err, { doc_id: D_ANOM_1 });
+    expect(await snapshotAclWorld()).toBe(before);
+
+    // ALICE created both docs — owner-tier per doc — so the repair
+    // lands: dangling ref overwritten with null, grants shed,
+    // before_space_id honest about the DANGLING ref (null, not the
+    // ghost id).
+    const out = await collectionMove.handler(buildCtx(userPrincipal()), {
+      collection_id: C_DANGLE,
+      destination: { kind: "legacy_root" },
+      acl_policy: "adopt_baseline",
+    });
+    expect(out.acl_transition?.before_space_id).toBeNull();
+    expect(out.acl_transition?.after_space_id).toBeNull();
+    expect(out.acl_transition?.dropped_grants.map((g) => g.grant_id)).toEqual([G_ANOM]);
+    expect(await spaceIdOf(C_DANGLE)).toBeNull();
+  });
+
+  it("trashed-space binding OUT reports the resolvable stored ref as before_space_id (honesty pin)", async () => {
+    await seedSpaceWorld();
+    const out = await collectionMove.handler(buildCtx(userPrincipal()), {
+      collection_id: C_TRASH_A,
+      destination: { kind: "legacy_root" },
+      acl_policy: "keep_grants",
+    });
+    expect(out.acl_transition?.before_space_id).toBe(S_TRASHED);
+    expect(out.acl_transition?.after_space_id).toBeNull();
+    expect(await spaceIdOf(C_TRASH_A)).toBeNull();
+  });
+
+  it("crossing INTO an anomaly is impossible (placeIn fails closed)", async () => {
+    await seed();
+    await seedSpaceWorld();
+    const toDangling = await collectionMove
+      .handler(buildCtx(userPrincipal()), {
+        collection_id: MID_B,
+        destination: { kind: "collection", collection_id: C_DANGLE },
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(toDangling, { collection_id: C_DANGLE });
+    const toTrashedSpace = await collectionMove
+      .handler(buildCtx(userPrincipal()), {
+        collection_id: MID_B,
+        destination: { kind: "collection", collection_id: C_TRASH_A },
+      })
+      .catch((e: unknown) => e);
+    expectAclDeny(toTrashedSpace, { collection_id: C_TRASH_A });
+  });
+
+  it("space_root destination 404s on a missing or trashed space (existence before authority)", async () => {
+    await seed();
+    await seedSpaceWorld();
+    const missing = await collectionMove
+      .handler(buildCtx(userPrincipal()), {
+        collection_id: MID_B,
+        destination: { kind: "space_root", space_id: S_GONE },
+      })
+      .catch((e: unknown) => e);
+    expect(missing).toBeInstanceOf(NotFoundError);
+    if (missing instanceof NotFoundError) {
+      expect(missing.subject_kind).toBe("space");
+      expect(missing.subject_id).toBe(S_GONE);
+    }
+    const trashed = await collectionMove
+      .handler(buildCtx(userPrincipal()), {
+        collection_id: MID_B,
+        destination: { kind: "space_root", space_id: S_TRASHED },
+      })
+      .catch((e: unknown) => e);
+    expect(trashed).toBeInstanceOf(NotFoundError);
+  });
+
+  it("space_root destination contends with the workspace-root slug scope (parent-scoped, space-BLIND)", async () => {
+    await seedSpaceWorld();
+    await seedMembership(S_TEAM);
+    // A LEGACY root collection already owns the slug `col-b3` — moving
+    // C_S_MID (slug `col-b3`) to the space root collides: both root
+    // destinations share the NULL-parent scope.
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("collections")
+      .values({
+        id: CollectionId("018f0000-0000-7000-8000-0000000000bc"),
+        workspace_id: WORKSPACE_A,
+        parent_id: null,
+        space_id: null,
+        title: "Clash",
+        slug: `col-${C_S_MID.slice(-2)}`,
+        order_key: "zz",
+        created_by: ALICE,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: null,
+      })
+      .execute();
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), {
+        collection_id: C_S_MID,
+        destination: { kind: "space_root", space_id: S_TEAM },
+      })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SlugCollisionError);
   });
 });

@@ -49,16 +49,18 @@
 
 import { z } from "zod";
 
-import { GrantRowOutputSchema } from "../shared/grant";
+import { AclTransitionOutputSchema, AclTransitionPolicySchema } from "../shared/grant";
 import {
   CollectionIdInputSchema,
   CollectionIdOutputSchema,
   DocIdInputSchema,
   DocIdOutputSchema,
-  SpaceIdOutputSchema,
 } from "../shared/ids";
 
-export const AclTransitionPolicySchema = z.enum(["adopt_baseline", "keep_grants"]);
+// Re-exported for existing importers; the definition moved to
+// `../shared/grant` when `collection.move` grew the same crossing branch
+// (one transition vocabulary, two movers — SSOT).
+export { AclTransitionPolicySchema };
 
 export const DocMoveInputSchema = z
   .object({
@@ -76,14 +78,7 @@ export const DocMoveOutputSchema = z.object({
   new_collection_id: CollectionIdOutputSchema.nullable(),
   new_order_key: z.string(),
   updated_at: z.number(),
-  acl_transition: z
-    .object({
-      policy: AclTransitionPolicySchema,
-      before_space_id: SpaceIdOutputSchema.nullable(),
-      after_space_id: SpaceIdOutputSchema.nullable(),
-      dropped_grants: z.array(GrantRowOutputSchema),
-    })
-    .optional(),
+  acl_transition: AclTransitionOutputSchema.optional(),
 });
 
 export type DocMoveWireInput = z.input<typeof DocMoveInputSchema>;

@@ -168,14 +168,15 @@ describe("deriveHttpBinding", () => {
     });
   });
 
-  it("collection.move → POST /collections/move/:collection_id with body={new_parent_id}", () => {
+  it("collection.move → POST /collections/move/:collection_id with body={acl_policy, destination}", () => {
     // `collection_id` matches the `<domain>_id` convention — promoted
-    // to a path param; `new_parent_id` stays in the body.
+    // to a path param; the tagged `destination` union and the optional
+    // `acl_policy` ride the body (keys sorted by the derivation).
     expect(deriveHttpBinding(registerCapability(collectionMove))).toEqual({
       verb: "POST",
       pathTemplate: "/collections/move/:collection_id",
       paramName: "collection_id",
-      bodyOrQueryKeys: ["new_parent_id"],
+      bodyOrQueryKeys: ["acl_policy", "destination"],
     });
   });
 

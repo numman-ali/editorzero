@@ -434,11 +434,11 @@ function applyStateEffect(
         ...(effect.patch.slug !== undefined ? { slug: effect.patch.slug } : {}),
         ...(effect.patch.order_key !== undefined ? { order_key: effect.patch.order_key } : {}),
       });
-    case "collection.move":
+    case "collection.move": {
       // Re-parent first, then stamp the post-move binding across the
       // subtree (root included) — `new_space_id` is sufficient for all
       // descendants by the denormalization invariant (see the helper).
-      return rebindSubtreeSpace(
+      const rebound = rebindSubtreeSpace(
         patchCollection(state, effect.collection_id, {
           parent_id: effect.new_parent_id,
           order_key: effect.new_order_key,
@@ -446,6 +446,15 @@ function applyStateEffect(
         effect.collection_id,
         effect.new_space_id,
       );
+      // Crossing branch (ADR 0040 §7): under `adopt_baseline` the
+      // handler hard-deleted every doc-scoped grant across the moved
+      // subtree in the same write; replay removes exactly those keys
+      // (removal is by id — preimage fields are forensic, the
+      // `doc.move` posture). Absent / empty = no-op (same-bucket moves
+      // and `keep_grants` crossings).
+      const dropped = effect.acl_transition?.dropped_grants ?? [];
+      return dropped.reduce((s, grant) => removeGrant(s, grant.grant_id), rebound);
+    }
     case "collection.soft_delete":
       return patchCollection(state, effect.collection_id, { deleted_at: effect.deleted_at });
     case "collection.restore":

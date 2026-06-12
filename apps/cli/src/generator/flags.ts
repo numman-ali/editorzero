@@ -26,7 +26,16 @@
  */
 
 import type { ArgDef, ArgsDef } from "citty";
-import { ZodObject, ZodOptional, type ZodType } from "zod";
+import {
+  ZodArray,
+  ZodDiscriminatedUnion,
+  ZodNullable,
+  ZodObject,
+  ZodOptional,
+  ZodRecord,
+  ZodTuple,
+  type ZodType,
+} from "zod";
 
 /**
  * Produce a citty `ArgsDef` from a capability's input shape. Assumes
@@ -50,4 +59,49 @@ export function deriveFlags(inputSchema: ZodType<unknown>): ArgsDef {
     };
   }
   return args;
+}
+
+/**
+ * The top-level input fields whose values are STRUCTURED (object /
+ * tagged-union / array / record / tuple after unwrapping optional +
+ * nullable) and therefore ride a flag as a JSON document — e.g.
+ * `collection.move`'s `destination: { kind: "space_root", space_id }`.
+ *
+ * `runCapability` JSON-parses exactly these flags before the zod parse
+ * (a malformed document is a typed CLI validation error, not a crash).
+ * The decode is SURFACE plumbing, not schema tolerance: the shared
+ * schema stays object-shaped (one definition for HTTP body, MCP, and
+ * the OpenAPI document), and the CLI decodes its string transport the
+ * same way Hono decodes the HTTP body before the validator.
+ *
+ * Detection is by zod CLASS, deliberately conservative: a transform
+ * pipeline whose input is a plain string (branded ids, coerced numbers)
+ * is NOT structured — strings pass through verbatim. Plain `ZodUnion`
+ * is excluded until a capability actually ships one (a union of string
+ * literals must NOT be JSON-parsed; the discriminated form is
+ * unambiguous because every arm is an object).
+ */
+export function deriveJsonFlagKeys(inputSchema: ZodType<unknown>): ReadonlySet<string> {
+  if (!(inputSchema instanceof ZodObject)) {
+    throw new Error(
+      `deriveJsonFlagKeys: capability input is not a ZodObject (typeName=${inputSchema.constructor.name}).`,
+    );
+  }
+  const keys = new Set<string>();
+  for (const [key, field] of Object.entries(inputSchema.shape)) {
+    let inner: unknown = field;
+    while (inner instanceof ZodOptional || inner instanceof ZodNullable) {
+      inner = inner.unwrap();
+    }
+    if (
+      inner instanceof ZodObject ||
+      inner instanceof ZodDiscriminatedUnion ||
+      inner instanceof ZodArray ||
+      inner instanceof ZodRecord ||
+      inner instanceof ZodTuple
+    ) {
+      keys.add(key);
+    }
+  }
+  return keys;
 }

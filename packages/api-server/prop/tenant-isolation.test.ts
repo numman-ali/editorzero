@@ -31,9 +31,11 @@
  *      guest-revoke refusal, placement standing for collection.create
  *      (space-bucket reach on root-into-space; parent-bucket reach +
  *      anomaly fail-closed on child creates; the mutual-exclusion
- *      schema rail), and the collection.move same-bucket rail
- *      (cross-bucket + anomalous-end refusals; same-space re-parents
- *      need reach). Oracle says unauthorized ⇒ the dispatch
+ *      schema rail), and the collection.move regime split (tagged
+ *      destination union; same-bucket re-parents need reach + a
+ *      policy-free input; crossings need per-doc administer over the
+ *      model subtree, destination standing, and the policy present).
+ *      Oracle says unauthorized ⇒ the dispatch
  *      must not allow. (The converse is deliberately NOT asserted —
  *      handlers carry non-authority preconditions (slug collisions,
  *      lifecycle conflicts, roster refusals) the oracle does not
@@ -102,6 +104,10 @@ import {
 } from "@editorzero/ids";
 import type { AgentPrincipal, Principal, Role, UserPrincipal } from "@editorzero/principal";
 import { CollectionCreateOutputSchema } from "@editorzero/schemas/collection/create";
+import {
+  CollectionMoveDestinationSchema,
+  CollectionMoveOutputSchema,
+} from "@editorzero/schemas/collection/move";
 import { DocListOutputSchema } from "@editorzero/schemas/doc/list";
 import { DocMoveOutputSchema } from "@editorzero/schemas/doc/move";
 import { SpaceListOutputSchema } from "@editorzero/schemas/space/list";
@@ -176,6 +182,10 @@ interface WSpace {
 }
 interface WCollection {
   id: CollectionId;
+  // Seeded collections are flat roots; runtime child creates and moves
+  // maintain the linkage so the collection.move oracle can walk the
+  // model subtree (per-doc administer covers nested docs too).
+  parent_id: CollectionId | null;
   space_id: SpaceId | null; // may dangle (anomaly arm — no FK by design)
   deleted_at: number | null;
 }
@@ -259,6 +269,7 @@ function generateWorld(rnd: () => number, mint: () => string, workspace_id: Work
   for (let i = 0, n = 2 + Math.floor(rnd() * 4); i < n; i++) {
     collections.push({
       id: CollectionId(mint()),
+      parent_id: null,
       space_id: chance(rnd, 0.3)
         ? null // legacy
         : chance(rnd, 0.12)
@@ -687,7 +698,7 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
   }
 
   // Pinned legacy→root collection.move (slice-1 fix-forward): the
-  // rail's ALLOW arm otherwise needs a live legacy collection drawn
+  // regime's ALLOW arm otherwise needs a live legacy collection drawn
   // together with a legacy target and a doc:write principal — too
   // statistics-dependent for the anti-vacuity floor. A root-target
   // move of a live legacy collection by a plain member is a
@@ -697,7 +708,23 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
     ops.push({
       capability: "collection.move",
       principal: { kind: "user", user_index: memberIdx, agent_index: 0 },
-      input: { collection_id: liveLegacyCol.id, new_parent_id: null },
+      input: { collection_id: liveLegacyCol.id, destination: { kind: "legacy_root" } },
+      polluted: false,
+    });
+  }
+  // Pinned legacy→space crossing (crossing slice): a workspace OWNER
+  // administers every legacy-placed doc via the admin backstop and owns
+  // reach into the personal space — `adopt_baseline` makes the drop arm
+  // deterministic rather than statistics-dependent.
+  if (liveLegacyCol !== undefined && personalSpace !== undefined) {
+    ops.push({
+      capability: "collection.move",
+      principal: { kind: "user", user_index: 0, agent_index: 0 },
+      input: {
+        collection_id: liveLegacyCol.id,
+        destination: { kind: "space_root", space_id: personalSpace.id },
+        acl_policy: "adopt_baseline",
+      },
       polluted: false,
     });
   }
@@ -822,11 +849,14 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
       // slugs collision-free against `c-<hex>` seeds and each other.
       const title = `fz col ${i}`;
       if (die >= 0.42) {
-        // collection.move — same-bucket rail (slice-1 fix-forward):
-        // legacy↔legacy allows on the gate alone, same-space
-        // re-parents need reach, cross-bucket / anomalous ends hit
-        // the typed-refusal lane. Moved skews legacy (the allow arm);
-        // targets 30% workspace root, standard pollution arms.
+        // collection.move — regime split (crossing slice): moved skews
+        // legacy; the destination union mixes all three kinds (30%
+        // legacy_root, 20% space_root over a pollutable space, 50%
+        // collection over a pollutable target); `acl_policy` rides on
+        // ~40% of draws so both rails fire (not_applicable on
+        // same-bucket, required on crossings). The oracle owns the
+        // bucket comparison + per-doc administer over the model
+        // subtree.
         const legacyCols = world.collections.filter(
           (c) => c.space_id === null && c.deleted_at === null,
         );
@@ -835,17 +865,31 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
             ? pick(rnd, legacyCols)
             : pick(rnd, world.collections);
         const m = maybePollute(movedPick.id, foreignCollectionIds);
-        const t = chance(rnd, 0.3)
-          ? { id: null, polluted: false }
-          : ((): { id: string | null; polluted: boolean } => {
-              const x = maybePollute(pick(rnd, world.collections).id, foreignCollectionIds);
-              return { id: x.id, polluted: x.polluted };
-            })();
+        const destDie = rnd();
+        let destination: Record<string, unknown>;
+        let destPolluted = false;
+        if (destDie < 0.3) {
+          destination = { kind: "legacy_root" };
+        } else if (destDie < 0.5) {
+          const x = maybePollute(pick(rnd, world.spaces).id, foreignSpaceIds);
+          destination = { kind: "space_root", space_id: x.id };
+          destPolluted = x.polluted;
+        } else {
+          const x = maybePollute(pick(rnd, world.collections).id, foreignCollectionIds);
+          destination = { kind: "collection", collection_id: x.id };
+          destPolluted = x.polluted;
+        }
         ops.push({
           capability: "collection.move",
           principal: principalSpec(),
-          input: { collection_id: m.id, new_parent_id: t.id },
-          polluted: m.polluted || t.polluted,
+          input: {
+            collection_id: m.id,
+            destination,
+            ...(chance(rnd, 0.4)
+              ? { acl_policy: chance(rnd, 0.5) ? "adopt_baseline" : "keep_grants" }
+              : {}),
+          },
+          polluted: m.polluted || destPolluted,
         });
       } else if (chance(rnd, 0.1)) {
         ops.push({
@@ -1095,6 +1139,26 @@ function subjectFor(world: World, spec: PrincipalSpec): OSubject | null {
  * Conservative: unmodelled preconditions return false (no claim);
  * the dispatch may still refuse for reasons the oracle doesn't track.
  */
+/**
+ * The moved collection's id plus every (transitive) model descendant —
+ * trashed rows included, mirroring the handler's enumeration. Seeded
+ * worlds are flat; runtime child creates/moves maintain `parent_id`.
+ */
+function modelSubtree(world: World, root: CollectionId): CollectionId[] {
+  const out: CollectionId[] = [root];
+  const seen = new Set<CollectionId>([root]);
+  let frontier = [root];
+  while (frontier.length > 0) {
+    const next = world.collections
+      .filter((c) => c.parent_id !== null && frontier.includes(c.parent_id) && !seen.has(c.id))
+      .map((c) => c.id);
+    for (const id of next) seen.add(id);
+    out.push(...next);
+    frontier = next;
+  }
+  return out;
+}
+
 function oracleForbids(world: World, op: Op): boolean {
   const s = subjectFor(world, op.principal);
   if (s === null) return true; // delegator_not_member — gate must deny
@@ -1185,26 +1249,54 @@ function oracleForbids(world: World, op: Op): boolean {
       return false;
     }
     case "collection.move": {
-      // Same-bucket rail (slice-1 fix-forward): 404 surfaces on either
-      // end, cross-bucket / anomalous ends must refuse, same-space
-      // re-parents need baseline reach. Cycles/slug collisions are
-      // non-authority preconditions the oracle stays silent on.
+      // Regime split (crossing slice): 404 surfaces on either end;
+      // same-bucket needs the policy ABSENT + reach over a space
+      // destination; a crossing needs per-doc administer over every
+      // doc in the model subtree (live AND trashed — sorted order is
+      // the handler's concern, ANY failing doc forbids), destination
+      // standing, and the policy PRESENT. Cycles/slug collisions/depth
+      // caps are non-authority preconditions the oracle stays silent
+      // on (one-sided: those refusals never reach an allow).
       const moved = world.collections.find((c) => c.id === op.input["collection_id"]);
       if (moved === undefined || moved.deleted_at !== null) return true;
-      const targetRaw = op.input["new_parent_id"];
-      const target = targetRaw === null ? null : CollectionId(String(targetRaw));
-      if (target !== null) {
-        const col = world.collections.find((c) => c.id === target);
+      const dest = CollectionMoveDestinationSchema.parse(op.input["destination"]);
+      if (dest.kind === "collection") {
+        const col = world.collections.find((c) => c.id === dest.collection_id);
         if (col === undefined || col.deleted_at !== null) return true;
+      } else if (dest.kind === "space_root") {
+        const sp = spaceById(dest.space_id);
+        if (sp === undefined || sp.deleted_at !== null) return true;
       }
       const src = placementOf(world, moved.id);
-      const dst = placementOf(world, target);
+      const dst =
+        dest.kind === "legacy_root"
+          ? ({ kind: "legacy" } as const)
+          : dest.kind === "space_root"
+            ? ({ kind: "space", space_id: dest.space_id } as const)
+            : placementOf(world, dest.collection_id);
       const sameBucket =
         (src.kind === "legacy" && dst.kind === "legacy") ||
         (src.kind === "space" && dst.kind === "space" && src.space_id === dst.space_id);
-      if (!sameBucket) return true; // cross_bucket_move_unsupported
-      if (dst.kind === "space") return !baselineReach(world, s, dst.space_id);
-      return false;
+      const policy = op.input["acl_policy"];
+      if (sameBucket) {
+        if (policy !== undefined) return true; // not-applicable rail
+        if (dest.kind === "collection" && dst.kind === "space") {
+          return !oraclePlaceIn(world, s, dest.collection_id);
+        }
+        if (dest.kind === "space_root") return !baselineReach(world, s, dest.space_id);
+        return false;
+      }
+      // Crossing — per-doc administer over the model subtree's docs.
+      for (const id of modelSubtree(world, moved.id)) {
+        for (const d of world.docs) {
+          if (d.collection_id === id && !oracleAdministerDoc(world, s, d)) return true;
+        }
+      }
+      if (dest.kind === "space_root" && !baselineReach(world, s, dest.space_id)) return true;
+      if (dest.kind === "collection" && !oraclePlaceIn(world, s, dest.collection_id)) {
+        return true;
+      }
+      return policy === undefined; // required rail
     }
     case "permission.grant": {
       if (op.input["resource_kind"] === "doc") {
@@ -1222,8 +1314,14 @@ function oracleForbids(world: World, op: Op): boolean {
       if (g === undefined) return true;
       if (g.is_guest === 1) return true; // standing lane refuses guest edges
       if (g.resource_kind === "doc") {
+        // Revoke works on TRASHED docs (offboarding posture — the
+        // handler evaluates the trashed row's STORED placement, same
+        // as doc.remove_guest); only a fully missing doc forbids. The
+        // pre-crossing oracle wrongly forbade trashed-doc revokes —
+        // vacuously, until the crossing slice's band re-carve shifted
+        // the draw sequence into the combination.
         const d = docById(g.resource_id);
-        return d === undefined || d.deleted_at !== null || !oracleAdministerDoc(world, s, d);
+        return d === undefined || !oracleAdministerDoc(world, s, d);
       }
       const sp = spaceById(g.resource_id);
       return sp === undefined || !oracleAdministerSpace(world, s, sp.id);
@@ -1294,9 +1392,36 @@ function applyAllowed(world: World, op: Op, output: unknown, mintModelId: () => 
       const parsed = CollectionCreateOutputSchema.parse(output);
       world.collections.push({
         id: CollectionId(mintModelId()),
+        // The REAL child id differs per driver run, so a runtime child
+        // of a runtime parent is unreachable by later ops — but a
+        // runtime child of a SEEDED parent must hang off it in the
+        // model for the move oracle's subtree walk.
+        parent_id: parsed.parent_id,
         space_id: parsed.space_id,
         deleted_at: null,
       });
+      return;
+    }
+    case "collection.move": {
+      const parsed = CollectionMoveOutputSchema.parse(output);
+      const moved = world.collections.find((c) => c.id === op.input["collection_id"]);
+      if (moved === undefined) return;
+      // Subtree FIRST (it is rooted at the pre-move linkage), then the
+      // root's re-parent; the whole subtree adopts the output binding
+      // (denormalization invariant). Crossing under adopt_baseline
+      // drops exactly the echoed grant ids.
+      const subtree = modelSubtree(world, moved.id);
+      for (const id of subtree) {
+        const c = world.collections.find((x) => x.id === id);
+        if (c !== undefined) c.space_id = parsed.new_space_id;
+      }
+      moved.parent_id = parsed.new_parent_id;
+      if (parsed.acl_transition !== undefined) {
+        const droppedIds = new Set<string>(
+          parsed.acl_transition.dropped_grants.map((g) => String(g.grant_id)),
+        );
+        world.grants = world.grants.filter((g) => !droppedIds.has(g.id));
+      }
       return;
     }
     case "permission.grant":
@@ -1453,7 +1578,7 @@ async function seedWorld(driver: FuzzDriver, world: World): Promise<void> {
       .values({
         id: c.id,
         workspace_id: world.workspace_id,
-        parent_id: null,
+        parent_id: c.parent_id,
         space_id: c.space_id,
         title: `c-${c.id.slice(-6)}`,
         slug: `c-${c.id.slice(-6)}`,

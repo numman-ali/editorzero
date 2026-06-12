@@ -4,19 +4,21 @@
  * re-declared (ADR 0034). See `routes/docs/create.ts` for the golden
  * shape this mirrors.
  *
- * Metadata-only mutation. Re-parents a collection within the workspace
- * under a different parent (or the workspace root via
- * `new_parent_id: null`).
+ * Metadata-only mutation. Moves a collection to a tagged destination —
+ * `{ kind: "legacy_root" }`, `{ kind: "space_root", space_id }`, or
+ * `{ kind: "collection", collection_id }` — with `acl_policy` required
+ * exactly when the move crosses a space-bucket boundary (an audited
+ * bulk ACL transition over the subtree's docs; ADR 0040 §7).
  *
  * **Pattern P3 — path param + JSON body merged into one capability
  * input.** The capability takes a single `CollectionMoveInput`
- * (`{ collection_id, new_parent_id }`), but the wire splits it: the
- * `collection_id` rides the path, `new_parent_id` rides the body. Rather
- * than re-declare two ad-hoc wire schemas (the drift the migration
- * removes), the route derives both halves from the ONE shared
- * `CollectionMoveInputSchema` via `.pick()` — which preserves each
- * field's `.transform()` (wire string → branded `CollectionId`) and the
- * object's `.strict()` (unknown body keys → 400). Two `validator`s
+ * (`{ collection_id, destination, acl_policy? }`), but the wire splits
+ * it: the `collection_id` rides the path, `destination` + `acl_policy`
+ * ride the body. Rather than re-declare two ad-hoc wire schemas (the
+ * drift the migration removes), the route derives both halves from the
+ * ONE shared `CollectionMoveInputSchema` via `.pick()` — which
+ * preserves each field's `.transform()` (wire string → branded id) and
+ * the object's `.strict()` (unknown body keys → 400). Two `validator`s
  * (`param` + `json`), each with the same hook projecting a parse failure
  * to the `{ error: "validation_failed" }` envelope at 400. The handler
  * re-merges the two branded halves into the capability input.
@@ -32,13 +34,18 @@
  * created. Body carries the post-move metadata.
  *
  * **Error arms (mapped from thrown `EditorZeroError` via `errorResponse`).**
- *   400 — `ValidationError`: cycle detection (`cycle_detected`) or
- *         depth-cap exceeded (`depth_cap_exceeded`); also a malformed
- *         body/param rejected by the validators. All converge on
- *         `{ error: "validation_failed" }`.
+ *   400 — `ValidationError`: cycle detection (`cycle_detected`),
+ *         depth-cap exceeded (`depth_cap_exceeded`), or an ACL-policy
+ *         rail (`acl_transition_policy_required` on a crossing without
+ *         a policy, `acl_policy_not_applicable` on a same-bucket move
+ *         carrying one); also a malformed body/param rejected by the
+ *         validators. All converge on `{ error: "validation_failed" }`.
  *   401 — unauthenticated (cross-cutting middleware return; declared only).
- *   403 — permission denied; caller lacks `doc:write`.
- *   404 — moved collection or target parent missing / soft-deleted.
+ *   403 — permission denied; caller lacks `doc:write`, lacks administer
+ *         over some subtree doc on a crossing (`acl_deny { doc_id }`),
+ *         or lacks destination standing (`acl_deny`).
+ *   404 — moved collection, destination collection, or destination
+ *         space missing / soft-deleted.
  *   409 — `SlugCollisionError`: moved collection's slug clashes with a
  *         live sibling under the target parent. Race window (pre-check →
  *         UPDATE) stays guarded by the partial unique index.
@@ -65,7 +72,7 @@ const COLLECTION_MOVE_ID = CapabilityId("collection.move");
 // `.pick()` preserves each field's `.transform()` (→ branded `CollectionId`)
 // and the parent object's `.strict()` (unknown body keys → 400).
 const ParamSchema = CollectionMoveInputSchema.pick({ collection_id: true });
-const BodySchema = CollectionMoveInputSchema.pick({ new_parent_id: true });
+const BodySchema = CollectionMoveInputSchema.pick({ destination: true, acl_policy: true });
 
 export const move = new Hono<ApiEnv>().post(
   "/move/:collection_id",
@@ -73,14 +80,17 @@ export const move = new Hono<ApiEnv>().post(
     describeRoute({
       tags: ["collections"],
       summary:
-        "Re-parent a collection. Refuses cycles, preserves the depth cap, enforces target-scope slug uniqueness.",
+        "Move a collection to a tagged destination (legacy root, space root, or another collection). " +
+        "Cross-bucket moves are audited bulk ACL transitions over the subtree's docs and require acl_policy.",
       responses: {
         200: {
-          description: "Moved — post-move metadata.",
+          description:
+            "Moved — post-move metadata; `acl_transition` echoes the applied transition on a crossing.",
           content: jsonContent(CollectionMoveOutputSchema),
         },
         400: {
-          description: "Validation error (cycle, depth-cap exceeded, or malformed body/param).",
+          description:
+            "Validation error (cycle, depth-cap exceeded, ACL-policy rail, or malformed body/param).",
           content: jsonContent(errEnvelope("validation_failed")),
         },
         401: {
@@ -88,12 +98,14 @@ export const move = new Hono<ApiEnv>().post(
           content: jsonContent(errEnvelope("unauthenticated")),
         },
         403: {
-          description: "Permission denied — caller lacks `doc:write`.",
+          description:
+            "Permission denied — caller lacks `doc:write`, lacks administer over some subtree doc " +
+            "on a crossing, or lacks destination standing.",
           content: jsonContent(errEnvelope("permission_denied")),
         },
         404: {
           description:
-            "The moved collection or the target parent does not exist or is soft-deleted.",
+            "The moved collection, the destination collection, or the destination space does not exist or is soft-deleted.",
           content: jsonContent(errEnvelope("not_found")),
         },
         409: {

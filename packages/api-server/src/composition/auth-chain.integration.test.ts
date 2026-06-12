@@ -2651,7 +2651,9 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const moveRes = await trunk.request(`/collections/move/${movable.collection_id}`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: parent.collection_id }),
+      body: JSON.stringify({
+        destination: { kind: "collection", collection_id: parent.collection_id },
+      }),
     });
     expect(moveRes.status).toBe(200);
     const moved = (await moveRes.json()) as {
@@ -2706,7 +2708,9 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const moveRes = await trunk.request(`/collections/move/${notesA.collection_id}`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: pB.collection_id }),
+      body: JSON.stringify({
+        destination: { kind: "collection", collection_id: pB.collection_id },
+      }),
     });
     expect(moveRes.status).toBe(409);
     const body = (await moveRes.json()) as { error: string };
@@ -2744,7 +2748,9 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const moveRes = await trunk.request(`/collections/move/${root.collection_id}`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: leaf.collection_id }),
+      body: JSON.stringify({
+        destination: { kind: "collection", collection_id: leaf.collection_id },
+      }),
     });
     expect(moveRes.status).toBe(400);
   });
@@ -2754,7 +2760,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const res = await trunk.request("/collections/move/018f0000-0000-7000-8000-0000000000c1", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: null }),
+      body: JSON.stringify({ destination: { kind: "legacy_root" } }),
     });
     expect(res.status).toBe(401);
   });
@@ -2945,7 +2951,7 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     const moveRes = await trunk.request(`/collections/move/${A}`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
-      body: JSON.stringify({ new_parent_id: DEEP4 }),
+      body: JSON.stringify({ destination: { kind: "collection", collection_id: DEEP4 } }),
     });
     expect(moveRes.status).toBe(200);
 
