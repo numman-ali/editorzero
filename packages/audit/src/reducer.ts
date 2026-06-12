@@ -196,6 +196,40 @@ function patchCollection(
   return cur ? setCollection(s, { ...cur, ...patch }) : s;
 }
 
+/**
+ * Stamp `space_id` on every collection in `root_id`'s subtree (the root
+ * included). The denormalization invariant — a descendant always
+ * carries its root's binding — makes `collection.move`'s single
+ * `new_space_id` sufficient post-state for the whole subtree; this walk
+ * is the reducer-side half of that contract (BFS over the projection's
+ * own parent links, so replay needs no extra effect payload).
+ */
+function rebindSubtreeSpace(
+  s: PersistentWorkspaceState,
+  root_id: CollectionId,
+  space_id: SpaceId | null,
+): PersistentWorkspaceState {
+  const all = Object.values(s.collections);
+  const subtree = new Set<string>([root_id]);
+  let frontier: readonly string[] = [root_id];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const c of all) {
+      if (c.parent_id !== null && frontier.includes(c.parent_id) && !subtree.has(c.id)) {
+        subtree.add(c.id);
+        next.push(c.id);
+      }
+    }
+    frontier = next;
+  }
+  const collections = { ...s.collections };
+  for (const id of subtree) {
+    const cur = collections[id];
+    if (cur) collections[id] = { ...cur, space_id };
+  }
+  return { ...s, collections };
+}
+
 function setSpace(s: PersistentWorkspaceState, sp: SpaceState): PersistentWorkspaceState {
   return { ...s, spaces: { ...s.spaces, [sp.id]: sp } };
 }
@@ -387,6 +421,7 @@ function applyStateEffect(
         id: effect.collection_id,
         workspace_id: effect.workspace_id,
         parent_id: effect.parent_id,
+        space_id: effect.space_id,
         title: effect.title,
         slug: effect.slug,
         order_key: effect.order_key,
@@ -400,10 +435,17 @@ function applyStateEffect(
         ...(effect.patch.order_key !== undefined ? { order_key: effect.patch.order_key } : {}),
       });
     case "collection.move":
-      return patchCollection(state, effect.collection_id, {
-        parent_id: effect.new_parent_id,
-        order_key: effect.new_order_key,
-      });
+      // Re-parent first, then stamp the post-move binding across the
+      // subtree (root included) — `new_space_id` is sufficient for all
+      // descendants by the denormalization invariant (see the helper).
+      return rebindSubtreeSpace(
+        patchCollection(state, effect.collection_id, {
+          parent_id: effect.new_parent_id,
+          order_key: effect.new_order_key,
+        }),
+        effect.collection_id,
+        effect.new_space_id,
+      );
     case "collection.soft_delete":
       return patchCollection(state, effect.collection_id, { deleted_at: effect.deleted_at });
     case "collection.restore":
@@ -430,11 +472,18 @@ function applyStateEffect(
       // writes title + slug in one UPDATE, so replay applies both (parallel to
       // `collection.update`). Projecting `title` alone left a stale slug.
       return patchDoc(state, effect.doc_id, { title: effect.title, slug: effect.slug });
-    case "doc.move":
-      return patchDoc(state, effect.doc_id, {
+    case "doc.move": {
+      const moved = patchDoc(state, effect.doc_id, {
         collection_id: effect.new_collection_id,
         order_key: effect.new_order_key,
       });
+      // Cross-boundary move (ADR 0040 §7): under `adopt_baseline` the
+      // handler hard-deleted the listed doc grants in the same write;
+      // replay removes exactly those keys. Absent / empty = no-op
+      // (every same-bucket move, and `keep_grants` crossings).
+      const dropped = effect.acl_transition?.dropped_grant_ids ?? [];
+      return dropped.reduce((s, grant_id) => removeGrant(s, grant_id), moved);
+    }
     case "doc.publish":
       // Both values come from the effect (ADR 0040 Step 5): the slug is
       // handler-COMPUTED (collision-suffixed), so replay must carry it —

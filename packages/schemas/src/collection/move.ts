@@ -29,7 +29,11 @@
 
 import { z } from "zod";
 
-import { CollectionIdInputSchema, CollectionIdOutputSchema } from "../shared/ids";
+import {
+  CollectionIdInputSchema,
+  CollectionIdOutputSchema,
+  SpaceIdOutputSchema,
+} from "../shared/ids";
 
 export const CollectionMoveInputSchema = z
   .object({
@@ -47,6 +51,10 @@ export const CollectionMoveOutputSchema = z.object({
   collection_id: CollectionIdOutputSchema,
   new_parent_id: CollectionIdOutputSchema.nullable(),
   new_order_key: z.string(),
+  // Post-move space binding (`null` = legacy no-space bucket; ADR 0040
+  // Step 7). The shipped handler never rewrites the binding, so this
+  // echoes the row's current value; Step-8 cross-space moves change it.
+  new_space_id: SpaceIdOutputSchema.nullable(),
   updated_at: z.number(),
 });
 

@@ -104,6 +104,14 @@ export interface CollectionState {
   readonly id: CollectionId;
   readonly workspace_id: WorkspaceId;
   readonly parent_id: CollectionId | null;
+  /**
+   * Space binding (`null` = legacy no-space bucket). Joined the
+   * projection with the `collection.create`/`collection.move` effect
+   * fields (ADR 0040 Step 7 — the lockstep rule). Denormalized: a
+   * descendant always carries its root's binding, which is why
+   * `collection.move` can rebind a whole subtree from one effect.
+   */
+  readonly space_id: SpaceId | null;
   readonly title: string;
   readonly slug: string;
   readonly order_key: string;
@@ -198,11 +206,10 @@ export interface GrantState {
  * deep-equal against the same projection built from the live DB is the
  * invariant-3a assertion.
  *
- * `collections` does NOT yet project `space_id` (the column landed in
- * Step 4): no effect can set it until the Step-7 effect family, and a
- * projected column no effect carries would fail replay the moment a
- * fixture touched it. The field joins this projection IN THE SAME
- * COMMIT as the effect that mutates it (the Step-7 lockstep rule).
+ * `collections.space_id` joined the projection in the same commit as
+ * the `collection.create`/`collection.move` effect fields that carry it
+ * (the Step-7 lockstep rule: a projected column and the effect that
+ * mutates it land together, never apart — either alone fails replay).
  */
 export interface PersistentWorkspaceState {
   readonly workspaces: Readonly<Record<string, WorkspaceState>>;

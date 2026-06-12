@@ -31,6 +31,7 @@ interface FixtureOutput {
   readonly collection_id: string;
   readonly workspace_id: string;
   readonly parent_id: string | null;
+  readonly space_id: string | null;
   readonly title: string;
   readonly slug: string;
   readonly order_key: string;
@@ -60,6 +61,7 @@ describe("POST /collections/create", () => {
       collection_id: "018f0000-0000-7000-8000-0000000000c1",
       workspace_id: TEST_PRINCIPAL.workspace_id,
       parent_id: null,
+      space_id: null,
       title: "Reference",
       slug: "reference",
       order_key: "018f0000-0000-7000-8000-0000000000c1",
@@ -97,6 +99,7 @@ describe("POST /collections/create", () => {
         collection_id: "018f0000-0000-7000-8000-0000000000d2",
         workspace_id: TEST_PRINCIPAL.workspace_id,
         parent_id: PARENT_ID,
+        space_id: null,
         title: "Child",
         slug: "child",
         order_key: "018f0000-0000-7000-8000-0000000000d2",

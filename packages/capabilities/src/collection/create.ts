@@ -142,6 +142,7 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
       collection_id: output.collection_id,
       workspace_id: output.workspace_id,
       parent_id: output.parent_id,
+      space_id: output.space_id,
       title: output.title,
       slug: output.slug,
       order_key: output.order_key,
@@ -242,12 +243,20 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
       });
     }
 
+    // Space binding is explicitly null in v1 (ADR 0040 Step 7): root
+    // creates have no space input until Step 8, and the denormalized
+    // child-inherits-parent rule lands with the placement slice. The
+    // column is written (not left to the DDL default) so the value the
+    // output + audit effect carry is visibly the value the row got.
+    const space_id = null;
+
     await ctx.db
       .insertInto("collections")
       .values({
         id: collection_id,
         workspace_id,
         parent_id,
+        space_id,
         title,
         slug,
         order_key,
@@ -262,6 +271,7 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
       collection_id,
       workspace_id,
       parent_id,
+      space_id,
       title,
       slug,
       order_key,

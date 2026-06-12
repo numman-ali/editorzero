@@ -109,6 +109,7 @@ export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutpu
       collection_id: output.collection_id,
       new_parent_id: output.new_parent_id,
       new_order_key: output.new_order_key,
+      new_space_id: output.new_space_id,
     }),
     effectOnDeny: (_input, reason: DenyReason): AuditDeny => ({
       kind: "deny",
@@ -128,9 +129,12 @@ export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutpu
     // `slug` is needed for the target-scope sibling-slug pre-check;
     // `parent_id` is needed to detect the "no-op same-parent" case for
     // the slug skip.
+    // `space_id` rides along so the output + audit effect can echo the
+    // post-move binding (the handler never rewrites it — ADR 0040
+    // Step 7; the Step-8 placement slice owns cross-space rebinds).
     const moved = await ctx.db
       .selectFrom("collections")
-      .select(["id", "parent_id", "slug"])
+      .select(["id", "parent_id", "slug", "space_id"])
       .where("id", "=", collection_id)
       .where("deleted_at", "is", null)
       .executeTakeFirst();
@@ -298,6 +302,7 @@ export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutpu
       collection_id: row.id,
       new_parent_id,
       new_order_key,
+      new_space_id: moved.space_id,
       updated_at: now,
     };
   },

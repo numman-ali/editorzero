@@ -441,6 +441,7 @@ describe("collection.create audit projections", () => {
     collection_id: SAMPLE_COLLECTION_ID,
     workspace_id: WORKSPACE_A,
     parent_id: SAMPLE_PARENT_ID,
+    space_id: null,
     title: "T",
     slug: "t",
     order_key: "018f0000-0000-7000-8000-0000000000d9",
@@ -454,6 +455,7 @@ describe("collection.create audit projections", () => {
       expect(effect.collection_id).toBe(SAMPLE_COLLECTION_ID);
       expect(effect.workspace_id).toBe(WORKSPACE_A);
       expect(effect.parent_id).toBe(SAMPLE_PARENT_ID);
+      expect(effect.space_id).toBeNull();
       expect(effect.title).toBe("T");
       expect(effect.slug).toBe("t");
       expect(effect.order_key).toBe(sampleOutput.order_key);

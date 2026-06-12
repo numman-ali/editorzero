@@ -235,15 +235,15 @@ export type AuditEffect =
   | { kind: "space.member_remove"; space_id: SpaceId; user_id: UserId }   // hard-DELETE: removes the projection key
   | { kind: "space.member_update_role"; space_id: SpaceId; user_id: UserId; role: GrantRole }
   // Collection --------------------------------------------------------------
-  | { kind: "collection.create"; collection_id: CollectionId; workspace_id: WorkspaceId; parent_id: CollectionId | null; title: string; slug: string; order_key: string }
+  | { kind: "collection.create"; collection_id: CollectionId; workspace_id: WorkspaceId; parent_id: CollectionId | null; space_id: SpaceId | null; title: string; slug: string; order_key: string }
   | { kind: "collection.update"; collection_id: CollectionId; patch: Partial<{ title: string; slug: string; order_key: string }> }
-  | { kind: "collection.move";   collection_id: CollectionId; new_parent_id: CollectionId | null; new_order_key: string }
+  | { kind: "collection.move";   collection_id: CollectionId; new_parent_id: CollectionId | null; new_order_key: string; new_space_id: SpaceId | null }  // new_space_id rebinds the WHOLE subtree on replay (denormalization invariant)
   | { kind: "collection.soft_delete"; collection_id: CollectionId }
   | { kind: "collection.restore";     collection_id: CollectionId }
   // Doc ---------------------------------------------------------------------
   | { kind: "doc.create"; doc_id: DocId; workspace_id: WorkspaceId; collection_id: CollectionId | null; title: string; slug: string; order_key: string; visibility: "workspace"|"public"|"private"; seed_blocks: SeedBlock[] }  // seed_blocks = pre-minted BlockIds + shape for replay reconstruction (invariant 3a)
   | { kind: "doc.rename"; doc_id: DocId; title: string }
-  | { kind: "doc.move";   doc_id: DocId; new_collection_id: CollectionId | null; new_order_key: string }
+  | { kind: "doc.move";   doc_id: DocId; new_collection_id: CollectionId | null; new_order_key: string; acl_transition?: { policy: "adopt_baseline"|"keep_grants"; before_space_id: SpaceId | null; after_space_id: SpaceId | null; dropped_grant_ids: GrantId[] } }  // present only on cross-boundary moves (ADR 0040 §7); one audit row per move (invariant 3)
   | { kind: "doc.publish";   doc_id: DocId; published_at: number }
   | { kind: "doc.unpublish"; doc_id: DocId }
   | { kind: "doc.soft_delete"; doc_id: DocId }

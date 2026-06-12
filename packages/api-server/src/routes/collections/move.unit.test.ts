@@ -56,6 +56,7 @@ describe("POST /collections/move", () => {
       collection_id: TARGET_ID,
       new_parent_id: NEW_PARENT_ID,
       new_order_key: "018f0000-0000-7000-8000-000000000111",
+      new_space_id: null,
       updated_at: 42,
     };
     const app = buildApp(async (invocation) => {
@@ -86,6 +87,7 @@ describe("POST /collections/move", () => {
       collection_id: TARGET_ID,
       new_parent_id: null,
       new_order_key: "018f0000-0000-7000-8000-000000000111",
+      new_space_id: null,
       updated_at: 42,
     };
     const app = buildApp(async (invocation) => {

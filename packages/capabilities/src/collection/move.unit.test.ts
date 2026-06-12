@@ -573,6 +573,7 @@ describe("collection.move", () => {
           collection_id: LEAF_A,
           new_parent_id: ROOT_B,
           new_order_key: "018f0000-0000-7000-8000-000000000111",
+          new_space_id: null,
           updated_at: 42,
         },
       );
@@ -581,6 +582,7 @@ describe("collection.move", () => {
         expect(effect.collection_id).toBe(LEAF_A);
         expect(effect.new_parent_id).toBe(ROOT_B);
         expect(effect.new_order_key).toBe("018f0000-0000-7000-8000-000000000111");
+        expect(effect.new_space_id).toBeNull();
       }
     });
 

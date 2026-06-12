@@ -34,6 +34,35 @@ import type {
 import type { AccessMode, GrantRole, Scope, SpaceKind, SpaceType } from "@editorzero/scopes";
 import type { BlockPostState, BlockVisibility, DocPurgePreimage, Role, SeedBlock } from "./types";
 
+/**
+ * ACL consequence of a cross-boundary `doc.move` (ADR 0040 §7 "ACL
+ * transitions on move", Step 7). A move that changes the doc's space
+ * binding stays ONE audit row (invariant 3), so the ACL consequence
+ * rides the `doc.move` effect rather than emitting sibling rows.
+ *
+ * - `policy` is the transition the capability applied: `adopt_baseline`
+ *   (doc-level grants dropped; the destination's baseline takes over) or
+ *   `keep_grants` (explicit doc grants survive the crossing).
+ * - `before_space_id` / `after_space_id` are the resolved space bindings
+ *   of the source and destination collections (`null` = the legacy
+ *   no-space bucket) — post-state facts, not re-derivable from the
+ *   `new_collection_id` alone once later moves rebind collections.
+ * - `dropped_grant_ids` is the exact set of doc-level grant rows the
+ *   handler hard-deleted under `adopt_baseline` (empty for
+ *   `keep_grants`). Grants are hard-DELETE (H1), so this list is the
+ *   only durable record; replay removes precisely these keys.
+ *
+ * Until the Step-8 cross-boundary branch ships, every `doc.move` is
+ * same-bucket (the Step-6 transition rule denies the rest) and the
+ * field is absent.
+ */
+export interface AclTransition {
+  readonly policy: "adopt_baseline" | "keep_grants";
+  readonly before_space_id: SpaceId | null;
+  readonly after_space_id: SpaceId | null;
+  readonly dropped_grant_ids: readonly GrantId[];
+}
+
 // prettier-ignore
 export type AuditEffect =
   // ── Reads (architecture.md §9.3) ─────────────────────────────────────────
@@ -151,6 +180,13 @@ export type AuditEffect =
       collection_id: CollectionId;
       workspace_id: WorkspaceId;
       parent_id: CollectionId | null;
+      // Space binding of the created collection (ADR 0040 Step 7;
+      // `null` = legacy no-space bucket). The shipped handler always
+      // writes null — root creates have no space input until Step 8,
+      // and the denormalized child-inherits-parent rule lands with the
+      // placement slice. The effect carries the column from day one so
+      // the Step-8 handler change is emission-only, not a reshape.
+      space_id: SpaceId | null;
       title: string;
       slug: string;
       order_key: string;
@@ -170,6 +206,16 @@ export type AuditEffect =
       collection_id: CollectionId;
       new_parent_id: CollectionId | null;
       new_order_key: string;
+      // Post-move space binding of the moved collection (ADR 0040
+      // Step 7). The shipped handler never rewrites `space_id`, so this
+      // echoes the row's current binding (always null today); the
+      // Step-8 placement slice makes cross-space moves rewrite it. By
+      // the denormalization invariant (descendants always carry their
+      // root's binding) this single value is sufficient post-state for
+      // the WHOLE subtree — the reducer walks the projection's
+      // parent links and stamps every descendant, so replay stays
+      // one-row-per-mutation (invariant 3) even for subtree rebinds.
+      new_space_id: SpaceId | null;
     }
   | { kind: "collection.soft_delete"; collection_id: CollectionId; deleted_at: number }
   | { kind: "collection.restore"; collection_id: CollectionId }
@@ -207,6 +253,11 @@ export type AuditEffect =
       doc_id: DocId;
       new_collection_id: CollectionId | null;
       new_order_key: string;
+      // Present ONLY when the move crossed a space boundary and the
+      // Step-8 cross-boundary branch applied an ACL transition (ADR
+      // 0040 §7). Absent on same-bucket moves — i.e. on every move the
+      // shipped handler performs (the Step-6 rule denies the rest).
+      acl_transition?: AclTransition;
     }
   // `published_slug` is handler-COMPUTED (collision-suffixed against the
   // live published set), so the effect must carry it — replay can never

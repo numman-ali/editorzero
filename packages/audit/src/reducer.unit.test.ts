@@ -69,6 +69,7 @@ describe("replay reducer — state transitions", () => {
         collection_id: COLL,
         workspace_id: WS,
         parent_id: null,
+        space_id: null,
         title: "Docs",
         slug: "docs",
         order_key: "a",
@@ -115,6 +116,7 @@ describe("replay reducer — state transitions", () => {
       id: COLL,
       workspace_id: WS,
       parent_id: null,
+      space_id: null,
       title: "Docs",
       slug: "docs",
       order_key: "a",
@@ -179,6 +181,7 @@ describe("replay reducer — state transitions", () => {
           collection_id: COLL,
           workspace_id: WS,
           parent_id: null,
+          space_id: null,
           title: "Agent coll",
           slug: "agent-coll",
           order_key: "a",
@@ -255,6 +258,7 @@ describe("replay reducer — state transitions", () => {
         collection_id: COLL,
         workspace_id: WS,
         parent_id: null,
+        space_id: null,
         title: "C",
         slug: "c",
         order_key: "a",
@@ -278,6 +282,7 @@ describe("replay reducer — state transitions", () => {
         collection_id: COLL,
         new_parent_id: COLL2,
         new_order_key: "z",
+        new_space_id: null,
       }),
     );
     expect(s.collections[COLL]).toMatchObject({ parent_id: COLL2, order_key: "z" });
@@ -514,6 +519,7 @@ const STATE_KIND_FIXTURES = {
     collection_id: COLL,
     workspace_id: WS,
     parent_id: null,
+    space_id: null,
     title: "Docs",
     slug: "docs",
     order_key: "a",
@@ -525,6 +531,7 @@ const STATE_KIND_FIXTURES = {
     collection_id: COLL,
     new_parent_id: null,
     new_order_key: "z",
+    new_space_id: SPACE,
   },
   "collection.soft_delete": { kind: "collection.soft_delete", collection_id: COLL, deleted_at: 1 },
   "collection.restore": { kind: "collection.restore", collection_id: COLL },
@@ -541,7 +548,21 @@ const STATE_KIND_FIXTURES = {
     seed_blocks: [],
   },
   "doc.rename": { kind: "doc.rename", doc_id: DOC, title: "Hello World", slug: "hello-world" },
-  "doc.move": { kind: "doc.move", doc_id: DOC, new_collection_id: null, new_order_key: "m" },
+  // Exercises the FULL shape (the optional cross-boundary transition) so
+  // the canonical fixture pins it; absence is the common case and is
+  // covered by the lifecycle walks above.
+  "doc.move": {
+    kind: "doc.move",
+    doc_id: DOC,
+    new_collection_id: null,
+    new_order_key: "m",
+    acl_transition: {
+      policy: "adopt_baseline",
+      before_space_id: SPACE,
+      after_space_id: null,
+      dropped_grant_ids: [GRANT],
+    },
+  },
   "doc.publish": { kind: "doc.publish", doc_id: DOC, published_slug: "d", published_at: 1 },
   "doc.unpublish": { kind: "doc.unpublish", doc_id: DOC },
   "doc.soft_delete": { kind: "doc.soft_delete", doc_id: DOC, deleted_at: 1 },
@@ -755,6 +776,131 @@ describe("replay reducer — grants (ADR 0040 Step 7)", () => {
         }),
       ),
     ).toBe(EMPTY_STATE);
+  });
+});
+
+// ── Placement lockstep (ADR 0040 Step 7, commit C) ─────────────────────────
+
+describe("replay reducer — collection space binding + doc.move acl_transition", () => {
+  const mkColl = (
+    id: CollectionId,
+    parent_id: CollectionId | null,
+    space_id: SpaceId | null = null,
+  ) =>
+    allow({
+      kind: "collection.create",
+      collection_id: id,
+      workspace_id: WS,
+      parent_id,
+      space_id,
+      title: "C",
+      slug: `c-${id.slice(-2)}`,
+      order_key: "a",
+      created_by: USER,
+    });
+
+  it("collection.create projects its space binding", () => {
+    const state = replay([mkColl(COLL, null, SPACE)]);
+    expect(state.collections[COLL]?.space_id).toBe(SPACE);
+  });
+
+  it("collection.move rebinds the WHOLE subtree (denormalization invariant)", () => {
+    // COLL (root) ← COLL2 (child) ← COLL3 (grandchild); sibling COLL4 is
+    // outside the subtree and must keep its own binding.
+    const COLL3 = CollectionId("018f0000-0000-7000-8000-0000000000c3");
+    const COLL4 = CollectionId("018f0000-0000-7000-8000-0000000000c4");
+    const state = replay([
+      mkColl(COLL, null),
+      mkColl(COLL2, COLL),
+      mkColl(COLL3, COLL2),
+      mkColl(COLL4, null),
+      allow({
+        kind: "collection.move",
+        collection_id: COLL,
+        new_parent_id: null,
+        new_order_key: "z",
+        new_space_id: SPACE,
+      }),
+    ]);
+    expect(state.collections[COLL]?.space_id).toBe(SPACE);
+    expect(state.collections[COLL2]?.space_id).toBe(SPACE);
+    expect(state.collections[COLL3]?.space_id).toBe(SPACE);
+    expect(state.collections[COLL4]?.space_id).toBeNull();
+  });
+
+  const grantOnDoc = allow({
+    kind: "acl.grant",
+    grant_id: GRANT,
+    workspace_id: WS,
+    resource_kind: "doc",
+    resource_id: DOC,
+    subject_kind: "user",
+    subject_id: USER2,
+    role: "view",
+    is_guest: 0,
+    created_by: USER,
+  });
+  const docCreate = allow({
+    kind: "doc.create",
+    doc_id: DOC,
+    workspace_id: WS,
+    collection_id: COLL,
+    title: "D",
+    slug: "d",
+    order_key: "a",
+    created_by: USER,
+    access_mode: "space",
+    seed_blocks: [],
+  });
+
+  it("doc.move adopt_baseline drops exactly the listed grants", () => {
+    const state = replay([
+      docCreate,
+      grantOnDoc,
+      allow({
+        kind: "doc.move",
+        doc_id: DOC,
+        new_collection_id: COLL2,
+        new_order_key: "m",
+        acl_transition: {
+          policy: "adopt_baseline",
+          before_space_id: SPACE,
+          after_space_id: null,
+          dropped_grant_ids: [GRANT],
+        },
+      }),
+    ]);
+    expect(state.docs[DOC]).toMatchObject({ collection_id: COLL2, order_key: "m" });
+    expect(state.grants).toEqual({});
+  });
+
+  it("doc.move keep_grants (empty dropped list) leaves grants intact", () => {
+    const state = replay([
+      docCreate,
+      grantOnDoc,
+      allow({
+        kind: "doc.move",
+        doc_id: DOC,
+        new_collection_id: COLL2,
+        new_order_key: "m",
+        acl_transition: {
+          policy: "keep_grants",
+          before_space_id: SPACE,
+          after_space_id: null,
+          dropped_grant_ids: [],
+        },
+      }),
+    ]);
+    expect(state.grants[GRANT]?.id).toBe(GRANT);
+  });
+
+  it("doc.move without acl_transition (same-bucket — every shipped move) touches no grants", () => {
+    const state = replay([
+      docCreate,
+      grantOnDoc,
+      allow({ kind: "doc.move", doc_id: DOC, new_collection_id: COLL2, new_order_key: "m" }),
+    ]);
+    expect(state.grants[GRANT]?.id).toBe(GRANT);
   });
 });
 

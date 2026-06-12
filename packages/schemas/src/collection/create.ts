@@ -33,6 +33,7 @@ import { TitleSchema } from "../shared/fields";
 import {
   CollectionIdInputSchema,
   CollectionIdOutputSchema,
+  SpaceIdOutputSchema,
   UserIdOutputSchema,
   WorkspaceIdOutputSchema,
 } from "../shared/ids";
@@ -52,6 +53,10 @@ export const CollectionCreateOutputSchema = z.object({
   collection_id: CollectionIdOutputSchema,
   workspace_id: WorkspaceIdOutputSchema,
   parent_id: CollectionIdOutputSchema.nullable(),
+  // Space binding of the created collection (`null` = legacy no-space
+  // bucket; ADR 0040 Step 7). Always null until the Step-8 placement
+  // slice adds space-targeted creation + parent inheritance.
+  space_id: SpaceIdOutputSchema.nullable(),
   title: z.string(),
   slug: z.string(),
   order_key: z.string(),
