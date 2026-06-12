@@ -19,11 +19,11 @@
  * suite; this file is the unit-level backstop.
  */
 
-import { CapabilityId, CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { CapabilityId, CollectionId, DocId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
 import { describe, expect, it } from "vitest";
 import type { AuditEffect } from "./effect";
 import { applyAuditRow, REPLAY_CLASS, replay } from "./reducer";
-import { EMPTY_STATE, memberKey, type ReplayRow } from "./state";
+import { EMPTY_STATE, memberKey, type ReplayRow, spaceMemberKey } from "./state";
 
 const WS = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const USER = UserId("018f0000-0000-7000-8000-000000000002");
@@ -31,6 +31,7 @@ const USER2 = UserId("018f0000-0000-7000-8000-000000000003");
 const COLL = CollectionId("018f0000-0000-7000-8000-0000000000c1");
 const COLL2 = CollectionId("018f0000-0000-7000-8000-0000000000c2");
 const DOC = DocId("018f0000-0000-7000-8000-0000000000d1");
+const SPACE = SpaceId("018f0000-0000-7000-8000-0000000000e1");
 // A non-user principal id, used to prove `created_by` comes from the effect
 // body, not the envelope `principal_id` (agent writes attribute to a human).
 const AGENT_PRINCIPAL = "018f0000-0000-7000-8000-0000000000f1";
@@ -448,6 +449,35 @@ const STATE_KIND_FIXTURES = {
     user_id: USER,
     role: "admin",
   },
+  "space.create": {
+    kind: "space.create",
+    space_id: SPACE,
+    workspace_id: WS,
+    space_kind: "team",
+    space_type: "closed",
+    owner_user_id: null,
+    name: "Eng",
+    slug: "eng",
+    baseline_access: "view",
+    created_by: USER,
+  },
+  "space.update": { kind: "space.update", space_id: SPACE, patch: { name: "Engineering" } },
+  "space.archive": { kind: "space.archive", space_id: SPACE, deleted_at: 1 },
+  "space.restore": { kind: "space.restore", space_id: SPACE },
+  "space.member_add": {
+    kind: "space.member_add",
+    workspace_id: WS,
+    space_id: SPACE,
+    user_id: USER,
+    role: "edit",
+  },
+  "space.member_remove": { kind: "space.member_remove", space_id: SPACE, user_id: USER },
+  "space.member_update_role": {
+    kind: "space.member_update_role",
+    space_id: SPACE,
+    user_id: USER,
+    role: "owner",
+  },
   "collection.create": {
     kind: "collection.create",
     collection_id: COLL,
@@ -486,6 +516,130 @@ const STATE_KIND_FIXTURES = {
   "doc.soft_delete": { kind: "doc.soft_delete", doc_id: DOC, deleted_at: 1 },
   "doc.restore": { kind: "doc.restore", doc_id: DOC },
 } satisfies { [K in StateKind]: Extract<AuditEffect, { kind: K }> };
+
+// ── Space family semantics (ADR 0040 Step 7) ───────────────────────────────
+//
+// The effects land BEFORE their Step-8 capabilities — born `"state"`
+// with transitions (the integration walk reaches them at Step 8; these
+// unit walks are the replay-sufficiency proof until then).
+
+describe("replay reducer — space family (ADR 0040 Step 7)", () => {
+  const create = allow({
+    kind: "space.create",
+    space_id: SPACE,
+    workspace_id: WS,
+    space_kind: "team",
+    space_type: "closed",
+    owner_user_id: null,
+    name: "Eng",
+    slug: "eng",
+    baseline_access: "view",
+    created_by: USER,
+  });
+
+  it("create → update → archive → restore reconstructs the full lifecycle", () => {
+    const state = replay([
+      create,
+      allow({
+        kind: "space.update",
+        space_id: SPACE,
+        patch: { name: "Engineering", space_type: "open", baseline_access: "comment" },
+      }),
+      allow({ kind: "space.archive", space_id: SPACE, deleted_at: 77 }),
+    ]);
+    expect(state.spaces[SPACE]).toEqual({
+      id: SPACE,
+      workspace_id: WS,
+      kind: "team",
+      type: "open", // space_type patch maps onto the row's `type`
+      owner_user_id: null,
+      name: "Engineering",
+      slug: "eng",
+      baseline_access: "comment",
+      created_by: USER,
+      deleted_at: 77, // the handler clock, verbatim (ADR 0017 anchor)
+    });
+    const restored = replay([
+      create,
+      allow({ kind: "space.archive", space_id: SPACE, deleted_at: 77 }),
+      allow({ kind: "space.restore", space_id: SPACE }),
+    ]);
+    expect(restored.spaces[SPACE]?.deleted_at).toBeNull();
+  });
+
+  it("member add → update_role → remove nets to NO entry (hard-DELETE projection)", () => {
+    const afterAdd = replay([
+      create,
+      allow({
+        kind: "space.member_add",
+        workspace_id: WS,
+        space_id: SPACE,
+        user_id: USER2,
+        role: "view",
+      }),
+      allow({ kind: "space.member_update_role", space_id: SPACE, user_id: USER2, role: "edit" }),
+    ]);
+    expect(afterAdd.space_members[spaceMemberKey(SPACE, USER2)]).toEqual({
+      workspace_id: WS,
+      space_id: SPACE,
+      user_id: USER2,
+      role: "edit",
+    });
+    const afterRemove = replay([
+      create,
+      allow({
+        kind: "space.member_add",
+        workspace_id: WS,
+        space_id: SPACE,
+        user_id: USER2,
+        role: "view",
+      }),
+      allow({ kind: "space.member_remove", space_id: SPACE, user_id: USER2 }),
+    ]);
+    expect(afterRemove.space_members).toEqual({});
+    // Re-add after remove starts a fresh row (no resurrecting state).
+    const reAdded = replay([
+      create,
+      allow({
+        kind: "space.member_add",
+        workspace_id: WS,
+        space_id: SPACE,
+        user_id: USER2,
+        role: "owner",
+      }),
+      allow({ kind: "space.member_remove", space_id: SPACE, user_id: USER2 }),
+      allow({
+        kind: "space.member_add",
+        workspace_id: WS,
+        space_id: SPACE,
+        user_id: USER2,
+        role: "view",
+      }),
+    ]);
+    expect(reAdded.space_members[spaceMemberKey(SPACE, USER2)]?.role).toBe("view");
+  });
+
+  it("patches and removes against absent entities are safe no-ops (truncated-log resilience)", () => {
+    expect(
+      applyAuditRow(
+        EMPTY_STATE,
+        allow({ kind: "space.update", space_id: SPACE, patch: { name: "x" } }),
+      ),
+    ).toBe(EMPTY_STATE);
+    expect(
+      applyAuditRow(
+        EMPTY_STATE,
+        allow({ kind: "space.member_remove", space_id: SPACE, user_id: USER }),
+      ),
+    ).toBe(EMPTY_STATE);
+    expect(
+      applyAuditRow(
+        EMPTY_STATE,
+        allow({ kind: "space.member_update_role", space_id: SPACE, user_id: USER, role: "view" }),
+      ),
+    ).toBe(EMPTY_STATE);
+  });
+});
 
 describe('replay reducer — every "state" kind has a transition', () => {
   it.each(

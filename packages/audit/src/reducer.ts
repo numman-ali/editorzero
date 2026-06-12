@@ -45,7 +45,7 @@
  * failing assertion, never a quiet no-op.
  */
 
-import type { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import type { CollectionId, DocId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { AuditEffect } from "./effect";
 import {
   type CollectionState,
@@ -55,6 +55,9 @@ import {
   memberKey,
   type PersistentWorkspaceState,
   type ReplayRow,
+  type SpaceMemberState,
+  type SpaceState,
+  spaceMemberKey,
   type WorkspaceState,
 } from "./state";
 
@@ -87,6 +90,13 @@ export const REPLAY_CLASS = {
   "member.add": "state",
   "member.remove": "state",
   "member.update_role": "state",
+  "space.create": "state",
+  "space.update": "state",
+  "space.archive": "state",
+  "space.restore": "state",
+  "space.member_add": "state",
+  "space.member_remove": "state",
+  "space.member_update_role": "state",
   "collection.create": "state",
   "collection.update": "state",
   "collection.move": "state",
@@ -185,6 +195,51 @@ function patchCollection(
   return cur ? setCollection(s, { ...cur, ...patch }) : s;
 }
 
+function setSpace(s: PersistentWorkspaceState, sp: SpaceState): PersistentWorkspaceState {
+  return { ...s, spaces: { ...s.spaces, [sp.id]: sp } };
+}
+
+function patchSpace(
+  s: PersistentWorkspaceState,
+  id: SpaceId,
+  patch: Partial<SpaceState>,
+): PersistentWorkspaceState {
+  const cur = s.spaces[id];
+  return cur ? setSpace(s, { ...cur, ...patch }) : s;
+}
+
+function setSpaceMember(
+  s: PersistentWorkspaceState,
+  m: SpaceMemberState,
+): PersistentWorkspaceState {
+  return {
+    ...s,
+    space_members: { ...s.space_members, [spaceMemberKey(m.space_id, m.user_id)]: m },
+  };
+}
+
+function patchSpaceMember(
+  s: PersistentWorkspaceState,
+  space_id: SpaceId,
+  user_id: UserId,
+  patch: Partial<SpaceMemberState>,
+): PersistentWorkspaceState {
+  const cur = s.space_members[spaceMemberKey(space_id, user_id)];
+  return cur ? setSpaceMember(s, { ...cur, ...patch }) : s;
+}
+
+/** Hard-DELETE projection: removing the key IS the post-state (Step-4 DDL). */
+function removeSpaceMember(
+  s: PersistentWorkspaceState,
+  space_id: SpaceId,
+  user_id: UserId,
+): PersistentWorkspaceState {
+  const key = spaceMemberKey(space_id, user_id);
+  if (!(key in s.space_members)) return s;
+  const { [key]: _removed, ...rest } = s.space_members;
+  return { ...s, space_members: rest };
+}
+
 function setDoc(s: PersistentWorkspaceState, d: DocState): PersistentWorkspaceState {
   return { ...s, docs: { ...s.docs, [d.id]: d } };
 }
@@ -254,6 +309,49 @@ function applyStateEffect(
       });
     case "member.update_role":
       return patchMember(state, effect.workspace_id, effect.user_id, { role: effect.role });
+
+    // ── spaces (ADR 0040 Step 7) ─────────────────────────────────────────────
+    case "space.create":
+      // `space_kind`/`space_type` map back to the row columns `kind`/`type`
+      // (the effect renames them because `kind` is the union discriminant).
+      return setSpace(state, {
+        id: effect.space_id,
+        workspace_id: effect.workspace_id,
+        kind: effect.space_kind,
+        type: effect.space_type,
+        owner_user_id: effect.owner_user_id,
+        name: effect.name,
+        slug: effect.slug,
+        baseline_access: effect.baseline_access,
+        created_by: effect.created_by,
+        deleted_at: null,
+      });
+    case "space.update":
+      return patchSpace(state, effect.space_id, {
+        ...(effect.patch.name !== undefined ? { name: effect.patch.name } : {}),
+        ...(effect.patch.slug !== undefined ? { slug: effect.patch.slug } : {}),
+        ...(effect.patch.space_type !== undefined ? { type: effect.patch.space_type } : {}),
+        ...(effect.patch.baseline_access !== undefined
+          ? { baseline_access: effect.patch.baseline_access }
+          : {}),
+      });
+    case "space.archive":
+      return patchSpace(state, effect.space_id, { deleted_at: effect.deleted_at });
+    case "space.restore":
+      return patchSpace(state, effect.space_id, { deleted_at: null });
+
+    // ── space members (hard-DELETE: remove nets the key away) ───────────────
+    case "space.member_add":
+      return setSpaceMember(state, {
+        workspace_id: effect.workspace_id,
+        space_id: effect.space_id,
+        user_id: effect.user_id,
+        role: effect.role,
+      });
+    case "space.member_remove":
+      return removeSpaceMember(state, effect.space_id, effect.user_id);
+    case "space.member_update_role":
+      return patchSpaceMember(state, effect.space_id, effect.user_id, { role: effect.role });
 
     // ── collections ──────────────────────────────────────────────────────────
     case "collection.create":

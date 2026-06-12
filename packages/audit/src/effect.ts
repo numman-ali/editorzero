@@ -23,13 +23,14 @@ import type {
   CustomDomainId,
   DocId,
   MirrorId,
+  SpaceId,
   TokenId,
   UserId,
   VersionId,
   WebhookId,
   WorkspaceId,
 } from "@editorzero/ids";
-import type { AccessMode, Scope } from "@editorzero/scopes";
+import type { AccessMode, GrantRole, Scope, SpaceKind, SpaceType } from "@editorzero/scopes";
 import type { BlockPostState, BlockVisibility, DocPurgePreimage, Role, SeedBlock } from "./types";
 
 // prettier-ignore
@@ -88,6 +89,61 @@ export type AuditEffect =
   | { kind: "member.add"; workspace_id: WorkspaceId; user_id: UserId; role: Role }
   | { kind: "member.remove"; workspace_id: WorkspaceId; user_id: UserId; deleted_at: number }
   | { kind: "member.update_role"; workspace_id: WorkspaceId; user_id: UserId; role: Role }
+  // ── Space (ADR 0040 Step 7 — effects land before their Step-8 capabilities)
+  //
+  // Post-state contract: `space.create` carries the full `SpaceState`
+  // projection (minus `deleted_at`, which is born null). The spaces
+  // row's `kind`/`type` columns land here as `space_kind`/`space_type`
+  // because `kind` is this union's discriminant — the reducer maps them
+  // back. `baseline_access` is the implicit GrantRole an OPEN space
+  // confers on Org members holding no membership row (Step-4 DDL).
+  | {
+      kind: "space.create";
+      space_id: SpaceId;
+      workspace_id: WorkspaceId;
+      space_kind: SpaceKind;
+      space_type: SpaceType;
+      // Bound by the spaces-table CHECK: non-null iff space_kind='personal'.
+      owner_user_id: UserId | null;
+      name: string;
+      slug: string;
+      baseline_access: GrantRole;
+      // Handler-resolved human attribution (the human behind an agent) —
+      // replay reads this, never the envelope principal.
+      created_by: UserId;
+    }
+  // Patch fields are the mutable subset: `space_kind` (team/personal) is
+  // structural and `owner_user_id` is fixed by the personal-space CHECK,
+  // so neither is patchable. `space_type` transitions (open ↔ closed ↔
+  // private) ARE — the Step-8 capability judges them; replay just
+  // applies the post-state value the handler wrote.
+  | {
+      kind: "space.update";
+      space_id: SpaceId;
+      patch: Partial<{
+        name: string;
+        slug: string;
+        space_type: SpaceType;
+        baseline_access: GrantRole;
+      }>;
+    }
+  // "Archive" is the ADR 0040 vocabulary for the spaces soft-delete
+  // (refuses on live descendants — ADR 0017 posture; the refusal is the
+  // capability's job, the effect only records the handler clock).
+  | { kind: "space.archive"; space_id: SpaceId; deleted_at: number }
+  | { kind: "space.restore"; space_id: SpaceId }
+  // `space_members` is hard-DELETE (Step-4 DDL has no deleted_at):
+  // `member_remove` REMOVES the projection key — add-then-remove nets
+  // to no entry, mirroring the grants H1 posture.
+  | {
+      kind: "space.member_add";
+      workspace_id: WorkspaceId;
+      space_id: SpaceId;
+      user_id: UserId;
+      role: GrantRole;
+    }
+  | { kind: "space.member_remove"; space_id: SpaceId; user_id: UserId }
+  | { kind: "space.member_update_role"; space_id: SpaceId; user_id: UserId; role: GrantRole }
   // ── Collection (§3.5) ────────────────────────────────────────────────────
   | {
       kind: "collection.create";
