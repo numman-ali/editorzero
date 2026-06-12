@@ -22,6 +22,7 @@ import type {
   CommentId,
   CustomDomainId,
   DocId,
+  GrantId,
   MirrorId,
   SpaceId,
   TokenId,
@@ -299,19 +300,45 @@ export type AuditEffect =
       sha256: string;
     }
   | { kind: "attachment.soft_delete"; attachment_id: AttachmentId }
-  // ── Permissions (§3.12) ──────────────────────────────────────────────────
+  // ── Permissions (ADR 0040 Step 7 — the polymorphic grants table) ─────────
+  //
+  // Reshaped at Step 7 from the pre-0040 speculative form (nested
+  // scope / "role" subjects / a bespoke access ladder): no capability
+  // had ever emitted these kinds, so the reshape is not an append-only
+  // violation. The shape now mirrors `GrantState` exactly — flat
+  // polymorphic `resource_kind`/`resource_id` (which SUPERSEDES the old
+  // nested scope union — resources are spaces or docs, never
+  // collections: B1), subjects are users or agents (roles are not
+  // grant subjects in the 0040 model), the role rides the GRANT_ROLES
+  // ladder, and `is_guest` is the guest-grant marker. A role CHANGE on
+  // an existing edge re-emits `acl.grant` under the same `grant_id`
+  // (replay converges by id); if Step 8 wants a distinct kind for it,
+  // that is a new append, not a reshape.
   | {
       kind: "acl.grant";
-      scope: { doc_id: DocId } | { collection_id: CollectionId };
-      subject_kind: "user" | "agent" | "role";
+      grant_id: GrantId;
+      workspace_id: WorkspaceId;
+      resource_kind: "space" | "doc";
+      resource_id: string;
+      subject_kind: "user" | "agent";
       subject_id: string;
-      access: "read" | "comment" | "edit" | "admin";
+      role: GrantRole;
+      is_guest: 0 | 1;
+      created_by: UserId;
     }
+  // Carries the FULL forensic preimage, not just the id: the grants row
+  // is hard-DELETEd on revoke (H1), so this audit row is the only
+  // durable record of what access was removed — an auditor must never
+  // need to join back to a row that no longer exists.
   | {
       kind: "acl.revoke";
-      scope: { doc_id: DocId } | { collection_id: CollectionId };
-      subject_kind: "user" | "agent" | "role";
+      grant_id: GrantId;
+      resource_kind: "space" | "doc";
+      resource_id: string;
+      subject_kind: "user" | "agent";
       subject_id: string;
+      role: GrantRole;
+      is_guest: 0 | 1;
     }
   // ── Principals (§3.3) ────────────────────────────────────────────────────
   | { kind: "agent.create"; agent_id: AgentId; owner_user_id: UserId | null; name: string }

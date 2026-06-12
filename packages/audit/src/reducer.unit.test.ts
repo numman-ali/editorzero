@@ -19,7 +19,15 @@
  * suite; this file is the unit-level backstop.
  */
 
-import { CapabilityId, CollectionId, DocId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
+import {
+  CapabilityId,
+  CollectionId,
+  DocId,
+  GrantId,
+  SpaceId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
 import { describe, expect, it } from "vitest";
 import type { AuditEffect } from "./effect";
 import { applyAuditRow, REPLAY_CLASS, replay } from "./reducer";
@@ -32,6 +40,7 @@ const COLL = CollectionId("018f0000-0000-7000-8000-0000000000c1");
 const COLL2 = CollectionId("018f0000-0000-7000-8000-0000000000c2");
 const DOC = DocId("018f0000-0000-7000-8000-0000000000d1");
 const SPACE = SpaceId("018f0000-0000-7000-8000-0000000000e1");
+const GRANT = GrantId("018f0000-0000-7000-8000-0000000000f1");
 // A non-user principal id, used to prove `created_by` comes from the effect
 // body, not the envelope `principal_id` (agent writes attribute to a human).
 const AGENT_PRINCIPAL = "018f0000-0000-7000-8000-0000000000f1";
@@ -478,6 +487,28 @@ const STATE_KIND_FIXTURES = {
     user_id: USER,
     role: "owner",
   },
+  "acl.grant": {
+    kind: "acl.grant",
+    grant_id: GRANT,
+    workspace_id: WS,
+    resource_kind: "doc",
+    resource_id: DOC,
+    subject_kind: "user",
+    subject_id: USER2,
+    role: "view",
+    is_guest: 0,
+    created_by: USER,
+  },
+  "acl.revoke": {
+    kind: "acl.revoke",
+    grant_id: GRANT,
+    resource_kind: "doc",
+    resource_id: DOC,
+    subject_kind: "user",
+    subject_id: USER2,
+    role: "view",
+    is_guest: 0,
+  },
   "collection.create": {
     kind: "collection.create",
     collection_id: COLL,
@@ -636,6 +667,92 @@ describe("replay reducer — space family (ADR 0040 Step 7)", () => {
       applyAuditRow(
         EMPTY_STATE,
         allow({ kind: "space.member_update_role", space_id: SPACE, user_id: USER, role: "view" }),
+      ),
+    ).toBe(EMPTY_STATE);
+  });
+});
+
+describe("replay reducer — grants (ADR 0040 Step 7)", () => {
+  const BOT_SUBJECT = "018f0000-0000-7000-8000-0000000000b1";
+  const grant = allow({
+    kind: "acl.grant",
+    grant_id: GRANT,
+    workspace_id: WS,
+    resource_kind: "space",
+    resource_id: SPACE,
+    subject_kind: "agent",
+    subject_id: BOT_SUBJECT,
+    role: "comment",
+    is_guest: 1,
+    created_by: USER,
+  });
+
+  it("acl.grant projects the full GrantState (guest marker included)", () => {
+    const state = replay([grant]);
+    expect(state.grants[GRANT]).toEqual({
+      id: GRANT,
+      workspace_id: WS,
+      resource_kind: "space",
+      resource_id: SPACE,
+      subject_kind: "agent",
+      subject_id: BOT_SUBJECT,
+      role: "comment",
+      is_guest: 1,
+      created_by: USER,
+    });
+  });
+
+  it("grant-then-revoke nets to NO entry (H1 hard-delete projection)", () => {
+    const state = replay([
+      grant,
+      allow({
+        kind: "acl.revoke",
+        grant_id: GRANT,
+        resource_kind: "space",
+        resource_id: SPACE,
+        subject_kind: "agent",
+        subject_id: BOT_SUBJECT,
+        role: "comment",
+        is_guest: 1,
+      }),
+    ]);
+    expect(state.grants).toEqual({});
+  });
+
+  it("re-grant under the same grant_id converges (the role-change posture)", () => {
+    const state = replay([
+      grant,
+      allow({
+        kind: "acl.grant",
+        grant_id: GRANT,
+        workspace_id: WS,
+        resource_kind: "space",
+        resource_id: SPACE,
+        subject_kind: "agent",
+        subject_id: BOT_SUBJECT,
+        role: "edit",
+        is_guest: 1,
+        created_by: USER,
+      }),
+    ]);
+    expect(Object.keys(state.grants)).toHaveLength(1);
+    expect(state.grants[GRANT]?.role).toBe("edit");
+  });
+
+  it("revoking an absent grant is a safe no-op (truncated-log resilience)", () => {
+    expect(
+      applyAuditRow(
+        EMPTY_STATE,
+        allow({
+          kind: "acl.revoke",
+          grant_id: GRANT,
+          resource_kind: "doc",
+          resource_id: DOC,
+          subject_kind: "user",
+          subject_id: USER2,
+          role: "view",
+          is_guest: 0,
+        }),
       ),
     ).toBe(EMPTY_STATE);
   });

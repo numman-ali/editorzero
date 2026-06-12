@@ -226,6 +226,14 @@ export type AuditEffect =
   | { kind: "member.add";    workspace_id: WorkspaceId; user_id: UserId; role: Role }
   | { kind: "member.remove"; workspace_id: WorkspaceId; user_id: UserId }
   | { kind: "member.update_role"; workspace_id: WorkspaceId; user_id: UserId; role: Role }
+  // Space (ADR 0040 Step 7; spaces-row kind/type land as space_kind/space_type — `kind` is the discriminant)
+  | { kind: "space.create";  space_id: SpaceId; workspace_id: WorkspaceId; space_kind: SpaceKind; space_type: SpaceType; owner_user_id: UserId | null; name: string; slug: string; baseline_access: GrantRole; created_by: UserId }
+  | { kind: "space.update";  space_id: SpaceId; patch: Partial<{ name: string; slug: string; space_type: SpaceType; baseline_access: GrantRole }> }
+  | { kind: "space.archive"; space_id: SpaceId; deleted_at: number }
+  | { kind: "space.restore"; space_id: SpaceId }
+  | { kind: "space.member_add";    workspace_id: WorkspaceId; space_id: SpaceId; user_id: UserId; role: GrantRole }
+  | { kind: "space.member_remove"; space_id: SpaceId; user_id: UserId }   // hard-DELETE: removes the projection key
+  | { kind: "space.member_update_role"; space_id: SpaceId; user_id: UserId; role: GrantRole }
   // Collection --------------------------------------------------------------
   | { kind: "collection.create"; collection_id: CollectionId; workspace_id: WorkspaceId; parent_id: CollectionId | null; title: string; slug: string; order_key: string }
   | { kind: "collection.update"; collection_id: CollectionId; patch: Partial<{ title: string; slug: string; order_key: string }> }
@@ -266,9 +274,11 @@ export type AuditEffect =
   | { kind: "attachment.request_upload"; upload_id: string; workspace_id: WorkspaceId; storage_key: string; declared_size: number; declared_content_type: string; declared_sha256: string | null; expires_at: number }   // F57/F80
   | { kind: "attachment.confirm_upload"; upload_id: string; attachment_id: string; storage_key: string; filename: string; content_type: string; bytes: number; sha256: string }                                         // F57/F80
   | { kind: "attachment.soft_delete"; attachment_id: string }
-  // Permissions -------------------------------------------------------------
-  | { kind: "acl.grant";  scope: { doc_id: DocId } | { collection_id: CollectionId }; subject_kind: "user"|"agent"|"role"; subject_id: string; access: "read"|"comment"|"edit"|"admin" }
-  | { kind: "acl.revoke"; scope: { doc_id: DocId } | { collection_id: CollectionId }; subject_kind: "user"|"agent"|"role"; subject_id: string }
+  // Permissions (reshaped at ADR 0040 Step 7 to mirror the polymorphic grants table;
+  // never emitted before then, so not an append-only violation. Revoke carries the
+  // full forensic preimage — the row is hard-DELETEd, the audit row is the only record.)
+  | { kind: "acl.grant";  grant_id: GrantId; workspace_id: WorkspaceId; resource_kind: "space"|"doc"; resource_id: string; subject_kind: "user"|"agent"; subject_id: string; role: GrantRole; is_guest: 0|1; created_by: UserId }
+  | { kind: "acl.revoke"; grant_id: GrantId; resource_kind: "space"|"doc"; resource_id: string; subject_kind: "user"|"agent"; subject_id: string; role: GrantRole; is_guest: 0|1 }
   // Principals --------------------------------------------------------------
   | { kind: "agent.create"; agent_id: AgentId; owner_user_id: UserId | null; name: string }
   | { kind: "agent.rename"; agent_id: AgentId; name: string }

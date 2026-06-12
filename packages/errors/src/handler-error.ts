@@ -12,7 +12,7 @@
  * downstream consumers only need one import.
  */
 
-import type { CollectionId, DocId } from "@editorzero/ids";
+import type { CollectionId, DocId, SpaceId } from "@editorzero/ids";
 import type { Scope, SubjectKind } from "@editorzero/scopes";
 
 export type DenyReason =
@@ -31,7 +31,14 @@ export type DenyReason =
   | { kind: "rate_limited"; bucket: string; retry_after_ms: number }
   | {
       kind: "acl_deny";
-      scope: { readonly doc_id: DocId } | { readonly collection_id: CollectionId };
+      // `{space_id}` joined the union at ADR 0040 Step 7 ("add {space_id}
+      // to the acl.* scope union") — the Step-8 space.* / permission.*
+      // capabilities deny on Space targets the way doc handlers deny on
+      // doc/collection targets today.
+      scope:
+        | { readonly doc_id: DocId }
+        | { readonly collection_id: CollectionId }
+        | { readonly space_id: SpaceId };
     }
   | { kind: "sub_block_acl_not_implemented" };
 

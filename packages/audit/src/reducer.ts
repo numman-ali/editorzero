@@ -45,12 +45,13 @@
  * failing assertion, never a quiet no-op.
  */
 
-import type { CollectionId, DocId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
+import type { CollectionId, DocId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { AuditEffect } from "./effect";
 import {
   type CollectionState,
   type DocState,
   EMPTY_STATE,
+  type GrantState,
   type MemberState,
   memberKey,
   type PersistentWorkspaceState,
@@ -97,6 +98,8 @@ export const REPLAY_CLASS = {
   "space.member_add": "state",
   "space.member_remove": "state",
   "space.member_update_role": "state",
+  "acl.grant": "state",
+  "acl.revoke": "state",
   "collection.create": "state",
   "collection.update": "state",
   "collection.move": "state",
@@ -130,8 +133,6 @@ export const REPLAY_CLASS = {
   "attachment.request_upload": "deferred",
   "attachment.confirm_upload": "deferred",
   "attachment.soft_delete": "deferred",
-  "acl.grant": "deferred",
-  "acl.revoke": "deferred",
   "agent.create": "deferred",
   "agent.rename": "deferred",
   "agent.revoke": "deferred",
@@ -238,6 +239,17 @@ function removeSpaceMember(
   if (!(key in s.space_members)) return s;
   const { [key]: _removed, ...rest } = s.space_members;
   return { ...s, space_members: rest };
+}
+
+function setGrant(s: PersistentWorkspaceState, g: GrantState): PersistentWorkspaceState {
+  return { ...s, grants: { ...s.grants, [g.id]: g } };
+}
+
+/** Grants are hard-DELETE too (H1): revoke removes the key. */
+function removeGrant(s: PersistentWorkspaceState, id: GrantId): PersistentWorkspaceState {
+  if (!(id in s.grants)) return s;
+  const { [id]: _removed, ...rest } = s.grants;
+  return { ...s, grants: rest };
 }
 
 function setDoc(s: PersistentWorkspaceState, d: DocState): PersistentWorkspaceState {
@@ -352,6 +364,22 @@ function applyStateEffect(
       return removeSpaceMember(state, effect.space_id, effect.user_id);
     case "space.member_update_role":
       return patchSpaceMember(state, effect.space_id, effect.user_id, { role: effect.role });
+
+    // ── grants (hard-DELETE: grant-then-revoke nets to no entry — H1) ───────
+    case "acl.grant":
+      return setGrant(state, {
+        id: effect.grant_id,
+        workspace_id: effect.workspace_id,
+        resource_kind: effect.resource_kind,
+        resource_id: effect.resource_id,
+        subject_kind: effect.subject_kind,
+        subject_id: effect.subject_id,
+        role: effect.role,
+        is_guest: effect.is_guest,
+        created_by: effect.created_by,
+      });
+    case "acl.revoke":
+      return removeGrant(state, effect.grant_id);
 
     // ── collections ──────────────────────────────────────────────────────────
     case "collection.create":
