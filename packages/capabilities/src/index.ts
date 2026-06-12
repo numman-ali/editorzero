@@ -56,6 +56,7 @@ export { docRestore } from "./doc/restore";
 export { docUnpublish } from "./doc/unpublish";
 export { docUpdate } from "./doc/update";
 export { permissionGrant } from "./permission/grant";
+export { permissionList } from "./permission/list";
 export { permissionRevoke } from "./permission/revoke";
 export { workspaceGet } from "./workspace/get";
 export { workspaceMemberAdd } from "./workspace/member_add";

@@ -42,6 +42,7 @@ import { docRestore } from "./doc/restore";
 import { docUnpublish } from "./doc/unpublish";
 import { docUpdate } from "./doc/update";
 import { permissionGrant } from "./permission/grant";
+import { permissionList } from "./permission/list";
 import { permissionRevoke } from "./permission/revoke";
 import { createRegistry, type Registry, registerCapability } from "./registry";
 import { workspaceGet } from "./workspace/get";
@@ -77,6 +78,7 @@ export function createDefaultRegistry(): Registry {
     registerCapability(docUnpublish),
     registerCapability(docUpdate),
     registerCapability(permissionGrant),
+    registerCapability(permissionList),
     registerCapability(permissionRevoke),
     registerCapability(workspaceGet),
     registerCapability(workspaceMemberAdd),

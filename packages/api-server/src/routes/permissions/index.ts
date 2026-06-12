@@ -14,6 +14,7 @@ import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
 import { grant } from "./grant";
+import { list } from "./list";
 import { revoke } from "./revoke";
 
-export const permissions = new Hono<ApiEnv>().route("/", grant).route("/", revoke);
+export const permissions = new Hono<ApiEnv>().route("/", grant).route("/", list).route("/", revoke);
