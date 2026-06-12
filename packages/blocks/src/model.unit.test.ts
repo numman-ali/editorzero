@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { materializeBlock, normalizeContent } from "./model";
+import { materializeBlock, normalizeContent, parseBlocks } from "./model";
 
 describe("normalizeContent", () => {
   it("maps undefined and the empty string to []", () => {
@@ -69,5 +69,46 @@ describe("materializeBlock", () => {
       content: [{ type: "text", text: "T", styles: {} }],
       children: [],
     });
+  });
+});
+
+describe("parseBlocks", () => {
+  const wireBlock = {
+    id: "018f0000-0000-7000-8000-0000000000b1",
+    type: "heading",
+    props: { level: 2 },
+    content: [{ type: "text", text: "T", styles: { bold: true } }],
+    children: [],
+  };
+
+  it("round-trips a persisted block list and re-canonicalizes content", () => {
+    const noisy = {
+      ...wireBlock,
+      // `bold: false` and an empty run are non-canonical spellings the
+      // parser must collapse — the browser's hash has to match the
+      // server's.
+      content: [
+        { type: "text", text: "T", styles: { bold: true, italic: false } },
+        { type: "text", text: "", styles: {} },
+      ],
+    };
+    expect(parseBlocks([noisy])).toEqual([
+      {
+        id: wireBlock.id,
+        type: "heading",
+        props: { level: 2 },
+        content: [{ type: "text", text: "T", styles: { bold: true } }],
+        children: [],
+      },
+    ]);
+  });
+
+  it("throws loud on unknown keys, non-empty children, and alien inline shapes", () => {
+    expect(() => parseBlocks([{ ...wireBlock, surprise: 1 }])).toThrow();
+    expect(() => parseBlocks([{ ...wireBlock, children: [wireBlock] }])).toThrow();
+    expect(() =>
+      parseBlocks([{ ...wireBlock, content: [{ type: "link", href: "https://x" }] }]),
+    ).toThrow();
+    expect(() => parseBlocks([null])).toThrow();
   });
 });

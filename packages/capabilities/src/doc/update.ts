@@ -116,7 +116,9 @@ export const docUpdate: Capability<Input, Output> = {
   output: DocUpdateOutputSchema,
   requires: ["doc:write", "block:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" bound by the `/doc/$docId` editor's explicit Save (diff → ops
+  // batch); proven by the marked Playwright spec in packages/e2e (H11).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

@@ -624,7 +624,7 @@ describe("doc.update", () => {
     expect(docUpdate.id).toBe("doc.update");
     expect(docUpdate.category).toBe("mutation");
     expect(docUpdate.requires).toEqual(["doc:write", "block:write"]);
-    expect(docUpdate.surfaces).toEqual(["api", "cli", "mcp"]);
+    expect(docUpdate.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     expect(docUpdate.agentAllowed).toBeDefined();
   });
 

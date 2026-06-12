@@ -28,25 +28,29 @@
 
 import { type Block, normalizeContent, type StyledText, TEXT_STYLE_KEYS } from "./model";
 
+// Deliberately MUTABLE declarations: every value is freshly allocated
+// by this module, and the browser hands the doc JSON straight to
+// Tiptap (`useEditor({ content })` / `setContent`), whose `JSONContent`
+// type rejects readonly arrays. Treat them as one-way payloads.
 interface PmMarkJSON {
-  readonly type: string;
+  type: string;
 }
 
 interface PmTextJSON {
-  readonly type: "text";
-  readonly text: string;
-  readonly marks?: readonly PmMarkJSON[];
+  type: "text";
+  text: string;
+  marks?: PmMarkJSON[];
 }
 
 interface PmBlockNodeJSON {
-  readonly type: string;
-  readonly attrs?: Readonly<Record<string, unknown>>;
-  readonly content?: readonly PmTextJSON[];
+  type: string;
+  attrs?: Record<string, unknown>;
+  content?: PmTextJSON[];
 }
 
 export interface PmDocJSON {
-  readonly type: "doc";
-  readonly content: readonly PmBlockNodeJSON[];
+  type: "doc";
+  content: PmBlockNodeJSON[];
 }
 
 /** Block types the owned schema knows, with their non-id attr keys. */

@@ -97,7 +97,9 @@ export const docGet: Capability<DocGetInput, DocGetOutput> = {
   input: DocGetInputSchema,
   output: DocGetOutputSchema,
   requires: ["doc:read"],
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" bound by the `/doc/$docId` screen (loader + editor base);
+  // proven by the marked Playwright spec in packages/e2e (ADR 0040 H11).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

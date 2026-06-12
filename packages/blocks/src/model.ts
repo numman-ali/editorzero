@@ -117,3 +117,36 @@ export function materializeBlock(input: PartialBlockInput, id: string): Block {
     children: [],
   };
 }
+
+/**
+ * Wire-parse for a persisted block list. `doc.get` carries `blocks` as
+ * `z.unknown()[]` at the schemas leaf (the block union deliberately
+ * stays out of `@editorzero/schemas` — its doc-comment points here);
+ * browser/CLI consumers re-validate with THIS package so the runtime
+ * contract has one home. Children are pinned empty (v1 has no
+ * nesting); content re-runs `normalizeContent` so the parsed block is
+ * canonical by construction (one spelling per style state — the hash
+ * the browser stamps must match what the server computed).
+ */
+const WireBlockSchema = z
+  .object({
+    id: z.string(),
+    type: z.string(),
+    props: z.record(z.string(), z.unknown()),
+    content: z.array(StyledTextSchema),
+    children: z.array(z.unknown()).length(0),
+  })
+  .strict();
+
+export function parseBlocks(value: readonly unknown[]): Block[] {
+  return value.map((entry) => {
+    const raw = WireBlockSchema.parse(entry);
+    return {
+      id: raw.id,
+      type: raw.type,
+      props: raw.props,
+      content: normalizeContent(raw.content),
+      children: [],
+    };
+  });
+}

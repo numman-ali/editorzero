@@ -25,6 +25,7 @@ export {
   materializeBlock,
   normalizeContent,
   type PartialBlockInput,
+  parseBlocks,
   type StyledText,
   TEXT_STYLE_KEYS,
   type TextStyleKey,

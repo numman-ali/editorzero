@@ -5,6 +5,14 @@
    hamburger. Base UI's Drawer is unstyled — open/close/swipe states
    arrive as data-attributes + CSS vars, styled here with tokens. */
 
+/* The SSOT sheet floors .win at 560px because the brand screens frame it
+   inside fixed screen-tabs; in the app .win IS the viewport root, so it
+   claims the full dynamic viewport. Same specificity as the SSOT rule —
+   this sheet loads after it (entry styles, then component styles). */
+.win {
+  min-height: 100dvh;
+}
+
 .shell-burger {
   display: none;
   width: 30px;

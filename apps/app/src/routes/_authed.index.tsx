@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 import {
   docListQueryOptions,
@@ -63,7 +63,10 @@ function Home() {
                   <div className="doc">
                     <span className="ord">{String(index + 1).padStart(2, "0")}</span>
                     <div>
-                      <div className="nm">{doc.title}</div>
+                      {/* Singular /doc — /docs is the reserved API prefix. */}
+                      <Link className="nm" to="/doc/$docId" params={{ docId: doc.id }}>
+                        {doc.title}
+                      </Link>
                       <div className="pth">{doc.slug}</div>
                     </div>
                   </div>

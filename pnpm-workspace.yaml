@@ -34,3 +34,12 @@ catalog:
   "@tiptap/pm": 3.24.0
   "@tiptap/react": 3.24.0
   "@tiptap/y-tiptap": 3.0.4
+
+# @tiptap/react declares its menu extensions as RANGED (^3.24.0) optional deps,
+# so plain resolution drifts them to a newer minor that then peer-wants a newer
+# core/pm — breaking the exact-lockstep rule above from inside the family.
+# Force the whole family to the catalog version. We import neither component
+# (BubbleMenu/FloatingMenu); the override exists for resolution coherence.
+overrides:
+  "@tiptap/extension-bubble-menu": 3.24.0
+  "@tiptap/extension-floating-menu": 3.24.0
