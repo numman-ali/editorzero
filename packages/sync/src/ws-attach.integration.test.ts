@@ -402,6 +402,25 @@ describe("collabAuthorize by construction", () => {
     pinnedClient.close();
   });
 
+  it("closeDocumentConnections severs the doc's WS subscriptions with the revocation close (ADR 0043 D5)", async () => {
+    const sync = buildSync({ collabAuthorize: () => Promise.resolve() });
+    await seedDocMetadata(DOC_ID);
+    const port = await listenFor(sync);
+
+    // Cold doc — nothing attached, nothing to close.
+    expect(sync.closeDocumentConnections(DOC_ID)).toBe(0);
+
+    const client = new WsClient(port, DOC_ID);
+    expect((await client.attach()).outcome).toBe("authenticated");
+
+    // One attached subscription dies with the per-document Close
+    // frame (the revocation tap's doc.delete arm rides this).
+    expect(sync.closeDocumentConnections(DOC_ID)).toBe(1);
+    await client.docClosed;
+    expect(sync.closeDocumentConnections(DOC_ID)).toBe(0);
+    client.close();
+  });
+
   it("hands the policy the documentName and the upgrade request headers", async () => {
     const seen: CollabAuthorizePayload[] = [];
     const sync = buildSync({

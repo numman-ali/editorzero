@@ -298,6 +298,16 @@ interface StagedUpdate {
 type DirectConnection = Awaited<ReturnType<Hocuspocus["openDirectConnection"]>>;
 type WsConnectionArgs = Parameters<Hocuspocus["handleConnection"]>;
 
+/**
+ * WebSocket close code for revocation closes (app range 4000–4999;
+ * ADR 0043 Decision 5). Sent both at the SOCKET level (the
+ * composition root's registry closing a subject's sockets) and the
+ * per-DOCUMENT level (`closeDocumentConnections`). A legitimate
+ * client reads it as "re-auth, don't blind-retry" — distinguishable
+ * from transport hiccups.
+ */
+export const COLLAB_REVOKED_CLOSE_CODE = 4401;
+
 export class HocuspocusSync {
   readonly #server: Hocuspocus;
   readonly #docUpdatesWriter: DocUpdatesWriter;
@@ -599,6 +609,34 @@ export class HocuspocusSync {
     }
     const wsMarker: HocuspocusWsMarker = { __ws: true };
     this.#server.handleConnection(websocket, request, wsMarker);
+  }
+
+  /**
+   * Close every WS connection attached to `doc_id` with the
+   * revocation close event (ADR 0043 Decision 5 refinement, Codex
+   * lift-gate round). Per-DOCUMENT closes — the multiplexed socket
+   * survives for other documents; re-attaching this one re-runs
+   * `collabAuthorize`, the authority. The revocation tap calls this
+   * on `doc.delete`: a trashed doc's room must not keep serving
+   * passive subscriptions (state replays, awareness relay) to readers
+   * whose re-attach would now be denied — and closing the ROOM is
+   * exactly scoped, where closing every reader's socket would storm
+   * the workspace on a routine verb. DirectConnections (the
+   * dispatcher's own lane) hold no `Connection` object and are
+   * untouched. Returns the number of connections closed.
+   */
+  closeDocumentConnections(doc_id: string): number {
+    const document = this.#server.documents.get(doc_id);
+    if (document === undefined) return 0;
+    let closed = 0;
+    document.connections.forEach(({ connection }) => {
+      connection.close({
+        code: COLLAB_REVOKED_CLOSE_CODE,
+        reason: "authorization revoked",
+      });
+      closed += 1;
+    });
+    return closed;
   }
 
   async #runRead<T>(doc_id: DocId, fn: (ydoc: Y.Doc) => T | Promise<T>): Promise<T> {

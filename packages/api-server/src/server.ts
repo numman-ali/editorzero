@@ -210,7 +210,14 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
       sync,
       gate: workspaceAwareGate({ loadDelegatorRoles: loadRoles }),
     }),
-    createRevocationTap({ registry: collabSockets, driver, logger }),
+    createRevocationTap({
+      registry: collabSockets,
+      driver,
+      logger,
+      // doc.delete closes the trashed doc's ROOM (per-document
+      // connections at the sync layer), not user sockets.
+      closeDocConnections: (docId) => sync.closeDocumentConnections(docId),
+    }),
   );
   collab.wireDispatcher(dispatcher);
 

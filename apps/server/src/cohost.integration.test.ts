@@ -758,6 +758,27 @@ describe("audited WS write lane (ADR 0043 Decision 3 — the default posture)", 
     expect(await applyUpdateAuditCount("error")).toBe(errorAuditBefore + 1);
     client.close();
   });
+
+  it("closes the trashed doc's room on doc.delete (revocation tap, per-document scope)", async () => {
+    // Codex lift-gate MUST-FIX 3: a baseline reader's passive
+    // subscription must not outlive the doc. The tap closes the ROOM
+    // (per-document Close, socket survives), not user sockets — a
+    // routine trash must not storm the workspace.
+    const doomedId = await createDoc(activePort(), cookie, "Carol's doomed doc");
+    const client = openClient();
+    expect((await client.attach(doomedId)).outcome).toBe("authenticated");
+
+    const res = await fetch(`http://127.0.0.1:${activePort()}/docs/delete/${doomedId}`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+
+    await client.waitForDocClose(doomedId);
+    // Same socket, fresh Auth frame: the soft-deleted row denies.
+    expect((await client.attach(doomedId)).outcome).toBe("denied");
+    client.close();
+  });
 });
 
 describe("operator read-only pin (collabReadOnly: true)", () => {

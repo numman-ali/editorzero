@@ -28,9 +28,14 @@
  */
 
 import type { SessionId, UserId } from "@editorzero/ids";
+import { COLLAB_REVOKED_CLOSE_CODE } from "@editorzero/sync";
 
-/** WebSocket close code for revocation closes (app range 4000–4999). */
-export const COLLAB_REVOKED_CLOSE_CODE = 4401;
+/**
+ * Re-exported from `@editorzero/sync` (the protocol layer owns the
+ * close-code vocabulary — `closeDocumentConnections` sends the same
+ * code at per-document scope).
+ */
+export { COLLAB_REVOKED_CLOSE_CODE };
 
 export interface CollabSocketLike {
   close(code?: number, reason?: string): void;

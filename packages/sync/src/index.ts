@@ -28,6 +28,7 @@ export {
   ForeignUpdateRefusedError,
 } from "./foreign-update";
 export {
+  COLLAB_REVOKED_CLOSE_CODE,
   type CollabAuthorizePayload,
   HocuspocusSync,
   type HocuspocusSyncDeps,

@@ -27,6 +27,7 @@ const GUEST_USER = UserId("018f0000-0000-7000-8000-000000000003");
 const SECOND_GUEST = UserId("018f0000-0000-7000-8000-000000000004");
 const MEMBER_ONE = UserId("018f0000-0000-7000-8000-000000000005");
 const MEMBER_TWO = UserId("018f0000-0000-7000-8000-000000000006");
+const OWNER_USER = UserId("018f0000-0000-7000-8000-000000000007");
 const SPACE = SpaceId("018f0000-0000-7000-8000-00000000c001");
 const SPACE_CLOSED = SpaceId("018f0000-0000-7000-8000-00000000c002");
 const SPACE_OPEN = SpaceId("018f0000-0000-7000-8000-00000000c003");
@@ -57,10 +58,10 @@ function admin(): UserPrincipal {
   };
 }
 
-function invocation(capability: string): DispatchInvocation {
+function invocation(capability: string, input: unknown = {}): DispatchInvocation {
   return {
     capability_id: CapabilityId(capability),
-    input: {},
+    input,
     principal: admin(),
     access: { workspace_id: WORKSPACE_A },
     trace_id: null,
@@ -102,20 +103,34 @@ function grantRowOutput(subject_kind: "user" | "agent", subject_id: string): unk
   };
 }
 
-function tapWith(registry: CollabSocketRegistry, logger = noopLogger) {
-  return createRevocationTap({ registry, driver, logger });
+function tapWith(
+  registry: CollabSocketRegistry,
+  logger = noopLogger,
+  closeDocConnections?: (doc_id: string) => number,
+) {
+  return createRevocationTap({
+    registry,
+    driver,
+    logger,
+    ...(closeDocConnections !== undefined && { closeDocConnections }),
+  });
 }
 
-function seedSpace(id: SpaceId, type: "open" | "closed" | "private"): Promise<unknown> {
+function seedSpace(
+  id: SpaceId,
+  type: "open" | "closed" | "private",
+  owner?: UserId,
+): Promise<unknown> {
   return driver
     .scoped(WORKSPACE_A)
     .insertInto("spaces")
     .values({
       id,
       workspace_id: WORKSPACE_A,
-      kind: "team",
+      // The schema CHECK pins (kind = 'personal') = (owner non-null).
+      kind: owner === undefined ? "team" : "personal",
       type,
-      owner_user_id: null,
+      owner_user_id: owner ?? null,
       name: `Space ${id.slice(-4)}`,
       slug: `space-${id.slice(-4)}`,
       baseline_access: "view",
@@ -228,57 +243,31 @@ describe("createRevocationTap — affected-subject derivation", () => {
     }
   });
 
-  it("closes the doc's user-kind grant holders on doc.delete", async () => {
-    await driver
-      .scoped(WORKSPACE_A)
-      .insertInto("grants")
-      .values([
-        {
-          id: GrantId("018f0000-0000-7000-8000-00000000e001"),
-          workspace_id: WORKSPACE_A,
-          resource_kind: "doc",
-          resource_id: DOC,
-          subject_kind: "user",
-          subject_id: GUEST_USER,
-          role: "view",
-          is_guest: 1,
-          created_by: ADMIN,
-          created_at: 1,
-        },
-        {
-          id: GrantId("018f0000-0000-7000-8000-00000000e002"),
-          workspace_id: WORKSPACE_A,
-          resource_kind: "doc",
-          resource_id: DOC,
-          subject_kind: "user",
-          subject_id: SECOND_GUEST,
-          role: "edit",
-          is_guest: 1,
-          created_by: ADMIN,
-          created_at: 1,
-        },
-        {
-          // Agent guest — must NOT close (no agent sockets today).
-          id: GrantId("018f0000-0000-7000-8000-00000000e003"),
-          workspace_id: WORKSPACE_A,
-          resource_kind: "doc",
-          resource_id: DOC,
-          subject_kind: "agent",
-          subject_id: "018f0000-0000-7000-8000-00000000f001",
-          role: "view",
-          is_guest: 1,
-          created_by: ADMIN,
-          created_at: 1,
-        },
-      ])
-      .execute();
-
+  it("closes the trashed doc's ROOM on doc.delete — per-document close, sockets untouched", async () => {
     const registry = recordingRegistry();
-    await tapWith(registry).afterCommit(invocation("doc.delete"), {
+    const roomCloses: string[] = [];
+    await tapWith(registry, noopLogger, (docId) => {
+      roomCloses.push(docId);
+      return 3;
+    }).afterCommit(invocation("doc.delete"), { doc_id: DOC, deleted_at: 999 });
+    expect(roomCloses).toEqual([DOC]);
+    // No user-level closes: grant standing survives soft-delete
+    // (restore revives it) — the ROOM dying is the whole posture.
+    expect(registry.closedUsers).toEqual([]);
+  });
+
+  it("contains an unwired doc-close arm as a logged tap failure (never a crash)", async () => {
+    const registry = recordingRegistry();
+    const error = vi.fn();
+    await tapWith(registry, { ...noopLogger, error }).afterCommit(invocation("doc.delete"), {
       doc_id: DOC,
       deleted_at: 999,
     });
-    expect(registry.closedUsers.toSorted()).toEqual([GUEST_USER, SECOND_GUEST].toSorted());
+    expect(registry.closedUsers).toEqual([]);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("revocation tap failed"),
+      expect.objectContaining({ "collab.reason": expect.stringContaining("unwired") }),
+    );
   });
 
   it("closes the space's members on space.archive", async () => {
@@ -391,6 +380,87 @@ describe("createRevocationTap — affected-subject derivation", () => {
       moveOutput({ before_space_id: null, after_space_id: SPACE_CLOSED }),
     );
     expect(registry.closedUsers.toSorted()).toEqual([MEMBER_ONE, MEMBER_TWO].toSorted());
+  });
+
+  it("closes ALL live members when the BEFORE bucket was an OPEN space — org baseline, not roster (Codex pin)", async () => {
+    // The lift-gate round's concrete miss: a member reading an open
+    // space with NO roster row must close when the doc crosses into a
+    // closed space — the roster alone undercounts open-space readers.
+    await seedSpace(SPACE, "open");
+    await seedSpace(SPACE_CLOSED, "closed");
+    await seedWorkspaceMember(MEMBER_ONE);
+    await seedWorkspaceMember(MEMBER_TWO); // deliberately NOT a space_members row
+
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(
+      invocation("doc.move"),
+      moveOutput({ before_space_id: SPACE, after_space_id: SPACE_CLOSED }),
+    );
+    expect(registry.closedUsers.toSorted()).toEqual([MEMBER_ONE, MEMBER_TWO].toSorted());
+  });
+
+  it("walks the full reader ladder for a restrictive BEFORE bucket: owner + roster + user-kind space grants", async () => {
+    await seedSpace(SPACE, "private", OWNER_USER); // personal — owner reads without a roster row
+    await seedSpace(SPACE_CLOSED, "closed");
+    await seedSpaceMember(SPACE, MEMBER_ONE);
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("grants")
+      .values({
+        id: GrantId("018f0000-0000-7000-8000-00000000e009"),
+        workspace_id: WORKSPACE_A,
+        resource_kind: "space",
+        resource_id: SPACE,
+        subject_kind: "user",
+        subject_id: SECOND_GUEST,
+        role: "view",
+        is_guest: 1,
+        created_by: ADMIN,
+        created_at: 1,
+      })
+      .execute();
+
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(
+      invocation("collection.move"),
+      moveOutput({ before_space_id: SPACE, after_space_id: SPACE_CLOSED }),
+    );
+    expect(registry.closedUsers.toSorted()).toEqual(
+      [OWNER_USER, MEMBER_ONE, SECOND_GUEST].toSorted(),
+    );
+  });
+
+  it("ignores a space.update that does not set space_type (a rename narrows nobody)", async () => {
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(
+      invocation("space.update", { space_id: SPACE, name: "Renamed" }),
+      { space_id: SPACE },
+    );
+    expect(registry.closedUsers).toEqual([]);
+  });
+
+  it("closes org-baseline readers (members minus roster) when space.update sets a restrictive type", async () => {
+    await seedSpace(SPACE, "open");
+    await seedWorkspaceMember(MEMBER_ONE);
+    await seedWorkspaceMember(MEMBER_TWO);
+    await seedSpaceMember(SPACE, MEMBER_ONE); // roster retains read standing
+
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(
+      invocation("space.update", { space_id: SPACE, space_type: "closed" }),
+      { space_id: SPACE },
+    );
+    expect(registry.closedUsers).toEqual([MEMBER_TWO]);
+  });
+
+  it("ignores space.update setting type to open (widening)", async () => {
+    await seedWorkspaceMember(MEMBER_ONE);
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(
+      invocation("space.update", { space_id: SPACE, space_type: "open" }),
+      { space_id: SPACE },
+    );
+    expect(registry.closedUsers).toEqual([]);
   });
 
   it("logs loud and closes nothing when a revoke-class output drifts (drift guard)", async () => {
