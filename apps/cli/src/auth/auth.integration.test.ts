@@ -165,7 +165,6 @@ describe("ez auth end-to-end (runLogin → runWhoami → runLogout)", () => {
     );
     expect(loginExit).toBe(0);
     expect(store.writes).toHaveLength(1);
-    // biome-ignore lint/complexity/useLiteralKeys: TS4111 — CredentialHeaders is a Record<string, string> index signature, bracket access required.
     expect(store.writes[0]?.["cookie"]).toContain("session_token");
     expect(JSON.parse(out.read())).toEqual({ ok: true, email });
 
@@ -190,10 +189,22 @@ describe("ez auth end-to-end (runLogin → runWhoami → runLogout)", () => {
 
     // 3. logout — clears locally + invalidates server-side.
     out.reset();
+    const loginCookie = store.writes[0];
+    if (loginCookie === undefined) throw new Error("login never wrote a credential");
     const logoutExit = await runLogout({ baseUrl: BASE_URL }, { store, fetch, stdout: out.stream });
     expect(logoutExit).toBe(0);
     expect(store.clears).toBe(1);
     expect(JSON.parse(out.read())).toEqual({ ok: true, server_cleared: true });
+
+    // 3b. The revocation is REAL, not just acknowledged: replaying the
+    //     pre-logout cookie against the authed surface must 401. This is
+    //     the assertion `server_cleared: true` alone cannot make — it
+    //     only says the sign-out endpoint answered 2xx (the CLI punch
+    //     list once worried logout left the server session live).
+    const replayed = await fetch(`${BASE_URL}/infra/whoami`, {
+      headers: { ...loginCookie },
+    });
+    expect(replayed.status).toBe(401);
 
     // 4. whoami after logout — no local credential → auth_expired
     //    without a network call (fast-fail commitment).
