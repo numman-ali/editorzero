@@ -48,6 +48,8 @@ This matrix incorporates red-team fixes F12, F13, F15, F19, F22.
 | `doc.purge` | doc:delete + admin (`humanOnly`) | H | — | ✓ | ✓ | — | ✓ | 5 | `doc.purge` (full preimage) |
 | `doc.publish` | doc:publish | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `doc.publish` |
 | `doc.unpublish` | doc:publish | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `doc.unpublish` |
+| `doc.add_guest` (ADR 0040 Step 8: mints the explicit `is_guest = 1` ceiling-crossing edge; role vocabulary excludes `owner`; NO subject standing checks by design; works mid-anomaly, owner-tier-bounded) | permission:grant | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `acl.grant` |
+| `doc.remove_guest` (ADR 0040 Step 8: edge-addressed `(doc, subject)`; works on TRASHED docs — else guest edges in trash are immortal; non-guest edge → `grant_lifecycle_conflict` routing to permission.revoke) | permission:revoke | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `acl.revoke` |
 | `block.set_visibility` (kept distinct — metadata toggle, not CRDT op) | block:write | H | A | ✓ | ✓ | ✓ | ✓ | 120 (bucket `doc.write`) | `block.set_visibility` |
 | `version.create` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `version.create` |
 | `version.list` | doc:read | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |

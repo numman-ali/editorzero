@@ -45,7 +45,7 @@ describe("isApiErrorCode", () => {
     expect(isApiErrorCode("")).toBe(false);
   });
 
-  it("mirrors exactly the 13 server-side typed codes", () => {
-    expect(API_ERROR_CODES).toHaveLength(13);
+  it("mirrors exactly the 14 server-side typed codes", () => {
+    expect(API_ERROR_CODES).toHaveLength(14);
   });
 });

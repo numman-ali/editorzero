@@ -31,6 +31,7 @@ export const API_ERROR_CODES = [
   "permission_denied",
   "not_found",
   "conflict",
+  "grant_lifecycle_conflict",
   "stale_precondition",
   "parent_deleted",
   "has_live_descendants",

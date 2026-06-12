@@ -19,6 +19,7 @@ import type {
   CapabilityId,
   CollectionId,
   DocId,
+  GrantId,
   SpaceId,
   UserId,
   WorkspaceId,
@@ -461,6 +462,53 @@ export class MemberAlreadyExistsError extends EditorZeroError {
     this.workspace_id = params.workspace_id;
     this.user_id = params.user_id;
     this.space_id = params.space_id;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "conflict" };
+  }
+}
+
+/**
+ * The ACL edge for `(resource, subject)` already exists in the OTHER
+ * lifecycle lane (ADR 0040 Step 8; Codex guest-family SHOULD-FIX).
+ * `permission.grant`/`permission.revoke` own `is_guest = 0` edges;
+ * `doc.add_guest`/`doc.remove_guest` own `is_guest = 1` — the verbs
+ * never flip the marker (silently converting would erase the audited
+ * escape-hatch semantics in one direction and downgrade within-standing
+ * access to re-share-proof guest access in the other). One class + one
+ * wire code: the calling verb determines which lane was hit, so each
+ * route's 409 description names its one meaning and the remediation
+ * ("revoke the non-guest grant first" / "use doc.remove_guest").
+ *
+ * Distinct from generic `conflict` for the `MemberAlreadyExistsError`
+ * reason: this is "the edge exists in the wrong lane" (the caller's
+ * next verb is deterministic), not "a concurrent write lost a race"
+ * (backoff + retry). Projects to `{ kind: "conflict" }` — the audit
+ * layer folds write-refused-by-state variants; surfaces disambiguate
+ * on the wire `code`.
+ */
+export class GrantLifecycleConflictError extends EditorZeroError {
+  readonly code = "grant_lifecycle_conflict";
+  readonly httpStatus = 409;
+  /** The lane the EXISTING edge occupies. */
+  readonly existing_lane: "guest" | "non_guest";
+  /** The existing edge's id (forensics; revoke-by-id takes it directly). */
+  readonly grant_id: GrantId;
+
+  constructor(params: {
+    message?: string;
+    existing_lane: "guest" | "non_guest";
+    grant_id: GrantId;
+  }) {
+    super(
+      params.message ??
+        (params.existing_lane === "guest"
+          ? `this edge exists as a GUEST grant (${params.grant_id}); manage it via doc.add_guest / doc.remove_guest`
+          : `this edge exists as a NON-guest grant (${params.grant_id}); revoke it via permission.revoke before adding a guest edge`),
+    );
+    this.existing_lane = params.existing_lane;
+    this.grant_id = params.grant_id;
   }
 
   toHandlerError(): HandlerError {

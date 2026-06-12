@@ -36,7 +36,7 @@ import {
   WORKSPACE_MEMBERS_DDL,
 } from "@editorzero/db";
 import {
-  ConflictError,
+  GrantLifecycleConflictError,
   NotFoundError,
   PermissionDeniedError,
   ValidationError,
@@ -677,7 +677,7 @@ describe("permission.grant — upsert branches", () => {
     expect(row.created_by).toBe(CREATOR);
   });
 
-  it("existing GUEST edge → 409 ConflictError (guest lifecycle owns it)", async () => {
+  it("existing GUEST edge → 409 GrantLifecycleConflictError (guest lifecycle owns it)", async () => {
     // CREATOR re-grants the exact edge doc.add_guest minted for
     // NON_MEMBER on D_CLOSED. NON_MEMBER isn't a workspace member, so
     // the subject rule would also fire — but the guest-conflict check
@@ -699,9 +699,20 @@ describe("permission.grant — upsert branches", () => {
       })
       .execute();
 
-    await expect(
-      permissionGrant.handler(buildCtx(user(CREATOR)), parsedInput({ role: "edit" })),
-    ).rejects.toBeInstanceOf(ConflictError);
+    // Typed lifecycle conflict (Codex guest-family SHOULD-FIX): the
+    // caller's next verb is deterministic — manage via doc.add_guest /
+    // doc.remove_guest — so the error names the lane and the edge.
+    const err = await permissionGrant
+      .handler(buildCtx(user(CREATOR)), parsedInput({ role: "edit" }))
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GrantLifecycleConflictError);
+    if (err instanceof GrantLifecycleConflictError) {
+      expect(err.existing_lane).toBe("guest");
+      expect(err.grant_id).toBe(G_GUEST_LEGACY);
+      expect(err.httpStatus).toBe(409);
+      expect(err.toHandlerError()).toEqual({ kind: "conflict" });
+    }
 
     // The guest edge is untouched — no role flip, no is_guest flip.
     const row = await driver

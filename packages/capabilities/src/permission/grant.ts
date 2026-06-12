@@ -92,7 +92,12 @@
  */
 
 import type { AuditDeny, AuditEffect, DenyReason, HandlerError } from "@editorzero/audit";
-import { ConflictError, NotFoundError, ValidationError } from "@editorzero/errors";
+import {
+  ConflictError,
+  GrantLifecycleConflictError,
+  NotFoundError,
+  ValidationError,
+} from "@editorzero/errors";
 import { CapabilityId, DocId, generateGrantId, SpaceId, UserId } from "@editorzero/ids";
 import type { Principal, UserPrincipal } from "@editorzero/principal";
 import {
@@ -342,11 +347,16 @@ export const permissionGrant: Capability<PermissionGrantInput, PermissionGrantOu
       .executeTakeFirst();
 
     if (existing !== undefined && existing.is_guest === 1) {
-      throw new ConflictError({
+      // Typed lifecycle-lane conflict (Codex guest-family SHOULD-FIX —
+      // was a generic ConflictError): the caller's next verb is
+      // deterministic, not a backoff-retry.
+      throw new GrantLifecycleConflictError({
         message:
           "permission.grant: this edge exists as a GUEST grant; guest access is " +
           "managed via doc.add_guest / doc.remove_guest (flipping is_guest would " +
           "erase the audited escape-hatch marker).",
+        existing_lane: "guest",
+        grant_id: existing.id,
       });
     }
 

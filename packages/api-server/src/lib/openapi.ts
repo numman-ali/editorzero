@@ -104,3 +104,15 @@ export function jsonContent(schema: z.ZodType): {
 export function errEnvelope<C extends string>(code: C) {
   return z.object({ error: z.literal(code) });
 }
+
+/**
+ * Two `{ error: <code> }` envelopes that share ONE HTTP status — the
+ * union documents both literals on the same `describeRoute` response
+ * (OpenAPI `anyOf`). Needed where a route can 409 with distinct codes
+ * (e.g. `conflict` race vs `grant_lifecycle_conflict` lane routing);
+ * runtime still emits exactly one literal per response via
+ * `errorResponse`.
+ */
+export function errEnvelopeOneOf<A extends string, B extends string>(a: A, b: B) {
+  return z.union([errEnvelope(a), errEnvelope(b)]);
+}

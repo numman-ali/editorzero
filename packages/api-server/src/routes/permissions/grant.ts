@@ -31,9 +31,11 @@
  * **403 — `permission_denied`.** Caller lacks the L1 scope, or the
  * granting-authority ladder denied (`acl_deny` on the resource).
  *
- * **409 — `conflict`.** The edge exists as a guest grant (managed via
- * `doc.add_guest`/`doc.remove_guest`), or a concurrent grant/revoke
- * raced this upsert; re-read and retry.
+ * **409 — two codes.** `grant_lifecycle_conflict`: the edge exists as
+ * a GUEST grant — managed via `doc.add_guest`/`doc.remove_guest`, not
+ * here (typed so surfaces route the caller to the right verb instead
+ * of generic retry copy). `conflict`: a concurrent grant/revoke raced
+ * this upsert; re-read and retry.
  */
 
 import { CapabilityId } from "@editorzero/ids";
@@ -45,7 +47,14 @@ import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
 import { errorResponse } from "../../lib/errors";
-import { describeRoute, errEnvelope, factory, jsonContent, validator } from "../../lib/openapi";
+import {
+  describeRoute,
+  errEnvelope,
+  errEnvelopeOneOf,
+  factory,
+  jsonContent,
+  validator,
+} from "../../lib/openapi";
 
 const PERMISSION_GRANT_ID = CapabilityId("permission.grant");
 
@@ -81,8 +90,8 @@ export const grant = new Hono<ApiEnv>().post(
         },
         409: {
           description:
-            "Edge exists as a guest grant (managed via doc.add_guest / doc.remove_guest), or a concurrent grant/revoke raced this upsert.",
-          content: jsonContent(errEnvelope("conflict")),
+            "`grant_lifecycle_conflict` — edge exists as a guest grant (managed via doc.add_guest / doc.remove_guest); `conflict` — a concurrent grant/revoke raced this upsert.",
+          content: jsonContent(errEnvelopeOneOf("grant_lifecycle_conflict", "conflict")),
         },
       },
     }),

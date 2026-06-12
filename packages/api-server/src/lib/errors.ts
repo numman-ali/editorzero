@@ -23,6 +23,7 @@
 
 import {
   ConflictError,
+  GrantLifecycleConflictError,
   HasLiveDescendantsError,
   LastOwnerError,
   MemberAlreadyExistsError,
@@ -46,6 +47,8 @@ export function errorResponse(c: Context<ApiEnv>, err: unknown) {
     return c.json({ error: "permission_denied" } as const, 403);
   if (err instanceof NotFoundError) return c.json({ error: "not_found" } as const, 404);
   if (err instanceof ConflictError) return c.json({ error: "conflict" } as const, 409);
+  if (err instanceof GrantLifecycleConflictError)
+    return c.json({ error: "grant_lifecycle_conflict" } as const, 409);
   if (err instanceof StalePreconditionError)
     return c.json({ error: "stale_precondition" } as const, 409);
   if (err instanceof ParentDeletedError) return c.json({ error: "parent_deleted" } as const, 409);

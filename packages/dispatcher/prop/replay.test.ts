@@ -82,10 +82,12 @@ import {
   collectionRestore,
   collectionUpdate,
   createRegistry,
+  docAddGuest,
   docCreate,
   docDelete,
   docMove,
   docPublish,
+  docRemoveGuest,
   docRename,
   docRestore,
   docUnpublish,
@@ -126,6 +128,10 @@ import { createDispatcher, scopeOnlyGate } from "../src/index";
 const WORKSPACE_ID = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const OWNER = UserId("018f0000-0000-7000-8000-000000000002");
 const SECOND_USER = UserId("018f0000-0000-7000-8000-000000000003");
+// Never seeded as a workspace member — `doc.add_guest` performs no
+// subject standing checks (the verb's point), so the walk can mint a
+// guest edge for an out-of-workspace subject.
+const GUEST_USER = UserId("018f0000-0000-7000-8000-000000000004");
 
 // Genesis values — used for BOTH the direct DB seed and the prepended genesis
 // `ReplayRow`s, so the two cannot drift (single source).
@@ -467,12 +473,14 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       registerCapability(collectionMove),
       registerCapability(collectionDelete),
       registerCapability(collectionRestore),
+      registerCapability(docAddGuest),
       registerCapability(docCreate),
       registerCapability(docRename),
       registerCapability(docMove),
       registerCapability(docPublish),
       registerCapability(docUnpublish),
       registerCapability(docDelete),
+      registerCapability(docRemoveGuest),
       registerCapability(docRestore),
       registerCapability(permissionGrant),
       registerCapability(permissionRevoke),
@@ -656,6 +664,48 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       resource_id: d2,
       subject_kind: "user",
       subject_id: SECOND_USER,
+      role: "view",
+    });
+
+    // ── Guest family (ADR 0040 Step 8) — the explicit `is_guest = 1`
+    //    lane through the SAME `acl.grant` / `acl.revoke` kinds. The
+    //    (d1, user, SECOND_USER) edge is free again after the revoke
+    //    above, so the lifecycle-conflict rails stay out of the walk's
+    //    way. Replay equality across these steps proves the reducer
+    //    carries `is_guest` verbatim (mint), converges role under the
+    //    same grant_id in the guest lane, holds steady on a zero-write
+    //    idempotent re-add, and removes by full preimage.
+    await step(docAddGuest.id, {
+      doc_id: d1,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+      role: "view",
+    });
+    await step(docAddGuest.id, {
+      doc_id: d1,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+      role: "comment",
+    });
+    await step(docAddGuest.id, {
+      doc_id: d1,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+      role: "comment",
+    });
+    await step(docRemoveGuest.id, {
+      doc_id: d1,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+    });
+    // A guest edge that SURVIVES the walk, minted for a subject who was
+    // NEVER a workspace member (no standing checks — the verb's point).
+    // d2 now carries one edge per lane, so the final projection compares
+    // a grants map with BOTH `is_guest` values on the same resource.
+    await step(docAddGuest.id, {
+      doc_id: d2,
+      subject_kind: "user",
+      subject_id: GUEST_USER,
       role: "view",
     });
 

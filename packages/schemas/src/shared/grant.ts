@@ -13,12 +13,24 @@
  * conflation a drift hazard; `packages/scopes` pins both separately.
  */
 
-import { ACCESS_MODES, GRANT_ROLES } from "@editorzero/scopes";
+import { ACCESS_MODES, BASELINE_ACCESS_ROLES, GRANT_ROLES } from "@editorzero/scopes";
 import { z } from "zod";
 
 import { GrantIdOutputSchema, UserIdOutputSchema, WorkspaceIdOutputSchema } from "./ids";
 
 export const GrantRoleSchema = z.enum(GRANT_ROLES);
+
+/**
+ * The role vocabulary a GUEST edge may carry: `GRANT_ROLES` minus
+ * `owner` (the same value set as the space-baseline vocabulary, so the
+ * one `BASELINE_ACCESS_ROLES` array sources both — no third list to
+ * drift). A guest owner-role edge would be a lying row: the ceiling
+ * deliberately ignores guest grants for administer/owner-tier
+ * (re-share-proof by design, ADR 0040 scenario 7), so the schema
+ * refuses to mint the label rather than letting surfaces explain a
+ * fake owner.
+ */
+export const GuestGrantRoleSchema = z.enum(BASELINE_ACCESS_ROLES);
 
 export const AccessModeSchema = z.enum(ACCESS_MODES);
 

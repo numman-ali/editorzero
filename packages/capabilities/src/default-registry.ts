@@ -31,12 +31,14 @@ import { collectionList } from "./collection/list";
 import { collectionMove } from "./collection/move";
 import { collectionRestore } from "./collection/restore";
 import { collectionUpdate } from "./collection/update";
+import { docAddGuest } from "./doc/add_guest";
 import { docCreate } from "./doc/create";
 import { docDelete } from "./doc/delete";
 import { docGet } from "./doc/get";
 import { docList } from "./doc/list";
 import { docMove } from "./doc/move";
 import { docPublish } from "./doc/publish";
+import { docRemoveGuest } from "./doc/remove_guest";
 import { docRename } from "./doc/rename";
 import { docRestore } from "./doc/restore";
 import { docUnpublish } from "./doc/unpublish";
@@ -76,12 +78,14 @@ export function createDefaultRegistry(): Registry {
     registerCapability(collectionMove),
     registerCapability(collectionRestore),
     registerCapability(collectionUpdate),
+    registerCapability(docAddGuest),
     registerCapability(docCreate),
     registerCapability(docDelete),
     registerCapability(docGet),
     registerCapability(docList),
     registerCapability(docMove),
     registerCapability(docPublish),
+    registerCapability(docRemoveGuest),
     registerCapability(docRename),
     registerCapability(docRestore),
     registerCapability(docUnpublish),
