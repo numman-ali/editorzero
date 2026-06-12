@@ -352,7 +352,7 @@ describe("space.archive — registry + audit wiring", () => {
     expect(spaceArchive.category).toBe("mutation");
     expect(spaceArchive.requires).toEqual(["space:manage"]);
     expect(spaceArchive.agentAllowed).toEqual({});
-    expect(spaceArchive.surfaces).toEqual(["api", "cli", "mcp"]);
+    expect(spaceArchive.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     expect(spaceArchive.audit.collapsePolicy).toEqual({ collapsible: false });
   });
 

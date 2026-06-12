@@ -1,6 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { ArchiveSpace } from "../components/archive-space";
 import { EditSpace } from "../components/edit-space";
 import { spaceKindLabel, spaceQueryOptions } from "../lib/spaces";
 
@@ -47,7 +48,12 @@ function SpaceScreen() {
           <span className="status-tag">{spaceKindLabel(space.kind)}</span>
         </div>
       </div>
-      <EditSpace space={space} />
+      <EditSpace space={space}>
+        {/* The space.archive cell — recoverable via space.restore
+            (API/CLI/MCP; the archived-listing gap blocks a browser
+            restore screen, the doc-trash punch-list class). */}
+        <ArchiveSpace spaceId={spaceId} />
+      </EditSpace>
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { formatUpdated } from "../lib/docs";
 import {
@@ -40,6 +40,10 @@ import "./inline-form.css";
  * `space.list` (the grid card). The 409 arm is the explicit-slug
  * sibling collision; everything else gets the generic retry line.
  *
+ * `children` render into the closed state's button row (the space's
+ * other verbs — today the `space.archive` confirm); the open form
+ * hides them, one mutation at a time.
+ *
  * Coverage: orchestration-only — policy lives unit-tested in
  * `lib/spaces.ts`; this file is in the e2e-covered set, proven by the
  * marked Playwright spec (`packages/e2e/test/spaces.spec.ts`).
@@ -50,7 +54,7 @@ type UpdateState =
   | { kind: "saving" }
   | { kind: "failed"; failure: SpaceUpdateFailure };
 
-export function EditSpace({ space }: { space: SpaceDetail }) {
+export function EditSpace({ space, children }: { space: SpaceDetail; children?: ReactNode }) {
   const queryClient = useQueryClient();
   const nameRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -120,9 +124,12 @@ export function EditSpace({ space }: { space: SpaceDetail }) {
         </div>
         <div className="kv">
           <span className="k" />
-          <button type="button" className="btn btn--ghost btn--sm" onClick={openForm}>
-            Edit space
-          </button>
+          <span className="inlineform">
+            <button type="button" className="btn btn--ghost btn--sm" onClick={openForm}>
+              Edit space
+            </button>
+            {children}
+          </span>
         </div>
       </div>
     );

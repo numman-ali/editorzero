@@ -75,3 +75,15 @@
   text-transform: uppercase;
   color: var(--ink-2);
 }
+
+/* Danger variant for a ghost trigger (warn-ink on the ghost outline —
+   the 03-documents documents-danger idiom, restated in the shared
+   sheet for non-editor hosts). */
+.inlineform-danger {
+  color: var(--warn-ink);
+  border-color: var(--hair-strong);
+}
+
+.inlineform-danger:hover {
+  border-color: var(--warn-ink);
+}

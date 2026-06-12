@@ -3,6 +3,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import {
+  archiveSpace,
+  classifySpaceArchiveError,
   classifySpaceCreateError,
   classifySpaceUpdateError,
   createSpace,
@@ -12,6 +14,7 @@ import {
   SPACE_BASELINE_ROLES,
   SPACE_LIST_QUERY_KEY,
   SPACE_TYPES,
+  spaceArchiveFailureMessage,
   spaceCreateFailureMessage,
   spaceKindLabel,
   spaceListQueryOptions,
@@ -310,5 +313,43 @@ describe("classifySpaceUpdateError + spaceUpdateFailureMessage", () => {
     expect(classifySpaceUpdateError(new ApiError(500, "internal"))).toBe("update_failed");
     expect(classifySpaceUpdateError(new TypeError("fetch failed"))).toBe("update_failed");
     expect(spaceUpdateFailureMessage("update_failed")).toContain("Try again");
+  });
+});
+
+describe("archiveSpace", () => {
+  it("resolves the soft-delete echo on 200", async () => {
+    const archived = await archiveSpace(
+      "018f0000-0000-7000-8000-00000000005a",
+      jsonClient(200, { space_id: "018f0000-0000-7000-8000-00000000005a", deleted_at: 9 }),
+    );
+    expect(archived.deleted_at).toBe(9);
+  });
+
+  it("throws ApiError with the typed envelope code on the 409 descendants refusal", async () => {
+    await expect(
+      archiveSpace(
+        "018f0000-0000-7000-8000-00000000005a",
+        jsonClient(409, { error: "has_live_descendants" }),
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "has_live_descendants" });
+  });
+
+  it("throws an ApiError instance on a 404 (already archived — trash-invisible)", async () => {
+    await expect(
+      archiveSpace("018f0000-0000-7000-8000-00000000005a", jsonClient(404, { error: "not_found" })),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("classifySpaceArchiveError + spaceArchiveFailureMessage", () => {
+  it("maps the 409 to not_empty with the actionable empty-it-first line", () => {
+    expect(classifySpaceArchiveError(new ApiError(409, "has_live_descendants"))).toBe("not_empty");
+    expect(spaceArchiveFailureMessage("not_empty")).toContain("Empty it first");
+  });
+
+  it("maps everything else to the generic retry arm", () => {
+    expect(classifySpaceArchiveError(new ApiError(500, "internal"))).toBe("archive_failed");
+    expect(classifySpaceArchiveError(new TypeError("fetch failed"))).toBe("archive_failed");
+    expect(spaceArchiveFailureMessage("archive_failed")).toContain("Try again");
   });
 });

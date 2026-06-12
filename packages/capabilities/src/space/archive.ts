@@ -69,7 +69,11 @@ export const spaceArchive: Capability<SpaceArchiveInput, SpaceArchiveOutput> = {
   output: SpaceArchiveOutputSchema,
   requires: ["space:manage"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the space detail screen's Archive confirm (the
+  // space.archive × Web UI cell) — proven end-to-end by the marked
+  // Playwright spec in packages/e2e (proves-capability-cell:
+  // space.archive).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "space", id: input.space_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

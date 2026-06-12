@@ -8,6 +8,7 @@ import { CREDENTIALS } from "./credentials";
  * proves-capability-cell: space.get
  * proves-capability-cell: space.create
  * proves-capability-cell: space.update
+ * proves-capability-cell: space.archive
  *
  * The `space.list` + `space.get` × Web UI parity cells (invariant 4,
  * ADR 0033 §3 / 0040 H11). The marker lines above are load-bearing:
@@ -212,4 +213,54 @@ test("space.update: the Edit disclosure patches the row; personal spaces pin the
   await expect(page.getByRole("combobox", { name: "Space type" })).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: "Baseline access" })).toHaveCount(0);
   await page.getByRole("button", { name: "Cancel" }).click();
+});
+
+test("space.archive: the confirm archives an empty space; live descendants refuse with the typed 409", async ({
+  page,
+}) => {
+  await signIn(page);
+
+  // 409 first: bind a live collection to Engineering over the API
+  // (collection.create's space_id regime) — archiving it must refuse.
+  await page.goto("/space");
+  await page.getByRole("link", { name: "Engineering" }).click();
+  await page.waitForURL(/\/space\/[0-9a-f-]{36}$/u);
+  const engineeringId = new URL(page.url()).pathname.split("/").at(-1);
+  const bound = await page.request.post("/collections/create", {
+    data: { title: "Engineering Docs", space_id: engineeringId },
+  });
+  expect(bound.ok()).toBe(true);
+
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await expectNoAxeViolations(page); // the open confirm is part of the audited surface
+  await page.getByRole("button", { name: "Archive Space" }).click();
+  await expect(page.getByRole("alert")).toContainText("Empty it first");
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  // Happy path: Design Studio is empty — archive lands back on the
+  // grid with the card gone (the list is trash-invisible).
+  await page.goto("/space");
+  await page.getByRole("link", { name: "Design Studio" }).click();
+  await page.waitForURL(/\/space\/[0-9a-f-]{36}$/u);
+  const designId = new URL(page.url()).pathname.split("/").at(-1);
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.getByRole("button", { name: "Archive Space" }).click();
+  await page.waitForURL((url) => url.pathname === "/space");
+  await expect(page.locator(".sp .nm")).toHaveText(["Engineering", "Personal", "Product"]);
+  // The detail now 404s — trash-invisible via the same gate.
+  const gone = await page.request.get(`/spaces/get/${designId}`);
+  expect(gone.status()).toBe(404);
+
+  // Invariant 6: restore over the API (the archived-spaces listing is
+  // the doc-trash gap class — no browser restore screen yet) and the
+  // card returns with its patched fields intact.
+  const restored = await page.request.post(`/spaces/restore/${designId}`);
+  expect(restored.ok()).toBe(true);
+  await page.goto("/space");
+  await expect(page.locator(".sp .nm")).toHaveText([
+    "Design Studio",
+    "Engineering",
+    "Personal",
+    "Product",
+  ]);
 });

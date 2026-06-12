@@ -1,7 +1,7 @@
 /**
- * `space.list` + `space.get` + `space.create` + `space.update`
- * data-layer — the Spaces screens' capability cells (invariant 4,
- * ADR 0033 §3 / 0040 H11).
+ * `space.list` + `space.get` + `space.create` + `space.update` +
+ * `space.archive` data-layer — the Spaces screens' capability cells
+ * (invariant 4, ADR 0033 §3 / 0040 H11).
  *
  * Same split as `docs.ts`: `fetchSpaceList` is the testable plain
  * function; `spaceListQueryOptions` is the react-query binding consumed
@@ -234,4 +234,44 @@ export function spaceUpdateFailureMessage(kind: SpaceUpdateFailure): string {
   return kind === "duplicate_slug"
     ? "A Space with this slug already exists. Pick a different slug."
     : "Update failed. Try again.";
+}
+
+type SpaceArchiveResponse = Awaited<
+  ReturnType<ApiClient["spaces"]["archive"][":space_id"]["$post"]>
+>;
+type SpaceArchiveSuccess = Extract<SpaceArchiveResponse, { status: 200 }>;
+export type SpaceArchived = Awaited<ReturnType<SpaceArchiveSuccess["json"]>>;
+
+/**
+ * Soft-delete a space (`space.archive` — recoverable per invariant 6:
+ * `space.restore` revives the row AND its ACL 1:1, grants ride
+ * through). The capability REFUSES while live collections, docs, or
+ * members remain (no cascade — ADR 0017 anchors soft-delete on a 1:1
+ * inverse); the 409's counts don't cross the wire (code-only
+ * envelope), so the browser arm is a static "empty it first". The
+ * archived-spaces *listing* is the same capability gap as doc trash —
+ * restore is reachable via API/CLI/MCP only for now.
+ */
+export async function archiveSpace(
+  spaceId: string,
+  client: ApiClient = apiClient,
+): Promise<SpaceArchived> {
+  const res = await client.spaces.archive[":space_id"].$post({ param: { space_id: spaceId } });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type SpaceArchiveFailure = "not_empty" | "archive_failed";
+
+/** 409 = live descendants; emptying the space is the only path forward. */
+export function classifySpaceArchiveError(error: unknown): SpaceArchiveFailure {
+  return isApiError(error) && error.status === 409 ? "not_empty" : "archive_failed";
+}
+
+export function spaceArchiveFailureMessage(kind: SpaceArchiveFailure): string {
+  return kind === "not_empty"
+    ? "This Space still has collections, docs, or members in it. Empty it first."
+    : "Archive failed. Try again.";
 }
