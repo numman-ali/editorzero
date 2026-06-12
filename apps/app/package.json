@@ -20,13 +20,16 @@
     "@fontsource-variable/archivo": "5.2.8",
     "@fontsource-variable/jetbrains-mono": "5.2.8",
     "@fontsource-variable/space-grotesk": "5.2.10",
+    "@hocuspocus/provider": "catalog:",
     "@tanstack/react-query": "5.100.14",
     "@tanstack/react-router": "1.170.10",
     "@tiptap/core": "catalog:",
+    "@tiptap/extension-collaboration": "catalog:",
     "@tiptap/pm": "catalog:",
     "@tiptap/react": "catalog:",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "yjs": "catalog:"
   },
   "devDependencies": {
     "@tanstack/router-cli": "1.167.12",

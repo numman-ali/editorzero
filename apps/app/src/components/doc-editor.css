@@ -52,6 +52,18 @@
   font-size: 12.5px;
 }
 
+/* Pre-sync placeholder for the collab canvas (the editor mounts only
+   after the first sync — see collab-doc-editor.tsx). */
+.doc-editor-connecting {
+  display: block;
+  padding: 20px 15px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
 .doc-editor-surface {
   caret-color: var(--ultra);
   padding-left: 15px;

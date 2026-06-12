@@ -420,8 +420,8 @@ describe("doc.apply_update", () => {
     expect(docApplyUpdate.id).toBe("doc.apply_update");
     expect(docApplyUpdate.category).toBe("mutation");
     expect(docApplyUpdate.requires).toEqual(["doc:write", "block:write"]);
-    // ui arrives with the SPA collab-provider slice (UI_PENDING row).
-    expect(docApplyUpdate.surfaces).toEqual(["api", "cli", "mcp"]);
+    // ui = the live collab editor (the SPA provider slice, ADR 0043).
+    expect(docApplyUpdate.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     expect(docApplyUpdate.agentAllowed).toBeDefined();
   });
 

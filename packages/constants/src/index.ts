@@ -243,6 +243,15 @@ export const COLLECTION_MAX_DEPTH: number = 8;
 /** Better Auth secret rotation cadence (ADR 0010). */
 export const BETTER_AUTH_ROTATION_MS: number = 90 * DAY_MS;
 
+// ── Collab WS revocation protocol (ADR 0043 Decision 5) ────────────────────
+export { COLLAB_REVOKED_CLOSE_CODE, COLLAB_REVOKED_REASON } from "./collab";
+
+// ── Durable-format names ───────────────────────────────────────────────────
+//
+// Same charter again: one value, two sides of the wire. The server write
+// path (@editorzero/sync) and the browser collab binding (apps/app) must
+// agree on the Y.XmlFragment name; see the module docstring.
+export { DOC_FRAGMENT } from "./doc-fragment";
 // ── Cross-surface URL contract (ADR 0035 §2) ───────────────────────────────
 //
 // Not a number, but the same SSOT charter: one enumeration, consumed by

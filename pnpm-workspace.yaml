@@ -31,9 +31,13 @@ catalog:
   # 3.26.1 / 3.0.5 (published 2026-06-11) sit inside the release-age cooldown.
   # Bump the whole line together, never one package.
   "@tiptap/core": 3.24.0
+  "@tiptap/extension-collaboration": 3.24.0
   "@tiptap/pm": 3.24.0
   "@tiptap/react": 3.24.0
   "@tiptap/y-tiptap": 3.0.4
+  # Collab client (ADR 0038 "all @hocuspocus/* in lockstep"): the provider
+  # matches the server's pinned 3.4.4 — same monorepo, same wire protocol.
+  "@hocuspocus/provider": 3.4.4
   # PWA layer (ADR 0039): vite-plugin-pwa EXACT (1.3.0 published 2026-05-05,
   # past the cooldown; vite ^8 peer matches ADR 0035). workbox-build/-window
   # are its REQUIRED peers; the other workbox-* are sw.ts's own imports —

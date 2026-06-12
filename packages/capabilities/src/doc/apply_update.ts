@@ -103,9 +103,11 @@ export const docApplyUpdate: Capability<Input, Output> = {
   output: DocApplyUpdateOutputSchema,
   requires: ["doc:write", "block:write"],
   agentAllowed: {},
-  // The `ui` cell lands with the SPA collab-provider slice (ADR 0043
-  // Decision 2) — the live editor over WS is its proving spec.
-  surfaces: ["api", "cli", "mcp"],
+  // `ui` = the live collab editor (the SPA provider slice, ADR 0043
+  // Decision 2): browser keystrokes ride WS deltas that the write
+  // gate dispatches through THIS capability. Proven by the marked
+  // Playwright spec (packages/e2e/test/live-collab.spec.ts).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

@@ -128,6 +128,7 @@
  */
 
 import type { AuditTx } from "@editorzero/audit";
+import { COLLAB_REVOKED_CLOSE_CODE, COLLAB_REVOKED_REASON } from "@editorzero/constants/collab";
 import type { DocUpdatesReader, DocUpdatesWriter, SystemDb } from "@editorzero/db";
 import type { DocId, WorkspaceId } from "@editorzero/ids";
 import { type Logger, noopLogger } from "@editorzero/observability";
@@ -299,14 +300,14 @@ type DirectConnection = Awaited<ReturnType<Hocuspocus["openDirectConnection"]>>;
 type WsConnectionArgs = Parameters<Hocuspocus["handleConnection"]>;
 
 /**
- * WebSocket close code for revocation closes (app range 4000–4999;
- * ADR 0043 Decision 5). Sent both at the SOCKET level (the
- * composition root's registry closing a subject's sockets) and the
- * per-DOCUMENT level (`closeDocumentConnections`). A legitimate
- * client reads it as "re-auth, don't blind-retry" — distinguishable
- * from transport hiccups.
+ * Revocation-close protocol constants (ADR 0043 Decision 5). Defined
+ * in `@editorzero/constants` — the browser collab binding classifies
+ * inbound closes against the same values — and re-exported here so
+ * sync's public surface is unchanged. Sent both at the SOCKET level
+ * (the composition root's registry closing a subject's sockets) and
+ * the per-DOCUMENT level (`closeDocumentConnections`).
  */
-export const COLLAB_REVOKED_CLOSE_CODE = 4401;
+export { COLLAB_REVOKED_CLOSE_CODE };
 
 export class HocuspocusSync {
   readonly #server: Hocuspocus;
@@ -632,7 +633,7 @@ export class HocuspocusSync {
     document.connections.forEach(({ connection }) => {
       connection.close({
         code: COLLAB_REVOKED_CLOSE_CODE,
-        reason: "authorization revoked",
+        reason: COLLAB_REVOKED_REASON,
       });
       closed += 1;
     });

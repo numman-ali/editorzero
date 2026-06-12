@@ -32,9 +32,9 @@
  * on that upstream.
  *
  * `DOC_FRAGMENT` is the Y.XmlFragment name reads and writes must
- * agree on. The string predates ADR 0038 (it was the BlockNote
- * binding's fragment name) and is part of the durable format — do not
- * rename the VALUE without a content migration.
+ * agree on. It lives in `@editorzero/constants` (durable format; the
+ * browser collab binding shares it — see the constant's docstring)
+ * and is re-exported here so sync's public surface is unchanged.
  */
 
 import {
@@ -45,11 +45,12 @@ import {
   type PartialBlockInput,
   pmDocToBlocks,
 } from "@editorzero/blocks";
+import { DOC_FRAGMENT } from "@editorzero/constants/doc-fragment";
 import { Node as PmNode } from "@tiptap/pm/model";
 import { updateYFragment, yXmlFragmentToProseMirrorRootNode } from "@tiptap/y-tiptap";
 import type * as Y from "yjs";
 
-export const DOC_FRAGMENT = "document-store";
+export { DOC_FRAGMENT };
 
 /** A seed block: caller-supplied (pre-minted) id is mandatory — audit
  * invariant 3a records every seeded block id. */

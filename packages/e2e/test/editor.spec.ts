@@ -31,8 +31,26 @@ import { CREDENTIALS } from "./credentials";
  * `insert`/`update` ops, and the reload assertion can only pass if the
  * server actually persisted them — a screen that faked its save would
  * fail there.
+ *
+ * Since the collab slice (ADR 0043) the doc screen mounts the LIVE
+ * canvas by default and this whole flow is its degrade path — the
+ * beforeEach below blocks the WS upgrade so every test here runs the
+ * HTTP-first editor deterministically. The live lane's proof is
+ * `live-collab.spec.ts`.
  */
 test.describe.configure({ mode: "serial" });
+
+// Pin the HTTP-first lane: the doc screen mounts the live collab canvas
+// by default now (ADR 0043 — live-collab.spec.ts proves that lane), and this
+// spec's cells — doc.update's diff-and-Save flow, the dirty-canvas
+// rename gate — exist only in its DEGRADE path. Closing the WS upgrade
+// before any page script runs makes the fallback deterministic: the
+// provider's first pre-sync close renders the HTTP editor.
+test.beforeEach(async ({ page }) => {
+  await page.routeWebSocket(/\/collab$/u, (ws) => {
+    ws.close({ code: 4000, reason: "e2e: collab lane blocked" });
+  });
+});
 
 const DOC_TITLE = "Editor proving ground";
 const EDITED_LINE = "Written from the browser editor.";

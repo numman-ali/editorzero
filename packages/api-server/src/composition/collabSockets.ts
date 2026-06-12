@@ -27,13 +27,13 @@
  * (the future SPA provider treats it as "re-auth, don't blind-retry").
  */
 
+import { COLLAB_REVOKED_CLOSE_CODE, COLLAB_REVOKED_REASON } from "@editorzero/constants/collab";
 import type { SessionId, UserId } from "@editorzero/ids";
-import { COLLAB_REVOKED_CLOSE_CODE } from "@editorzero/sync";
 
 /**
- * Re-exported from `@editorzero/sync` (the protocol layer owns the
- * close-code vocabulary — `closeDocumentConnections` sends the same
- * code at per-document scope).
+ * Re-exported from `@editorzero/constants` (one protocol vocabulary,
+ * both sides of the wire — `closeDocumentConnections` sends the same
+ * code at per-document scope; the SPA provider classifies against it).
  */
 export { COLLAB_REVOKED_CLOSE_CODE };
 
@@ -78,7 +78,7 @@ export function createCollabSocketRegistry(): CollabSocketRegistry {
       entries.delete(entry);
       closed += 1;
       try {
-        entry.socket.close(COLLAB_REVOKED_CLOSE_CODE, "authorization revoked");
+        entry.socket.close(COLLAB_REVOKED_CLOSE_CODE, COLLAB_REVOKED_REASON);
       } catch {
         // A socket racing its own teardown can throw on close; the
         // entry is already deregistered and the transport is dying —

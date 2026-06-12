@@ -1,7 +1,7 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { DocEditor } from "../components/doc-editor";
+import { CollabDocEditor } from "../components/collab-doc-editor";
 import { MoveDoc } from "../components/move-doc";
 import { PublishDoc } from "../components/publish-doc";
 import { SharingDoc } from "../components/sharing-doc";
@@ -10,10 +10,12 @@ import { docQueryOptions } from "../lib/doc-editor";
 
 /**
  * `/doc/$docId` — the doc screen: the `doc.get` × Web UI parity cell
- * (load) hosting the `doc.update` cell (the editor's Save). Singular
- * `/doc` on purpose: `/docs` is a RESERVED API prefix
- * (`@editorzero/constants` — the trunk owns it for `/docs/list` etc.),
- * and client routes must never shadow the API namespace (ADR 0035 §2).
+ * (load) hosting the live collab canvas (the `doc.apply_update` cell,
+ * ADR 0043) with the HTTP-first editor (the `doc.update` cell — Save
+ * lane) as its degrade path. Singular `/doc` on purpose: `/docs` is a
+ * RESERVED API prefix (`@editorzero/constants` — the trunk owns it for
+ * `/docs/list` etc.), and client routes must never shadow the API
+ * namespace (ADR 0035 §2).
  *
  * The loader warms the cache (`ensureQueryData` — a 404/403 rejects
  * into the route error boundary before any chrome renders); the
@@ -71,7 +73,15 @@ function DocScreen() {
           disclosure because its open state is a table — no place in the
           header's inline row. */}
       <SharingDoc docId={docId} />
-      <DocEditor key={docId} docId={docId} docTitle={data.doc.title} initialBlocks={data.blocks} />
+      {/* The live collab canvas (doc.apply_update cell, ADR 0043); it
+          degrades to the HTTP-first DocEditor (the doc.update cell)
+          when the WS lane is unavailable or pinned read-only. */}
+      <CollabDocEditor
+        key={docId}
+        docId={docId}
+        docTitle={data.doc.title}
+        initialBlocks={data.blocks}
+      />
     </section>
   );
 }
