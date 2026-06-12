@@ -105,7 +105,9 @@ describe("doc.create handler", () => {
     expect(out.workspace_id).toBe(WORKSPACE_A);
     expect(out.title).toBe("Hello, World!");
     expect(out.slug).toBe("hello-world");
-    expect(out.visibility).toBe("workspace");
+    expect(out.access_mode).toBe("space");
+    expect(out.published_slug).toBeNull();
+    expect(out.published_at).toBeNull();
     expect(out.collection_id).toBeNull();
     expect(out.order_key).toBe(out.doc_id);
     // created_by is carried on the output so the audit effect can record it
@@ -122,8 +124,10 @@ describe("doc.create handler", () => {
     expect(row.id).toBe(out.doc_id);
     expect(row.title).toBe("Hello, World!");
     expect(row.slug).toBe("hello-world");
-    expect(row.visibility).toBe("workspace");
-    expect(row.visibility_version).toBe(0);
+    expect(row.access_mode).toBe("space");
+    expect(row.published_slug).toBeNull();
+    expect(row.published_at).toBeNull();
+    expect(row.render_version).toBe(0);
     expect(row.created_by).toBe(ALICE);
     expect(row.created_at).toBe(42);
     expect(row.updated_at).toBe(42);
@@ -138,15 +142,17 @@ describe("doc.create handler", () => {
     expect(heading.content[0]?.text).toBe("Hello, World!");
   });
 
-  it("lands new docs at workspace root with visibility `workspace` (v1 scope)", async () => {
-    // Both `visibility` and `collection_id` are intentionally not
-    // caller-settable in v1 — see `create.ts` file header. The
-    // handler hardcodes `visibility: "workspace"` and
-    // `collection_id: null`, so a fresh doc always presents that
-    // way regardless of what the caller tried to supply.
+  it("lands new docs at workspace root, unpublished, with access_mode `space` (ADR 0040 Step 5)", async () => {
+    // `access_mode` is intentionally not caller-settable — the mode
+    // switch is the Step-8 ACL capability; see `create.ts` file
+    // header. The handler hardcodes `access_mode: "space"`, a NULL
+    // publish pair, and `collection_id: null` (when omitted), so a
+    // fresh doc always presents that way regardless of what the
+    // caller tried to supply.
     const ctx = buildCtx(userPrincipal());
     const out = await docCreate.handler(ctx, { title: "Plain notes" });
-    expect(out.visibility).toBe("workspace");
+    expect(out.access_mode).toBe("space");
+    expect(out.published_slug).toBeNull();
     expect(out.collection_id).toBeNull();
 
     const row = await driver
@@ -155,25 +161,29 @@ describe("doc.create handler", () => {
       .selectAll()
       .executeTakeFirstOrThrow();
     expect(row.collection_id).toBeNull();
-    expect(row.visibility).toBe("workspace");
+    expect(row.access_mode).toBe("space");
+    expect(row.published_slug).toBeNull();
+    expect(row.published_at).toBeNull();
   });
 
-  it("rejects caller-supplied `visibility` at the input boundary (strict mode)", () => {
+  it("rejects caller-supplied `access_mode` (and legacy `visibility`) at the input boundary", () => {
     // `InputSchema.strict()` emits a zod `unrecognized_keys` issue
-    // for any field the schema doesn't know. That's how we refuse
-    // to print visibility labels the read path doesn't honour
-    // (Codex F103 P1 — `"private"` today would be false privacy,
-    // `"public"` would bypass `doc:publish`). When the read path
-    // honours visibility, `visibility` becomes accepted input.
+    // for any field the schema doesn't know. That's how we refuse a
+    // caller-chosen read scope before the grant machinery exists
+    // (Codex F103 P1 lineage — a `"private"` doc nobody's ACL honours
+    // yet would be false privacy). `access_mode` becomes accepted
+    // input only via the Step-8 mode-switch capability, not here.
+    // The retired `visibility` vocabulary must stay rejected too —
+    // a pre-Step-5 client sending it deserves a 400, not silence.
     //
     // `collection_id` is accepted as of the collections-slice 1
     // widening (see `collection.create` sibling); the live-
     // collection check is exercised in the integration scenarios
     // below.
     for (const bad of [
+      { title: "x", access_mode: "private" },
+      { title: "x", access_mode: "space" },
       { title: "x", visibility: "public" },
-      { title: "x", visibility: "private" },
-      { title: "x", visibility: "workspace" },
       { title: "x", stray: 1 },
     ]) {
       const result = docCreate.input.safeParse(bad);
@@ -563,7 +573,9 @@ describe("doc.create audit projections", () => {
     slug: "t",
     order_key: "018f0000-0000-7000-8000-0000000000d9",
     created_by: ALICE,
-    visibility: "workspace" as const,
+    access_mode: "space" as const,
+    published_slug: null,
+    published_at: null,
     seed_blocks: sampleSeedBlocks,
   };
 
@@ -578,7 +590,7 @@ describe("doc.create audit projections", () => {
       expect(effect.slug).toBe("t");
       expect(effect.order_key).toBe(sampleOutput.order_key);
       expect(effect.created_by).toBe(ALICE);
-      expect(effect.visibility).toBe("workspace");
+      expect(effect.access_mode).toBe("space");
       // Invariant 3a: pre-minted block IDs land in the audit envelope
       // so a later replay can reconstruct the initial Y.Doc fragment.
       expect(effect.seed_blocks).toEqual(sampleSeedBlocks);

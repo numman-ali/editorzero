@@ -38,10 +38,10 @@
  * Symmetric pair with `collection.restore` — who can delete must
  * retain the rollback.
  *
- * **No `visibility_version` bump.** Unlike `doc.delete`, collections
+ * **No `render_version` bump.** Unlike `doc.delete`, collections
  * don't back a public-route projection — there is no cached render
- * keyed on a collection's visibility to invalidate. The column
- * simply doesn't exist on `collections`.
+ * keyed on a collection to invalidate. The column simply doesn't
+ * exist on `collections`.
  *
  * **Cascade side-effects deferred.** ADR 0017 lists search re-index /
  * notification cancel / etc. as the cascade; none of those backing

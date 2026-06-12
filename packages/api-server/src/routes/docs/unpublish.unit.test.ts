@@ -43,8 +43,9 @@ const VALID_DOC_ID = "018f0000-0000-7000-8000-0000000000a1";
 
 interface FixtureOutput {
   readonly doc_id: string;
-  readonly visibility: "workspace";
-  readonly visibility_version: number;
+  readonly published_slug: null;
+  readonly published_at: null;
+  readonly render_version: number;
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
@@ -68,8 +69,9 @@ describe("POST /docs/unpublish/:doc_id", () => {
     let captured: DispatchInvocation | undefined;
     const output: FixtureOutput = {
       doc_id: VALID_DOC_ID,
-      visibility: "workspace",
-      visibility_version: 5,
+      published_slug: null,
+      published_at: null,
+      render_version: 5,
     };
     const app = buildApp(async (invocation) => {
       captured = invocation;

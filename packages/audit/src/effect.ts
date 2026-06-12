@@ -29,15 +29,8 @@ import type {
   WebhookId,
   WorkspaceId,
 } from "@editorzero/ids";
-import type { Scope } from "@editorzero/scopes";
-import type {
-  BlockPostState,
-  BlockVisibility,
-  DocPurgePreimage,
-  DocVisibility,
-  Role,
-  SeedBlock,
-} from "./types";
+import type { AccessMode, Scope } from "@editorzero/scopes";
+import type { BlockPostState, BlockVisibility, DocPurgePreimage, Role, SeedBlock } from "./types";
 
 // prettier-ignore
 export type AuditEffect =
@@ -143,7 +136,7 @@ export type AuditEffect =
       // envelope `principal_id`, which for an agent write is the agent, not
       // the human (Codex review HIGH 1).
       created_by: UserId;
-      visibility: DocVisibility;
+      access_mode: AccessMode;
       seed_blocks: SeedBlock[];
     }
   // `slug` is re-derived from the new title by the handler (slugify) and
@@ -158,7 +151,14 @@ export type AuditEffect =
       new_collection_id: CollectionId | null;
       new_order_key: string;
     }
-  | { kind: "doc.publish"; doc_id: DocId; published_at: number }
+  // `published_slug` is handler-COMPUTED (collision-suffixed against the
+  // live published set), so the effect must carry it — replay can never
+  // re-derive it (the same effect-carries-the-handler-computed-value
+  // contract as `doc.rename`'s slug). On an idempotent re-publish both
+  // values are the doc's existing ones (stable URL, original timestamp).
+  | { kind: "doc.publish"; doc_id: DocId; published_slug: string; published_at: number }
+  // Clears the publish dimension — deterministic (both fields land on
+  // null), so no payload beyond the target.
   | { kind: "doc.unpublish"; doc_id: DocId }
   | { kind: "doc.soft_delete"; doc_id: DocId; deleted_at: number }
   | { kind: "doc.restore"; doc_id: DocId }

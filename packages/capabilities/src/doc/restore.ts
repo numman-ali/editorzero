@@ -33,7 +33,7 @@
  * would muddle the audit log with no-op restore rows. Callers
  * observing 404 on a restore retry know the doc is live, which is
  * what they wanted anyway. (Also: no state change means no
- * `visibility_version` bump, which matches the already-deleted short-
+ * `render_version` bump, which matches the already-deleted short-
  * circuit in `doc.delete` — see the idempotency rationale there.)
  *
  * **Audit effect.** `{ kind: "doc.restore", doc_id }`. Symmetric with
@@ -43,11 +43,17 @@
  * `doc.delete` id → `doc.soft_delete` effect split, because there's
  * no "hard restore" to disambiguate from).
  *
- * **Public-route cache invalidation — `visibility_version` bump.**
+ * **Render-cache invalidation — `render_version` bump. The publish
+ * dimension stays CLEARED (ADR 0040 Step 5):** `doc.soft_delete`
+ * nulled `published_slug`/`published_at`, and restore deliberately
+ * does NOT bring them back — a restored doc re-enters the workspace
+ * unpublished, and re-exposure is a separate, audited `doc.publish`
+ * (no surprise-republication; the old URL may have been reclaimed
+ * while the doc sat in the trash).**
  * Symmetric with `doc.delete`: a restore of a *published* doc flips
  * the public-route from "404" back to "renders", which only survives
- * cache invalidation if `visibility_version` bumps. Same
- * `eb("visibility_version", "+", 1)` increment pattern
+ * cache invalidation if `render_version` bumps. Same
+ * `eb("render_version", "+", 1)` increment pattern
  * publish/unpublish/delete use (architecture.md §5.4).
  *
  * **v1 scope — `deleted_at` clear + version bump only; cascade side-
@@ -86,7 +92,7 @@ const DOC_RESTORE_ID = CapabilityId("doc.restore");
 // `DocRestoreInputSchema` / `DocRestoreOutputSchema` are the single source
 // (ADR 0034), reused verbatim by the API route's `validator` / `resolver`.
 // Input is the `doc.delete` mirror (single UUIDv7 `doc_id`, `.strict()`);
-// output carries `visibility_version` so the caller can swap their cached
+// output carries `render_version` so the caller can swap their cached
 // public-route key after a restore. The schema rationale lives in the file
 // header above and at the definition in `@editorzero/schemas/doc/restore`.
 
@@ -168,12 +174,12 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
       .updateTable("docs")
       .set((eb) => ({
         deleted_at: null,
-        visibility_version: eb("visibility_version", "+", 1),
+        render_version: eb("render_version", "+", 1),
         updated_at: now,
       }))
       .where("id", "=", input.doc_id)
       .where("deleted_at", "is not", null)
-      .returning(["id", "visibility_version"])
+      .returning(["id", "render_version"])
       .executeTakeFirst();
 
     if (row === undefined) {
@@ -182,7 +188,7 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
 
     return {
       doc_id: row.id,
-      visibility_version: row.visibility_version,
+      render_version: row.render_version,
     };
   },
 };

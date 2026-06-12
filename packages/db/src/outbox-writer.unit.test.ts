@@ -34,8 +34,8 @@ describe("createOutboxWriter", () => {
     await driver.withSystemTx((tx) =>
       writer.append(asAuditTx(tx), {
         workspace_id: WORKSPACE_ID,
-        event: "doc.visibility_changed",
-        payload: { doc_id: "d_1", visibility: "public", visibility_version: 2 },
+        event: "doc.publish_changed",
+        payload: { doc_id: "d_1", published_slug: "d-1", published_at: 99, render_version: 2 },
       }),
     );
 
@@ -44,7 +44,7 @@ describe("createOutboxWriter", () => {
     const row = rows[0];
     if (row === undefined) throw new Error("expected one row");
     expect(row.workspace_id).toBe(WORKSPACE_ID);
-    expect(row.event).toBe("doc.visibility_changed");
+    expect(row.event).toBe("doc.publish_changed");
     expect(row.created_at).toBe(123_456);
     expect(row.forwarded_at).toBeNull();
     expect(row.forwarded_to).toBeNull();

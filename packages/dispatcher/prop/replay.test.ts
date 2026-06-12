@@ -199,10 +199,11 @@ function readIdField(result: unknown, key: string): string {
  * Project the live DB into the same `PersistentWorkspaceState` the reducer
  * reconstructs — the right-hand side of the invariant-3a equality. Scoped to
  * the one workspace under test. Deliberately selects ONLY the projected
- * columns: `created_at` / `updated_at` / `diagnostic_salt` / `visibility_
- * version` are excluded by construction (see `@editorzero/audit` state.ts —
- * they are not audit-reconstructable), and `settings` is parsed to the object
- * form the reducer holds.
+ * columns: `created_at` / `updated_at` / `diagnostic_salt` /
+ * `render_version` are excluded by construction (see `@editorzero/audit`
+ * state.ts — they are not audit-reconstructable / are derivable
+ * bookkeeping), and `settings` is parsed to the object form the reducer
+ * holds.
  */
 async function projectFromDb(d: SqliteDriver, ws: WorkspaceId): Promise<PersistentWorkspaceState> {
   const sys = d.system();
@@ -276,7 +277,9 @@ async function projectFromDb(d: SqliteDriver, ws: WorkspaceId): Promise<Persiste
       "title",
       "slug",
       "order_key",
-      "visibility",
+      "access_mode",
+      "published_slug",
+      "published_at",
       "created_by",
       "deleted_at",
     ])
@@ -289,7 +292,9 @@ async function projectFromDb(d: SqliteDriver, ws: WorkspaceId): Promise<Persiste
       title: r.title,
       slug: r.slug,
       order_key: r.order_key,
-      visibility: r.visibility,
+      access_mode: r.access_mode,
+      published_slug: r.published_slug,
+      published_at: r.published_at,
       created_by: r.created_by,
       deleted_at: r.deleted_at,
     };
@@ -569,7 +574,17 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
     await step(docRename.id, { doc_id: d1, title: "Doc One Renamed" });
     await step(docMove.id, { doc_id: d1, new_collection_id: c1 });
     await step(docPublish.id, { doc_id: d1 });
+    // Idempotent re-publish: the effect carries the SAME handler-reused
+    // pair (URL + original published_at stay stable), so replay equality
+    // after this step proves the reducer honours the carried values
+    // rather than re-deriving (ADR 0040 Step 5).
+    await step(docPublish.id, { doc_id: d1 });
     await step(docUnpublish.id, { doc_id: d1 });
+    // Delete-while-published: `doc.soft_delete` must clear the publish
+    // pair in BOTH the handler and the reducer (a trashed doc leaves the
+    // public site); restore must NOT republish. Publishing d2 first makes
+    // these transitions non-trivial (non-null → null).
+    await step(docPublish.id, { doc_id: d2 });
     await step(docDelete.id, { doc_id: d2 });
     await step(docRestore.id, { doc_id: d2 });
 

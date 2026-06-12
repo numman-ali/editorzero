@@ -21,9 +21,9 @@
  * `resolver` + `.parse(result)`.
  *
  * **Shape.** Mirror of `doc.delete`: a single `doc_id` in, a `doc_id`
- * plus `visibility_version` out. `doc_id` validates as UUIDv7 on the
+ * plus `render_version` out. `doc_id` validates as UUIDv7 on the
  * wire (`DocIdInputSchema`) and narrows to the brand. The output carries
- * `visibility_version` so the caller can swap their cached public-route
+ * `render_version` so the caller can swap their cached public-route
  * key after a restore flips the route from "404" back to "renders"; no
  * `restored_at` field — the post-state is "not deleted" and the audit
  * row owns the event timestamp (see the capability header).
@@ -41,7 +41,7 @@ export const DocRestoreInputSchema = z
 
 export const DocRestoreOutputSchema = z.object({
   doc_id: DocIdOutputSchema,
-  visibility_version: z.number(),
+  render_version: z.number(),
 });
 
 export type DocRestoreWireInput = z.input<typeof DocRestoreInputSchema>;

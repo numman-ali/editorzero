@@ -292,7 +292,10 @@ function applyStateEffect(
         title: effect.title,
         slug: effect.slug,
         order_key: effect.order_key,
-        visibility: effect.visibility,
+        access_mode: effect.access_mode,
+        // A doc is never born published (ADR 0040 Step 5).
+        published_slug: null,
+        published_at: null,
         created_by: effect.created_by,
         deleted_at: null,
       });
@@ -307,15 +310,25 @@ function applyStateEffect(
         order_key: effect.new_order_key,
       });
     case "doc.publish":
-      // Matches the live handler: publish flips visibility to "public".
-      // `effect.published_at` is carried for the ADR 0040 Step-5 future
-      // (orthogonal publish); there is no live `published_at` column yet,
-      // so v1 replay does not project it.
-      return patchDoc(state, effect.doc_id, { visibility: "public" });
+      // Both values come from the effect (ADR 0040 Step 5): the slug is
+      // handler-COMPUTED (collision-suffixed), so replay must carry it —
+      // never re-derive; on idempotent re-publish the handler echoes the
+      // doc's existing pair, so replay converges on the same state.
+      return patchDoc(state, effect.doc_id, {
+        published_slug: effect.published_slug,
+        published_at: effect.published_at,
+      });
     case "doc.unpublish":
-      return patchDoc(state, effect.doc_id, { visibility: "workspace" });
+      return patchDoc(state, effect.doc_id, { published_slug: null, published_at: null });
     case "doc.soft_delete":
-      return patchDoc(state, effect.doc_id, { deleted_at: effect.deleted_at });
+      // Soft-delete also clears the publish dimension (the live handler
+      // does — a trashed doc leaves the public site; restore must never
+      // surprise-republish). Unconditional, so no effect payload needed.
+      return patchDoc(state, effect.doc_id, {
+        deleted_at: effect.deleted_at,
+        published_slug: null,
+        published_at: null,
+      });
     case "doc.restore":
       return patchDoc(state, effect.doc_id, { deleted_at: null });
 

@@ -149,8 +149,10 @@ describe("ez doc list end-to-end (generator → trunk → dispatcher → doc.lis
           title: "Seeded doc",
           slug: "seeded-doc",
           order_key: "a",
-          visibility: "workspace",
-          visibility_version: 0,
+          access_mode: "space",
+          published_slug: null,
+          published_at: null,
+          render_version: 0,
           created_by: UserId(user.id),
           created_at: 1_700_000_000_000,
           updated_at: 1_700_000_000_000,
@@ -180,12 +182,12 @@ describe("ez doc list end-to-end (generator → trunk → dispatcher → doc.lis
         id: string;
         title: string;
         slug: string;
-        visibility: string;
+        access_mode: string;
       }[];
     };
     expect(body.docs).toHaveLength(1);
     expect(body.docs[0]?.id).toBe(DOC_ID);
     expect(body.docs[0]?.title).toBe("Seeded doc");
-    expect(body.docs[0]?.visibility).toBe("workspace");
+    expect(body.docs[0]?.access_mode).toBe("space");
   });
 });

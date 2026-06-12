@@ -20,11 +20,13 @@
  * `hc` client, branded `c.req.valid`) and `DocPublishOutputSchema` to
  * `resolver` + `.parse(result)`.
  *
- * `visibility` is a literal `"public"` (NOT the shared `DocVisibility`
- * enum): the capability's entire purpose is to land on that one state, so
- * the response pins it via `z.literal(...)` — a tighter contract than the
- * enum, which must not be widened by sharing it (see the capability
- * header and `../shared/visibility`).
+ * The response pins the published post-state structurally (ADR 0040
+ * Step 5 — publish is orthogonal to `access_mode`): `published_slug` /
+ * `published_at` are non-nullable here because the capability's entire
+ * purpose is to land on the published state — a tighter contract than
+ * the nullable read-path pair on `doc.get`/`doc.list`, deliberately not
+ * shared with them. `render_version` is the F5 cache-invalidation
+ * counter (renamed from `visibility_version` at the Step-5 split).
  */
 
 import { z } from "zod";
@@ -39,9 +41,9 @@ export const DocPublishInputSchema = z
 
 export const DocPublishOutputSchema = z.object({
   doc_id: DocIdOutputSchema,
-  visibility: z.literal("public"),
-  visibility_version: z.number(),
+  published_slug: z.string(),
   published_at: z.number(),
+  render_version: z.number(),
 });
 
 export type DocPublishWireInput = z.input<typeof DocPublishInputSchema>;

@@ -6,8 +6,8 @@
  * function; `docListQueryOptions` is the react-query binding consumed by
  * BOTH the route loader (`ensureQueryData` — data resolves before the
  * screen renders) and the component (`useSuspenseQuery` reads the warmed
- * cache). The presentational helpers (`docVisibilityLabel`,
- * `visibilityTagClass`, `formatUpdated`) live here so the route component
+ * cache). The presentational helpers (`docAccessModeLabel`,
+ * `docTagClass`, `formatUpdated`) live here so the route component
  * stays render-only (excluded from unit coverage; proven by the marked
  * Playwright spec in packages/e2e).
  *
@@ -54,21 +54,24 @@ export function docListQueryOptions(client: ApiClient = apiClient) {
 }
 
 /**
- * Vocabulary lock (ADR 0040): the UI says "Space" for the membership
- * boundary the wire calls `workspace`. The other two values render
- * verbatim (capitalized by the chip's CSS `text-transform`).
+ * Vocabulary lock (ADR 0040): the UI says "Space" for the read-scope
+ * value the wire calls `space` (the Step-5 `access_mode` split retired
+ * the overloaded `visibility`). `private` renders verbatim (capitalized
+ * by the chip's CSS `text-transform`).
  */
-export function docVisibilityLabel(visibility: DocSummary["visibility"]): string {
-  return visibility === "workspace" ? "Space" : visibility;
+export function docAccessModeLabel(access_mode: DocSummary["access_mode"]): string {
+  return access_mode === "space" ? "Space" : access_mode;
 }
 
 /**
- * Chip modifier: `st-pub` (the published-green token pair) only for
- * `public` — that IS its semantic in the Meridian Zero sheet. The other
- * values keep the base `.status-tag` outline.
+ * Chip modifier: `st-pub` (the published-green token pair) marks the
+ * PUBLISH dimension — orthogonal to `access_mode` (ADR 0040 Step 5).
+ * `published_at IS NOT NULL` is the publish predicate, so a published
+ * doc's chip goes green while still labelling its read scope;
+ * unpublished docs keep the base `.status-tag` outline.
  */
-export function visibilityTagClass(visibility: DocSummary["visibility"]): string {
-  return visibility === "public" ? "status-tag st-pub" : "status-tag";
+export function docTagClass(published_at: DocSummary["published_at"]): string {
+  return published_at !== null ? "status-tag st-pub" : "status-tag";
 }
 
 /**

@@ -27,11 +27,12 @@
  * lie). The sole literal `as const` is the validator hook's
  * `{ error: "validation_failed" }` envelope.
  *
- * **Metadata-only mutation.** Mutates `docs.deleted_at` + bumps
- * `visibility_version` in the dispatcher's write-path tx; no Y.Doc
- * touching, no `doc_updates` row. The permission gate, audit entry, and
- * write-path tx all live inside the dispatcher; the handler only
- * dispatches.
+ * **Metadata-only mutation.** Mutates `docs.deleted_at`, CLEARS the
+ * `published_slug`/`published_at` pair (a trashed doc leaves the public
+ * site — ADR 0040 Step 5), and bumps `render_version` in the
+ * dispatcher's write-path tx; no Y.Doc touching, no `doc_updates` row.
+ * The permission gate, audit entry, and write-path tx all live inside
+ * the dispatcher; the handler only dispatches.
  *
  * **Why POST.** Capability changes server state. Path is
  * capability-shaped (`/docs/delete/:id`) rather than subresource-shaped
@@ -39,8 +40,8 @@
  * slice uses.
  *
  * **Status codes.**
- *   200 — soft-deleted: `deleted_at` set, `visibility_version` bumped.
- *         Body carries `{ doc_id, deleted_at, visibility_version }`.
+ *   200 — soft-deleted: `deleted_at` set, `render_version` bumped.
+ *         Body carries `{ doc_id, deleted_at, render_version }`.
  *   400 — malformed doc_id (not a v7 UUID); validator hook → envelope.
  *   401 — unauthenticated (principal middleware; declaration only).
  *   403 — permission denied; caller lacks `doc:delete`.
@@ -67,7 +68,7 @@ export const del = new Hono<ApiEnv>().post(
       responses: {
         200: {
           description:
-            "Doc soft-deleted; deleted_at anchors the recovery window, visibility_version bumped.",
+            "Doc soft-deleted; deleted_at anchors the recovery window, render_version bumped.",
           content: jsonContent(DocDeleteOutputSchema),
         },
         400: {

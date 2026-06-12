@@ -44,7 +44,7 @@ test("an empty Space renders the docs panel with its empty state", async ({ page
   await expectNoAxeViolations(page);
 });
 
-test("docs created over the API render in the list with slug, visibility, and date", async ({
+test("docs created over the API render in the list with slug, access chip, and date", async ({
   page,
 }) => {
   await signIn(page);
@@ -60,7 +60,7 @@ test("docs created over the API render in the list with slug, visibility, and da
   await expect(table).toBeVisible();
 
   // Both rows, with their derived slugs and the vocabulary-locked
-  // visibility label ("Space", not "workspace").
+  // access-mode label ("Space", not the wire's "space" — ADR 0040).
   await expect(page.getByRole("cell").filter({ hasText: "Launch checklist" })).toBeVisible();
   await expect(page.getByText("launch-checklist", { exact: true })).toBeVisible();
   await expect(page.getByRole("cell").filter({ hasText: "Meridian field notes" })).toBeVisible();

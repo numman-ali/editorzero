@@ -36,7 +36,7 @@ const VALID_DOC_ID = "018f0000-0000-7000-8000-0000000000a1";
 
 interface FixtureOutput {
   readonly doc_id: string;
-  readonly visibility_version: number;
+  readonly render_version: number;
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
@@ -60,7 +60,7 @@ describe("POST /docs/restore/:doc_id", () => {
     let captured: DispatchInvocation | undefined;
     const output: FixtureOutput = {
       doc_id: VALID_DOC_ID,
-      visibility_version: 8,
+      render_version: 8,
     };
     const app = buildApp(async (invocation) => {
       captured = invocation;

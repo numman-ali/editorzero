@@ -1,5 +1,6 @@
 /**
- * `POST /docs/publish/:doc_id` — flip a doc's visibility to public.
+ * `POST /docs/publish/:doc_id` — publish a doc: mint its public URL
+ * slug and stamp `published_at` (ADR 0040 Step 5).
  *
  * Code-first route shape (ADR 0029) — mirrors the golden `create.ts`:
  * a self-contained `Hono<ApiEnv>` sub-app built from three chained
@@ -40,8 +41,8 @@
  * spec stays wire-shaped. No wire copy drifts because there is no copy.
  *
  * **Status code — 200 OK.** Publish mutates an existing doc's metadata
- * (visibility → public, `visibility_version` bumped); it does not create
- * a resource, so 200 rather than 201.
+ * (`published_slug` minted, `published_at` stamped, `render_version`
+ * bumped); it does not create a resource, so 200 rather than 201.
  *
  * **No request body.** The capability's only input is the path-param
  * `doc_id`; an empty POST is the expected shape.
@@ -67,11 +68,11 @@ export const publish = new Hono<ApiEnv>().post(
   ...factory.createHandlers(
     describeRoute({
       tags: ["docs"],
-      summary: "Set a doc's visibility to public.",
+      summary: "Publish a doc — mint its public URL slug and stamp published_at.",
       responses: {
         200: {
           description:
-            "Doc visibility flipped (or re-asserted) to public; visibility_version bumped.",
+            "Doc published (or re-asserted): published_slug minted or kept stable, published_at stamped or kept, render_version bumped.",
           content: jsonContent(DocPublishOutputSchema),
         },
         400: {

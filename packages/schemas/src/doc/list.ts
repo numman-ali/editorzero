@@ -18,21 +18,20 @@
  * re-branded via the shared `*OutputSchema` transforms so
  * `z.output<typeof DocListOutputSchema>` preserves the brand — callers
  * (API adapter / CLI / MCP) receive typed IDs instead of plain strings
- * without a cast at the boundary. `visibility` is the full read-path
+ * without a cast at the boundary. `access_mode` is the read-path
  * tri-state (`DocVisibilitySchema`): the list echoes whichever value a
  * doc currently holds.
  */
 
 import { z } from "zod";
-
+import { AccessModeSchema } from "../shared/grant";
 import { CollectionIdOutputSchema, DocIdOutputSchema } from "../shared/ids";
-import { DocVisibilitySchema } from "../shared/visibility";
 
 export const DocListInputSchema = z.object({}).strict();
 
 // Fields chosen for the "list view" use case: enough to render a
-// navigable document list (id, title, visibility, collection,
-// timestamps). Internal columns (`order_key`, `visibility_version`,
+// navigable document list (id, title, access_mode + publish state, collection,
+// timestamps). Internal columns (`order_key`, `render_version`,
 // `deleted_at`, `workspace_id`) are intentionally omitted — the
 // scope is implicit; the ordering is applied inside the handler.
 const DocSummarySchema = z.object({
@@ -40,7 +39,9 @@ const DocSummarySchema = z.object({
   title: z.string(),
   slug: z.string(),
   collection_id: CollectionIdOutputSchema.nullable(),
-  visibility: DocVisibilitySchema,
+  access_mode: AccessModeSchema,
+  published_slug: z.string().nullable(),
+  published_at: z.number().nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });

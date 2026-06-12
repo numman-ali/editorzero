@@ -74,8 +74,9 @@ async function seedDocRow(params: {
   id: DocId;
   workspace_id: WorkspaceId;
   title: string;
-  visibility?: "workspace" | "public" | "private";
-  visibility_version?: number;
+  published_slug?: string | null;
+  published_at?: number | null;
+  render_version?: number;
   collection_id?: CollectionId | null;
   deleted_at?: number | null;
 }) {
@@ -89,8 +90,10 @@ async function seedDocRow(params: {
       title: params.title,
       slug: params.title.toLowerCase(),
       order_key: params.id,
-      visibility: params.visibility ?? "workspace",
-      visibility_version: params.visibility_version ?? 0,
+      access_mode: "space",
+      published_slug: params.published_slug ?? null,
+      published_at: params.published_at ?? null,
+      render_version: params.render_version ?? 0,
       created_by: ALICE,
       created_at: 1,
       updated_at: 1,
@@ -102,12 +105,12 @@ async function seedDocRow(params: {
 // ── Scenarios ────────────────────────────────────────────────────────────
 
 describe("doc.delete", () => {
-  it("flips deleted_at from NULL to now, bumps visibility_version, returns the post-state", async () => {
+  it("flips deleted_at from NULL to now, bumps render_version, returns the post-state", async () => {
     await seedDocRow({
       id: DOC_A1,
       workspace_id: WORKSPACE_A,
       title: "Draft",
-      visibility_version: 3,
+      render_version: 3,
     });
 
     const ctx = buildCtx(WORKSPACE_A, () => 2_000_000);
@@ -116,7 +119,7 @@ describe("doc.delete", () => {
     expect(out).toEqual({
       doc_id: DOC_A1,
       deleted_at: 2_000_000,
-      visibility_version: 4,
+      render_version: 4,
     });
 
     // Verify the docs row was actually updated. Read via the tenant-
@@ -125,30 +128,44 @@ describe("doc.delete", () => {
     const row = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version", "updated_at"])
+      .select(["deleted_at", "render_version", "updated_at"])
       .where("id", "=", DOC_A1)
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBe(2_000_000);
-    expect(row.visibility_version).toBe(4);
+    expect(row.render_version).toBe(4);
     expect(row.updated_at).toBe(2_000_000);
   });
 
-  it("bumps visibility_version on every successful call (public-route cache invalidation — §5.4)", async () => {
-    // The public-route cache keys on `visibility_version`; a delete
-    // of a published doc must flip "renders" → "404", which means the
-    // version has to move. Sibling assertion to publish/unpublish's
-    // always-bump invariant.
+  it("CLEARS the publish pair: a trashed doc leaves the public site (ADR 0040 Step 5)", async () => {
+    // Deleting a published doc must take it off the public site — and
+    // because restore never republishes, clearing here (not at restore
+    // time) is what makes that safe. Clearing also releases the URL
+    // from `docs_published_slug_unique` (the index is partial on
+    // `deleted_at IS NULL` anyway; NULLing the slug keeps row state and
+    // index semantics aligned). The render_version bump flips a cached
+    // "renders" → "404" downstream.
     await seedDocRow({
       id: DOC_A1,
       workspace_id: WORKSPACE_A,
       title: "Live doc",
-      visibility: "public",
-      visibility_version: 11,
+      published_slug: "live-doc",
+      published_at: 777,
+      render_version: 11,
     });
 
     const ctx = buildCtx(WORKSPACE_A, () => 5_000_000);
     const out = await docDelete.handler(ctx, { doc_id: DOC_A1 });
-    expect(out.visibility_version).toBe(12);
+    expect(out.render_version).toBe(12);
+
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("docs")
+      .select(["published_slug", "published_at", "deleted_at"])
+      .where("id", "=", DOC_A1)
+      .executeTakeFirstOrThrow();
+    expect(row.published_slug).toBeNull();
+    expect(row.published_at).toBeNull();
+    expect(row.deleted_at).toBe(5_000_000);
   });
 
   it("throws NotFoundError when the doc does not exist", async () => {
@@ -169,7 +186,7 @@ describe("doc.delete", () => {
       workspace_id: WORKSPACE_A,
       title: "Already trashed",
       deleted_at: 999,
-      visibility_version: 5,
+      render_version: 5,
     });
     const ctx = buildCtx(WORKSPACE_A, () => 5_000_000);
     await expect(docDelete.handler(ctx, { doc_id: DOC_A2_DELETED })).rejects.toBeInstanceOf(
@@ -181,11 +198,11 @@ describe("doc.delete", () => {
     const row = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version"])
+      .select(["deleted_at", "render_version"])
       .where("id", "=", DOC_A2_DELETED)
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBe(999);
-    expect(row.visibility_version).toBe(5);
+    expect(row.render_version).toBe(5);
   });
 
   it("composes with Layer-2 scoping: workspace-A ctx cannot delete workspace-B doc", async () => {
@@ -198,11 +215,11 @@ describe("doc.delete", () => {
     const row = await driver
       .scoped(WORKSPACE_B)
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version"])
+      .select(["deleted_at", "render_version"])
       .where("id", "=", DOC_B1)
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBeNull();
-    expect(row.visibility_version).toBe(0);
+    expect(row.render_version).toBe(0);
   });
 
   it("rejects a non-UUIDv7 doc_id at the input schema", () => {
@@ -257,7 +274,7 @@ describe("doc.delete", () => {
       {
         doc_id: DOC_A1,
         deleted_at: 2_000_000,
-        visibility_version: 4,
+        render_version: 4,
       },
     );
     expect(effect.kind).toBe("doc.soft_delete");

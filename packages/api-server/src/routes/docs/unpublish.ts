@@ -1,6 +1,7 @@
 /**
- * `POST /docs/unpublish/:doc_id` — set a doc's visibility back to
- * `"workspace"` (inverse of `doc.publish`).
+ * `POST /docs/unpublish/:doc_id` — unpublish a doc: clear its
+ * `published_slug` / `published_at` pair (inverse of `doc.publish`;
+ * ADR 0040 Step 5).
  *
  * Code-first route shape (ADR 0029) — mirrors the golden `create.ts` and
  * its P2 sibling `publish.ts`: a self-contained `Hono<ApiEnv>` sub-app
@@ -41,10 +42,11 @@
  * spec stays wire-shaped. No wire copy drifts because there is no copy.
  *
  * **Status code — 200 OK.** Unpublish mutates an existing doc's metadata
- * (visibility → workspace, `visibility_version` bumped); it does not
- * create a resource, so 200 rather than 201. Intentionally no
- * `unpublished_at` in the response — the target DDL has no symmetric
- * column for the un-publish side (see `capabilities/src/doc/unpublish.ts`).
+ * (`published_slug`/`published_at` cleared to NULL, `render_version`
+ * bumped); it does not create a resource, so 200 rather than 201.
+ * Intentionally no `unpublished_at` in the response — the DDL has no
+ * symmetric column for the un-publish side (see
+ * `capabilities/src/doc/unpublish.ts`).
  *
  * **No request body.** The capability's only input is the path-param
  * `doc_id`; an empty POST is the expected shape.
@@ -73,11 +75,11 @@ export const unpublish = new Hono<ApiEnv>().post(
   ...factory.createHandlers(
     describeRoute({
       tags: ["docs"],
-      summary: "Set a doc's visibility back to workspace (inverse of doc.publish).",
+      summary: "Unpublish a doc — clear its public URL slug and published_at.",
       responses: {
         200: {
           description:
-            "Doc visibility flipped (or re-asserted) to workspace; visibility_version bumped.",
+            "Doc unpublished (or re-asserted): published_slug/published_at cleared, render_version bumped.",
           content: jsonContent(DocUnpublishOutputSchema),
         },
         400: {

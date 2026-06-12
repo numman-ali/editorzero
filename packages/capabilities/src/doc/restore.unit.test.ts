@@ -97,8 +97,9 @@ async function seedDocRow(params: {
   id: DocId;
   workspace_id: WorkspaceId;
   title: string;
-  visibility?: "workspace" | "public" | "private";
-  visibility_version?: number;
+  published_slug?: string | null;
+  published_at?: number | null;
+  render_version?: number;
   collection_id?: CollectionId | null;
   deleted_at?: number | null;
 }) {
@@ -112,8 +113,10 @@ async function seedDocRow(params: {
       title: params.title,
       slug: params.title.toLowerCase(),
       order_key: params.id,
-      visibility: params.visibility ?? "workspace",
-      visibility_version: params.visibility_version ?? 0,
+      access_mode: "space",
+      published_slug: params.published_slug ?? null,
+      published_at: params.published_at ?? null,
+      render_version: params.render_version ?? 0,
       created_by: ALICE,
       created_at: 1,
       updated_at: 1,
@@ -125,13 +128,13 @@ async function seedDocRow(params: {
 // ── Scenarios ────────────────────────────────────────────────────────────
 
 describe("doc.restore", () => {
-  it("clears deleted_at, bumps visibility_version, returns the post-state", async () => {
+  it("clears deleted_at, bumps render_version, returns the post-state", async () => {
     await seedDocRow({
       id: DOC_A2_DELETED,
       workspace_id: WORKSPACE_A,
       title: "Trashed",
       deleted_at: 999,
-      visibility_version: 3,
+      render_version: 3,
     });
 
     const ctx = buildCtx(WORKSPACE_A, () => 4_000_000);
@@ -139,7 +142,7 @@ describe("doc.restore", () => {
 
     expect(out).toEqual({
       doc_id: DOC_A2_DELETED,
-      visibility_version: 4,
+      render_version: 4,
     });
 
     // Verify the docs row was actually updated — deleted_at cleared,
@@ -147,30 +150,44 @@ describe("doc.restore", () => {
     const row = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version", "updated_at"])
+      .select(["deleted_at", "render_version", "updated_at"])
       .where("id", "=", DOC_A2_DELETED)
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBeNull();
-    expect(row.visibility_version).toBe(4);
+    expect(row.render_version).toBe(4);
     expect(row.updated_at).toBe(4_000_000);
   });
 
-  it("bumps visibility_version so public-route cache invalidates on restore of a published doc (§5.4)", async () => {
-    // The cache contract is symmetric to delete's: flipping the
-    // public-route render back from "404" to "renders" requires a
-    // version movement or the cached 404 sticks.
+  it("does NOT republish: the publish pair stays cleared after restore (ADR 0040 Step 5)", async () => {
+    // `doc.soft_delete` clears `published_slug`/`published_at` on its
+    // way to the trash, so a trashed row always carries a NULL pair —
+    // restore brings the doc back PRIVATE-to-the-workspace, never back
+    // onto the public site. Republishing is a deliberate `doc.publish`
+    // call. The render_version bump still matters: a renderer that
+    // cached "published" state under an older version must invalidate.
     await seedDocRow({
       id: DOC_A2_DELETED,
       workspace_id: WORKSPACE_A,
       title: "Was public",
-      visibility: "public",
-      visibility_version: 11,
+      published_slug: null,
+      published_at: null,
+      render_version: 11,
       deleted_at: 999,
     });
 
     const ctx = buildCtx(WORKSPACE_A, () => 5_000_000);
     const out = await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });
-    expect(out.visibility_version).toBe(12);
+    expect(out.render_version).toBe(12);
+
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("docs")
+      .select(["published_slug", "published_at", "deleted_at"])
+      .where("id", "=", DOC_A2_DELETED)
+      .executeTakeFirstOrThrow();
+    expect(row.published_slug).toBeNull();
+    expect(row.published_at).toBeNull();
+    expect(row.deleted_at).toBeNull();
   });
 
   it("throws NotFoundError when the doc does not exist", async () => {
@@ -188,7 +205,7 @@ describe("doc.restore", () => {
       id: DOC_A1_LIVE,
       workspace_id: WORKSPACE_A,
       title: "Alive",
-      visibility_version: 5,
+      render_version: 5,
     });
     const ctx = buildCtx(WORKSPACE_A, () => 5_000_000);
     await expect(docRestore.handler(ctx, { doc_id: DOC_A1_LIVE })).rejects.toBeInstanceOf(
@@ -199,11 +216,11 @@ describe("doc.restore", () => {
     const row = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version"])
+      .select(["deleted_at", "render_version"])
       .where("id", "=", DOC_A1_LIVE)
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBeNull();
-    expect(row.visibility_version).toBe(5);
+    expect(row.render_version).toBe(5);
   });
 
   it("composes with Layer-2 scoping: workspace-A ctx cannot restore workspace-B doc", async () => {
@@ -223,11 +240,11 @@ describe("doc.restore", () => {
     const row = await driver
       .scoped(WORKSPACE_B)
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version"])
+      .select(["deleted_at", "render_version"])
       .where("id", "=", DOC_B1_DELETED)
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBe(888);
-    expect(row.visibility_version).toBe(0);
+    expect(row.render_version).toBe(0);
   });
 
   describe("parent-collection precondition (slice 2)", () => {
@@ -318,7 +335,7 @@ describe("doc.restore", () => {
         workspace_id: WORKSPACE_A,
         title: "Trashed",
         collection_id: DELETED_COLLECTION,
-        visibility_version: 7,
+        render_version: 7,
         deleted_at: 999,
       });
       const ctx = buildCtx(WORKSPACE_A);
@@ -328,11 +345,11 @@ describe("doc.restore", () => {
       const row = await driver
         .scoped(WORKSPACE_A)
         .selectFrom("docs")
-        .select(["deleted_at", "visibility_version"])
+        .select(["deleted_at", "render_version"])
         .where("id", "=", DOC_A2_DELETED)
         .executeTakeFirstOrThrow();
       expect(row.deleted_at).toBe(999);
-      expect(row.visibility_version).toBe(7);
+      expect(row.render_version).toBe(7);
     });
 
     it("has no precondition when collection_id is null (workspace-root doc)", async () => {
@@ -396,7 +413,7 @@ describe("doc.restore", () => {
       { doc_id: DOC_A2_DELETED },
       {
         doc_id: DOC_A2_DELETED,
-        visibility_version: 4,
+        render_version: 4,
       },
     );
     expect(effect.kind).toBe("doc.restore");

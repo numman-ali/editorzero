@@ -1,57 +1,57 @@
 /**
- * `doc.publish` — set a doc's `visibility` to `"public"` (architecture.md
- * Appendix A § doc; `METADATA_ONLY_CAPABILITIES` in `@editorzero/scopes`).
+ * `doc.publish` — set a doc's publish dimension: mint `published_slug`,
+ * stamp `published_at` (architecture.md §3.5; ADR 0040 Step 5;
+ * `METADATA_ONLY_CAPABILITIES` in `@editorzero/scopes`).
+ *
+ * Publish is ORTHOGONAL to `access_mode` (the Step-5 de-overload): a
+ * `private` doc can be published, a `space` doc can be unpublished.
+ * "Published" means `published_at IS NOT NULL`; this capability never
+ * touches `access_mode`.
  *
  * Metadata-only mutation: no `ctx.transact`, no Y.Doc touching, no
- * `doc_updates` row. Single UPDATE on the `docs` row. Idempotent at the
- * state level (`visibility` lands on `"public"` regardless of prior
- * value); `visibility_version` bumps on every successful invocation so
- * cache keyed on the version invalidates even when the caller re-asserts
- * an already-public state (F5 — the version is a stable signal that
+ * `doc_updates` row. Idempotent at the state level: re-publishing an
+ * already-published doc keeps BOTH `published_slug` (URL stability — a
+ * live public link must never rotate out from under its readers) and
+ * the original `published_at` (the "first published" timestamp is a
+ * fact, not a counter). `render_version` bumps on every successful
+ * invocation regardless (F5 — the version is a stable signal that
  * *something* happened, not a change-detector).
  *
+ * **Slug minting.** `published_slug` defaults to the doc's internal
+ * `slug`; collisions against the live published set resolve by suffix
+ * (`-2`, `-3`, … — architecture §3.5). The internal slug is per-
+ * collection-unique while the published slug is WORKSPACE-unique
+ * (`docs_published_slug_unique`, soft-deleted rows excluded), so two
+ * docs named "getting-started" in different collections can both exist
+ * but only the first to publish gets the bare URL. The mint runs as a
+ * SELECT inside the dispatcher's write-path tx: SQLite's single-writer
+ * serializes concurrent publishes outright; on Postgres (READ
+ * COMMITTED) a same-candidate race is backstopped by the partial
+ * unique index — the loser surfaces through the dispatcher's error
+ * projection rather than double-allocating a URL.
+ *
  * **Scope.** `doc:publish`. Distinct from `doc:write` so platform members
- * (who hold `doc:write` for authoring) can't trivially widen visibility —
- * that requires a deliberate role grant. Matches the matrix's split at
- * the `editor` agent tier (`AGENT_SCOPE_TIERS` in `@editorzero/scopes`).
+ * (who hold `doc:write` for authoring) can't trivially expose a doc
+ * publicly — that requires a deliberate role grant. Matches the matrix's
+ * split at the `editor` agent tier (`AGENT_SCOPE_TIERS`).
  *
  * **Soft-deleted handling.** A `deleted_at IS NOT NULL` doc returns 404,
- * same as `doc.get` — publishing a trashed doc has no defined meaning and
- * should surface as "not found" to the caller. Callers that hold
- * `doc:delete` scope use `doc.restore` first; `doc.publish` is visibility,
- * not resurrection.
+ * same as `doc.get` — publishing a trashed doc has no defined meaning.
+ * (`doc.soft_delete` clears the publish dimension; restore does NOT
+ * re-publish — see `delete.ts`.)
  *
- * **Audit effect.** `{ kind: "doc.publish", doc_id, published_at }`.
- * `published_at` is `ctx.now()` — the same timestamp written to
- * `docs.updated_at`. The audit row carries this; the `docs` row does NOT
- * yet — see "v1 scope" below.
+ * **Audit effect.** `{ kind: "doc.publish", doc_id, published_slug,
+ * published_at }`. The slug is handler-COMPUTED, so the effect must
+ * carry it — replay can never re-derive a collision-suffixed value
+ * (the same effect-carries-the-handler-computed-value contract as
+ * `doc.rename`'s slug).
  *
- * **v1 scope — visibility-only slice; `published_slug` + `published_at`
- * columns deferred.** Architecture.md §3 / Appendix A calls for the
- * `docs` row to carry `published_slug` + `published_at` (and for a
- * public-route renderer keyed on `(workspace_id, published_slug,
- * visibility_version)`). Neither column exists in the current DDL
- * (`packages/db/src/schema.ts` → `DocsTable`). Rather than widen the
- * DDL + backfill plan + public-route behaviour in this capability's
- * commit, this slice lands the **capability + route shape** only:
- * visibility flip to `"public"`, `visibility_version` bump, audit-row
- * emit. The DDL + public-route substrate land in the public read-path
- * renderer slice (the inverse capability `doc.unpublish` already
- * shipped alongside this one with the same deferral posture); at that
- * point this handler's UPDATE grows to set `published_slug = slug` +
- * `published_at = now` in the same statement, and `doc.get_markdown`'s
- * public-route uses `published_slug` as the URL key. No handler logic
- * from this file is load-bearing for that transition; the callers of
- * this route (the capability registry + OpenAPI doc + `hc<AppType>`
- * RPC) don't see a breaking change when those fields appear on the
- * response.
- *
- * **v1 limitation — no read-path enforcement of `"public"`.** Same
- * reason as above: `doc.list` / `doc.get` return every non-deleted doc
- * in the workspace regardless of visibility (no per-doc visibility
- * filter, no anonymous principal yet). Publishing a doc today only
- * updates the audit trail and the `visibility_version` — observable
- * effect on reads lands with the public-route slice.
+ * **Render consumer still deferred.** The public `(public)/[domain]/
+ * [slug]` route and the outbox→render consumer need substrate that does
+ * not exist yet (§12 jobs runner, the §7 markdown projection, an
+ * anonymous principal). This slice lands the full publish DATA model;
+ * the `doc.publish_changed` outbox event (keyed on `render_version`) is
+ * the seam the renderer subscribes to when it ships.
  */
 
 import type {
@@ -79,20 +79,17 @@ const DOC_PUBLISH_ID = CapabilityId("doc.publish");
 //
 // `DocPublishInputSchema` / `DocPublishOutputSchema` are the single source
 // (ADR 0034), reused verbatim by the API route's `validator` / `resolver`
-// so the wire contract has exactly one definition. The input is the same
-// single-`doc_id` shape as `doc.get` (validated UUIDv7, branded via
-// `.transform`); the output returns the post-update projection — with
-// `visibility` pinned to the literal `"public"` (not the wider enum)
-// because the capability's entire purpose is to land on that state — so
-// callers don't need a follow-up `doc.get`. Definitions + rationale live
-// at `@editorzero/schemas/doc/publish`.
+// so the wire contract has exactly one definition. The output pins the
+// published post-state structurally (`published_slug`/`published_at`
+// non-nullable) so callers don't need a follow-up `doc.get`. Definitions
+// + rationale live at `@editorzero/schemas/doc/publish`.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
 export const docPublish: Capability<DocPublishInput, DocPublishOutput> = {
   id: DOC_PUBLISH_ID,
   category: "mutation",
-  summary: "Set a doc's visibility to public.",
+  summary: "Publish a doc — mint its public URL slug and stamp published_at.",
   input: DocPublishInputSchema,
   output: DocPublishOutputSchema,
   requires: ["doc:publish"],
@@ -103,6 +100,7 @@ export const docPublish: Capability<DocPublishInput, DocPublishOutput> = {
     effectOnAllow: (_input, output): AuditEffect => ({
       kind: "doc.publish",
       doc_id: output.doc_id,
+      published_slug: output.published_slug,
       published_at: output.published_at,
     }),
     effectOnDeny: (_input, reason: DenyReason): AuditDeny => ({
@@ -118,52 +116,95 @@ export const docPublish: Capability<DocPublishInput, DocPublishOutput> = {
   handler: async (ctx, input) => {
     const now = ctx.now();
 
-    // Single UPDATE with expression-builder increment
-    // (`kysely@0.28.16` supports `eb('col', '+', 1)` at
-    // `expression-builder.d.ts:64-72`). The WHERE filters soft-deleted
-    // docs so a trashed row returns zero rows from `.returning(...)`
-    // and the handler throws 404 without writing. The
-    // `WorkspaceScopingPlugin` appends `workspace_id = ctx.tenant.*`
-    // on both the UPDATE and the RETURNING clause (F87 alias-aware),
-    // so a cross-workspace target is invisible — same 404 projection.
-    // Single-statement + `RETURNING` keeps the "0 rows = not found"
-    // branch atomic with the write, so the idempotent bump semantic
-    // can't race against a concurrent soft-delete between a split
-    // SELECT and UPDATE.
+    // Read first: the mint needs the doc's internal slug, and the
+    // idempotent re-publish branch needs the existing publish pair. The
+    // `WorkspaceScopingPlugin` scopes both this read and the UPDATE
+    // below, so a cross-workspace target is invisible (404 projection).
+    const doc = await ctx.db
+      .selectFrom("docs")
+      .select(["id", "slug", "published_slug", "published_at"])
+      .where("id", "=", input.doc_id)
+      .where("deleted_at", "is", null)
+      .executeTakeFirst();
+    if (doc === undefined) {
+      throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
+    }
+
+    let published_slug: string;
+    let published_at: number;
+    if (doc.published_slug !== null && doc.published_at !== null) {
+      // Already published — idempotent re-assert. URL and original
+      // publish time stay stable; only `render_version` moves.
+      published_slug = doc.published_slug;
+      published_at = doc.published_at;
+    } else {
+      // Mint against the LIVE published set (`deleted_at IS NULL`
+      // mirrors the partial unique index — a trashed doc's old URL is
+      // reusable by design). One SELECT pulls the base and every
+      // suffixed sibling; the smallest free candidate wins.
+      const taken = new Set(
+        (
+          await ctx.db
+            .selectFrom("docs")
+            .select("published_slug")
+            .where("published_slug", "is not", null)
+            .where("deleted_at", "is", null)
+            .where((eb) =>
+              eb.or([
+                eb("published_slug", "=", doc.slug),
+                eb("published_slug", "like", `${doc.slug}-%`),
+              ]),
+            )
+            .execute()
+        ).map((r) => r.published_slug),
+      );
+      if (taken.has(doc.slug)) {
+        let n = 2;
+        while (taken.has(`${doc.slug}-${n}`)) n += 1;
+        published_slug = `${doc.slug}-${n}`;
+      } else {
+        published_slug = doc.slug;
+      }
+      published_at = now;
+    }
+
+    // The `deleted_at IS NULL` guard re-applies so a concurrent
+    // soft-delete between the read and this write lands as 404, never
+    // as a publish of a trashed doc.
     const row = await ctx.db
       .updateTable("docs")
       .set((eb) => ({
-        visibility: "public",
-        visibility_version: eb("visibility_version", "+", 1),
+        published_slug,
+        published_at,
+        render_version: eb("render_version", "+", 1),
         updated_at: now,
       }))
       .where("id", "=", input.doc_id)
       .where("deleted_at", "is", null)
-      .returning(["id", "visibility_version"])
+      .returning(["id", "render_version"])
       .executeTakeFirst();
-
     if (row === undefined) {
       throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
     }
 
-    // `doc.visibility_changed` — downstream cache/public-route
-    // invalidator (§5.4, F5). Keyed on `visibility_version` so a
-    // forwarder seeing an out-of-order row can reject the stale
-    // one without coordination. Committed inside the same write-
-    // path tx as the UPDATE above via the dispatcher's `ctx.outbox`
-    // queue → `createOutboxWriter` flush (architecture.md §2101,
-    // ADR 0018 F10/F31).
-    ctx.outbox("doc.visibility_changed", {
+    // `doc.publish_changed` — the future renderer's invalidation signal
+    // (renamed from `doc.visibility_changed` at the Step-5 split). Keyed
+    // on `render_version` so a forwarder seeing an out-of-order row can
+    // reject the stale one without coordination. Committed inside the
+    // same write-path tx as the UPDATE via the dispatcher's `ctx.outbox`
+    // queue → `createOutboxWriter` flush (F10/F31).
+    ctx.outbox("doc.publish_changed", {
       doc_id: row.id,
-      visibility: "public",
-      visibility_version: row.visibility_version,
+      published_slug,
+      published_at,
+      render_version: row.render_version,
     });
 
     return {
       doc_id: row.id,
-      visibility: "public",
-      visibility_version: row.visibility_version,
-      published_at: now,
+      published_slug,
+      published_at,
+      render_version: row.render_version,
     };
   },
 };

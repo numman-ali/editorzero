@@ -85,7 +85,17 @@ export const docList: Capability<DocListInput, DocListOutput> = {
   handler: async (ctx) => {
     const rows = await ctx.db
       .selectFrom("docs")
-      .select(["id", "title", "slug", "collection_id", "visibility", "created_at", "updated_at"])
+      .select([
+        "id",
+        "title",
+        "slug",
+        "collection_id",
+        "access_mode",
+        "published_slug",
+        "published_at",
+        "created_at",
+        "updated_at",
+      ])
       .where("deleted_at", "is", null)
       .orderBy("order_key")
       .execute();

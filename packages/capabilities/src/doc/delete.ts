@@ -39,17 +39,20 @@
  * log speaks to forensic readers who need to distinguish soft from
  * hard deletion.
  *
- * **Public-route cache invalidation — `visibility_version` bumps.** The
- * public-route contract (architecture.md §5.4) keys its cache on
- * `(workspace_id, doc_id, latest_snapshot_seq, visibility_version)`
+ * **Render-cache invalidation — `render_version` bumps; the publish
+ * dimension CLEARS (ADR 0040 Step 5).** A trashed doc must leave the
+ * public site, and a later restore must never surprise-republish — so
+ * the soft-delete UPDATE also lands `published_slug`/`published_at` on
+ * NULL (releasing the public URL for reuse; the audit trail keeps the
+ * old value via the original `doc.publish` effect). Re-exposure after
+ * restore is a deliberate, separate `doc.publish`. The
+ * public-route contract (architecture.md §3.5/§7) keys its cache on
+ * `(workspace_id, doc_id, latest_snapshot_seq, render_version)`
  * and uses the version as its sole invalidation signal for
  * capabilities in this lane (publish / unpublish /
- * block.set_visibility / delete / restore). A soft-delete of
- * a *published* doc must flip the public-route from "renders" to
- * "404" — without a version bump, a cached render would keep serving
- * a deleted-but-published doc. The handler therefore bumps
- * `visibility_version` on every successful call, same
- * `eb("visibility_version", "+", 1)` pattern publish/unpublish use.
+ * block.set_visibility / delete / restore). The handler bumps
+ * `render_version` on every successful call, same
+ * `eb("render_version", "+", 1)` pattern publish/unpublish use.
  * Idempotent semantics: the version moves even though `deleted_at`
  * would trivially overwrite itself, so any cache keyed on the version
  * invalidates even if an unusual caller replays delete on a fresh
@@ -98,7 +101,7 @@ const DOC_DELETE_ID = CapabilityId("doc.delete");
 // single-`doc_id` shape as `doc.get` / `doc.publish` / `doc.unpublish`
 // (UUIDv7-validated, `.transform()`-branded, `.strict()`); the output
 // echoes `doc_id` and returns `deleted_at` (recovery-window anchor) +
-// `visibility_version` (public-route cache-invalidation signal). See the
+// `render_version` (render-cache invalidation signal). See the
 // schema definition in `@editorzero/schemas/doc/delete` and the header
 // above for the semantics that shape these.
 
@@ -144,12 +147,17 @@ export const docDelete: Capability<DocDeleteInput, DocDeleteOutput> = {
       .updateTable("docs")
       .set((eb) => ({
         deleted_at: now,
-        visibility_version: eb("visibility_version", "+", 1),
+        // Step 5: a trashed doc leaves the public site — clear the
+        // publish dimension so restore can't surprise-republish and the
+        // public URL is released (see the file header).
+        published_slug: null,
+        published_at: null,
+        render_version: eb("render_version", "+", 1),
         updated_at: now,
       }))
       .where("id", "=", input.doc_id)
       .where("deleted_at", "is", null)
-      .returning(["id", "visibility_version"])
+      .returning(["id", "render_version"])
       .executeTakeFirst();
 
     if (row === undefined) {
@@ -159,7 +167,7 @@ export const docDelete: Capability<DocDeleteInput, DocDeleteOutput> = {
     return {
       doc_id: row.id,
       deleted_at: now,
-      visibility_version: row.visibility_version,
+      render_version: row.render_version,
     };
   },
 };

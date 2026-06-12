@@ -45,9 +45,10 @@
  *       JSON string.
  *
  *  4. **Monotonic bookkeeping — derivable, deferred.**
- *     - `docs.visibility_version` (count of publish/unpublish/delete/
- *       restore effects). Reconstructable by replay derivation; deferred to
- *       keep the first contract tight. Promoting it is additive.
+ *     - `docs.render_version` (count of publish/unpublish/delete/
+ *       restore effects; renamed from `visibility_version` at the Step-5
+ *       split). Reconstructable by replay derivation; deferred to keep
+ *       the first contract tight. Promoting it is additive.
  *
  * **Genesis caveat (also a review question).** The signup bootstrap writes
  * the `workspaces` row + the owner `workspace_members` row directly via
@@ -60,19 +61,21 @@
  * That lands in its own slice; until it does, a replay over a freshly-
  * signed-up workspace will not contain the root workspace / owner rows.
  *
- * **The `docs` read-scope field is the ADR 0040 Step-5 seam.** Today it is
- * the live overloaded `visibility ∈ {workspace, public, private}` column;
- * Step 5 splits it into `access_mode ∈ {space, private}` + `published_at`.
- * The reducer sets this field in exactly two places (`doc.create` initial,
- * `doc.publish`/`doc.unpublish` flip), so the split lands as an additive
- * transform — not a reducer rewrite. The property compares this field
- * against whatever the live `docs` columns are, so it tracks the schema.
+ * **The ADR 0040 Step-5 split LANDED (2026-06-12):** the overloaded
+ * `visibility` column is retired. `DocState` now mirrors the live pair —
+ * `access_mode ∈ {space, private}` (read scope; only `doc.create` sets it
+ * until the Step-8 mode-switch capability) and `published_slug`/
+ * `published_at` (the orthogonal publish dimension: set by `doc.publish`,
+ * cleared by `doc.unpublish` AND `doc.soft_delete` — a trashed doc leaves
+ * the public site, and restore never surprise-republishes).
+ * `render_version` (renamed from `visibility_version`) stays OUT of the
+ * projection — boundary item 4: derivable monotonic bookkeeping.
  */
 
 import type { CollectionId, DocId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
-import type { GrantRole, SpaceKind, SpaceType } from "@editorzero/scopes";
+import type { AccessMode, GrantRole, SpaceKind, SpaceType } from "@editorzero/scopes";
 
-import type { AuditRecord, DocVisibility, Role } from "./types";
+import type { AuditRecord, Role } from "./types";
 
 /** Reconstructed `workspaces` projection (excludes salt + create/update timestamps). */
 export interface WorkspaceState {
@@ -126,12 +129,16 @@ export interface DocState {
   readonly title: string;
   readonly slug: string;
   readonly order_key: string;
+  /** Read scope inside the Org (ADR 0040 Step 5). Set at `doc.create`; the mode switch is a Step-8 capability. */
+  readonly access_mode: AccessMode;
   /**
-   * Doc read-scope. The ADR 0040 Step-5 seam (see file doc): today the
-   * live `visibility` enum; Step 5 adds `access_mode` + `published_at`
-   * here additively.
+   * Publish dimension (orthogonal to `access_mode`). `doc.publish` sets
+   * both from the effect (the slug is handler-computed — replay cannot
+   * re-derive it); `doc.unpublish` and `doc.soft_delete` clear both
+   * deterministically.
    */
-  readonly visibility: DocVisibility;
+  readonly published_slug: string | null;
+  readonly published_at: number | null;
   readonly created_by: UserId;
   /** Epoch-ms the doc was soft-deleted, or `null` if live (ADR 0017 recovery anchor). */
   readonly deleted_at: number | null;

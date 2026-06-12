@@ -136,7 +136,9 @@ export const docGet: Capability<DocGetInput, DocGetOutput> = {
         "collection_id",
         "title",
         "slug",
-        "visibility",
+        "access_mode",
+        "published_slug",
+        "published_at",
         "created_at",
         "updated_at",
       ])

@@ -53,17 +53,18 @@
  * (schema.ts header: no FK in DDL so tests can stand DOCS_DDL up
  * in isolation; the SELECT+reject pattern substitutes).
  *
- * **v1 limitation — `visibility`.** `doc.list` returns every
- * non-deleted doc in the workspace regardless of `visibility`
- * today (no per-doc visibility filter / ACL table). Accepting
- * `"private"` would print a label the read path doesn't honour
- * (false privacy); accepting `"public"` would bypass `doc:publish`
- * (members hold `doc:write` but not `doc:publish`). New docs
- * land as `"workspace"`; `doc.publish` (scope `doc:publish`) and
- * a future visibility-widening capability open the other states
- * once the read path is ready. `InputSchema.strict()` makes a
- * caller-supplied `visibility` a zod `unrecognized_keys` issue —
- * a 400 with a clear path reference, not a silent drop.
+ * **`access_mode` is not caller-settable (ADR 0040 Step 5).**
+ * `doc.list`/`doc.get` still return every non-deleted doc in the
+ * workspace — the ceiling resolver (Step 6) is what makes
+ * `access_mode` mean something on reads. Accepting `"private"` at
+ * create would print a label the read path doesn't honour yet
+ * (false privacy), so every new doc lands as `"space"` and the
+ * mode switch arrives with the Step-8 ACL capability family. A doc
+ * is never born published either — publish is `doc.publish`'s job
+ * (scope `doc:publish`, which members holding only `doc:write`
+ * don't get). `InputSchema.strict()` makes a caller-supplied
+ * `access_mode` a zod `unrecognized_keys` issue — a 400 with a
+ * clear path reference, not a silent drop.
  *
  * **Title normalisation.** `z.string().trim().min(1)` strips
  * surrounding whitespace before the non-empty check. `"   "` trims
@@ -125,7 +126,7 @@ import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
 const DOC_CREATE_ID = CapabilityId("doc.create");
-const DEFAULT_VISIBILITY = "workspace" as const;
+const DEFAULT_ACCESS_MODE = "space" as const;
 
 // ── Wire + internal contract ───────────────────────────────────────────────
 //
@@ -134,7 +135,7 @@ const DEFAULT_VISIBILITY = "workspace" as const;
 // so the wire contract has exactly one definition. `InferInput` is the
 // wire shape (plain strings); each field's `.transform()` narrows to the
 // branded internal shape — `DocCreateInput` / `DocCreateOutput`. The
-// capability semantics that shape these (visibility not caller-settable,
+// capability semantics that shape these (access_mode not caller-settable,
 // `.strict()` rejecting unknown keys, the trim-then-`min(1)` title rule,
 // `seed_blocks` carried on the output so `effectOnAllow` can project it
 // without ctx access) are documented in the file header above and at the
@@ -210,7 +211,7 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
       slug: output.slug,
       order_key: output.order_key,
       created_by: output.created_by,
-      visibility: output.visibility,
+      access_mode: output.access_mode,
       seed_blocks: output.seed_blocks,
     }),
     effectOnDeny: (_input, reason: DenyReason): AuditDeny => ({
@@ -262,7 +263,7 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
     // F103 P3 — documented, not fixed, because the fix requires
     // infra the slice doesn't ship yet.
     const order_key = doc_id;
-    const visibility = DEFAULT_VISIBILITY;
+    const access_mode = DEFAULT_ACCESS_MODE;
     const now = ctx.now();
     const created_by = resolveCreatedBy(ctx.principal);
 
@@ -354,8 +355,10 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
         title,
         slug,
         order_key,
-        visibility,
-        visibility_version: 0,
+        access_mode,
+        published_slug: null,
+        published_at: null,
+        render_version: 0,
         created_by,
         created_at: now,
         updated_at: now,
@@ -385,7 +388,9 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
       slug,
       order_key,
       created_by,
-      visibility,
+      access_mode,
+      published_slug: null,
+      published_at: null,
       seed_blocks,
     };
   },

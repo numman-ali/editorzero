@@ -39,6 +39,7 @@ import type {
   WorkspaceId,
 } from "@editorzero/ids";
 import type {
+  AccessMode,
   CapabilityCategory,
   GrantRole,
   Role,
@@ -260,8 +261,25 @@ export interface DocsTable {
   readonly title: string;
   readonly slug: string;
   readonly order_key: string;
-  readonly visibility: "workspace" | "public" | "private";
-  readonly visibility_version: number;
+  /**
+   * Read scope INSIDE the Org (ADR 0040 Step 5 — the `visibility`
+   * de-overload): `space` = space-mediated, `private` = allow-list.
+   * Orthogonal to publish; no live capability mutates it yet (the mode
+   * switch lands with the Step-8 ACL family).
+   */
+  readonly access_mode: AccessMode;
+  /**
+   * The public dimension (orthogonal to `access_mode`). Non-null
+   * `published_at` ⇒ published; `published_slug` is the workspace-
+   * unique public URL segment (`docs_published_slug_unique`). Set by
+   * `doc.publish`; cleared by `doc.unpublish` AND `doc.soft_delete`
+   * (a trashed doc leaves the public site; restore never
+   * surprise-republishes).
+   */
+  readonly published_slug: string | null;
+  readonly published_at: number | null;
+  /** Render/cache-invalidation counter (F5) — renamed from `visibility_version` at the Step-5 split. */
+  readonly render_version: number;
   readonly created_by: UserId;
   readonly created_at: number;
   readonly updated_at: number;

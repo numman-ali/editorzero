@@ -37,7 +37,9 @@ const DOCS_PAYLOAD = {
       title: "A doc",
       slug: "a-doc",
       collection_id: null,
-      visibility: "workspace" as const,
+      access_mode: "space" as const,
+      published_slug: null,
+      published_at: null,
       created_at: 1,
       updated_at: 1,
     },
@@ -123,7 +125,9 @@ describe("createCapabilityCommand", () => {
       slug: "hello",
       order_key: "a",
       created_by: "018f0000-0000-7000-8000-000000000002",
-      visibility: "workspace",
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
       seed_blocks: [],
     };
     const fetch = vi.fn<typeof globalThis.fetch>(

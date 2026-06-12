@@ -32,6 +32,7 @@ export {
   type WorkspaceState,
 } from "./state";
 export type {
+  AccessMode,
   AuditDeny,
   AuditError,
   AuditRecord,
@@ -40,7 +41,6 @@ export type {
   CollapsePolicy,
   DenyReason,
   DocPurgePreimage,
-  DocVisibility,
   HandlerError,
   Role,
   SeedBlock,

@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   DOC_LIST_QUERY_KEY,
+  docAccessModeLabel,
   docListQueryOptions,
-  docVisibilityLabel,
+  docTagClass,
   fetchDocList,
   formatUpdated,
-  visibilityTagClass,
 } from "./docs";
 
 /**
@@ -34,7 +34,9 @@ const ONE_DOC = {
       title: "Hello",
       slug: "hello",
       collection_id: null,
-      visibility: "workspace",
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
       created_at: 1,
       updated_at: 2,
     },
@@ -79,25 +81,23 @@ describe("docListQueryOptions", () => {
   });
 });
 
-describe("docVisibilityLabel (ADR 0040 vocabulary lock)", () => {
-  it('renders the wire value "workspace" as "Space"', () => {
-    expect(docVisibilityLabel("workspace")).toBe("Space");
+describe("docAccessModeLabel (ADR 0040 vocabulary lock)", () => {
+  it('renders the wire value "space" as "Space"', () => {
+    expect(docAccessModeLabel("space")).toBe("Space");
   });
 
-  it("passes the other values through", () => {
-    expect(docVisibilityLabel("public")).toBe("public");
-    expect(docVisibilityLabel("private")).toBe("private");
+  it("passes private through", () => {
+    expect(docAccessModeLabel("private")).toBe("private");
   });
 });
 
-describe("visibilityTagClass", () => {
-  it("reserves the published-green pair for public", () => {
-    expect(visibilityTagClass("public")).toBe("status-tag st-pub");
+describe("docTagClass (publish dimension, orthogonal to access_mode)", () => {
+  it("reserves the published-green pair for a published doc", () => {
+    expect(docTagClass(1_700_000_000_000)).toBe("status-tag st-pub");
   });
 
-  it("keeps the base outline for workspace and private", () => {
-    expect(visibilityTagClass("workspace")).toBe("status-tag");
-    expect(visibilityTagClass("private")).toBe("status-tag");
+  it("keeps the base outline for an unpublished doc", () => {
+    expect(docTagClass(null)).toBe("status-tag");
   });
 });
 

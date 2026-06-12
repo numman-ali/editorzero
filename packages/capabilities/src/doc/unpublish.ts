@@ -1,56 +1,43 @@
 /**
- * `doc.unpublish` — set a doc's `visibility` back to `"workspace"`
- * (architecture.md Appendix A § doc; `METADATA_ONLY_CAPABILITIES` in
- * `@editorzero/scopes`).
+ * `doc.unpublish` — clear a doc's publish dimension: `published_slug`
+ * and `published_at` both land on NULL (architecture.md §3.5; ADR 0040
+ * Step 5; `METADATA_ONLY_CAPABILITIES` in `@editorzero/scopes`).
  *
- * Pair of `doc.publish`. Same metadata-only lane: no `ctx.transact`, no
- * Y.Doc touching, no `doc_updates` row. Single UPDATE + RETURNING on
- * the `docs` row. Always lands on `visibility: "workspace"` regardless
- * of prior state; `visibility_version` bumps on every successful call
- * so cache keyed on the version invalidates even when the caller re-
- * asserts an already-unpublished state (mirror of publish's F5-driven
- * always-bump — version is an invalidation signal, not a change-
- * detector).
+ * Pair of `doc.publish`, and like it ORTHOGONAL to `access_mode` —
+ * unpublishing changes who can reach the doc from OUTSIDE the Org,
+ * never its read scope inside. Same metadata-only lane: no
+ * `ctx.transact`, no Y.Doc touching, no `doc_updates` row. Single
+ * UPDATE + RETURNING. Always lands on the not-published state
+ * regardless of prior state; `render_version` bumps on every
+ * successful call so cache keyed on the version invalidates even when
+ * the caller re-asserts an already-unpublished doc (mirror of
+ * publish's F5-driven always-bump — version is an invalidation signal,
+ * not a change-detector).
  *
- * **"Workspace" as the unpublish target, not "private".** The matrix
- * has three visibility states (workspace / public / private), but
- * unpublish doesn't need a caller-chosen target: `"workspace"` is the
- * default new-doc visibility (see `doc/create.ts` → `DEFAULT_VISIBILITY`)
- * and the "not public" state that a later public-route renderer will
- * treat as un-listed. A caller who wants `"private"` uses a future
- * `doc.set_visibility` (not yet implemented); `doc.unpublish` is the
- * narrow inverse of `doc.publish`, intentionally symmetric.
+ * **The published URL is RELEASED, not parked.** Clearing
+ * `published_slug` removes the row from `docs_published_slug_unique`,
+ * so another doc may claim the slug. A later re-publish of this doc
+ * re-mints (and may get a suffixed variant if the URL was taken) —
+ * deliberate: parking URLs forever would let one workspace member
+ * squat the namespace.
  *
  * **Scope.** `doc:publish`. Mirrors publish — the same role widening
  * that grants a caller the ability to open a doc publicly also grants
  * them the ability to close it. Splitting publish/unpublish across
  * different scopes would leave a doc stuck public if the original
  * publisher's role was revoked, which is the opposite of what the scope
- * model wants (admins retain the ability to roll back visibility).
+ * model wants (admins retain the ability to roll back exposure).
  *
  * **Soft-deleted handling.** A `deleted_at IS NOT NULL` doc returns 404
- * (same projection as `doc.publish` / `doc.get`). Unpublishing a
- * trashed doc has no defined meaning; the soft-deleted state already
- * hides it from the public-route by construction, so the only visible
- * effect would be a `visibility_version` bump with no corresponding
+ * (same projection as `doc.publish` / `doc.get`). `doc.soft_delete`
+ * already cleared the publish dimension on its way to the trash, so the
+ * only visible effect here would be a `render_version` bump with no
  * state transition. 404 is the honest projection.
  *
- * **Audit effect.** `{ kind: "doc.unpublish", doc_id }`. No timestamp
- * field on the effect — `doc.publish` carries `published_at` because
- * the target DDL persists it on the `docs` row (deferred; see
- * `doc/publish.ts` v1 scope note), but the un-publish side has no
- * symmetric `unpublished_at` in the architecture.md target DDL. The
- * audit row's `created_at` envelope already carries "when this
- * happened"; no separate effect field needed.
- *
- * **v1 scope — visibility-only slice; `published_slug` clearing
- * deferred.** Matches the `doc.publish` scope note: the target DDL
- * has `published_slug` clearing happen on `doc.unpublish`
- * (architecture.md §3.5 "cleared on doc.unpublish"), but the column
- * doesn't exist in the live schema yet. When the public-route renderer
- * slice ships `published_slug` + `published_at`, this handler's UPDATE
- * grows to also set `published_slug = null`. Additive migration — no
- * wire-contract change, no response-shape change.
+ * **Audit effect.** `{ kind: "doc.unpublish", doc_id }`. The clear is
+ * deterministic (both fields land on NULL), so the effect needs no
+ * payload beyond the target; the audit envelope's `created_at` already
+ * says when.
  */
 
 import type {
@@ -79,17 +66,16 @@ const DOC_UNPUBLISH_ID = CapabilityId("doc.unpublish");
 // `DocUnpublishInputSchema` / `DocUnpublishOutputSchema` are the single
 // source (ADR 0034), reused verbatim by the API route's `validator` /
 // `resolver`. Input is a single `doc_id` validated as a UUIDv7 then
-// branded via `.transform(DocId)`; output returns the post-update
-// projection (`visibility` pinned to the literal `"workspace"`) so
-// callers don't need a follow-up `doc.get`. See
-// `@editorzero/schemas/doc/unpublish` for the definitions.
+// branded via `.transform(DocId)`; output pins the unpublished
+// post-state via `z.null()` literals so callers don't need a follow-up
+// `doc.get`. See `@editorzero/schemas/doc/unpublish` for definitions.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
 export const docUnpublish: Capability<DocUnpublishInput, DocUnpublishOutput> = {
   id: DOC_UNPUBLISH_ID,
   category: "mutation",
-  summary: "Set a doc's visibility back to workspace (inverse of doc.publish).",
+  summary: "Unpublish a doc — clear its public URL slug and published_at.",
   input: DocUnpublishInputSchema,
   output: DocUnpublishOutputSchema,
   requires: ["doc:publish"],
@@ -114,41 +100,44 @@ export const docUnpublish: Capability<DocUnpublishInput, DocUnpublishOutput> = {
   handler: async (ctx, input) => {
     const now = ctx.now();
 
-    // Same single-UPDATE + expression-builder increment shape as
-    // `doc.publish` — see that file's handler comment for why this
-    // runs single-statement with RETURNING inside the dispatcher's
-    // BEGIN IMMEDIATE tx.
+    // Same single-UPDATE + expression-builder increment shape as the
+    // other metadata mutators — single-statement with RETURNING inside
+    // the dispatcher's write-path tx keeps the "0 rows = not found"
+    // branch atomic with the write.
     const row = await ctx.db
       .updateTable("docs")
       .set((eb) => ({
-        visibility: "workspace",
-        visibility_version: eb("visibility_version", "+", 1),
+        published_slug: null,
+        published_at: null,
+        render_version: eb("render_version", "+", 1),
         updated_at: now,
       }))
       .where("id", "=", input.doc_id)
       .where("deleted_at", "is", null)
-      .returning(["id", "visibility_version"])
+      .returning(["id", "render_version"])
       .executeTakeFirst();
 
     if (row === undefined) {
       throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
     }
 
-    // `doc.visibility_changed` — mirrors the publish-side emit
-    // (packages/capabilities/src/doc/publish.ts). Same event
-    // name; the `visibility` discriminator tells the downstream
-    // forwarder which side flipped. Committed inside the same
-    // write-path tx as the UPDATE above (architecture.md §2101).
-    ctx.outbox("doc.visibility_changed", {
+    // `doc.publish_changed` — mirrors the publish-side emit
+    // (packages/capabilities/src/doc/publish.ts); null slug/at says
+    // "no longer served". Keyed on `render_version` so a forwarder can
+    // reject out-of-order rows without coordination. Committed inside
+    // the same write-path tx as the UPDATE above.
+    ctx.outbox("doc.publish_changed", {
       doc_id: row.id,
-      visibility: "workspace",
-      visibility_version: row.visibility_version,
+      published_slug: null,
+      published_at: null,
+      render_version: row.render_version,
     });
 
     return {
       doc_id: row.id,
-      visibility: "workspace",
-      visibility_version: row.visibility_version,
+      published_slug: null,
+      published_at: null,
+      render_version: row.render_version,
     };
   },
 };

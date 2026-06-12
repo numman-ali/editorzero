@@ -20,17 +20,19 @@ import type {
   WebhookId,
   WorkspaceId,
 } from "@editorzero/ids";
-import type { Role, Scope } from "@editorzero/scopes";
+import type { AccessMode, Role, Scope } from "@editorzero/scopes";
 
 // Re-exported from their owning packages so an audit consumer only
 // needs `@editorzero/audit`. `DenyReason` / `HandlerError` live with
 // `EditorZeroError` in `@editorzero/errors` (each subclass owns the
-// projection to `HandlerError`); `Role` lives in `@editorzero/scopes`.
-export type { DenyReason, HandlerError, Role };
+// projection to `HandlerError`); `Role` / `AccessMode` live in
+// `@editorzero/scopes` (`AccessMode` is the ADR 0040 Step-5 successor
+// to the retired tri-state `DocVisibility` — publish is now the
+// orthogonal `published_slug`/`published_at` pair, not an enum value).
+export type { AccessMode, DenyReason, HandlerError, Role };
 
-// ── Visibility enums (§3.5, §3.6) ──────────────────────────────────────────
+// ── Visibility enums (§3.6) ────────────────────────────────────────────────
 
-export type DocVisibility = "workspace" | "public" | "private";
 export type BlockVisibility = "default" | "internal" | "public";
 
 // ── Canonical post-states used by AuditEffect ──────────────────────────────
@@ -95,7 +97,13 @@ export interface DocPurgePreimage {
   doc_id: DocId;
   title: string;
   collection_id: CollectionId | null;
-  visibility: DocVisibility;
+  access_mode: AccessMode;
+  // Publish dimension at purge time. Soft-delete already cleared these
+  // (a trashed doc leaves the public site), so for a purge after the
+  // normal trash flow they are null — carried anyway so the preimage
+  // mirrors the row, not an assumption about how it got here.
+  published_slug: string | null;
+  published_at: number | null;
   blocks: BlockPostState[];
   snapshot_seq_at_purge: number;
 }

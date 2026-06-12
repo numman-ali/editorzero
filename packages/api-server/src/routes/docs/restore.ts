@@ -2,7 +2,7 @@
  * `POST /docs/restore/:doc_id` — revive a soft-deleted doc.
  *
  * Inverse of `POST /docs/delete/:doc_id`; same metadata-only lane. Flips
- * `docs.deleted_at` from non-NULL back to NULL + bumps `visibility_version`.
+ * `docs.deleted_at` from non-NULL back to NULL + bumps `render_version`.
  * See `routes/docs/delete.ts` for the fuller route-posture discussion; this
  * doc-block keeps only the deltas.
  *
@@ -33,8 +33,8 @@
  * `{ error: "validation_failed" }` envelope.
  *
  * **Status codes.**
- *   200 — restored: `deleted_at` cleared, `visibility_version` bumped.
- *         Body carries `{ doc_id, visibility_version }`. No `restored_at`
+ *   200 — restored: `deleted_at` cleared, `render_version` bumped.
+ *         Body carries `{ doc_id, render_version }`. No `restored_at`
  *         field (audit envelope owns event time; see capability doc-block).
  *   400 — malformed doc_id (not a v7 UUID); validator hook → envelope.
  *   401 — unauthenticated (principal middleware; declaration only).
@@ -62,7 +62,7 @@ export const restore = new Hono<ApiEnv>().post(
       summary: "Restore a soft-deleted doc (inverse of doc.delete).",
       responses: {
         200: {
-          description: "Doc restored; deleted_at cleared, visibility_version bumped.",
+          description: "Doc restored; deleted_at cleared, render_version bumped.",
           content: jsonContent(DocRestoreOutputSchema),
         },
         400: {

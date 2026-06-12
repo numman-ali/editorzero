@@ -88,8 +88,10 @@ async function seedDocs() {
         title: "A2",
         slug: "a2",
         order_key: "a1",
-        visibility: "workspace",
-        visibility_version: 0,
+        access_mode: "space",
+        published_slug: null,
+        published_at: null,
+        render_version: 0,
         created_by: ALICE,
         created_at: 1,
         updated_at: 1,
@@ -102,8 +104,12 @@ async function seedDocs() {
         title: "A1",
         slug: "a1",
         order_key: "a0",
-        visibility: "public",
-        visibility_version: 0,
+        // Published doc — exercises the non-null publish pair through the
+        // list projection (ADR 0040 Step 5).
+        access_mode: "space",
+        published_slug: "a1",
+        published_at: 777,
+        render_version: 1,
         created_by: ALICE,
         created_at: 1,
         updated_at: 1,
@@ -116,8 +122,10 @@ async function seedDocs() {
         title: "A3 deleted",
         slug: "a3",
         order_key: "a2",
-        visibility: "workspace",
-        visibility_version: 0,
+        access_mode: "space",
+        published_slug: null,
+        published_at: null,
+        render_version: 0,
         created_by: ALICE,
         created_at: 1,
         updated_at: 1,
@@ -135,8 +143,10 @@ async function seedDocs() {
       title: "B1",
       slug: "b1",
       order_key: "a0",
-      visibility: "workspace",
-      visibility_version: 0,
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
+      render_version: 0,
       created_by: ALICE,
       created_at: 1,
       updated_at: 1,
@@ -163,7 +173,7 @@ describe("doc.list", () => {
     expect(out.docs.find((d) => d.id === DOC_A3_DELETED)).toBeUndefined();
   });
 
-  it("projects the expected shape including nullable collection_id and visibility", async () => {
+  it("projects the expected shape including nullable collection_id and the publish pair", async () => {
     await seedDocs();
     const ctx = buildCtx(WORKSPACE_A);
     const out = await docList.handler(ctx, {});
@@ -176,14 +186,18 @@ describe("doc.list", () => {
       title: "A1",
       slug: "a1",
       collection_id: null,
-      visibility: "public",
+      access_mode: "space",
+      published_slug: "a1",
+      published_at: 777,
     });
     expect(second).toMatchObject({
       id: DOC_A2,
       title: "A2",
       slug: "a2",
       collection_id: COLLECTION_C1,
-      visibility: "workspace",
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
     });
   });
 

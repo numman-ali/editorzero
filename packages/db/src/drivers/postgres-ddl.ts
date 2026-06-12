@@ -63,18 +63,20 @@ export const WORKSPACES_DDL = `
 
 export const DOCS_DDL = `
   CREATE TABLE docs (
-    id                 TEXT PRIMARY KEY,
-    workspace_id       TEXT NOT NULL,
-    collection_id      TEXT,
-    title              TEXT NOT NULL,
-    slug               TEXT NOT NULL,
-    order_key          TEXT NOT NULL,
-    visibility         TEXT NOT NULL DEFAULT 'workspace',
-    visibility_version INTEGER NOT NULL DEFAULT 0,
-    created_by         TEXT NOT NULL,
-    created_at         BIGINT NOT NULL,
-    updated_at         BIGINT NOT NULL,
-    deleted_at         BIGINT,
+    id              TEXT PRIMARY KEY,
+    workspace_id    TEXT NOT NULL,
+    collection_id   TEXT,
+    title           TEXT NOT NULL,
+    slug            TEXT NOT NULL,
+    order_key       TEXT NOT NULL,
+    access_mode     TEXT NOT NULL DEFAULT 'space' CHECK (access_mode IN ('space','private')),
+    published_slug  TEXT,
+    published_at    BIGINT,
+    render_version  INTEGER NOT NULL DEFAULT 0,
+    created_by      TEXT NOT NULL,
+    created_at      BIGINT NOT NULL,
+    updated_at      BIGINT NOT NULL,
+    deleted_at      BIGINT,
     UNIQUE (id, workspace_id)
   );
   CREATE UNIQUE INDEX docs_root_slug_unique
@@ -83,6 +85,9 @@ export const DOCS_DDL = `
   CREATE UNIQUE INDEX docs_nested_slug_unique
     ON docs(workspace_id, collection_id, slug)
     WHERE collection_id IS NOT NULL AND deleted_at IS NULL;
+  CREATE UNIQUE INDEX docs_published_slug_unique
+    ON docs(workspace_id, published_slug)
+    WHERE published_slug IS NOT NULL AND deleted_at IS NULL;
 ` as const;
 
 /**

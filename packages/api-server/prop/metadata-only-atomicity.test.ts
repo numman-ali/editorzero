@@ -12,10 +12,11 @@
  * the four-row commit (architecture.md §6.5, ADR 0018 F10/F31) is
  * all-or-none:
  *
- *   1. `docs` row (UPDATE — visibility + visibility_version + updated_at).
+ *   1. `docs` row (UPDATE — published_slug + published_at +
+ *      render_version + updated_at; ADR 0040 Step 5).
  *   2. `audit_events(outcome='allow')` — dispatcher via `createAuditWriter`.
  *   3. `outbox(event='audit.appended')` — paired with (2), same writer.
- *   4. `outbox(event='doc.visibility_changed')` — queued during the
+ *   4. `outbox(event='doc.publish_changed')` — queued during the
  *      handler's `ctx.outbox(...)` call and flushed by the trunk
  *      composition root (`createApiDispatcher`) via
  *      `createOutboxWriter().append(auditTx, …)` before `withSystemTx`
@@ -199,10 +200,11 @@ function wrapDriverWithPlugin(
 // ── Per-trial fixture ────────────────────────────────────────────────────
 
 async function seedDoc(driver: SqliteDriver): Promise<void> {
-  // Seed a workspace-visibility doc. `doc.publish` will flip it to
-  // `public` and bump `visibility_version` from 0 → 1. The reject-arm
-  // assertions below pivot on the seed values ("workspace", 0) to
-  // prove the rollback restored pre-dispatch state.
+  // Seed an unpublished doc. `doc.publish` will mint
+  // `published_slug = "seed"` (no collision in an otherwise-empty
+  // workspace), stamp `published_at`, and bump `render_version` from
+  // 0 → 1. The reject-arm assertions below pivot on the seed values
+  // (NULL pair, 0) to prove the rollback restored pre-dispatch state.
   await driver
     .system()
     .insertInto("docs")
@@ -213,8 +215,10 @@ async function seedDoc(driver: SqliteDriver): Promise<void> {
       title: "seed",
       slug: "seed",
       order_key: "a",
-      visibility: "workspace",
-      visibility_version: 0,
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
+      render_version: 0,
       created_by: USER_ID,
       created_at: 1,
       updated_at: 1,
@@ -228,9 +232,10 @@ interface TrialResult {
   readonly faultTriggered: boolean;
   readonly callsIssued: number;
   readonly tags: readonly QueryTag[];
-  readonly docVisibility: "workspace" | "public" | "private";
-  readonly docVisibilityVersion: number;
-  readonly visibilityChangedOutboxCount: number;
+  readonly docPublishedSlug: string | null;
+  readonly docPublishedAt: number | null;
+  readonly docRenderVersion: number;
+  readonly publishChangedOutboxCount: number;
   readonly auditAppendedOutboxCount: number;
   readonly allowAuditCount: number;
   readonly errorAuditCount: number;
@@ -289,12 +294,12 @@ async function runTrial(faultOrdinal: number): Promise<TrialResult> {
     const docRow = await realDriver
       .system()
       .selectFrom("docs")
-      .select(["visibility", "visibility_version"])
+      .select(["published_slug", "published_at", "render_version"])
       .where("id", "=", DOC_ID)
       .executeTakeFirstOrThrow();
     const outboxRows = await realDriver.system().selectFrom("outbox").select("event").execute();
-    const visibilityChangedOutboxCount = outboxRows.filter(
-      (r) => r.event === "doc.visibility_changed",
+    const publishChangedOutboxCount = outboxRows.filter(
+      (r) => r.event === "doc.publish_changed",
     ).length;
     const auditAppendedOutboxCount = outboxRows.filter((r) => r.event === "audit.appended").length;
     const auditRows = await realDriver
@@ -310,9 +315,10 @@ async function runTrial(faultOrdinal: number): Promise<TrialResult> {
       faultTriggered: fault.wasTriggered(),
       callsIssued: fault.callsIssued(),
       tags: fault.tagsCaptured(),
-      docVisibility: docRow.visibility,
-      docVisibilityVersion: docRow.visibility_version,
-      visibilityChangedOutboxCount,
+      docPublishedSlug: docRow.published_slug,
+      docPublishedAt: docRow.published_at,
+      docRenderVersion: docRow.render_version,
+      publishChangedOutboxCount,
       auditAppendedOutboxCount,
       allowAuditCount,
       errorAuditCount,
@@ -330,6 +336,10 @@ function countUpdates(tags: readonly QueryTag[], table: string): number {
   return tags.filter((t) => t.kind === "UpdateQueryNode" && t.table === table).length;
 }
 
+function countSelects(tags: readonly QueryTag[], table: string): number {
+  return tags.filter((t) => t.kind === "SelectQueryNode" && t.table === table).length;
+}
+
 function countOutboxInserts(tags: readonly QueryTag[], event: string): number {
   return tags.filter(
     (t) => t.kind === "InsertQueryNode" && t.table === "outbox" && t.event === event,
@@ -345,15 +355,21 @@ function countOutboxInserts(tags: readonly QueryTag[], event: string): number {
 
 /**
  * Expected query count inside the metadata-only write-path tx.
- * Empirically observed breakdown (4 queries):
+ * Empirically observed breakdown (6 queries — ADR 0040 Step 5 added
+ * the two SELECTs the slug mint needs):
  *
- *   1 — handler `UPDATE docs` (doc.publish: visibility + visibility_version
- *       + updated_at, single statement with RETURNING)
+ *   1 — handler `SELECT docs` (publish-state read: internal slug +
+ *       existing pair for the idempotent re-publish branch)
+ * + 1 — handler `SELECT docs` (published-slug taken set for the
+ *       collision-suffix mint; runs because the seed doc is
+ *       unpublished — a re-publish trial would skip it)
+ * + 1 — handler `UPDATE docs` (published_slug + published_at +
+ *       render_version + updated_at, single statement with RETURNING)
  * + 1 — `createAuditWriter` `INSERT audit_events` (dispatcher's allow audit,
  *       called inside `fn` before it returns)
  * + 1 — `createAuditWriter` `INSERT outbox(audit.appended)` (paired
  *       with the audit row, same writer)
- * + 1 — `createOutboxWriter` `INSERT outbox(doc.visibility_changed)`
+ * + 1 — `createOutboxWriter` `INSERT outbox(doc.publish_changed)`
  *       (flushed from the handler's queued `ctx.outbox(...)` call
  *       after `fn` returns, before `withSystemTx` commits)
  *
@@ -361,7 +377,7 @@ function countOutboxInserts(tags: readonly QueryTag[], event: string): number {
  * iteration loop's no-op arm (ordinal > last in-tx query) covers the
  * "fault past the tail" case explicitly.
  */
-const EXPECTED_META_TX_QUERIES = 4;
+const EXPECTED_META_TX_QUERIES = 6;
 const MAX_ORDINAL = 8;
 
 describe("metadata-only atomicity (§17.1 row 7b)", () => {
@@ -369,12 +385,13 @@ describe("metadata-only atomicity (§17.1 row 7b)", () => {
     const result = await runTrial(10_000);
     expect(result.thrown).toBeNull();
     expect(result.faultTriggered).toBe(false);
-    // Four-row commit landed.
-    expect(result.docVisibility).toBe("public");
-    expect(result.docVisibilityVersion).toBe(1);
+    // Four-row commit landed: minted slug + stamp + version bump.
+    expect(result.docPublishedSlug).toBe("seed");
+    expect(result.docPublishedAt).not.toBeNull();
+    expect(result.docRenderVersion).toBe(1);
     expect(result.allowAuditCount).toBe(1);
     expect(result.auditAppendedOutboxCount).toBe(1);
-    expect(result.visibilityChangedOutboxCount).toBe(1);
+    expect(result.publishChangedOutboxCount).toBe(1);
     expect(result.errorAuditCount).toBe(0);
     // Exact query count — ranges would leave a blind spot where a
     // query migrates across the tx boundary while another moves in.
@@ -382,11 +399,14 @@ describe("metadata-only atomicity (§17.1 row 7b)", () => {
     // Per-table tag breakdown — proves the specific writes ran inside
     // the plugin-wrapped tx. If a regression moves the handler's UPDATE
     // outside the tx and a different UPDATE moves in, `callsIssued`
-    // stays at 4 but `countUpdates(..., "docs")` flips.
+    // stays at 6 but `countUpdates(..., "docs")` flips. The two mint
+    // SELECTs must also run INSIDE the tx — moving them out re-opens
+    // the Postgres mint race ADR 0040 Step 5 documents.
+    expect(countSelects(result.tags, "docs")).toBe(2);
     expect(countUpdates(result.tags, "docs")).toBe(1);
     expect(countInserts(result.tags, "audit_events")).toBe(1);
     expect(countOutboxInserts(result.tags, "audit.appended")).toBe(1);
-    expect(countOutboxInserts(result.tags, "doc.visibility_changed")).toBe(1);
+    expect(countOutboxInserts(result.tags, "doc.publish_changed")).toBe(1);
     expect(MAX_ORDINAL).toBeGreaterThanOrEqual(EXPECTED_META_TX_QUERIES);
   });
 
@@ -404,13 +424,14 @@ describe("metadata-only atomicity (§17.1 row 7b)", () => {
         expect((result.thrown as FaultInjectedError).ordinal).toBe(ordinal);
         expect(result.faultTriggered).toBe(true);
         // Every row inside the write-path tx is absent. The docs
-        // UPDATE rolled back to the seed (workspace / 0); the audit
+        // UPDATE rolled back to the seed (NULL pair / 0); the audit
         // allow row + its outbox(audit.appended) pair + the handler-
-        // emitted outbox(doc.visibility_changed) are all gone.
-        expect(result.docVisibility).toBe("workspace");
-        expect(result.docVisibilityVersion).toBe(0);
+        // emitted outbox(doc.publish_changed) are all gone.
+        expect(result.docPublishedSlug).toBeNull();
+        expect(result.docPublishedAt).toBeNull();
+        expect(result.docRenderVersion).toBe(0);
         expect(result.allowAuditCount).toBe(0);
-        expect(result.visibilityChangedOutboxCount).toBe(0);
+        expect(result.publishChangedOutboxCount).toBe(0);
         // The error-audit row lands in the separate `withAuditTx` and
         // commits independently — observability survives the rollback.
         // That tx writes its own `audit_events(error)` row AND its own
@@ -423,11 +444,12 @@ describe("metadata-only atomicity (§17.1 row 7b)", () => {
         // No-op arm — the fault was past the last in-tx query so the
         // dispatch resolved and all four rows committed.
         expect(result.faultTriggered).toBe(false);
-        expect(result.docVisibility).toBe("public");
-        expect(result.docVisibilityVersion).toBe(1);
+        expect(result.docPublishedSlug).toBe("seed");
+        expect(result.docPublishedAt).not.toBeNull();
+        expect(result.docRenderVersion).toBe(1);
         expect(result.allowAuditCount).toBe(1);
         expect(result.auditAppendedOutboxCount).toBe(1);
-        expect(result.visibilityChangedOutboxCount).toBe(1);
+        expect(result.publishChangedOutboxCount).toBe(1);
         expect(result.errorAuditCount).toBe(0);
       }
     });

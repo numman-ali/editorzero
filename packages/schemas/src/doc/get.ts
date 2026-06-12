@@ -20,8 +20,9 @@
  * client, branded `c.req.valid`) and `DocGetOutputSchema` to `resolver`
  * + `.parse(result)`.
  *
- * **Branded-ID fields come from `../shared/ids`; `visibility` from
- * `../shared/visibility`.** `blocks` is intentionally `z.array(z.unknown())`,
+ * **Branded-ID fields come from `../shared/ids`; `access_mode` from
+ * `../shared/grant` (the ADR 0040 Step-5 read-scope enum); the publish
+ * dimension rides `published_slug`/`published_at` (null ⇔ unpublished).** `blocks` is intentionally `z.array(z.unknown())`,
  * NOT the owned `Block` shape: expressing that polymorphic shape in
  * zod would mirror the block-type registry here, and a schemas leaf
  * must stay light. The capability handler returns the canonical
@@ -32,14 +33,13 @@
  */
 
 import { z } from "zod";
-
+import { AccessModeSchema } from "../shared/grant";
 import {
   CollectionIdOutputSchema,
   DocIdInputSchema,
   DocIdOutputSchema,
   WorkspaceIdOutputSchema,
 } from "../shared/ids";
-import { DocVisibilitySchema } from "../shared/visibility";
 
 export const DocGetInputSchema = z
   .object({
@@ -53,7 +53,9 @@ const DocMetaSchema = z.object({
   title: z.string(),
   slug: z.string(),
   collection_id: CollectionIdOutputSchema.nullable(),
-  visibility: DocVisibilitySchema,
+  access_mode: AccessModeSchema,
+  published_slug: z.string().nullable(),
+  published_at: z.number().nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });

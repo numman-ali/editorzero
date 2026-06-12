@@ -488,8 +488,10 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
           title: "My first doc",
           slug: "my-first-doc",
           order_key: "a",
-          visibility: "workspace",
-          visibility_version: 0,
+          access_mode: "space",
+          published_slug: null,
+          published_at: null,
+          render_version: 0,
           created_by: UserId(principal.id),
           created_at: 1_700_000_000_000,
           updated_at: 1_700_000_000_000,
@@ -501,11 +503,11 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const res = await trunk.request("/docs/list", { headers: { cookie } });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      docs: ReadonlyArray<{ id: string; title: string; visibility: string }>;
+      docs: ReadonlyArray<{ id: string; title: string; access_mode: string }>;
     };
     expect(body.docs).toHaveLength(1);
     expect(body.docs[0]?.title).toBe("My first doc");
-    expect(body.docs[0]?.visibility).toBe("workspace");
+    expect(body.docs[0]?.access_mode).toBe("space");
   });
 
   it("GET /docs/list 401s when no session cookie is present", async () => {
@@ -547,8 +549,10 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
             title: "Dana's doc",
             slug: "dana-doc",
             order_key: "a",
-            visibility: "workspace",
-            visibility_version: 0,
+            access_mode: "space",
+            published_slug: null,
+            published_at: null,
+            render_version: 0,
             created_by: UserId(danaPrincipal.id),
             created_at: 1,
             updated_at: 1,
@@ -561,8 +565,10 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
             title: "Eve's doc",
             slug: "eve-doc",
             order_key: "a",
-            visibility: "workspace",
-            visibility_version: 0,
+            access_mode: "space",
+            published_slug: null,
+            published_at: null,
+            render_version: 0,
             created_by: UserId(evePrincipal.id),
             created_at: 1,
             updated_at: 1,
@@ -784,13 +790,13 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const getRes = await trunk.request(`/docs/get/${createBody.doc_id}`, { headers: { cookie } });
     expect(getRes.status).toBe(200);
     const getBody = (await getRes.json()) as {
-      doc: { id: string; title: string; visibility: string };
+      doc: { id: string; title: string; access_mode: string };
       blocks: ReadonlyArray<{ id: string; type: string }>;
     };
 
     expect(getBody.doc.id).toBe(createBody.doc_id);
     expect(getBody.doc.title).toBe("Henry's doc");
-    expect(getBody.doc.visibility).toBe("workspace");
+    expect(getBody.doc.access_mode).toBe("space");
     // The seed blocks the writer inserted (heading + paragraph) must
     // project out of the Y.Doc clone. Identity-matching on block IDs
     // proves the hydration applied the committed doc_updates row —
@@ -1003,8 +1009,8 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     });
     expect(res.status).toBe(403);
 
-    // Confirm the row was not mutated — visibility still "workspace",
-    // visibility_version still 0. `driver.system()` is typed against
+    // Confirm the row was not mutated — publish pair still NULL,
+    // render_version still 0. `driver.system()` is typed against
     // the real schema, so the id column wants a `DocId` brand; the
     // wire-form string off `createBody.doc_id` needs to be re-branded
     // via the idempotent `DocId()` factory (already a valid UUIDv7
@@ -1012,20 +1018,22 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const row = await driver
       .system()
       .selectFrom("docs")
-      .select(["visibility", "visibility_version"])
+      .select(["published_slug", "published_at", "render_version"])
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
-    expect(row.visibility).toBe("workspace");
-    expect(row.visibility_version).toBe(0);
+    expect(row.published_slug).toBeNull();
+    expect(row.published_at).toBeNull();
+    expect(row.render_version).toBe(0);
   });
 
-  it("POST /docs/publish/:doc_id flips visibility to public for an owner principal", async () => {
+  it("POST /docs/publish/:doc_id mints the publish pair for an owner principal", async () => {
     // Happy-path allow — post-ADR 0024 the resolver reads role from
     // `workspace_members`, so seeding `"owner"` lets the caller clear
     // the scope gate. The route response carries the post-state
-    // projection; the durable row flips to `visibility="public"` with
-    // `visibility_version` bumped from 0 → 1 in the same write-path tx
-    // that wrote the allow-audit row. No `doc_updates` row lands —
+    // projection; the durable row gets `published_slug` minted from the
+    // internal slug, `published_at` stamped, and `render_version`
+    // bumped from 0 → 1 in the same write-path tx that wrote the
+    // allow-audit row (ADR 0040 Step 5). No `doc_updates` row lands —
     // publish is metadata-only, never touches `ctx.transact`.
     const { trunk } = await buildStack({
       registerDocCreate: true,
@@ -1051,23 +1059,26 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       doc_id: string;
-      visibility: "public";
-      visibility_version: number;
+      published_slug: string;
       published_at: number;
+      render_version: number;
     };
     expect(body.doc_id).toBe(doc_id);
-    expect(body.visibility).toBe("public");
-    expect(body.visibility_version).toBe(1);
+    // Minted from the internal slug ("Paula's doc" → "paula-s-doc") —
+    // no collision in a fresh workspace, so the bare slug wins.
+    expect(body.published_slug).toBe("paula-s-doc");
     expect(body.published_at).toBeGreaterThan(0);
+    expect(body.render_version).toBe(1);
 
     const row = await driver
       .system()
       .selectFrom("docs")
-      .select(["visibility", "visibility_version"])
+      .select(["published_slug", "published_at", "render_version"])
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
-    expect(row.visibility).toBe("public");
-    expect(row.visibility_version).toBe(1);
+    expect(row.published_slug).toBe("paula-s-doc");
+    expect(row.published_at).toBe(body.published_at);
+    expect(row.render_version).toBe(1);
 
     // Audit trail: create (allow) + publish (allow). Two rows total; no
     // deny, no `doc_updates` row from publish (metadata-only).
@@ -1129,7 +1140,7 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     // Same gate-fires-first shape as publish — the scope `doc:publish`
     // guards both directions, and `member` doesn't hold it. A single
     // deny-audit row lands via `withAuditTx`; no write-path tx opens,
-    // so no `docs.visibility` bump is possible.
+    // so no `docs` publish-pair mutation is possible.
     const { trunk } = await buildStack({
       registerDocUnpublish: true,
     });
@@ -1188,22 +1199,23 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     });
     expect(res.status).toBe(403);
 
-    // Row unchanged — visibility still "workspace", visibility_version
-    // still 0. Same brand-via-`DocId()` dance as the publish sibling.
+    // Row unchanged — publish pair still NULL, render_version still 0.
+    // Same brand-via-`DocId()` dance as the publish sibling.
     const row = await driver
       .system()
       .selectFrom("docs")
-      .select(["visibility", "visibility_version"])
+      .select(["published_slug", "published_at", "render_version"])
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
-    expect(row.visibility).toBe("workspace");
-    expect(row.visibility_version).toBe(0);
+    expect(row.published_slug).toBeNull();
+    expect(row.published_at).toBeNull();
+    expect(row.render_version).toBe(0);
   });
 
-  it("POST /docs/unpublish/:doc_id flips a published doc back to workspace for an owner principal", async () => {
-    // Happy-path allow. The flow is: create (workspace, v0) → publish
-    // (public, v1) → unpublish (workspace, v2). Each allow audit row
-    // lands in order; no deny, no `doc_updates` rows from publish /
+  it("POST /docs/unpublish/:doc_id clears the publish pair for an owner principal", async () => {
+    // Happy-path allow. The flow is: create (unpublished, v0) → publish
+    // (pair minted, v1) → unpublish (pair cleared, v2). Each allow audit
+    // row lands in order; no deny, no `doc_updates` rows from publish /
     // unpublish (both metadata-only).
     const { trunk } = await buildStack({
       registerDocCreate: true,
@@ -1236,21 +1248,24 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       doc_id: string;
-      visibility: "workspace";
-      visibility_version: number;
+      published_slug: null;
+      published_at: null;
+      render_version: number;
     };
     expect(body.doc_id).toBe(doc_id);
-    expect(body.visibility).toBe("workspace");
-    expect(body.visibility_version).toBe(2);
+    expect(body.published_slug).toBeNull();
+    expect(body.published_at).toBeNull();
+    expect(body.render_version).toBe(2);
 
     const row = await driver
       .system()
       .selectFrom("docs")
-      .select(["visibility", "visibility_version"])
+      .select(["published_slug", "published_at", "render_version"])
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
-    expect(row.visibility).toBe("workspace");
-    expect(row.visibility_version).toBe(2);
+    expect(row.published_slug).toBeNull();
+    expect(row.published_at).toBeNull();
+    expect(row.render_version).toBe(2);
 
     const audits = await driver
       .system()
@@ -1372,11 +1387,11 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const row = await driver
       .system()
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version"])
+      .select(["deleted_at", "render_version"])
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBeNull();
-    expect(row.visibility_version).toBe(0);
+    expect(row.render_version).toBe(0);
   });
 
   it("POST /docs/delete/:doc_id soft-deletes a doc for an owner principal", async () => {
@@ -1410,11 +1425,11 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const body = (await res.json()) as {
       doc_id: string;
       deleted_at: number;
-      visibility_version: number;
+      render_version: number;
     };
     expect(body.doc_id).toBe(doc_id);
     expect(body.deleted_at).toBeGreaterThan(0);
-    expect(body.visibility_version).toBe(1);
+    expect(body.render_version).toBe(1);
 
     // Durable row soft-deleted; the tenant-scoped `docs` view filter
     // hides it from subsequent reads, but the raw system row still
@@ -1422,11 +1437,11 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const row = await driver
       .system()
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version"])
+      .select(["deleted_at", "render_version"])
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBe(body.deleted_at);
-    expect(row.visibility_version).toBe(1);
+    expect(row.render_version).toBe(1);
 
     const audits = await driver
       .system()
@@ -1553,16 +1568,16 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     const row = await driver
       .system()
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version"])
+      .select(["deleted_at", "render_version"])
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBe(1_000_000);
-    expect(row.visibility_version).toBe(0);
+    expect(row.render_version).toBe(0);
   });
 
   it("POST /docs/restore/:doc_id revives a soft-deleted doc for an owner principal", async () => {
     // Happy-path allow. Create → delete → restore; the `deleted_at`
-    // column returns to NULL on the durable row and `visibility_version`
+    // column returns to NULL on the durable row and `render_version`
     // bumps to 2 (one bump per metadata mutation). Three allow audits
     // land in order; no `doc_updates` rows from delete or restore
     // (both metadata-only).
@@ -1597,20 +1612,20 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       doc_id: string;
-      visibility_version: number;
+      render_version: number;
     };
     expect(body.doc_id).toBe(doc_id);
-    expect(body.visibility_version).toBe(2);
+    expect(body.render_version).toBe(2);
 
     // Durable row restored — deleted_at back to null, version bumped.
     const row = await driver
       .system()
       .selectFrom("docs")
-      .select(["deleted_at", "visibility_version"])
+      .select(["deleted_at", "render_version"])
       .where("id", "=", DocId(doc_id))
       .executeTakeFirstOrThrow();
     expect(row.deleted_at).toBeNull();
-    expect(row.visibility_version).toBe(2);
+    expect(row.render_version).toBe(2);
 
     const audits = await driver
       .system()

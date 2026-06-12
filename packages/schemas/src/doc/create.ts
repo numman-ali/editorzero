@@ -22,12 +22,15 @@
  *
  * **Golden reference for schema extraction.** Branded-ID fields come
  * from `../shared/ids`; capability-specific shapes (the seed-block) stay
- * local. `visibility` is the create-time subset, NOT the full
- * `DocVisibility` — `"public"` is reserved (see the capability header).
+ * local. `access_mode` echoes the create-time default (`"space"`) via the
+ * shared `AccessModeSchema` — it is NOT caller-settable (the mode switch
+ * is a Step-8 ACL capability; see the capability header). A new doc is
+ * never born published, so `published_slug`/`published_at` are pinned
+ * `null` literals on the response.
  */
 
 import { z } from "zod";
-
+import { AccessModeSchema } from "../shared/grant";
 import {
   BlockIdOutputSchema,
   CollectionIdInputSchema,
@@ -36,8 +39,6 @@ import {
   UserIdOutputSchema,
   WorkspaceIdOutputSchema,
 } from "../shared/ids";
-
-const VisibilitySchema = z.enum(["workspace", "private"]);
 
 export const DocCreateInputSchema = z
   .object({
@@ -71,7 +72,9 @@ export const DocCreateOutputSchema = z.object({
   // `principal_id` — which for an agent write is the agent, not the human
   // (Codex contract review HIGH 1).
   created_by: UserIdOutputSchema,
-  visibility: VisibilitySchema,
+  access_mode: AccessModeSchema,
+  published_slug: z.null(),
+  published_at: z.null(),
   seed_blocks: z.array(SeedBlockSchema),
 });
 

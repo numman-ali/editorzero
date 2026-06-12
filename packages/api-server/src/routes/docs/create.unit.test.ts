@@ -45,7 +45,9 @@ interface FixtureOutput {
   readonly slug: string;
   readonly order_key: string;
   readonly created_by: string;
-  readonly visibility: "workspace" | "private";
+  readonly access_mode: "space" | "private";
+  readonly published_slug: null;
+  readonly published_at: null;
   readonly seed_blocks: ReadonlyArray<{
     id: string;
     type: string;
@@ -81,7 +83,9 @@ describe("POST /docs/create", () => {
       slug: "hello",
       order_key: "018f0000-0000-7000-8000-0000000000a1",
       created_by: TEST_PRINCIPAL.id,
-      visibility: "workspace",
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
       seed_blocks: [
         { id: "018f0000-0000-7000-8000-0000000000b1", type: "heading", props: { level: 1 } },
         { id: "018f0000-0000-7000-8000-0000000000b2", type: "paragraph" },
@@ -137,7 +141,10 @@ describe("POST /docs/create", () => {
     const res = await app.request("/docs/create", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Hello", visibility: "public" }),
+      // `access_mode` is the key a tempted client would send post-Step-5
+      // (read scope is not caller-settable); `visibility` is the retired
+      // pre-Step-5 vocabulary — both must 400, not silently drop.
+      body: JSON.stringify({ title: "Hello", access_mode: "private", visibility: "public" }),
     });
     expect(res.status).toBe(400);
     expect(dispatchCalled).toBe(false);

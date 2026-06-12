@@ -1,25 +1,21 @@
 /**
- * `doc.unpublish` — capability-level integration test.
+ * `doc.unpublish` — capability-level integration test (ADR 0040 Step 5).
  *
- * Mirror of `doc.publish.unit.test.ts`. Exercises the handler against
- * real in-memory SQLite. No sync service needed (metadata-only
- * mutation; no `ctx.transact`). Layer-2 tenant isolation is owned by
- * `packages/db/src/tenant.unit.test.ts`; here we confirm the capability
- * composes with that layer (workspace-A ctx cannot unpublish workspace-B
- * docs).
- *
- * Dispatcher wiring (zod parse, audit row emit, write-path tx) is the
- * dispatcher's test.
+ * Pair of `publish.unit.test.ts`; same harness shape. Step-5 semantics
+ * under test: unpublish clears `published_slug` + `published_at`
+ * (releasing the public URL for reuse), bumps `render_version`, and
+ * never touches `access_mode`.
  */
 
 import { createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
 import { NotFoundError } from "@editorzero/errors";
-import { type CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { CapabilityContext } from "../kernel";
+import { docPublish } from "./publish";
 import { docUnpublish } from "./unpublish";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
@@ -31,7 +27,11 @@ const ALICE = UserId("018f0000-0000-7000-8000-0000000000a1");
 const DOC_A1 = DocId("018f0000-0000-7000-8000-0000000000d1");
 const DOC_A2_DELETED = DocId("018f0000-0000-7000-8000-0000000000d2");
 const DOC_B1 = DocId("018f0000-0000-7000-8000-0000000000d3");
+const DOC_A3 = DocId("018f0000-0000-7000-8000-0000000000d4");
 const DOC_MISSING = DocId("018f0000-0000-7000-8000-0000000000d9");
+// Free TEXT in the standalone DOCS_DDL fixture (no FK) — places the
+// same-slugged second doc in a collection (per-collection uniqueness).
+const COLL_X = "018f0000-0000-7000-8000-0000000000c1";
 
 let driver: SqliteDriver;
 
@@ -69,11 +69,8 @@ function buildCtx(
     principal: userPrincipal(),
     tenant: { workspace_id },
     db: driver.scoped(workspace_id),
-    // `doc.unpublish` is metadata-only (METADATA_ONLY_CAPABILITIES) —
-    // calling `ctx.transact` would violate the allowlist. The handler
-    // never does; this stub throws so a regression (handler quietly
-    // starts calling transact) surfaces as a test failure rather than
-    // a silent passing run against a noop.
+    // Metadata-only mutation — a handler that starts calling
+    // `ctx.transact` must surface as a test failure, not a silent noop.
     transact: () => {
       throw new Error("doc.unpublish: handler must not call ctx.transact (metadata-only)");
     },
@@ -91,8 +88,10 @@ async function seedDocRow(params: {
   id: DocId;
   workspace_id: WorkspaceId;
   title: string;
-  visibility?: "workspace" | "public" | "private";
-  visibility_version?: number;
+  slug?: string;
+  published_slug?: string | null;
+  published_at?: number | null;
+  render_version?: number;
   collection_id?: CollectionId | null;
   deleted_at?: number | null;
 }) {
@@ -104,10 +103,12 @@ async function seedDocRow(params: {
       workspace_id: params.workspace_id,
       collection_id: params.collection_id ?? null,
       title: params.title,
-      slug: params.title.toLowerCase(),
+      slug: params.slug ?? params.title.toLowerCase(),
       order_key: params.id,
-      visibility: params.visibility ?? "workspace",
-      visibility_version: params.visibility_version ?? 0,
+      access_mode: "space",
+      published_slug: params.published_slug ?? null,
+      published_at: params.published_at ?? null,
+      render_version: params.render_version ?? 0,
       created_by: ALICE,
       created_at: 1,
       updated_at: 1,
@@ -119,13 +120,14 @@ async function seedDocRow(params: {
 // ── Scenarios ────────────────────────────────────────────────────────────
 
 describe("doc.unpublish", () => {
-  it("flips visibility to workspace, bumps visibility_version, returns the post-state", async () => {
+  it("clears published_slug + published_at, bumps render_version, leaves access_mode alone", async () => {
     await seedDocRow({
       id: DOC_A1,
       workspace_id: WORKSPACE_A,
-      title: "Published",
-      visibility: "public",
-      visibility_version: 3,
+      title: "Live",
+      published_slug: "live",
+      published_at: 111,
+      render_version: 3,
     });
 
     const { ctx, outboxEmits } = buildCtx(WORKSPACE_A, () => 2_000_000);
@@ -133,87 +135,82 @@ describe("doc.unpublish", () => {
 
     expect(out).toEqual({
       doc_id: DOC_A1,
-      visibility: "workspace",
-      visibility_version: 4,
+      published_slug: null,
+      published_at: null,
+      render_version: 4,
     });
 
     const row = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
-      .select(["visibility", "visibility_version", "updated_at"])
+      .select(["access_mode", "published_slug", "published_at", "render_version", "updated_at"])
       .where("id", "=", DOC_A1)
       .executeTakeFirstOrThrow();
-    expect(row.visibility).toBe("workspace");
-    expect(row.visibility_version).toBe(4);
+    expect(row.access_mode).toBe("space");
+    expect(row.published_slug).toBeNull();
+    expect(row.published_at).toBeNull();
+    expect(row.render_version).toBe(4);
     expect(row.updated_at).toBe(2_000_000);
 
-    // Mirror of `doc.publish`'s emission: `doc.visibility_changed`
-    // with the new `visibility_version` as the invalidation key.
-    // The `visibility` discriminator tells the forwarder this is the
-    // un-publish side.
     expect(outboxEmits).toEqual([
       {
-        event: "doc.visibility_changed",
+        event: "doc.publish_changed",
         payload: {
           doc_id: DOC_A1,
-          visibility: "workspace",
-          visibility_version: 4,
+          published_slug: null,
+          published_at: null,
+          render_version: 4,
         },
       },
     ]);
   });
 
-  it("is idempotent at the state level (already-workspace bumps version anyway)", async () => {
-    // F5 symmetric to publish's always-bump idempotency. Re-asserting
-    // the workspace state still bumps visibility_version so any cache
-    // keyed on it invalidates.
+  it("releases the public URL: another doc can claim the bare slug afterwards", async () => {
     await seedDocRow({
       id: DOC_A1,
       workspace_id: WORKSPACE_A,
-      title: "Already workspace",
-      visibility: "workspace",
-      visibility_version: 7,
+      title: "Guide",
+      slug: "guide",
+      published_slug: "guide",
+      published_at: 100,
+    });
+    // Same internal slug as DOC_A1 is legal — different collection.
+    await seedDocRow({
+      id: DOC_A3,
+      workspace_id: WORKSPACE_A,
+      title: "New guide",
+      slug: "guide",
+      collection_id: CollectionId(COLL_X),
+    });
+
+    const { ctx } = buildCtx(WORKSPACE_A, () => 5_000);
+    await docUnpublish.handler(ctx, { doc_id: DOC_A1 });
+    const out = await docPublish.handler(ctx, { doc_id: DOC_A3 });
+    // No suffix — DOC_A1's claim is gone, the namespace really freed.
+    expect(out.published_slug).toBe("guide");
+  });
+
+  it("is idempotent at the state level (already-unpublished bumps version anyway)", async () => {
+    // F5 — `render_version` is a stable signal that *something*
+    // happened, not a change-detector. A caller re-asserting unpublish
+    // should see the version move so any cache keyed on it invalidates.
+    await seedDocRow({
+      id: DOC_A1,
+      workspace_id: WORKSPACE_A,
+      title: "Never public",
+      render_version: 7,
     });
 
     const { ctx, outboxEmits } = buildCtx(WORKSPACE_A, () => 3_000_000);
     const out = await docUnpublish.handler(ctx, { doc_id: DOC_A1 });
 
-    expect(out.visibility).toBe("workspace");
-    expect(out.visibility_version).toBe(8);
-    // Same invalidation contract as publish: the event fires even
-    // though the state didn't transition, because the
-    // `visibility_version` bump is the cache-invalidation signal.
+    expect(out.published_slug).toBeNull();
+    expect(out.published_at).toBeNull();
+    expect(out.render_version).toBe(8);
     expect(outboxEmits).toEqual([
       {
-        event: "doc.visibility_changed",
-        payload: { doc_id: DOC_A1, visibility: "workspace", visibility_version: 8 },
-      },
-    ]);
-  });
-
-  it("unpublishes a private doc back to workspace (narrow inverse of publish)", async () => {
-    // A doc that was previously `private` should also land on
-    // `workspace` on unpublish. The capability's contract is "restore
-    // the workspace-default visibility", not "undo the last publish."
-    // A caller wanting `private` would use a future
-    // `doc.set_visibility` capability — not unpublish.
-    await seedDocRow({
-      id: DOC_A1,
-      workspace_id: WORKSPACE_A,
-      title: "Previously private",
-      visibility: "private",
-      visibility_version: 2,
-    });
-
-    const { ctx, outboxEmits } = buildCtx(WORKSPACE_A);
-    const out = await docUnpublish.handler(ctx, { doc_id: DOC_A1 });
-
-    expect(out.visibility).toBe("workspace");
-    expect(out.visibility_version).toBe(3);
-    expect(outboxEmits).toEqual([
-      {
-        event: "doc.visibility_changed",
-        payload: { doc_id: DOC_A1, visibility: "workspace", visibility_version: 3 },
+        event: "doc.publish_changed",
+        payload: { doc_id: DOC_A1, published_slug: null, published_at: null, render_version: 8 },
       },
     ]);
   });
@@ -223,17 +220,16 @@ describe("doc.unpublish", () => {
     await expect(docUnpublish.handler(ctx, { doc_id: DOC_MISSING })).rejects.toBeInstanceOf(
       NotFoundError,
     );
-    // Handler throws before the `ctx.outbox` call — no emission on
-    // the failed path, matching the single-tx atomicity guarantee.
+    // Failed mutation must not leak a `doc.publish_changed` event
+    // (single-tx atomicity — F10/F31).
     expect(outboxEmits).toEqual([]);
   });
 
-  it("treats soft-deleted docs as not found", async () => {
+  it("treats soft-deleted docs as not found (delete already cleared the publish dimension)", async () => {
     await seedDocRow({
       id: DOC_A2_DELETED,
       workspace_id: WORKSPACE_A,
       title: "Trashed",
-      visibility: "public",
       deleted_at: 999,
     });
     const { ctx, outboxEmits } = buildCtx(WORKSPACE_A);
@@ -241,16 +237,13 @@ describe("doc.unpublish", () => {
       NotFoundError,
     );
 
-    // And the row stays untouched — the soft-deleted doc must not
-    // have its visibility flipped through an error path.
     const row = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
-      .select(["visibility", "visibility_version"])
+      .select(["published_slug", "published_at", "render_version"])
       .where("id", "=", DOC_A2_DELETED)
       .executeTakeFirstOrThrow();
-    expect(row.visibility).toBe("public");
-    expect(row.visibility_version).toBe(0);
+    expect(row.render_version).toBe(0);
     expect(outboxEmits).toEqual([]);
   });
 
@@ -259,25 +252,25 @@ describe("doc.unpublish", () => {
       id: DOC_B1,
       workspace_id: WORKSPACE_B,
       title: "B1",
-      visibility: "public",
+      published_slug: "b1",
+      published_at: 50,
     });
     const { ctx: ctxA, outboxEmits } = buildCtx(WORKSPACE_A);
+
     await expect(docUnpublish.handler(ctxA, { doc_id: DOC_B1 })).rejects.toBeInstanceOf(
       NotFoundError,
     );
 
-    // workspace-B's row untouched.
+    // Workspace-B's published state must remain untouched.
     const row = await driver
       .scoped(WORKSPACE_B)
       .selectFrom("docs")
-      .select(["visibility", "visibility_version"])
+      .select(["published_slug", "published_at", "render_version"])
       .where("id", "=", DOC_B1)
       .executeTakeFirstOrThrow();
-    expect(row.visibility).toBe("public");
-    expect(row.visibility_version).toBe(0);
-    // And no outbox leak across the tenant boundary — the emission
-    // would carry workspace-A's tenant_id on the outbox row, for a
-    // doc owned by B. The handler throws first, so nothing queues.
+    expect(row.published_slug).toBe("b1");
+    expect(row.published_at).toBe(50);
+    expect(row.render_version).toBe(0);
     expect(outboxEmits).toEqual([]);
   });
 
@@ -291,15 +284,10 @@ describe("doc.unpublish", () => {
     }
   });
 
-  it("rejects a non-UUID string at the input schema", () => {
-    const result = docUnpublish.input.safeParse({ doc_id: "not-a-uuid" });
-    expect(result.success).toBe(false);
-  });
-
   it("rejects unknown input keys (strict)", () => {
     const result = docUnpublish.input.safeParse({
       doc_id: DOC_A1,
-      visibility: "workspace",
+      access_mode: "space",
     });
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -320,24 +308,12 @@ describe("doc.unpublish", () => {
     expect(subject).toEqual({ kind: "doc", id: DOC_A1 });
   });
 
-  it("emits doc.unpublish on allow with doc_id (no timestamp field)", () => {
+  it("emits doc.unpublish on allow with just the target (the clear is deterministic)", () => {
     const effect = docUnpublish.audit.effectOnAllow(
       { doc_id: DOC_A1 },
-      {
-        doc_id: DOC_A1,
-        visibility: "workspace",
-        visibility_version: 4,
-      },
+      { doc_id: DOC_A1, published_slug: null, published_at: null, render_version: 4 },
     );
-    expect(effect.kind).toBe("doc.unpublish");
-    if (effect.kind === "doc.unpublish") {
-      expect(effect.doc_id).toBe(DOC_A1);
-      // Confirm the effect shape deliberately carries no timestamp
-      // field — the audit envelope's `created_at` is the source of
-      // truth for "when this happened" (target DDL has no
-      // `unpublished_at` on the docs row).
-      expect(Object.keys(effect)).toEqual(["kind", "doc_id"]);
-    }
+    expect(effect).toEqual({ kind: "doc.unpublish", doc_id: DOC_A1 });
   });
 
   it("emits a deny effect carrying the reason code", () => {

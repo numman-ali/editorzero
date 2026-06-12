@@ -40,7 +40,7 @@ const VALID_DOC_ID = "018f0000-0000-7000-8000-0000000000a1";
 interface FixtureOutput {
   readonly doc_id: string;
   readonly deleted_at: number;
-  readonly visibility_version: number;
+  readonly render_version: number;
 }
 
 function buildApp(dispatch: (invocation: DispatchInvocation) => Promise<unknown>) {
@@ -65,7 +65,7 @@ describe("POST /docs/delete/:doc_id", () => {
     const output: FixtureOutput = {
       doc_id: VALID_DOC_ID,
       deleted_at: 2_000_000,
-      visibility_version: 7,
+      render_version: 7,
     };
     const app = buildApp(async (invocation) => {
       captured = invocation;

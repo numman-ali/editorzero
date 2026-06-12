@@ -1,12 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
-import {
-  docListQueryOptions,
-  docVisibilityLabel,
-  formatUpdated,
-  visibilityTagClass,
-} from "../lib/docs";
+import { docAccessModeLabel, docListQueryOptions, docTagClass, formatUpdated } from "../lib/docs";
 
 /**
  * `/` — the Space landing: the `doc.list × Web UI` parity cell (invariant 4,
@@ -50,7 +45,7 @@ function Home() {
           <thead>
             <tr>
               <th scope="col">Doc</th>
-              <th scope="col">Visibility</th>
+              <th scope="col">Access</th>
               <th scope="col" className="num">
                 Updated
               </th>
@@ -72,8 +67,10 @@ function Home() {
                   </div>
                 </td>
                 <td>
-                  <span className={visibilityTagClass(doc.visibility)}>
-                    {docVisibilityLabel(doc.visibility)}
+                  {/* Label = read scope (access_mode); green st-pub
+                      modifier = the orthogonal publish dimension. */}
+                  <span className={docTagClass(doc.published_at)}>
+                    {docAccessModeLabel(doc.access_mode)}
                   </span>
                 </td>
                 <td className="num">

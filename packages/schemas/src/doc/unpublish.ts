@@ -20,12 +20,14 @@
  * `hc` client, branded `c.req.valid`) and `DocUnpublishOutputSchema` to
  * `resolver` + `.parse(result)`.
  *
- * `visibility` is a literal `"workspace"` (NOT the shared `DocVisibility`
- * enum): the capability's entire purpose is to land on that one state, so
- * the response pins it via `z.literal(...)` — a tighter contract than the
- * enum, which must not be widened by sharing it (see the capability
- * header and `../shared/visibility`). No `published_at` field: the
- * un-publish side has no symmetric `unpublished_at` in the target DDL.
+ * The response pins the unpublished post-state via `z.null()` literals
+ * (ADR 0040 Step 5): the capability's entire purpose is to land on the
+ * not-published state, so `published_slug`/`published_at` are null by
+ * contract — tighter than the nullable read-path pair, deliberately not
+ * shared with it. No `unpublished_at` exists in the DDL; the audit
+ * envelope's `created_at` already says when. `render_version` is the F5
+ * cache-invalidation counter (renamed from `visibility_version` at the
+ * Step-5 split).
  */
 
 import { z } from "zod";
@@ -40,8 +42,9 @@ export const DocUnpublishInputSchema = z
 
 export const DocUnpublishOutputSchema = z.object({
   doc_id: DocIdOutputSchema,
-  visibility: z.literal("workspace"),
-  visibility_version: z.number(),
+  published_slug: z.null(),
+  published_at: z.null(),
+  render_version: z.number(),
 });
 
 export type DocUnpublishWireInput = z.input<typeof DocUnpublishInputSchema>;

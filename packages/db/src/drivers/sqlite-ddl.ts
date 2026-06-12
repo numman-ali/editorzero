@@ -86,21 +86,40 @@ export const WORKSPACES_DDL = `
  * index without changing the effective row identity (`id` is already
  * the PK). The practical effect: a child row can only pair `doc_id =
  * X` with the one `workspace_id` that row X actually belongs to.
+ *
+ * Read-scope vs publish are ORTHOGONAL dimensions (ADR 0040 Step 5,
+ * the `visibility` de-overload):
+ *  - \`access_mode ∈ {space, private}\` — who inside the Org can read
+ *    (space-mediated vs allow-list). No live capability mutates it yet;
+ *    the mode switch lands with the Step-8 ACL family.
+ *  - \`published_slug\`/\`published_at\` — the public dimension.
+ *    Non-null \`published_at\` ⇒ published; \`published_slug\` is the
+ *    workspace-unique public URL segment (\`docs_published_slug_unique\`
+ *    — soft-deleted rows excluded so a trashed doc never blocks a
+ *    reuse). Set by \`doc.publish\`, cleared by \`doc.unpublish\` AND by
+ *    \`doc.soft_delete\` (a trashed doc must leave the public site;
+ *    restore must never surprise-republish).
+ *  - \`render_version\` — render/cache-invalidation counter (F5),
+ *    bumped by publish/unpublish/delete/restore. Renamed from the
+ *    legacy \`visibility_version\` at the Step-5 split (§3.5 records
+ *    the rename decision).
  */
 export const DOCS_DDL = `
   CREATE TABLE docs (
-    id                 TEXT PRIMARY KEY,
-    workspace_id       TEXT NOT NULL,
-    collection_id      TEXT,
-    title              TEXT NOT NULL,
-    slug               TEXT NOT NULL,
-    order_key          TEXT NOT NULL,
-    visibility         TEXT NOT NULL DEFAULT 'workspace',
-    visibility_version INTEGER NOT NULL DEFAULT 0,
-    created_by         TEXT NOT NULL,
-    created_at         INTEGER NOT NULL,
-    updated_at         INTEGER NOT NULL,
-    deleted_at         INTEGER,
+    id              TEXT PRIMARY KEY,
+    workspace_id    TEXT NOT NULL,
+    collection_id   TEXT,
+    title           TEXT NOT NULL,
+    slug            TEXT NOT NULL,
+    order_key       TEXT NOT NULL,
+    access_mode     TEXT NOT NULL DEFAULT 'space' CHECK (access_mode IN ('space','private')),
+    published_slug  TEXT,
+    published_at    INTEGER,
+    render_version  INTEGER NOT NULL DEFAULT 0,
+    created_by      TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    deleted_at      INTEGER,
     UNIQUE (id, workspace_id)
   );
   CREATE UNIQUE INDEX docs_root_slug_unique
@@ -109,6 +128,9 @@ export const DOCS_DDL = `
   CREATE UNIQUE INDEX docs_nested_slug_unique
     ON docs(workspace_id, collection_id, slug)
     WHERE collection_id IS NOT NULL AND deleted_at IS NULL;
+  CREATE UNIQUE INDEX docs_published_slug_unique
+    ON docs(workspace_id, published_slug)
+    WHERE published_slug IS NOT NULL AND deleted_at IS NULL;
 ` as const;
 
 /**

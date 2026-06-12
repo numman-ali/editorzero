@@ -73,10 +73,10 @@ describe("replay reducer — state transitions", () => {
         slug: "hello",
         order_key: "a",
         created_by: USER,
-        visibility: "workspace",
+        access_mode: "space",
         seed_blocks: [],
       }),
-      allow({ kind: "doc.publish", doc_id: DOC, published_at: 123 }),
+      allow({ kind: "doc.publish", doc_id: DOC, published_slug: "hello", published_at: 123 }),
       allow({ kind: "doc.rename", doc_id: DOC, title: "Hello World", slug: "hello-world" }),
     ]);
 
@@ -121,7 +121,11 @@ describe("replay reducer — state transitions", () => {
       // assertion previously masked).
       slug: "hello-world",
       order_key: "a",
-      visibility: "public",
+      access_mode: "space",
+      // Publish is orthogonal: the rename moved the INTERNAL slug, the
+      // published URL stays the value the publish effect carried.
+      published_slug: "hello",
+      published_at: 123,
       created_by: USER,
       deleted_at: null,
     });
@@ -150,7 +154,7 @@ describe("replay reducer — state transitions", () => {
           slug: "agent-doc",
           order_key: "a",
           created_by: USER, // the human behind the agent
-          visibility: "workspace",
+          access_mode: "space",
           seed_blocks: [],
         },
       },
@@ -287,7 +291,7 @@ describe("replay reducer — state transitions", () => {
         slug: "d",
         order_key: "a",
         created_by: USER,
-        visibility: "workspace",
+        access_mode: "space",
         seed_blocks: [],
       }),
     ]);
@@ -298,7 +302,9 @@ describe("replay reducer — state transitions", () => {
       title: "D",
       slug: "d",
       order_key: "a",
-      visibility: "workspace",
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
       created_by: USER,
       deleted_at: null,
     });
@@ -307,14 +313,29 @@ describe("replay reducer — state transitions", () => {
       allow({ kind: "doc.move", doc_id: DOC, new_collection_id: COLL, new_order_key: "m" }),
     );
     expect(s.docs[DOC]).toMatchObject({ collection_id: COLL, order_key: "m" });
-    s = applyAuditRow(s, allow({ kind: "doc.publish", doc_id: DOC, published_at: 5 }));
-    expect(s.docs[DOC]?.visibility).toBe("public");
+    s = applyAuditRow(
+      s,
+      allow({ kind: "doc.publish", doc_id: DOC, published_slug: "d", published_at: 5 }),
+    );
+    expect(s.docs[DOC]).toMatchObject({ published_slug: "d", published_at: 5 });
     s = applyAuditRow(s, allow({ kind: "doc.unpublish", doc_id: DOC }));
-    expect(s.docs[DOC]?.visibility).toBe("workspace");
+    expect(s.docs[DOC]).toMatchObject({ published_slug: null, published_at: null });
+    // Re-publish, then soft-delete: delete clears the publish dimension
+    // too (a trashed doc leaves the public site — Step 5).
+    s = applyAuditRow(
+      s,
+      allow({ kind: "doc.publish", doc_id: DOC, published_slug: "d", published_at: 7 }),
+    );
     s = applyAuditRow(s, allow({ kind: "doc.soft_delete", doc_id: DOC, deleted_at: 999 }));
-    expect(s.docs[DOC]?.deleted_at).toBe(999);
+    expect(s.docs[DOC]).toMatchObject({
+      deleted_at: 999,
+      published_slug: null,
+      published_at: null,
+    });
     s = applyAuditRow(s, allow({ kind: "doc.restore", doc_id: DOC }));
     expect(s.docs[DOC]?.deleted_at).toBeNull();
+    // Restore does NOT republish (no surprise-publication).
+    expect(s.docs[DOC]?.published_at).toBeNull();
   });
 });
 
@@ -455,12 +476,12 @@ const STATE_KIND_FIXTURES = {
     slug: "hello",
     order_key: "a",
     created_by: USER,
-    visibility: "workspace",
+    access_mode: "space",
     seed_blocks: [],
   },
   "doc.rename": { kind: "doc.rename", doc_id: DOC, title: "Hello World", slug: "hello-world" },
   "doc.move": { kind: "doc.move", doc_id: DOC, new_collection_id: null, new_order_key: "m" },
-  "doc.publish": { kind: "doc.publish", doc_id: DOC, published_at: 1 },
+  "doc.publish": { kind: "doc.publish", doc_id: DOC, published_slug: "d", published_at: 1 },
   "doc.unpublish": { kind: "doc.unpublish", doc_id: DOC },
   "doc.soft_delete": { kind: "doc.soft_delete", doc_id: DOC, deleted_at: 1 },
   "doc.restore": { kind: "doc.restore", doc_id: DOC },

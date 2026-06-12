@@ -22,7 +22,7 @@
  *
  * Branded-ID fields come from `../shared/ids` (`DocIdInputSchema`
  * validates the UUIDv7 shape then brands; `DocIdOutputSchema` brands a
- * trusted server-produced string). `deleted_at` / `visibility_version`
+ * trusted server-produced string). `deleted_at` / `render_version`
  * are plain epoch-millis / counter numbers; `deleted_at` is the exact
  * stamp the handler wrote to `docs.deleted_at` and is echoed onto the
  * `doc.soft_delete` audit effect so replay reconstructs the ADR 0017
@@ -42,7 +42,7 @@ export const DocDeleteInputSchema = z
 export const DocDeleteOutputSchema = z.object({
   doc_id: DocIdOutputSchema,
   deleted_at: z.number(),
-  visibility_version: z.number(),
+  render_version: z.number(),
 });
 
 export type DocDeleteWireInput = z.input<typeof DocDeleteInputSchema>;

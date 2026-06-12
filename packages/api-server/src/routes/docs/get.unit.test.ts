@@ -49,7 +49,9 @@ interface FixtureOutput {
     title: string;
     slug: string;
     collection_id: string | null;
-    visibility: "workspace" | "public" | "private";
+    access_mode: "space" | "private";
+    published_slug: string | null;
+    published_at: number | null;
     created_at: number;
     updated_at: number;
   };
@@ -82,7 +84,9 @@ describe("GET /docs/get/:doc_id", () => {
         title: "Hello",
         slug: "hello",
         collection_id: null,
-        visibility: "workspace",
+        access_mode: "space",
+        published_slug: null,
+        published_at: null,
         created_at: 1,
         updated_at: 1,
       },
