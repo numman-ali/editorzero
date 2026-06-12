@@ -48,18 +48,21 @@ import { hc } from "hono/client";
 import { testClient } from "hono/testing";
 import { describe, expect, it } from "vitest";
 
-import { type AppType, app, createApiApp } from "./index";
+import { type AppType, type AuthRevocation, app, createApiApp } from "./index";
 import { openApiDocument } from "./lib/openapi";
 
 function unreachable(message: string): never {
   throw new Error(message);
 }
 
-function makeFakeAuth(handler: Auth["handler"] = async () => new Response()): Auth {
+function makeFakeAuth(
+  handler: Auth["handler"] = async () => new Response(),
+  getSession: () => Promise<unknown> = async () => null,
+): Auth {
   return {
     handler,
     api: {
-      getSession: async () => null,
+      getSession,
     },
   } as Auth;
 }
@@ -233,6 +236,133 @@ describe("api-server trunk composition", () => {
     expect(() => createApiApp({ registry: emptyRegistry, dispatcher: fakeDispatcher })).toThrow(
       /registry.+without.+auth/i,
     );
+  });
+
+  // ── Auth-revocation tap (ADR 0043 Decision 5, sign-out arm) ─────────────
+  //
+  // The `/auth/*` mount wraps Better Auth's handler: when a
+  // revocation-class endpoint succeeds, `onAuthRevoked` reports what was
+  // revoked so the composition root can close the matching collab
+  // sockets. These tests pin the wrap's contract at the mount boundary
+  // with a fake auth; the live flow — an attached WS closed by a real
+  // sign-out — is integration-tested in apps/server's cohost suite.
+
+  const WS_RAW = "018f0000-0000-7000-8000-00000000aaa1";
+  const USER_RAW = "018f0000-0000-7000-8000-00000000aaa2";
+  const SESSION_RAW = "018f0000-0000-7000-8000-00000000aaa3";
+
+  function makeSessionAuth(handler?: Auth["handler"]): Auth {
+    return makeFakeAuth(handler ?? (async () => new Response(null, { status: 200 })), async () => ({
+      session: { id: SESSION_RAW },
+      user: { id: USER_RAW, workspaceId: WS_RAW },
+    }));
+  }
+  const memberLoadRoles: LoadRoles = async () => ["member"];
+
+  function buildRevocationTrunk(options: {
+    auth: Auth;
+    onAuthRevoked: (revocation: AuthRevocation) => void;
+  }) {
+    return createApiApp({
+      auth: options.auth,
+      loadRoles: memberLoadRoles,
+      dispatcher: fakeDispatcher,
+      onAuthRevoked: options.onAuthRevoked,
+    });
+  }
+
+  it("createApiApp({ onAuthRevoked }) without auth throws (the tap rides /auth/*)", () => {
+    expect(() => createApiApp({ onAuthRevoked: () => undefined })).toThrow(
+      /onAuthRevoked.+without.+auth/i,
+    );
+  });
+
+  it("POST /auth/sign-out fires onAuthRevoked({ kind: 'session' }) only after the handler confirms", async () => {
+    const order: string[] = [];
+    const revocations: AuthRevocation[] = [];
+    const trunk = buildRevocationTrunk({
+      auth: makeSessionAuth(async () => {
+        order.push("handler");
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      }),
+      onAuthRevoked: (revocation) => {
+        order.push("revoked");
+        revocations.push(revocation);
+      },
+    });
+    const res = await trunk.request("/auth/sign-out", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["handler", "revoked"]);
+    expect(revocations).toEqual([{ kind: "session", session_id: SESSION_RAW }]);
+  });
+
+  it("POST /auth/revoke-sessions and /auth/revoke-other-sessions fire { kind: 'user' }", async () => {
+    for (const path of ["/auth/revoke-sessions", "/auth/revoke-other-sessions"]) {
+      const revocations: AuthRevocation[] = [];
+      const trunk = buildRevocationTrunk({
+        auth: makeSessionAuth(),
+        onAuthRevoked: (revocation) => revocations.push(revocation),
+      });
+      const res = await trunk.request(path, { method: "POST" });
+      expect(res.status).toBe(200);
+      expect(revocations).toEqual([{ kind: "user", user_id: USER_RAW }]);
+    }
+  });
+
+  it("does not fire when Better Auth refuses the revocation (response not ok)", async () => {
+    const revocations: AuthRevocation[] = [];
+    const trunk = buildRevocationTrunk({
+      auth: makeSessionAuth(async () => new Response("nope", { status: 400 })),
+      onAuthRevoked: (revocation) => revocations.push(revocation),
+    });
+    const res = await trunk.request("/auth/sign-out", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect(revocations).toEqual([]);
+  });
+
+  it("does not fire for an unauthenticated caller, and never blocks the handler", async () => {
+    const revocations: AuthRevocation[] = [];
+    const trunk = buildRevocationTrunk({
+      // Default `getSession` resolves null — no principal to report.
+      auth: makeFakeAuth(async () => new Response(null, { status: 200 })),
+      onAuthRevoked: (revocation) => revocations.push(revocation),
+    });
+    const res = await trunk.request("/auth/sign-out", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(revocations).toEqual([]);
+  });
+
+  it("a throwing onAuthRevoked never turns a committed revocation into a 5xx", async () => {
+    const trunk = buildRevocationTrunk({
+      auth: makeSessionAuth(),
+      onAuthRevoked: () => {
+        throw new Error("registry exploded");
+      },
+    });
+    const res = await trunk.request("/auth/sign-out", { method: "POST" });
+    expect(res.status).toBe(200);
+  });
+
+  it("non-revocation auth traffic passes through without a session resolution", async () => {
+    // The wrap must not add a getSession round-trip to hot auth paths
+    // (sign-in, get-session) — only revocation-class POSTs resolve.
+    let sessionReads = 0;
+    const revocations: AuthRevocation[] = [];
+    const auth = makeFakeAuth(
+      async () => new Response(null, { status: 200 }),
+      async () => {
+        sessionReads += 1;
+        return null;
+      },
+    );
+    const trunk = buildRevocationTrunk({
+      auth,
+      onAuthRevoked: (revocation) => revocations.push(revocation),
+    });
+    await trunk.request("/auth/sign-in/email", { method: "POST" });
+    await trunk.request("/auth/get-session");
+    expect(sessionReads).toBe(0);
+    expect(revocations).toEqual([]);
   });
 
   // ── Global error mapper (trunk.onError) ────────────────────────────────

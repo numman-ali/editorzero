@@ -87,7 +87,7 @@ export interface AttachCollabOptions {
  * so the refusal branches unit-test against structural fakes instead
  * of a fully booted stack (production passes the real `BootedApp`).
  */
-export type CollabBooted = Pick<BootedApp, "resolver"> & {
+export type CollabBooted = Pick<BootedApp, "resolver" | "collabSockets"> & {
   readonly sync: Pick<BootedApp["sync"], "handleWsConnection">;
 };
 
@@ -144,6 +144,16 @@ export function attachCollab(
       return;
     }
     wss.handleUpgrade(req, socket, head, (client) => {
+      // Revocation registry (ADR 0043 Decision 5): the socket is
+      // tracked under the identity resolved at upgrade so revoke-class
+      // commits and sign-out can close it. The release rides the
+      // socket's own close event — entries never outlive transports.
+      const release = booted.collabSockets.register({
+        user_id: principal.id,
+        session_id: principal.session_id,
+        socket: client,
+      });
+      client.on("close", release);
       booted.sync.handleWsConnection(client, req);
     });
   };

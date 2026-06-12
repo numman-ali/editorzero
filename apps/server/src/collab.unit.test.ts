@@ -102,6 +102,14 @@ function refusalBooted(resolver: CollabBooted["resolver"]): CollabBooted {
         throw new Error("handleWsConnection must not be reached on a refusal path");
       },
     },
+    collabSockets: {
+      register: () => {
+        throw new Error("register must not be reached on a refusal path");
+      },
+      closeByUser: () => 0,
+      closeBySession: () => 0,
+      size: () => 0,
+    },
   };
 }
 

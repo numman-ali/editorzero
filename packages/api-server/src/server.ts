@@ -55,7 +55,9 @@ import { HocuspocusSync } from "@editorzero/sync";
 
 import { createApiApp } from "./app";
 import { createCollabPolicies } from "./composition/collabPolicies";
+import { type CollabSocketRegistry, createCollabSocketRegistry } from "./composition/collabSockets";
 import { createApiDispatcher } from "./composition/createApiDispatcher";
+import { createRevocationTap, withRevocationTap } from "./composition/revocationTap";
 
 /**
  * `SecretRef` the Better Auth signing secret is read from when `secret`
@@ -90,12 +92,13 @@ export interface GetApiAppOptions {
   readonly logger?: Logger;
   /**
    * WS connection write posture, threaded to
-   * `HocuspocusSyncDeps.collabReadOnly`. DEFAULT TRUE — production
-   * stays read-only until ADR 0043 increment 5 (socket registry +
-   * event-driven revocation closes) gates the lift. The audited write
-   * lane itself (the `beforeHandleMessage` gate dispatching
-   * `doc.apply_update`) is ALWAYS wired; integration tests pass FALSE
-   * to exercise it end-to-end.
+   * `HocuspocusSyncDeps.collabReadOnly`. DEFAULT FALSE (lifted) — the
+   * ADR 0043 write lane is the production posture: every novel WS
+   * frame dispatches `doc.apply_update` through the audited gate, and
+   * the socket registry + revocation tap (Decision 5, wired below)
+   * close revoked standing. TRUE is the operator's emergency
+   * read-only pin: attaches succeed but every WS write keeps the
+   * native nacked-not-applied contract.
    */
   readonly collabReadOnly?: boolean;
 }
@@ -117,6 +120,14 @@ export interface BootedApp {
    * resolver instance is the ADR 0027 WS-attach-hook pass.
    */
   readonly resolver: BetterAuthResolver;
+  /**
+   * Collab socket registry (ADR 0043 Decision 5). `attachCollab`
+   * (apps/server) registers every upgraded WS under the identity it
+   * resolved at upgrade; the revocation tap (wrapped around the
+   * dispatcher here) and the sign-out arm (`onAuthRevoked` on the
+   * trunk) close affected entries when standing changes.
+   */
+  readonly collabSockets: CollabSocketRegistry;
   /** Tear down sync then driver, in dependency order. Idempotent. */
   readonly close: () => Promise<void>;
 }
@@ -186,12 +197,21 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     ...(options.collabReadOnly !== undefined && { collabReadOnly: options.collabReadOnly }),
     logger,
   });
-  const dispatcher = createApiDispatcher({
-    driver,
-    registry,
-    sync,
-    gate: workspaceAwareGate({ loadDelegatorRoles: loadRoles }),
-  });
+  // Revocation tap (ADR 0043 Decision 5): every successful dispatch —
+  // HTTP, MCP, and the WS write lane alike — flows through
+  // `withRevocationTap`, which closes the affected subject's collab
+  // sockets after a revoke-class capability commits. The registry is
+  // populated by `attachCollab` (apps/server) at upgrade time.
+  const collabSockets = createCollabSocketRegistry();
+  const dispatcher = withRevocationTap(
+    createApiDispatcher({
+      driver,
+      registry,
+      sync,
+      gate: workspaceAwareGate({ loadDelegatorRoles: loadRoles }),
+    }),
+    createRevocationTap({ registry: collabSockets, driver, logger }),
+  );
   collab.wireDispatcher(dispatcher);
 
   const app = createApiApp({
@@ -200,6 +220,21 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     dispatcher,
     registry,
     ...(options.mcpServerInfo !== undefined && { mcpServerInfo: options.mcpServerInfo }),
+    // Sign-out arm of the same tap: Better Auth owns session
+    // destruction, so the `/auth/*` mount reports it and the registry
+    // closes whatever the revoked standing was carrying.
+    onAuthRevoked: (revocation) => {
+      const closed =
+        revocation.kind === "session"
+          ? collabSockets.closeBySession(revocation.session_id)
+          : collabSockets.closeByUser(revocation.user_id);
+      if (closed > 0) {
+        logger.info("collab sockets closed after auth revocation", {
+          event: "session.revoke_close",
+          "collab.sockets_closed": closed,
+        });
+      }
+    },
   });
 
   let closed = false;
@@ -210,5 +245,5 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     await driver.close();
   };
 
-  return { app, driver, sync, resolver, close };
+  return { app, driver, sync, resolver, collabSockets, close };
 }

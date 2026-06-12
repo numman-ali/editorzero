@@ -30,7 +30,19 @@
  *     never import `hono-openapi` directly (ADR 0029 §7 fence).
  */
 
-export { type AppType, app, type CreateApiAppOptions, createApiApp } from "./app";
+export {
+  type AppType,
+  type AuthRevocation,
+  app,
+  type CreateApiAppOptions,
+  createApiApp,
+} from "./app";
+export {
+  COLLAB_REVOKED_CLOSE_CODE,
+  type CollabSocketEntry,
+  type CollabSocketLike,
+  type CollabSocketRegistry,
+} from "./composition/collabSockets";
 export {
   type CreateApiDispatcherOptions,
   createApiDispatcher,

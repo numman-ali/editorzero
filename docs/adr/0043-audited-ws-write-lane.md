@@ -98,3 +98,17 @@ Codex reviewed the full design brief pre-build; dispositions:
 - A `@hocuspocus/server` bump → the version-pin assertion forces re-verification of the message-type classification and the readOnly ack semantics.
 - Multi-process deployment (more than one trunk) → the socket registry and revocation tap need a cross-process channel (the §12 jobs runner is the natural host).
 - The `canWrite` ladder lands → `doc.apply_update` inherits it with every other content mutation; its ADR records the ladder shape.
+
+## Amendment (2026-06-13) — Decision 4 deferred behind its substrate; the lift landed on Decisions 3+5
+
+**Decision 4 has an unbuilt prerequisite, discovered at build time.** The bearer arm assumes agent credentials exist to resolve — they don't, anywhere in the system: the principal resolver is cookie-only by documented scope, no Better Auth api-key/agent-auth plugin is wired, no token/agent tables exist, and no agent-lifecycle capabilities are registered. ADR 0016 designed the *model* (`AgentPrincipal`, H8 delegation, the gate composition); its **credential slice** was never scheduled. Building a WS-only bearer arm now would invent the credential substrate inside a transport adapter — backwards. Disposition:
+
+- Decision 4 lands **with the ADR 0016 credential slice**, through the `resolveCollabPrincipal` seam built in increment 3 (`packages/api-server/src/composition/collabPolicies.ts`): both attach standing and write dispatch resolve through that one function, so the bearer arm lands in exactly one place and the two can never diverge. The H8 emphasis binds that future arm verbatim (gate composition, never static `effectiveScopes` for agents).
+- **The `readOnly` lift re-gates on Decision 5 only.** A cookie-only lift exposes no agent lane — there is no credential an agent could present — so deferring Decision 4 widens nothing. The registry's agent-kind extension (close agent sockets on agent-credential revocation) goes with it.
+
+**The lift landed (increments 1–3 + 5).** `collabReadOnly` defaults FALSE at both layers (`HocuspocusSyncDeps`, `GetApiAppOptions`); `true` remains as the operator's emergency read-only pin (attaches succeed, native nacked-not-applied contract, integration-pinned). Decision 5 mechanics as built:
+
+- Registry keys are `{user_id, session_id}` (the design's `session_key` = the Better Auth session id), captured at upgrade in `attachCollab`; entries release on socket close. Close code **4401** ("authorization revoked", app range) tells legitimate clients "re-auth, don't blind-retry".
+- The capability tap wraps the dispatcher at the composition root (`withRevocationTap`) — every surface's dispatches flow through it. Affected-subject derivation per revoke-class capability narrows outputs through the SSOT zod schemas; a parse miss is a logged drift guard that closes nothing. The tap never throws into a committed dispatch (liveness gap, not correctness — log loud).
+- The sign-out arm wraps the `/auth/*` mount (`onAuthRevoked`): `sign-out` closes by session; `revoke-sessions` / `revoke-other-sessions` close by user. Named residual: `POST /auth/revoke-session` (single foreign session, token in body) needs a token→session mapping and has no exposing surface yet — it joins the map when one does.
+- Agent-kind grant subjects close nothing today (no agent sockets exist — see the Decision 4 deferral above).

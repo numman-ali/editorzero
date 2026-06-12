@@ -10,9 +10,11 @@
  *      red-team blocker inverted: Hocuspocus treats a hook-less server
  *      as needing no auth at all, so the class always registers
  *      `onAuthenticate` and the DEFAULT policy is refusal.
- *   2. **Forced readOnly** — when a policy allows, the Authenticated
- *      frame still carries scope `"readonly"` (invariant 3: no audited
- *      WS write lane yet — no policy outcome can grant write).
+ *   2. **Write posture is the operator's, not the policy's** — the
+ *      Authenticated frame's scope comes from `collabReadOnly` alone
+ *      (default lifted/`"read-write"` since ADR 0043 Decisions 3+5
+ *      landed; `true` pins `"readonly"`). No attach-policy outcome can
+ *      widen it.
  *   3. **`__ws` hydration** — a WS client attaching to a COLD doc gets
  *      committed `doc_updates` state replayed before sync (proven
  *      across two instances over one SQLite file — the restart shape).
@@ -374,16 +376,30 @@ describe("collabAuthorize by construction", () => {
     client.close();
   });
 
-  it("forces scope readonly even when the policy allows (invariant 3)", async () => {
-    const sync = buildSync({ collabAuthorize: () => Promise.resolve() });
+  it("defaults to read-write scope (ADR 0043 lift) and the readOnly pin forces readonly", async () => {
+    // The scope is decided by `collabReadOnly` alone — the attach
+    // policy can admit or deny, never widen posture. Default = the
+    // lifted ADR 0043 posture (writes flow through the audited gate);
+    // `true` is the operator's emergency read-only pin.
+    const lifted = buildSync({ collabAuthorize: () => Promise.resolve() });
     await seedDocMetadata(DOC_ID);
-    const port = await listenFor(sync);
+    const liftedPort = await listenFor(lifted);
+    const liftedClient = new WsClient(liftedPort, DOC_ID);
+    const liftedResult = await liftedClient.attach();
+    expect(liftedResult.outcome).toBe("authenticated");
+    expect(liftedResult.scope).toBe("read-write");
+    liftedClient.close();
 
-    const client = new WsClient(port, DOC_ID);
-    const result = await client.attach();
-    expect(result.outcome).toBe("authenticated");
-    expect(result.scope).toBe("readonly");
-    client.close();
+    const pinned = buildSync({
+      collabAuthorize: () => Promise.resolve(),
+      collabReadOnly: true,
+    });
+    const pinnedPort = await listenFor(pinned);
+    const pinnedClient = new WsClient(pinnedPort, DOC_ID);
+    const pinnedResult = await pinnedClient.attach();
+    expect(pinnedResult.outcome).toBe("authenticated");
+    expect(pinnedResult.scope).toBe("readonly");
+    pinnedClient.close();
   });
 
   it("hands the policy the documentName and the upgrade request headers", async () => {

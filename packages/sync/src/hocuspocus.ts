@@ -196,9 +196,9 @@ export interface HocuspocusSyncDeps {
    * multiplexed socket. Throw to deny: Hocuspocus answers
    * `permission-denied` for that document only; other documents on
    * the socket are unaffected. After the policy passes, the class
-   * sets `connectionConfig.readOnly` from `collabReadOnly` (default
-   * TRUE — see that knob for the ADR 0043 staging), so no attach
-   * policy can widen write posture.
+   * sets `connectionConfig.readOnly` from `collabReadOnly`, so no
+   * attach policy can widen write posture beyond what the operator
+   * configured.
    *
    * OPTIONAL with a deny-all default, which is by-construction
    * fail-closed: Hocuspocus treats a *hook-less* server as requiring
@@ -228,14 +228,15 @@ export interface HocuspocusSyncDeps {
   readonly collabApplyUpdate?: (payload: CollabApplyUpdatePayload) => Promise<void>;
   /**
    * The `connectionConfig.readOnly` value every authorized WS attach
-   * gets. DEFAULT TRUE — the shipped production posture until ADR
-   * 0043 increment 5 (socket registry + event-driven revocation
-   * closes) lands; Decision 5 explicitly gates the universal lift on
-   * it, because per-frame re-resolution protects the next write but
-   * not a passive revoked socket that keeps receiving broadcasts.
-   * Test compositions pass FALSE to exercise the audited write lane
-   * (the gate dispatches only on non-readOnly connections; readOnly
-   * connections keep the native nacked-not-applied contract).
+   * gets. DEFAULT FALSE — the ADR 0043 Decision 3 write lane is the
+   * production posture: every update-bearing frame flows through the
+   * `beforeHandleMessage` gate into the audited `doc.apply_update`
+   * dispatch. The lift was gated on Decision 5 (socket registry +
+   * event-driven revocation closes) and landed WITH it — per-frame
+   * re-resolution protects the next write, the registry closes the
+   * passive read feed. TRUE is the operator escape hatch (emergency
+   * read-only pin) and the unit posture for exercising the native
+   * nacked-not-applied contract on readOnly connections.
    */
   readonly collabReadOnly?: boolean;
   /**
@@ -374,7 +375,7 @@ export class HocuspocusSync {
     const systemDb = deps.systemDb;
     const appliedSeq = this.#appliedSeq;
     const aheadSeqs = this.#aheadSeqs;
-    const collabReadOnly = deps.collabReadOnly ?? true;
+    const collabReadOnly = deps.collabReadOnly ?? false;
     // `unloadImmediately: false` keeps Y.Docs resident across the
     // per-doc `debounce` window after the last direct connection
     // drops (§6.4 assumes hot docs stay in memory under burst writes).
@@ -398,12 +399,11 @@ export class HocuspocusSync {
       // `openDirectConnection` builds its connectionConfig directly).
       onAuthenticate: async ({ documentName, requestHeaders, connectionConfig }) => {
         await collabAuthorize({ documentName, requestHeaders });
-        // Production posture stays readOnly (true) until ADR 0043
-        // increment 5 — the gate below makes a lifted connection's
-        // writes audited (every novel frame = one `doc.apply_update`
-        // dispatch), and readOnly connections keep the native
-        // nacked-not-applied contract. See the `collabReadOnly` deps
-        // docstring for the staging.
+        // Default posture is lifted (ADR 0043 Decisions 3+5 landed):
+        // the gate below makes every non-readOnly connection's writes
+        // audited (each novel frame = one `doc.apply_update`
+        // dispatch). A TRUE pin keeps the native nacked-not-applied
+        // contract — see the `collabReadOnly` deps docstring.
         connectionConfig.readOnly = collabReadOnly;
       },
       // The audited-WS-write-lane gate (ADR 0043 Decision 3). ALWAYS

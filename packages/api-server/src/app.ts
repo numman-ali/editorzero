@@ -104,6 +104,7 @@ import type { Registry } from "@editorzero/capabilities";
 import type { LoadRoles } from "@editorzero/db";
 import type { Dispatcher } from "@editorzero/dispatcher";
 import { EditorZeroError } from "@editorzero/errors";
+import type { SessionId, UserId } from "@editorzero/ids";
 import { createMcpHandler } from "@editorzero/mcp-server";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -118,6 +119,32 @@ import { infra } from "./routes/infra";
 import { permissions } from "./routes/permissions";
 import { spaces } from "./routes/spaces";
 import { workspaces } from "./routes/workspaces";
+
+/**
+ * What a successful auth-revocation endpoint revoked (ADR 0043
+ * Decision 5, sign-out arm). `session` — the caller's current session
+ * (`POST /auth/sign-out`); `user` — every session the caller holds
+ * (`POST /auth/revoke-sessions` / `revoke-other-sessions`; deliberately
+ * blunt — re-attach re-runs collab authorization, which is the
+ * authority).
+ */
+export type AuthRevocation =
+  | { readonly kind: "session"; readonly session_id: SessionId }
+  | { readonly kind: "user"; readonly user_id: UserId };
+
+/**
+ * Better Auth endpoints whose success revokes session standing, mapped
+ * to the close scope they imply. `POST /auth/revoke-session` (single
+ * foreign session, token in body) is the named residual: mapping its
+ * body token to a `session_id` needs a session-table read, and no
+ * surface exposes per-device revocation yet — it joins this map when
+ * one does.
+ */
+const AUTH_REVOCATION_PATHS: ReadonlyMap<string, "session" | "user"> = new Map([
+  ["/auth/sign-out", "session"],
+  ["/auth/revoke-sessions", "user"],
+  ["/auth/revoke-other-sessions", "user"],
+]);
 
 export interface CreateApiAppOptions {
   /**
@@ -192,6 +219,18 @@ export interface CreateApiAppOptions {
    * surfaces this to end-users as `serverInfo`.
    */
   readonly mcpServerInfo?: { readonly name: string; readonly version: string };
+  /**
+   * Sign-out arm of the collab revocation tap (ADR 0043 Decision 5).
+   * Fired after a revocation-class `/auth/*` endpoint succeeds —
+   * Better Auth owns session destruction, so the trunk is the only
+   * place that sees it happen. The composition root closes the
+   * matching collab sockets (`closeBySession` / `closeByUser`); a
+   * surviving client that reconnects re-runs `collabAuthorize`, which
+   * refuses. Per-frame principal re-resolution already protects
+   * writes — this closes the passive read feed. Requires `auth` (the
+   * tap rides the `/auth/*` mount); the factory throws otherwise.
+   */
+  readonly onAuthRevoked?: (revocation: AuthRevocation) => void;
 }
 
 /**
@@ -210,7 +249,15 @@ function isPgRetryableError(err: unknown): boolean {
 }
 
 export function createApiApp(options: CreateApiAppOptions = {}) {
-  const { auth, loadRoles, dispatcher, registry, mcpServerInfo } = options;
+  const { auth, loadRoles, dispatcher, registry, mcpServerInfo, onAuthRevoked } = options;
+
+  // ADR 0043 Decision 5 — the sign-out tap rides the `/auth/*` mount.
+  if (onAuthRevoked !== undefined && auth === undefined) {
+    throw new Error(
+      "createApiApp: `onAuthRevoked` was provided without `auth`. The revocation " +
+        "tap wraps the `/auth/*` mount; without `auth` it would never fire.",
+    );
+  }
 
   // ADR 0024 — `auth` and `loadRoles` are the auth-resolver pair.
   if (auth !== undefined && loadRoles === undefined) {
@@ -309,7 +356,38 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
   });
 
   if (auth !== undefined && loadRoles !== undefined) {
-    trunk.on(["POST", "GET"], "/auth/*", (c) => auth.handler(c.req.raw));
+    const resolve = createBetterAuthResolver({ auth, loadRoles });
+    // The `/auth/*` mount carries the sign-out arm of the revocation
+    // tap (ADR 0043 Decision 5): capture the caller's identity BEFORE
+    // Better Auth destroys the session, fire `onAuthRevoked` only
+    // after the handler confirms (`response.ok`). Containment on both
+    // edges — resolution failure falls back to the bare handler (the
+    // close is a liveness improvement, not a gate: an unclosed socket
+    // lingers only until its next refused write), and a throwing
+    // callback never turns a committed revocation into a 5xx.
+    trunk.on(["POST", "GET"], "/auth/*", async (c) => {
+      const closeKind = c.req.method === "POST" ? AUTH_REVOCATION_PATHS.get(c.req.path) : undefined;
+      if (onAuthRevoked === undefined || closeKind === undefined) {
+        return auth.handler(c.req.raw);
+      }
+      const principal = await resolve(c.req.raw.headers).catch(() => null);
+      const response = await auth.handler(c.req.raw);
+      if (response.ok && principal !== null) {
+        try {
+          if (closeKind === "session") {
+            if (principal.session_id !== null) {
+              onAuthRevoked({ kind: "session", session_id: principal.session_id });
+            }
+          } else {
+            onAuthRevoked({ kind: "user", user_id: principal.id });
+          }
+        } catch {
+          // The revocation already committed inside Better Auth; a tap
+          // failure is a socket-liveness gap, never an auth failure.
+        }
+      }
+      return response;
+    });
     // Principal middleware for every capability-domain prefix. Today
     // just `/docs/*`; future prefixes (`/blocks/*`, `/workspaces/*`)
     // repeat this line. Also attached to `/infra/whoami` (ADR 0025)
@@ -317,7 +395,6 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     // even though it shares the `/infra/` prefix with the public
     // `/infra/health` liveness probe. Exact-path attachment keeps
     // `/infra/health` public.
-    const resolve = createBetterAuthResolver({ auth, loadRoles });
     const principalMw = createPrincipalMiddleware({
       resolve: (c) => resolve(c.req.raw.headers),
     });

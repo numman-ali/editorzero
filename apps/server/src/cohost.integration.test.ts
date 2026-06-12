@@ -11,20 +11,26 @@
  *
  * The ADR 0030 red-team blockers, each pinned here:
  *
- *   1. **Forced readOnly** — the Authenticated frame carries scope
- *      `"readonly"`, and a real Yjs update frame from an attached client
- *      is nacked (`SyncStatus false`) with NO durable `doc_updates` row
- *      and NO server-side state change (Codex review: assert state, not
- *      just the denial frame). Invariant 3 is why: WS writes bypass the
- *      audited dispatcher lane, so no principal may write until that
- *      lane exists (slice B).
+ *   1. **Write posture** — originally "forced readOnly" (no audited WS
+ *      write lane existed); since ADR 0043 landed, the default posture
+ *      is LIFTED: the Authenticated frame carries `"read-write"` and
+ *      every novel update-bearing frame dispatches `doc.apply_update`
+ *      (the write-lane describe). The operator's `collabReadOnly: true`
+ *      pin preserves the original contract — attaches succeed, writes
+ *      are nacked with NO durable row and NO state change (the pin
+ *      describe; Codex review: assert state, not just the denial
+ *      frame).
  *   2. **Origin allow-list at upgrade** — wrong AND absent Origin are
  *      refused even with a valid session cookie (the raw upgrade never
  *      passes Better Auth's CORS handling; absent-Origin tolerance only
  *      shields non-browser clients that could fake the header anyway).
- *   3. **Revocation freshness** — the principal is re-resolved per Auth
- *      frame from the upgrade request's headers: after sign-out, a NEW
- *      document attach on the SAME open socket is denied.
+ *   3. **Revocation freshness** — sign-out closes the registered
+ *      socket server-side with the app-range revocation code (ADR 0043
+ *      Decision 5's event-driven tap), and the dead cookie cannot
+ *      re-attach. Per-frame principal re-resolution remains the
+ *      backstop rail for anything the tap misses; it is pinned at the
+ *      sync layer (`ws-attach.integration.test.ts`) and the policy
+ *      layer (`collabPolicies.unit.test.ts`).
  *   4. **authZ by construction** — per-document authorization runs in
  *      `HocuspocusSync`'s constructor-registered `onAuthenticate`; the
  *      tenant-scoped lookup + ACL ceiling deny a cross-workspace doc on
@@ -47,7 +53,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { type BootedApp, getApiApp } from "@editorzero/api-server";
+import { type BootedApp, COLLAB_REVOKED_CLOSE_CODE, getApiApp } from "@editorzero/api-server";
 import { parseRuntimeConfig } from "@editorzero/config";
 import { DocId } from "@editorzero/ids";
 import { DOC_FRAGMENT } from "@editorzero/sync";
@@ -89,8 +95,9 @@ function boot(collabReadOnly?: boolean): Promise<BootedApp> {
       EDITORZERO_REGISTRATION_MODE: "open",
     }),
     secret: TEST_SECRET,
-    // ADR 0043: default (true) = production posture; the write-lane
-    // suite lifts to false to exercise the audited dispatch gate.
+    // ADR 0043: default (false) = lifted production posture — WS
+    // writes flow through the audited dispatch gate. The pin suite
+    // passes TRUE to cover the operator's emergency read-only knob.
     ...(collabReadOnly !== undefined && { collabReadOnly }),
   });
 }
@@ -215,6 +222,8 @@ class CollabClient {
   #pendingAuth: ((result: AuthResult) => void) | null = null;
   #pendingSyncStatus: ((saved: boolean) => void) | null = null;
   #closed = false;
+  /** Socket-level close (code + reason) — how a revocation close lands. */
+  #socketClose: { code: number; reason: string } | null = null;
 
   constructor(port: number, headers: Record<string, string>) {
     this.#ws = new WebSocket(`ws://127.0.0.1:${port}/collab`, { headers });
@@ -229,8 +238,9 @@ class CollabClient {
         reject(new Error("ws upgrade rejected"));
       });
     });
-    this.#ws.on("close", () => {
+    this.#ws.on("close", (code, reason) => {
       this.#closed = true;
+      this.#socketClose = { code, reason: reason.toString() };
       this.#pendingAuth?.({ outcome: "rejected", scope: null });
       this.#pendingAuth = null;
     });
@@ -346,6 +356,16 @@ class CollabClient {
     }
   }
 
+  /** Resolve with `{code, reason}` once the SOCKET itself closes. */
+  async waitForSocketClose(): Promise<{ code: number; reason: string }> {
+    const deadline = Date.now() + WS_TIMEOUT_MS;
+    for (;;) {
+      if (this.#socketClose !== null) return this.#socketClose;
+      if (Date.now() > deadline) throw new Error("timed out waiting for socket close");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
   /** Poll the local replica until its fragment text contains `needle`. */
   async waitForText(documentName: string, needle: string): Promise<string> {
     const deadline = Date.now() + WS_TIMEOUT_MS;
@@ -384,25 +404,6 @@ describe("production WS attach (ADR 0030 hardening)", () => {
 
   function openClient(headers: Record<string, string>): CollabClient {
     return new CollabClient(activePort(), headers);
-  }
-
-  async function docUpdatesCount(docId: string): Promise<number> {
-    if (booted === undefined) throw new Error("not booted");
-    const rows = await booted.driver
-      .system()
-      .selectFrom("doc_updates")
-      .where("doc_id", "=", DocId(docId))
-      .select("id")
-      .execute();
-    return rows.length;
-  }
-
-  async function docGetBody(docId: string, cookie: string): Promise<string> {
-    const res = await fetch(`http://127.0.0.1:${activePort()}/docs/get/${docId}`, {
-      headers: { cookie },
-    });
-    expect(res.status).toBe(200);
-    return res.text();
   }
 
   beforeAll(async () => {
@@ -463,13 +464,15 @@ describe("production WS attach (ADR 0030 hardening)", () => {
     client.close();
   });
 
-  it("authenticates an in-workspace doc — and the grant is readonly", async () => {
+  it("authenticates an in-workspace doc with read-write scope (ADR 0043 lifted posture)", async () => {
     const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
     const result = await client.attach(docInA);
     expect(result.outcome).toBe("authenticated");
-    // Invariant 3: no audited WS write lane yet ⇒ the sync layer forces
-    // readOnly for EVERY principal; the Authenticated frame carries it.
-    expect(result.scope).toBe("readonly");
+    // The default posture is lifted: WS writes are admitted — every
+    // novel frame dispatches `doc.apply_update` through the audited
+    // gate (pinned in the write-lane describe below). The operator's
+    // read-only pin keeps the old posture (its own describe below).
+    expect(result.scope).toBe("read-write");
     client.close();
   });
 
@@ -486,28 +489,6 @@ describe("production WS attach (ADR 0030 hardening)", () => {
     const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
     expect((await client.attach(docInA)).outcome).toBe("authenticated");
     expect((await client.attach(docInB)).outcome).toBe("denied");
-    client.close();
-  });
-
-  it("nacks a WS write and leaves durable + in-memory state untouched (readOnly enforced)", async () => {
-    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
-    expect((await client.attach(docInA)).outcome).toBe("authenticated");
-
-    const rowsBefore = await docUpdatesCount(docInA);
-    const bodyBefore = await docGetBody(docInA, cookieA);
-
-    // A REAL Yjs update (not a malformed frame): a paragraph minted in a
-    // scratch doc — exactly what a writing client would push.
-    const scratch = new Y.Doc();
-    const para = new Y.XmlElement("paragraph");
-    para.insert(0, [new Y.XmlText("rogue WS write")]);
-    scratch.getXmlFragment(DOC_FRAGMENT).insert(0, [para]);
-    const saved = await client.sendUpdate(docInA, Y.encodeStateAsUpdate(scratch));
-
-    // Codex review SHOULD-FIX: assert STATE, not just the denial frame.
-    expect(saved).toBe(false);
-    expect(await docUpdatesCount(docInA)).toBe(rowsBefore);
-    expect(await docGetBody(docInA, cookieA)).toBe(bodyBefore);
     client.close();
   });
 
@@ -556,7 +537,7 @@ describe("production WS attach (ADR 0030 hardening)", () => {
     client.close();
   });
 
-  it("denies a NEW document attach after sign-out on a still-open socket (freshness)", async () => {
+  it("closes the live socket at sign-out (ADR 0043 Decision 5) and refuses the dead cookie's re-attach", async () => {
     const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieB });
     expect((await client.attach(docInB)).outcome).toBe("authenticated");
 
@@ -567,10 +548,20 @@ describe("production WS attach (ADR 0030 hardening)", () => {
     });
     expect(signOut.ok).toBe(true);
 
-    // The socket is still open; the principal is re-resolved from the
-    // upgrade headers PER Auth frame — the revoked session must deny
-    // the next document, not ride the upgrade-time snapshot.
-    expect((await client.attach(docInB2)).outcome).toBe("denied");
+    // The sign-out arm of the revocation tap closes the registered
+    // socket server-side, event-driven — the client does not get to
+    // keep a passive broadcast feed on revoked standing. (Per-frame
+    // re-resolution remains the backstop rail for anything the tap
+    // misses — pinned at the sync/composition layers.) The app-range
+    // close code tells a legitimate client "re-auth, don't blind-retry".
+    const closed = await client.waitForSocketClose();
+    expect(closed.code).toBe(COLLAB_REVOKED_CLOSE_CODE);
+    expect(closed.reason).toBe("authorization revoked");
+
+    // Reconnecting with the dead cookie refuses at upgrade (authN).
+    const again = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieB });
+    expect((await again.attach(docInB2)).outcome).toBe("rejected");
+    again.close();
     client.close();
   });
 
@@ -582,7 +573,7 @@ describe("production WS attach (ADR 0030 hardening)", () => {
   });
 });
 
-describe("audited WS write lane (ADR 0043 Decision 3 — readOnly lifted)", () => {
+describe("audited WS write lane (ADR 0043 Decision 3 — the default posture)", () => {
   let booted: BootedApp | undefined;
   let running: RunningServer | undefined;
   let cookie = "";
@@ -643,10 +634,10 @@ describe("audited WS write lane (ADR 0043 Decision 3 — readOnly lifted)", () =
   }
 
   beforeAll(async () => {
-    // The SAME production composition as the suite above with ONE
-    // delta: `collabReadOnly: false` — the staged ADR 0043 increment-5
-    // lift, pulled forward here to exercise the write lane end-to-end.
-    booted = await boot(false);
+    // The default production composition — the ADR 0043 lift landed
+    // with increment 5, so the audited write lane IS the posture this
+    // boot ships with. No knob passed.
+    booted = await boot();
     const bootedNow = booted;
     running = await startServer(bootedNow, 0, [
       (server) => attachCollab(server, bootedNow, { publicOrigin: PUBLIC_ORIGIN }),
@@ -659,7 +650,7 @@ describe("audited WS write lane (ADR 0043 Decision 3 — readOnly lifted)", () =
     await running?.close();
   });
 
-  it("authenticates with a read-write grant once the posture lifts", async () => {
+  it("authenticates with a read-write grant (default posture)", async () => {
     const client = openClient();
     const result = await client.attach(docId);
     expect(result.outcome).toBe("authenticated");
@@ -765,6 +756,79 @@ describe("audited WS write lane (ADR 0043 Decision 3 — readOnly lifted)", () =
     expect(await docUpdatesCount()).toBe(rowsBefore);
     expect(await docGetBody()).toBe(bodyBefore);
     expect(await applyUpdateAuditCount("error")).toBe(errorAuditBefore + 1);
+    client.close();
+  });
+});
+
+describe("operator read-only pin (collabReadOnly: true)", () => {
+  let booted: BootedApp | undefined;
+  let running: RunningServer | undefined;
+  let cookie = "";
+  let docId = "";
+
+  function activePort(): number {
+    if (running === undefined) throw new Error("server not started");
+    return running.port;
+  }
+
+  async function docUpdatesCount(): Promise<number> {
+    if (booted === undefined) throw new Error("not booted");
+    const rows = await booted.driver
+      .system()
+      .selectFrom("doc_updates")
+      .where("doc_id", "=", DocId(docId))
+      .select("id")
+      .execute();
+    return rows.length;
+  }
+
+  async function docGetBody(): Promise<string> {
+    const res = await fetch(`http://127.0.0.1:${activePort()}/docs/get/${docId}`, {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    return res.text();
+  }
+
+  beforeAll(async () => {
+    // The emergency knob: same production composition, posture pinned
+    // read-only. Attaches still succeed; the gate never dispatches
+    // (it only fires on non-readOnly connections) and every WS write
+    // keeps the native nacked-not-applied contract.
+    booted = await boot(true);
+    const bootedNow = booted;
+    running = await startServer(bootedNow, 0, [
+      (server) => attachCollab(server, bootedNow, { publicOrigin: PUBLIC_ORIGIN }),
+    ]);
+    cookie = await signUp(running.port, "dave@example.com");
+    docId = await createDoc(running.port, cookie, "Dave's pinned doc");
+  });
+
+  afterAll(async () => {
+    await running?.close();
+  });
+
+  it("nacks a WS write and leaves durable + in-memory state untouched (pinned readOnly)", async () => {
+    const client = new CollabClient(activePort(), { origin: PUBLIC_ORIGIN, cookie });
+    const result = await client.attach(docId);
+    expect(result.outcome).toBe("authenticated");
+    expect(result.scope).toBe("readonly");
+
+    const rowsBefore = await docUpdatesCount();
+    const bodyBefore = await docGetBody();
+
+    // A REAL Yjs update (not a malformed frame): a paragraph minted in
+    // a scratch doc — exactly what a writing client would push.
+    const scratch = new Y.Doc();
+    const para = new Y.XmlElement("paragraph");
+    para.insert(0, [new Y.XmlText("rogue WS write")]);
+    scratch.getXmlFragment(DOC_FRAGMENT).insert(0, [para]);
+    const saved = await client.sendUpdate(docId, Y.encodeStateAsUpdate(scratch));
+
+    // Assert STATE, not just the denial frame (Codex review SHOULD-FIX).
+    expect(saved).toBe(false);
+    expect(await docUpdatesCount()).toBe(rowsBefore);
+    expect(await docGetBody()).toBe(bodyBefore);
     client.close();
   });
 });
