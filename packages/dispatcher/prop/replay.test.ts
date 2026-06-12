@@ -89,6 +89,8 @@ import {
   docRename,
   docRestore,
   docUnpublish,
+  permissionGrant,
+  permissionRevoke,
   registerCapability,
   workspaceMemberAdd,
   workspaceMemberRemove,
@@ -465,6 +467,8 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       registerCapability(docUnpublish),
       registerCapability(docDelete),
       registerCapability(docRestore),
+      registerCapability(permissionGrant),
+      registerCapability(permissionRevoke),
     ]);
 
     const dispatcher = createDispatcher({
@@ -593,6 +597,54 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
     await step(collectionDelete.id, { collection_id: c2 });
     await step(collectionRestore.id, { collection_id: c2 });
 
+    // ── ACL edges (ADR 0040 Step 8) — the FIRST real `acl.grant` /
+    //    `acl.revoke` emitters, closing the Step-7 deferred obligation.
+    //    Both docs sit in legacy placements (no Spaces exist in this
+    //    walk), so OWNER's doc owner-tier authorizes and SECOND_USER's
+    //    live membership is sufficient standing.
+    const g1 = readIdField(
+      await step(permissionGrant.id, {
+        resource_kind: "doc",
+        resource_id: d1,
+        subject_kind: "user",
+        subject_id: SECOND_USER,
+        role: "view",
+      }),
+      "grant_id",
+    );
+    // Role convergence re-emits `acl.grant` under the SAME grant_id —
+    // replay equality after this step proves the reducer upserts by id
+    // (carried values, not re-derivation).
+    await step(permissionGrant.id, {
+      resource_kind: "doc",
+      resource_id: d1,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+      role: "edit",
+    });
+    // Idempotent same-role re-grant: an allow row with ZERO row writes —
+    // the reducer's upsert must leave the projection converged.
+    await step(permissionGrant.id, {
+      resource_kind: "doc",
+      resource_id: d1,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+      role: "edit",
+    });
+    // Hard-DELETE revoke: the effect's full preimage removes the edge.
+    await step(permissionRevoke.id, { grant_id: g1 });
+    // A second edge that SURVIVES the walk: grants persist through the
+    // subject's membership soft-delete below (revocation is explicit;
+    // the L1 gate already cuts a removed member's access) — so the
+    // final projection compares a NON-EMPTY grants map.
+    await step(permissionGrant.id, {
+      resource_kind: "doc",
+      resource_id: d2,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+      role: "view",
+    });
+
     await step(workspaceMemberRemove.id, { user_id: SECOND_USER });
 
     // ── Deferred-kind guard + coverage. Every effect a shipped capability
@@ -624,6 +676,8 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       "doc.unpublish",
       "doc.soft_delete",
       "doc.restore",
+      "acl.grant",
+      "acl.revoke",
     ];
     for (const kind of EXPECTED_STATE_KINDS) {
       expect(emittedKinds.has(kind)).toBe(true);

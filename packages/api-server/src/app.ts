@@ -115,6 +115,7 @@ import { audit } from "./routes/audit";
 import { collections } from "./routes/collections";
 import { docs } from "./routes/docs";
 import { infra } from "./routes/infra";
+import { permissions } from "./routes/permissions";
 import { workspaces } from "./routes/workspaces";
 
 export interface CreateApiAppOptions {
@@ -357,7 +358,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
   // Mount each domain sub-app at its prefix. The fluent `.route()`
   // chain is load-bearing for `hc<AppType>`: base Hono's `.route()`
   // merges each sub-app's RPC `Schema` into the return type, and the
-  // chain accumulates the union across all five domains. Keep it a
+  // chain accumulates the union across all six domains. Keep it a
   // single contiguous expression — an intermediate `const` re-mount is
   // the shape most prone to widening the inferred schema to `unknown`.
   // `audit` mounts at the plural `/audits` prefix (dir is singular).
@@ -366,6 +367,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     .route("/docs", docs)
     .route("/collections", collections)
     .route("/workspaces", workspaces)
+    .route("/permissions", permissions)
     .route("/audits", audit);
 }
 

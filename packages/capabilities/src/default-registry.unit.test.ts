@@ -26,6 +26,8 @@ const EXPECTED_IDS = [
   "doc.restore",
   "doc.unpublish",
   "doc.update",
+  "permission.grant",
+  "permission.revoke",
   "workspace.get",
   "workspace.member_add",
   "workspace.member_list",
