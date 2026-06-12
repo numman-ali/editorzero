@@ -134,6 +134,28 @@ export function renameFailureMessage(kind: RenameFailure): string {
     : "Rename failed. Try again.";
 }
 
+type DocDeleteResponse = Awaited<ReturnType<ApiClient["docs"]["delete"][":doc_id"]["$post"]>>;
+type DocDeleteSuccess = Extract<DocDeleteResponse, { status: 200 }>;
+export type DocDeleted = Awaited<ReturnType<DocDeleteSuccess["json"]>>;
+
+/**
+ * Soft-delete a doc (`doc.delete` — recoverable by design, invariant 6:
+ * `doc.restore` brings it back with ACL + content intact). The browser
+ * Trash *screen* is a later cell — it needs a trash-listing capability
+ * that doesn't exist yet — so for now restore is reachable via the
+ * API/CLI/MCP surfaces only.
+ */
+export async function deleteDoc(docId: string, client: ApiClient = apiClient): Promise<DocDeleted> {
+  const res = await client.docs.delete[":doc_id"].$post({ param: { doc_id: docId } });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+/** No typed arms beyond the generic — delete has no collision-class failure. */
+export const DELETE_FAILED_MESSAGE = "Trash failed. Try again.";
+
 /**
  * Vocabulary lock (ADR 0040): the UI says "Space" for the read-scope
  * value the wire calls `space` (the Step-5 `access_mode` split retired

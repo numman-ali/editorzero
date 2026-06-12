@@ -7,7 +7,9 @@ import {
   classifyRenameError,
   createDoc,
   createFailureMessage,
+  DELETE_FAILED_MESSAGE,
   DOC_LIST_QUERY_KEY,
+  deleteDoc,
   docAccessModeLabel,
   docListQueryOptions,
   docTagClass,
@@ -196,6 +198,29 @@ describe("renameFailureMessage", () => {
 
   it("offers a retry on rename_failed", () => {
     expect(renameFailureMessage("rename_failed")).toContain("Try again");
+  });
+});
+
+describe("deleteDoc", () => {
+  const DELETED = {
+    doc_id: "018f0000-0000-7000-8000-0000000000d2",
+    deleted_at: 5,
+    render_version: 2,
+  };
+
+  it("resolves the 200 echo (soft-delete projection)", async () => {
+    const deleted = await deleteDoc(DELETED.doc_id, jsonClient(200, DELETED));
+    expect(deleted.deleted_at).toBe(5);
+  });
+
+  it("throws ApiError with the typed envelope code on a 404", async () => {
+    await expect(
+      deleteDoc(DELETED.doc_id, jsonClient(404, { error: "not_found" })),
+    ).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("DELETE_FAILED_MESSAGE offers a retry", () => {
+    expect(DELETE_FAILED_MESSAGE).toContain("Try again");
   });
 });
 

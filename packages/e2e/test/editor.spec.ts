@@ -7,15 +7,19 @@ import { CREDENTIALS } from "./credentials";
  * proves-capability-cell: doc.get
  * proves-capability-cell: doc.update
  * proves-capability-cell: doc.rename
+ * proves-capability-cell: doc.delete
  *
  * The HTTP-first editor cells (ADR 0038; invariant 4, ADR 0033 §3 / 0040
- * H11). Three markers, one screen: `/doc/$docId` loads a doc through
+ * H11). Four markers, one screen: `/doc/$docId` loads a doc through
  * `doc.get` (loader + owned-model parse + Tiptap render), persists
  * edits through `doc.update` (browser diff → ops batch with per-block
- * hash preconditions → explicit Save), and renames through the toolbar's
+ * hash preconditions → explicit Save), renames through the toolbar's
  * `doc.rename` control (title-slot rule: row title + slug + the canvas
  * heading move together in one audited mutation — distinct from editing
- * the heading block, which is a content op).
+ * the heading block, which is a content op), and soft-deletes through
+ * the toolbar's `doc.delete` Trash control (recoverable per invariant
+ * 6 — the spec restores over the API, the browser Trash screen being a
+ * later cell).
  *
  * The proof is end-to-end against real server state: the doc is created
  * over the same `POST /docs/create` every surface uses, the editor is
@@ -155,4 +159,39 @@ test("doc.rename: duplicate title surfaces the typed 409; a dirty canvas gates t
   await page.keyboard.type("dirty");
   await expect(page.getByRole("status")).toHaveText("Unsaved changes");
   await expect(page.getByRole("button", { name: "Rename" })).toBeDisabled();
+});
+
+test("doc.delete: the toolbar Trash control soft-deletes, returns to the list, and stays recoverable (doc.delete cell)", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/");
+  await page.getByRole("link", { name: RENAMED_TITLE }).click();
+  await page.waitForURL(/\/doc\/[0-9a-f-]{36}$/u);
+  const docId = new URL(page.url()).pathname.split("/").at(-1);
+
+  // Trigger → inline confirm (the disclosure pattern); confirm trashes
+  // and navigates home. No dirty gate — trashing discards edits by
+  // intent; the confirm step is the guard.
+  await page.getByRole("button", { name: "Trash", exact: true }).click();
+  await expectNoAxeViolations(page); // the open confirm row is part of the audited surface
+  await page.getByRole("button", { name: "Move to trash" }).click();
+  await page.waitForURL((url) => url.pathname === "/");
+
+  // Server state: doc.list excludes trashed — the row is gone while its
+  // siblings remain.
+  await expect(page.getByRole("cell").filter({ hasText: RENAMED_TITLE })).toHaveCount(0);
+  await expect(page.getByRole("cell").filter({ hasText: "Launch checklist" })).toBeVisible();
+  // The doc itself now 404s.
+  const gone = await page.request.get(`/docs/get/${docId}`);
+  expect(gone.status()).toBe(404);
+
+  // Invariant 6: the soft-delete is recoverable via a first-class
+  // capability — restore over the API (the browser Trash screen is a
+  // later cell, blocked on a trash-listing capability) and the row
+  // returns to the list with content intact.
+  const restored = await page.request.post(`/docs/restore/${docId}`);
+  expect(restored.ok()).toBe(true);
+  await page.goto("/");
+  await expect(page.getByRole("cell").filter({ hasText: RENAMED_TITLE })).toBeVisible();
 });

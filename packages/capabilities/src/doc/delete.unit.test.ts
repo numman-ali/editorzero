@@ -264,7 +264,9 @@ describe("doc.delete", () => {
     expect(docDelete.id).toBe("doc.delete");
     expect(docDelete.category).toBe("mutation");
     expect(docDelete.requires).toEqual(["doc:delete"]);
-    expect(docDelete.surfaces).toEqual(["api", "cli", "mcp"]);
+    // "ui" since the editor toolbar's Trash control landed (proven by
+    // the marked Playwright spec in packages/e2e — ADR 0040 H11).
+    expect(docDelete.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     expect(docDelete.agentAllowed).toBeDefined();
   });
 

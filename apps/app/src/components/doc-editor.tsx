@@ -13,6 +13,7 @@ import {
 } from "../lib/doc-editor";
 import { DOC_LIST_QUERY_KEY } from "../lib/docs";
 import { RenameDoc } from "./rename-doc";
+import { TrashDoc } from "./trash-doc";
 
 import "./doc-editor.css";
 
@@ -145,6 +146,10 @@ export function DocEditor({
           disabled={saveState.kind === "dirty" || saveState.kind === "saving"}
           onRenamed={handleReload}
         />
+        {/* No dirty gate — trashing discards unsaved edits by intent;
+            the confirm step is the guard. Disabled mid-save only so an
+            in-flight ops batch can't race the soft-delete. */}
+        <TrashDoc docId={docId} disabled={saveState.kind === "saving"} />
       </div>
       {failure !== null ? (
         <div className="doc-editor-alert" role="alert">

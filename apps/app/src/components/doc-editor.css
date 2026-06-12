@@ -15,9 +15,20 @@
   flex-wrap: wrap;
 }
 
-/* Pushes the rename control to the toolbar's right edge. */
+/* Pushes the rename + trash controls to the toolbar's right edge. */
 .doc-editor-spacer {
   margin-left: auto;
+}
+
+/* The mock's bulk-bar danger modifier (03-documents `documents-danger`):
+   warn-ink text on the ghost outline, border warms on hover. */
+.doc-editor-danger {
+  color: var(--warn-ink);
+  border-color: var(--hair-strong);
+}
+
+.doc-editor-danger:hover {
+  border-color: var(--warn-ink);
 }
 
 .doc-editor-status {
