@@ -76,6 +76,7 @@ Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 b
 | [0040](0040-tenancy-ia-model.md) | **Tenancy & IA model: Org → Space (membership ceiling) → Collection/Doc (per-doc ACL); Personal spaces; item-scoped guest grants; publish as an independent dimension; agents as peer grant-targets** | **Accepted (new, 2026-06-01; extends 0024, amends 0015/0017/0020)** |
 | [0041](0041-audited-genesis-bootstrap.md) | **Audited genesis bootstrap via system-audit provenance markers** | **Accepted (new, 2026-06-02; closes the invariant-3 genesis gap; relates 0024/0040)** |
 | [0042](0042-trash-listing.md) | **Trash listing: `trash.list` — trash browse by per-kind acting-authority predicates; restorability stays with restore (`/trash` prefix; visible-stream cursor)** | **Proposed (draft 2026-06-12; cross-model Codex review folded same day; extends 0017, applies 0040's read postures; awaiting @numman)** |
+| [0043](0043-audited-ws-write-lane.md) | **The audited WS write lane: broadcast-after-commit substrate (resident Y.Doc = committed-only), `doc.apply_update` raw-delta capability, WS surface as hook-gated adapter; revocation closes gate the readOnly lift** | **Accepted (new, 2026-06-13; cross-model design round folded pre-build; executes ADR 0030 slice-B obligations, extends 0038)** |
 
 ## Review trails
 
