@@ -600,15 +600,11 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       readIdField(await step(docCreate.id, { title: "Doc Two", collection_id: c1 }), "doc_id"),
     );
     await step(docRename.id, { doc_id: d1, title: "Doc One Renamed" });
-    // Same-bucket move (legacy → legacy). The CROSS-boundary branch
-    // (`acl_transition` + dropped-grant preimages, ADR 0040 §7) is NOT
-    // walk-reachable yet: every capability-minted collection is legacy
-    // (`collection.create` pins `space_id = null`), and seeding a
-    // space-bound collection outside dispatch would break the replay
-    // property by construction. The reducer's transition semantics are
-    // pinned fixture-level in `@editorzero/audit` reducer tests; ADD
-    // crossing steps here the moment a space-collection capability
-    // lands (tracked in ADR 0040 Step-8 build order).
+    // Same-bucket move (legacy → legacy) — no `acl_policy`, no
+    // transition. The CROSS-boundary branch (`acl_transition` +
+    // dropped-grant preimages, ADR 0040 §7) is exercised further down,
+    // after the space family mints a space-bound collection THROUGH
+    // dispatch (space-collection slice 1).
     await step(docMove.id, { doc_id: d1, new_collection_id: c1 });
     await step(docPublish.id, { doc_id: d1 });
     // Idempotent re-publish: the effect carries the SAME handler-reused
@@ -757,6 +753,43 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
     // state-as-of-delete rides through).
     await step(spaceArchive.id, { space_id: s1 });
     await step(spaceRestore.id, { space_id: s1 });
+
+    // ── Space-collection family (ADR 0040 space-collection slice 1) —
+    //    the first space-bound collections minted THROUGH dispatch, and
+    //    the first walk-reachable cross-boundary `doc.move` (closing
+    //    the Step-7 deferral noted at the same-bucket move above). c3
+    //    roots in s1 (open after the update step — the owner rides the
+    //    open-space baseline); c4 INHERITS s1 from c3 (derivation, not
+    //    input), and serving as the crossing DESTINATION pins the
+    //    denormalized inheritance through replay end-to-end (Codex
+    //    space-collection review pin).
+    const c3 = CollectionId(
+      readIdField(
+        await step(collectionCreate.id, { title: "Space Root", space_id: s1 }),
+        "collection_id",
+      ),
+    );
+    const c4 = CollectionId(
+      readIdField(
+        await step(collectionCreate.id, { title: "Space Child", parent_id: c3 }),
+        "collection_id",
+      ),
+    );
+    // The crossing needs a grant to shed: d1's earlier edges were
+    // revoked/removed above, so re-grant SECOND_USER, then
+    // `adopt_baseline` hard-drops it with the preimage riding the
+    // effect — replay must apply the drop. The return crossing
+    // (space → legacy) under `keep_grants` records the transition
+    // with ZERO grant writes.
+    await step(permissionGrant.id, {
+      resource_kind: "doc",
+      resource_id: d1,
+      subject_kind: "user",
+      subject_id: SECOND_USER,
+      role: "view",
+    });
+    await step(docMove.id, { doc_id: d1, new_collection_id: c4, acl_policy: "adopt_baseline" });
+    await step(docMove.id, { doc_id: d1, new_collection_id: c1, acl_policy: "keep_grants" });
 
     await step(workspaceMemberRemove.id, { user_id: SECOND_USER });
 

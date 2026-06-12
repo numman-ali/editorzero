@@ -10,9 +10,30 @@
  */
 
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
-import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
-import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
-import { AgentId, CollectionId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
+import {
+  COLLECTIONS_DDL,
+  createSqliteDriver,
+  DOCS_DDL,
+  GRANTS_DDL,
+  SPACE_MEMBERS_DDL,
+  SPACES_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
+import {
+  NotFoundError,
+  PermissionDeniedError,
+  SlugCollisionError,
+  ValidationError,
+} from "@editorzero/errors";
+import {
+  AgentId,
+  CollectionId,
+  GrantId,
+  SpaceId,
+  TokenId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AgentPrincipal, Principal, UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -34,6 +55,12 @@ let driver: SqliteDriver;
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(COLLECTIONS_DDL);
+  // Space-binding arms load the ACL resolver, which reads spaces /
+  // space_members / grants — every child create now touches these
+  // tables even on the legacy (no-space) path.
+  driver.exec(SPACES_DDL);
+  driver.exec(SPACE_MEMBERS_DDL);
+  driver.exec(GRANTS_DDL);
   driver.exec(DOCS_DDL);
 });
 
@@ -369,6 +396,307 @@ describe("collection.create — sibling-slug pre-check", () => {
 });
 
 // ── Agent attribution ────────────────────────────────────────────────────
+
+// ── Space binding (ADR 0040 space-collection slice) ──────────────────────
+//
+// Root creates may request a `space_id` (existence-404 first, then
+// `assertCanPlaceInSpace` standing); child creates INHERIT the parent's
+// stored binding behind `assertCanPlaceIn`. The two Codex review pins
+// live here: non-delegated agents do NOT ride the open-space user
+// baseline, and child inheritance lands in the row + audit effect.
+
+describe("collection.create — space binding", () => {
+  const S_OPEN = SpaceId("018f0000-0000-7000-8000-0000000000e1");
+  const S_CLOSED = SpaceId("018f0000-0000-7000-8000-0000000000e2");
+  const S_TRASHED = SpaceId("018f0000-0000-7000-8000-0000000000e3");
+  const S_GONE = SpaceId("018f0000-0000-7000-8000-0000000000e4"); // never inserted
+  const C_SPACED = CollectionId("018f0000-0000-7000-8000-0000000000c4");
+  const C_DANGLING = CollectionId("018f0000-0000-7000-8000-0000000000c5");
+  const C_ANOM = CollectionId("018f0000-0000-7000-8000-0000000000c6");
+  const G_SPACE = GrantId("018f0000-0000-7000-8000-0000000000f5");
+
+  function bobPrincipal(): UserPrincipal {
+    return { ...userPrincipal(), id: BOB };
+  }
+
+  async function seedSpaceRow(
+    id: SpaceId,
+    opts: { type?: "open" | "closed"; deleted_at?: number | null } = {},
+  ) {
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("spaces")
+      .values({
+        id,
+        workspace_id: WORKSPACE_A,
+        kind: "team",
+        type: opts.type ?? "closed",
+        owner_user_id: null,
+        name: `space-${id.slice(-2)}`,
+        slug: `space-${id.slice(-2)}`,
+        baseline_access: "view",
+        created_by: ALICE,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: opts.deleted_at ?? null,
+      })
+      .execute();
+  }
+
+  async function seedSpaceMemberRow(space_id: SpaceId, user_id: UserId) {
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("space_members")
+      .values({
+        workspace_id: WORKSPACE_A,
+        space_id,
+        user_id,
+        role: "edit",
+        created_at: 1,
+        updated_at: 1,
+      })
+      .execute();
+  }
+
+  async function seedSpaceCollectionRow(id: CollectionId, space_id: SpaceId) {
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("collections")
+      .values({
+        id,
+        workspace_id: WORKSPACE_A,
+        parent_id: null,
+        space_id,
+        title: `col-${id.slice(-2)}`,
+        slug: `col-${id.slice(-2)}`,
+        order_key: id,
+        created_by: ALICE,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: null,
+      })
+      .execute();
+  }
+
+  async function seedAgentSpaceGrant(space_id: SpaceId) {
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("grants")
+      .values({
+        id: G_SPACE,
+        workspace_id: WORKSPACE_A,
+        resource_kind: "space",
+        resource_id: space_id,
+        subject_kind: "agent",
+        subject_id: AGENT_BOT42,
+        role: "edit",
+        is_guest: 0,
+        created_by: ALICE,
+        created_at: 7,
+      })
+      .execute();
+  }
+
+  it("root create with space_id binds the row + output when the user is a space member", async () => {
+    await seedSpaceRow(S_CLOSED);
+    await seedSpaceMemberRow(S_CLOSED, ALICE);
+    const ctx = buildCtx(userPrincipal());
+    const out = await collectionCreate.handler(ctx, { title: "Bound root", space_id: S_CLOSED });
+
+    expect(out.parent_id).toBeNull();
+    expect(out.space_id).toBe(S_CLOSED);
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("collections")
+      .selectAll()
+      .where("id", "=", out.collection_id)
+      .executeTakeFirstOrThrow();
+    expect(row.space_id).toBe(S_CLOSED);
+  });
+
+  it("accepts explicit `parent_id: null` alongside space_id (root create, schema rail passes)", async () => {
+    await seedSpaceRow(S_CLOSED);
+    await seedSpaceMemberRow(S_CLOSED, ALICE);
+    const parsed = collectionCreate.input.parse({
+      title: "Explicit root",
+      parent_id: null,
+      space_id: S_CLOSED,
+    });
+    const out = await collectionCreate.handler(buildCtx(userPrincipal()), parsed);
+    expect(out.space_id).toBe(S_CLOSED);
+  });
+
+  it("open space: a plain workspace user rides the open-space baseline", async () => {
+    await seedSpaceRow(S_OPEN, { type: "open" });
+    const ctx = buildCtx(bobPrincipal()); // not a space member, no grant
+    const out = await collectionCreate.handler(ctx, { title: "Open root", space_id: S_OPEN });
+    expect(out.space_id).toBe(S_OPEN);
+  });
+
+  it("Codex pin 1a: a non-delegated agent does NOT ride the open-space baseline (acl_deny, scope {space_id})", async () => {
+    await seedSpaceRow(S_OPEN, { type: "open" });
+    const ctx = buildCtx(agentPrincipal({ owner: ALICE })); // attribution ok, no space grant
+    const err = await collectionCreate
+      .handler(ctx, { title: "Agent open", space_id: S_OPEN })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { space_id: S_OPEN } });
+    }
+  });
+
+  it("Codex pin 1b: a delegated agent rides its delegator's open-space reach", async () => {
+    await seedSpaceRow(S_OPEN, { type: "open" });
+    const ctx = buildCtx(agentPrincipal({ owner: ALICE, acting_as: ALICE }));
+    const out = await collectionCreate.handler(ctx, { title: "Delegated open", space_id: S_OPEN });
+    expect(out.space_id).toBe(S_OPEN);
+    expect(out.created_by).toBe(ALICE);
+  });
+
+  it("a non-delegated agent with an explicit space grant can create into a closed space", async () => {
+    await seedSpaceRow(S_CLOSED);
+    await seedAgentSpaceGrant(S_CLOSED);
+    const ctx = buildCtx(agentPrincipal({ owner: ALICE }));
+    const out = await collectionCreate.handler(ctx, { title: "Granted", space_id: S_CLOSED });
+    expect(out.space_id).toBe(S_CLOSED);
+  });
+
+  it("missing space → NotFoundError (404) before any standing check", async () => {
+    const ctx = buildCtx(userPrincipal());
+    const err = await collectionCreate
+      .handler(ctx, { title: "Ghost", space_id: S_GONE })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
+    if (err instanceof NotFoundError) {
+      expect(err.subject_kind).toBe("space");
+      expect(err.subject_id).toBe(S_GONE);
+    }
+  });
+
+  it("soft-deleted space → NotFoundError (404), same surface as missing", async () => {
+    await seedSpaceRow(S_TRASHED, { deleted_at: 99 });
+    const ctx = buildCtx(userPrincipal());
+    await expect(
+      collectionCreate.handler(ctx, { title: "Trashed", space_id: S_TRASHED }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("live closed space without membership or grant → acl_deny {space_id}", async () => {
+    await seedSpaceRow(S_CLOSED);
+    const ctx = buildCtx(bobPrincipal());
+    const err = await collectionCreate
+      .handler(ctx, { title: "No reach", space_id: S_CLOSED })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { space_id: S_CLOSED } });
+    }
+  });
+
+  it("denied root create leaves no collections row (authority before insert)", async () => {
+    await seedSpaceRow(S_CLOSED);
+    await expect(
+      collectionCreate.handler(buildCtx(bobPrincipal()), { title: "No row", space_id: S_CLOSED }),
+    ).rejects.toBeInstanceOf(PermissionDeniedError);
+    const rows = await driver.scoped(WORKSPACE_A).selectFrom("collections").selectAll().execute();
+    expect(rows).toHaveLength(0);
+  });
+
+  it("schema rail: `space_id` alongside a non-null `parent_id` is rejected at parse", () => {
+    const result = collectionCreate.input.safeParse({
+      title: "Both",
+      parent_id: C_SPACED,
+      space_id: S_CLOSED,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["space_id"]);
+    }
+    // Explicit-null space_id with a real parent is fine — null means
+    // "no request", and the child inherits regardless.
+    const ok = collectionCreate.input.safeParse({
+      title: "Null space",
+      parent_id: C_SPACED,
+      space_id: null,
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it("Codex pin 2: a child under a space-bound parent INHERITS the binding — row, output, and audit effect", async () => {
+    await seedSpaceRow(S_CLOSED);
+    await seedSpaceMemberRow(S_CLOSED, ALICE);
+    await seedSpaceCollectionRow(C_SPACED, S_CLOSED);
+    const ctx = buildCtx(userPrincipal());
+    const input = collectionCreate.input.parse({ title: "Inherited child", parent_id: C_SPACED });
+    const out = await collectionCreate.handler(ctx, input);
+
+    expect(out.parent_id).toBe(C_SPACED);
+    expect(out.space_id).toBe(S_CLOSED); // derived, never supplied
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("collections")
+      .selectAll()
+      .where("id", "=", out.collection_id)
+      .executeTakeFirstOrThrow();
+    expect(row.space_id).toBe(S_CLOSED);
+
+    const effect = collectionCreate.audit.effectOnAllow(input, out);
+    expect(effect.kind).toBe("collection.create");
+    if (effect.kind === "collection.create") {
+      expect(effect.space_id).toBe(S_CLOSED);
+      expect(effect.parent_id).toBe(C_SPACED);
+    }
+  });
+
+  it("child under a space-bound parent without reach → acl_deny {collection_id: parent}", async () => {
+    await seedSpaceRow(S_CLOSED);
+    await seedSpaceCollectionRow(C_SPACED, S_CLOSED);
+    const ctx = buildCtx(bobPrincipal());
+    const err = await collectionCreate
+      .handler(ctx, { title: "Blocked child", parent_id: C_SPACED })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { collection_id: C_SPACED } });
+    }
+  });
+
+  it("child under a DANGLING-space parent fails closed (anomaly), even for a space member elsewhere", async () => {
+    await seedSpaceCollectionRow(C_DANGLING, S_GONE); // live collection, no spaces row
+    const ctx = buildCtx(userPrincipal());
+    const err = await collectionCreate
+      .handler(ctx, { title: "Dangling child", parent_id: C_DANGLING })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { collection_id: C_DANGLING } });
+    }
+    // Inheritance can never copy the dangling ref into a fresh row.
+    const rows = await driver.scoped(WORKSPACE_A).selectFrom("collections").selectAll().execute();
+    expect(rows).toHaveLength(1); // only the seeded parent
+  });
+
+  it("child under a TRASHED-space parent fails closed (anomaly, second arm)", async () => {
+    await seedSpaceRow(S_TRASHED, { deleted_at: 99 });
+    await seedSpaceCollectionRow(C_ANOM, S_TRASHED);
+    const ctx = buildCtx(userPrincipal());
+    await expect(
+      collectionCreate.handler(ctx, { title: "Anomaly child", parent_id: C_ANOM }),
+    ).rejects.toBeInstanceOf(PermissionDeniedError);
+  });
+
+  it("legacy root + legacy child remain reach-free (control: no spaces seeded at all)", async () => {
+    const parentId = await seedChain(1);
+    const ctx = buildCtx(bobPrincipal()); // no membership, no grants anywhere
+    const root = await collectionCreate.handler(ctx, { title: "Legacy root" });
+    expect(root.space_id).toBeNull();
+    const child = await collectionCreate.handler(ctx, {
+      title: "Legacy child",
+      parent_id: parentId,
+    });
+    expect(child.space_id).toBeNull();
+  });
+});
 
 describe("collection.create — agent principal attribution", () => {
   it("uses `acting_as` when set (delegated agent-auth token)", async () => {

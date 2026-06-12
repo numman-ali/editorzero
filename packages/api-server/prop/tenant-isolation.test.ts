@@ -28,7 +28,10 @@
  *      ceiling for doc mutations, administer ladders for ACL verbs,
  *      restore tier for space.restore, administer + placement standing
  *      for cross-boundary doc.move, the two policy rails, the
- *      guest-revoke refusal. Oracle says unauthorized ⇒ the dispatch
+ *      guest-revoke refusal, placement standing for collection.create
+ *      (space-bucket reach on root-into-space; parent-bucket reach +
+ *      anomaly fail-closed on child creates; the mutual-exclusion
+ *      schema rail). Oracle says unauthorized ⇒ the dispatch
  *      must not allow. (The converse is deliberately NOT asserted —
  *      handlers carry non-authority preconditions (slug collisions,
  *      lifecycle conflicts, roster refusals) the oracle does not
@@ -96,6 +99,7 @@ import {
   WorkspaceId,
 } from "@editorzero/ids";
 import type { AgentPrincipal, Principal, Role, UserPrincipal } from "@editorzero/principal";
+import { CollectionCreateOutputSchema } from "@editorzero/schemas/collection/create";
 import { DocListOutputSchema } from "@editorzero/schemas/doc/list";
 import { DocMoveOutputSchema } from "@editorzero/schemas/doc/move";
 import { SpaceListOutputSchema } from "@editorzero/schemas/space/list";
@@ -650,6 +654,36 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
     });
   }
 
+  // Pinned space-placement canaries (space-collection slice 1). The
+  // personal space always exists and is live, so: (a) its OWNER —
+  // when their workspace role carries doc:write — creating a root
+  // collection into it is a deterministic ALLOW through the
+  // personal-owner rung of baselineReach (no membership row exists by
+  // construction); (b) a non-delegated api-key agent attempting the
+  // same is refused unless a seeded space grant happens to cover it —
+  // agents never ride the user-baseline rungs (Codex review pin 1a at
+  // the fuzz layer; the oracle enforces the deny whenever no agent
+  // grant exists).
+  const personalSpace = world.spaces.find((sp) => sp.kind === "personal");
+  if (personalSpace !== undefined) {
+    const ownerIdx = world.users.findIndex((u) => u.id === personalSpace.owner_user_id);
+    const ownerRole = world.users[ownerIdx]?.wsRole;
+    if (ownerRole === "owner" || ownerRole === "admin" || ownerRole === "member") {
+      ops.push({
+        capability: "collection.create",
+        principal: { kind: "user", user_index: ownerIdx, agent_index: 0 },
+        input: { title: "fz canary pspace", space_id: personalSpace.id },
+        polluted: false,
+      });
+    }
+    ops.push({
+      capability: "collection.create",
+      principal: { kind: "api-key-agent", user_index: 0, agent_index: 0 },
+      input: { title: "fz canary agent space", space_id: personalSpace.id },
+      polluted: false,
+    });
+  }
+
   // Pollution: swap an in-tenant resource id for a foreign-tenant id
   // (or never-seeded garbage) — the op must then never allow.
   const maybePollute = (
@@ -757,6 +791,52 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
         input: { doc_id: t.id },
         polluted: t.polluted,
       });
+    } else if (die < 0.43) {
+      // collection.create (space-collection slice 1) — three arms:
+      // legacy root (always-placeable control; the gate still refuses
+      // guests/non-members), root INTO a space (existence-404 →
+      // `assertCanPlaceInSpace` standing), child under a seeded
+      // collection (inheritance + `assertCanPlaceIn` over the parent's
+      // bucket: legacy ∨ reach ∨ anomaly-fail-closed). A small slice
+      // probes the mutual-exclusion schema rail (parent + space
+      // together → 400, never reaches authority). Per-op index keeps
+      // slugs collision-free against `c-<hex>` seeds and each other.
+      const title = `fz col ${i}`;
+      if (chance(rnd, 0.1)) {
+        ops.push({
+          capability: "collection.create",
+          principal: principalSpec(),
+          input: {
+            title,
+            parent_id: pick(rnd, world.collections).id,
+            space_id: pick(rnd, world.spaces).id,
+          },
+          polluted: false, // refused by SHAPE, not tenancy
+        });
+      } else if (chance(rnd, 0.25)) {
+        ops.push({
+          capability: "collection.create",
+          principal: principalSpec(),
+          input: { title },
+          polluted: false,
+        });
+      } else if (chance(rnd, 0.5)) {
+        const t = maybePollute(pick(rnd, world.spaces).id, foreignSpaceIds);
+        ops.push({
+          capability: "collection.create",
+          principal: spacePrincipal(),
+          input: { title, space_id: t.id },
+          polluted: t.polluted,
+        });
+      } else {
+        const t = maybePollute(pick(rnd, world.collections).id, foreignCollectionIds);
+        ops.push({
+          capability: "collection.create",
+          principal: principalSpec(),
+          input: { title, parent_id: t.id },
+          polluted: t.polluted,
+        });
+      }
     } else if (die < 0.5) {
       const realDoc = pick(rnd, world.docs).id;
       const d = maybePollute(realDoc, foreignDocIds);
@@ -1032,6 +1112,33 @@ function oracleForbids(world: World, op: Op): boolean {
       if (target !== null && !oraclePlaceIn(world, s, target)) return true;
       return policy === undefined; // required rail
     }
+    case "collection.create": {
+      const parentRaw = op.input["parent_id"];
+      const spaceRaw = op.input["space_id"];
+      // Mutual-exclusion schema rail: refused by shape before any
+      // authority evaluation.
+      if (parentRaw != null && spaceRaw != null) return true;
+      if (parentRaw != null) {
+        // Child arm: missing/trashed parent → 404 surface; otherwise
+        // the placement-standing term over the parent's bucket
+        // (legacy → no claim; anomaly → fail-closed; space → reach).
+        const col = world.collections.find((c) => c.id === parentRaw);
+        if (col === undefined || col.deleted_at !== null) return true;
+        return !oraclePlaceIn(world, s, CollectionId(String(parentRaw)));
+      }
+      if (spaceRaw != null) {
+        // Root-into-space arm: missing/trashed space → 404 surface;
+        // otherwise baseline reach over the destination bucket (the
+        // resolver's `assertCanPlaceInSpace` — agents need a grant or
+        // a delegator, never the open-space user baseline).
+        const sp = spaceById(spaceRaw);
+        if (sp === undefined || sp.deleted_at !== null) return true;
+        return !baselineReach(world, s, sp.id);
+      }
+      // Legacy root: no oracle claim (the gate may still refuse —
+      // guest scope, non-member — but allows are legitimate).
+      return false;
+    }
     case "permission.grant": {
       if (op.input["resource_kind"] === "doc") {
         const d = docById(op.input["resource_id"]);
@@ -1108,6 +1215,21 @@ function applyAllowed(world: World, op: Op, output: unknown, mintModelId: () => 
           (g) => !(g.resource_kind === "doc" && g.resource_id === d.id),
         );
       }
+      return;
+    }
+    case "collection.create": {
+      // Handler-minted id differs per driver run (same posture as
+      // grants below): ops never reference it and digests normalize
+      // it, so a model-lane placeholder keeps the model
+      // cross-driver-identical. An allowed child create can never
+      // carry a dangling ref (anomaly parents fail closed), so the
+      // model's space_id is null or a live seeded space.
+      const parsed = CollectionCreateOutputSchema.parse(output);
+      world.collections.push({
+        id: CollectionId(mintModelId()),
+        space_id: parsed.space_id,
+        deleted_at: null,
+      });
       return;
     }
     case "permission.grant":
@@ -1711,6 +1833,7 @@ const MATRIX_CAPABILITIES = [
   "doc.delete",
   "doc.restore",
   "doc.move",
+  "collection.create",
   "permission.grant",
   "permission.revoke",
   "doc.add_guest",

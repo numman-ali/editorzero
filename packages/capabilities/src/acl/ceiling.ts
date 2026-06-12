@@ -232,6 +232,17 @@ export interface DocReadResolver {
    * visibility rule. False for missing/soft-deleted spaces.
    */
   hasBaselineReach(space_id: SpaceId): boolean;
+  /**
+   * F88 projection of `hasBaselineReach` — `acl_deny` scoped to the
+   * space. The placement-standing assert for verbs that target a SPACE
+   * bucket directly rather than through an existing collection
+   * (`collection.create(space_id)` — the space-collection family).
+   * Exactly the `assertCanPlaceIn` term one level up: agents do NOT
+   * ride the open-space user baseline (they need an explicit space
+   * grant, or a delegator with reach), and missing/soft-deleted spaces
+   * fail closed (the 404 surface is the handler's job, before this).
+   */
+  assertCanPlaceInSpace(space_id: SpaceId): void;
 }
 
 /**
@@ -433,6 +444,12 @@ export async function loadDocReadResolver(
     return baselineReach(placement.space_id);
   };
 
+  const hasBaselineReach = (space_id: SpaceId): boolean => {
+    const space = spaces.get(space_id);
+    if (space === undefined || space.deleted_at !== null) return false;
+    return baselineReach(space_id);
+  };
+
   return {
     canRead,
     assertCanRead: (doc) => {
@@ -481,10 +498,13 @@ export async function loadDocReadResolver(
         });
       }
     },
-    hasBaselineReach: (space_id) => {
-      const space = spaces.get(space_id);
-      if (space === undefined || space.deleted_at !== null) return false;
-      return baselineReach(space_id);
+    hasBaselineReach,
+    assertCanPlaceInSpace: (space_id) => {
+      if (!hasBaselineReach(space_id)) {
+        throw new PermissionDeniedError({
+          reason: { kind: "acl_deny", scope: { space_id } },
+        });
+      }
     },
   };
 }

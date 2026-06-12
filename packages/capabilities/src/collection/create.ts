@@ -8,12 +8,35 @@
  *      `ctx.db` (tenant-scoped) — 404 if missing or soft-deleted.
  *   3. Walk the ancestor chain to compute the new collection's depth.
  *      Refuse when the chain would exceed `COLLECTION_MAX_DEPTH`.
- *   4. INSERT the `collections` row. The self-ref composite FK
+ *   4. Resolve the space binding + placement standing (two regimes,
+ *      below).
+ *   5. INSERT the `collections` row. The self-ref composite FK
  *      `(parent_id, workspace_id) REFERENCES collections(id,
  *      workspace_id)` (F99) is the DB-side guard; the handler-side
  *      pre-check exists so the common path surfaces a typed 404 rather
  *      than a bubbled-up SQL FK violation (which would audit as
  *      `internal`).
+ *
+ * **Space binding (ADR 0040 space-collection slice).** Two regimes,
+ * mutually exclusive by the schema rail (`space_id` with `parent_id`
+ * is a 400 before the handler runs):
+ *   - **Root create** (`parent_id` null): `space_id` is caller input.
+ *     `null`/omitted = the legacy no-space bucket, exactly as before —
+ *     no resolver load, query count unchanged. A non-null `space_id`
+ *     is gated existence-first (missing or soft-deleted space → 404,
+ *     the `doc.move` target precedent), then standing via
+ *     `assertCanPlaceInSpace` — baseline reach over the destination
+ *     bucket (membership / space grant / open-space user baseline).
+ *     Non-delegated agents do NOT ride the open-space baseline; they
+ *     need an explicit space grant or a delegator with reach (Codex
+ *     space-collection review).
+ *   - **Child create** (`parent_id` non-null): the binding is
+ *     INHERITED from the parent's stored row — derivation, not input.
+ *     Standing is `assertCanPlaceIn(parent_id)`: legacy parents are
+ *     always placeable, space-bound parents require reach over their
+ *     bucket, and an ANOMALOUS parent (dangling/trashed space ref)
+ *     fails closed — inheritance can never copy a dangling ref into a
+ *     fresh row.
  *
  * **Metadata-only capability** (§6.5, `METADATA_ONLY_CAPABILITIES` in
  * `@editorzero/scopes`). No Y.Doc interaction; a collection is pure
@@ -66,7 +89,12 @@ import type {
 } from "@editorzero/audit";
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
 import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, type CollectionId, generateCollectionId } from "@editorzero/ids";
+import {
+  CapabilityId,
+  type CollectionId,
+  generateCollectionId,
+  type SpaceId,
+} from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
 import {
   type CollectionCreateInput,
@@ -75,6 +103,7 @@ import {
   CollectionCreateOutputSchema,
 } from "@editorzero/schemas/collection/create";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -162,6 +191,7 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
     const collection_id = generateCollectionId();
     const workspace_id = ctx.tenant.workspace_id;
     const parent_id: CollectionId | null = input.parent_id ?? null;
+    const requested_space_id = input.space_id ?? null;
     const title = input.title;
     const slug = slugify(title);
     const now = ctx.now();
@@ -171,6 +201,12 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
     // index or a cross-replica seq when that infra lands (architecture.md
     // §3.5).
     const order_key = collection_id;
+
+    // Resolved space binding of the new row: caller-requested on a
+    // root create (placement-standing-gated below), INHERITED from the
+    // parent's stored row on a child create (derivation, not input —
+    // the schema rail rejects `space_id` alongside `parent_id`).
+    let space_id: typeof requested_space_id = requested_space_id;
 
     // Parent validation + depth walk. The loop doubles as the "parent
     // exists and is live" check: on the first iteration `cursor =
@@ -196,17 +232,47 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
             ],
           });
         }
-        const row: { parent_id: CollectionId | null } | undefined = await ctx.db
-          .selectFrom("collections")
-          .select(["parent_id"])
-          .where("id", "=", cursor)
-          .where("deleted_at", "is", null)
-          .executeTakeFirst();
+        const row: { parent_id: CollectionId | null; space_id: SpaceId | null } | undefined =
+          await ctx.db
+            .selectFrom("collections")
+            .select(["parent_id", "space_id"])
+            .where("id", "=", cursor)
+            .where("deleted_at", "is", null)
+            .executeTakeFirst();
         if (row === undefined) {
           throw new NotFoundError({ subject_kind: "collection", subject_id: cursor });
         }
+        if (cursor === parent_id) space_id = row.space_id;
         cursor = row.parent_id;
       }
+
+      // Placement standing over the parent's bucket — the literal
+      // `doc.create` term, one level up: legacy parents are always
+      // placeable, space-bound parents require baseline reach
+      // (membership / space grant / open-space user baseline — agents
+      // need an explicit grant or a delegator), and an ANOMALOUS
+      // parent (dangling or trashed space ref) fails closed, which
+      // also means inheritance can never copy a dangling ref into a
+      // fresh row.
+      const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+      acl.assertCanPlaceIn(parent_id);
+    } else if (requested_space_id !== null) {
+      // Root create INTO a space. Existence first (the doc.move
+      // target-404 precedent — live-object surface), then standing via
+      // the resolver's own term (`assertCanPlaceInSpace` — agents do
+      // NOT ride the open-space user baseline; Codex space-collection
+      // review).
+      const space = await ctx.db
+        .selectFrom("spaces")
+        .select(["id"])
+        .where("id", "=", requested_space_id)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+      if (space === undefined) {
+        throw new NotFoundError({ subject_kind: "space", subject_id: requested_space_id });
+      }
+      const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+      acl.assertCanPlaceInSpace(requested_space_id);
     }
 
     // Sibling-slug pre-check. Typed 409 on the common path rather
@@ -242,13 +308,6 @@ export const collectionCreate: Capability<CollectionCreateInput, CollectionCreat
         parent_id,
       });
     }
-
-    // Space binding is explicitly null in v1 (ADR 0040 Step 7): root
-    // creates have no space input until Step 8, and the denormalized
-    // child-inherits-parent rule lands with the placement slice. The
-    // column is written (not left to the DDL default) so the value the
-    // output + audit effect carry is visibly the value the row got.
-    const space_id = null;
 
     await ctx.db
       .insertInto("collections")

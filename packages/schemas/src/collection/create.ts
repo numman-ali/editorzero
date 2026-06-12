@@ -33,6 +33,7 @@ import { TitleSchema } from "../shared/fields";
 import {
   CollectionIdInputSchema,
   CollectionIdOutputSchema,
+  SpaceIdInputSchema,
   SpaceIdOutputSchema,
   UserIdOutputSchema,
   WorkspaceIdOutputSchema,
@@ -46,16 +47,29 @@ export const CollectionCreateInputSchema = z
     // `null` (explicit workspace root) is distinct from "omitted" on the
     // wire; both coerce to null in the handler.
     parent_id: CollectionIdInputSchema.nullable().optional(),
+    // Space binding for ROOT creates only (ADR 0040 space-collection
+    // slice). Mutually exclusive with `parent_id` — a child collection
+    // INHERITS its parent's stored binding (derivation, not input;
+    // accepting a redundant value that "must match" would be a drift
+    // surface every surface could disagree on). `null`/omitted = the
+    // legacy no-space bucket.
+    space_id: SpaceIdInputSchema.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => !(v.parent_id != null && v.space_id != null), {
+    message:
+      "collection.create: `space_id` is only valid on root creates — a child collection inherits its parent's space binding",
+    path: ["space_id"],
+  });
 
 export const CollectionCreateOutputSchema = z.object({
   collection_id: CollectionIdOutputSchema,
   workspace_id: WorkspaceIdOutputSchema,
   parent_id: CollectionIdOutputSchema.nullable(),
   // Space binding of the created collection (`null` = legacy no-space
-  // bucket; ADR 0040 Step 7). Always null until the Step-8 placement
-  // slice adds space-targeted creation + parent inheritance.
+  // bucket; ADR 0040). Root creates carry the caller-requested binding
+  // (placement-standing-gated); child creates carry the parent's
+  // inherited binding.
   space_id: SpaceIdOutputSchema.nullable(),
   title: z.string(),
   slug: z.string(),

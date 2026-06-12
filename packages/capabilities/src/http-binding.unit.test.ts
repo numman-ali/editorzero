@@ -135,7 +135,7 @@ describe("deriveHttpBinding", () => {
       verb: "POST",
       pathTemplate: "/collections/create",
       paramName: null,
-      bodyOrQueryKeys: ["parent_id", "title"],
+      bodyOrQueryKeys: ["parent_id", "space_id", "title"],
     });
   });
 
