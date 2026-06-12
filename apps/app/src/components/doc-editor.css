@@ -12,6 +12,12 @@
   gap: 10px;
   padding: 10px 15px;
   border-bottom: var(--rule) solid var(--hair);
+  flex-wrap: wrap;
+}
+
+/* Pushes the rename control to the toolbar's right edge. */
+.doc-editor-spacer {
+  margin-left: auto;
 }
 
 .doc-editor-status {

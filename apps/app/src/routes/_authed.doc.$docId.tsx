@@ -17,16 +17,18 @@ import { docQueryOptions } from "../lib/doc-editor";
  * remounts the editor across doc navigations — a Tiptap instance is
  * created once per mount, so reusing one across docs would leak state.
  *
- * The panel header shows `doc.title` read-only — the title row is
- * `doc.rename`'s capability (its UI cell is a later slice). Until that
- * cell lands, editing the heading-1 block here updates the CONTENT
- * heading but not `docs.title` (list/breadcrumb keep the row value) —
- * an accepted, documented v1 seam, same one the API/CLI/MCP surfaces
- * already expose.
+ * The panel header shows `doc.title`; renaming it is the editor
+ * toolbar's `RenameDoc` control (`doc.rename` — title + slug + the
+ * canvas heading move together in ONE audited mutation; its re-base
+ * writes the doc.get cache, so this header re-renders with no wiring
+ * of its own). Editing the heading-1 block in the CANVAS remains a
+ * content op that leaves `docs.title` behind — the documented v1 seam,
+ * same as the API/CLI/MCP surfaces; the rename control is the
+ * sanctioned path for browser users.
  *
  * Coverage: render-only; proven by the marked Playwright spec
  * (`packages/e2e/test/editor.spec.ts`, `proves-capability-cell:
- * doc.get` + `doc.update`).
+ * doc.get` + `doc.update` + `doc.rename`).
  */
 export const Route = createFileRoute("/_authed/doc/$docId")({
   loader: ({ context, params }) =>
@@ -45,7 +47,7 @@ function DocScreen() {
         </h2>
         <span className="pth">{data.doc.slug}</span>
       </div>
-      <DocEditor key={docId} docId={docId} initialBlocks={data.blocks} />
+      <DocEditor key={docId} docId={docId} docTitle={data.doc.title} initialBlocks={data.blocks} />
     </section>
   );
 }

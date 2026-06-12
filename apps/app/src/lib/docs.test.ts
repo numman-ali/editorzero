@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyCreateError,
+  classifyRenameError,
   createDoc,
   createFailureMessage,
   DOC_LIST_QUERY_KEY,
@@ -12,6 +13,8 @@ import {
   docTagClass,
   fetchDocList,
   formatUpdated,
+  renameDoc,
+  renameFailureMessage,
 } from "./docs";
 
 /**
@@ -142,6 +145,57 @@ describe("createFailureMessage", () => {
 
   it("offers a retry on create_failed", () => {
     expect(createFailureMessage("create_failed")).toContain("Try again");
+  });
+});
+
+describe("renameDoc", () => {
+  const RENAMED = {
+    doc_id: "018f0000-0000-7000-8000-0000000000d2",
+    title: "Renamed",
+    slug: "renamed",
+    updated_at: 3,
+  };
+
+  it("resolves the 200 echo with the re-derived slug", async () => {
+    const renamed = await renameDoc(RENAMED.doc_id, "Renamed", jsonClient(200, RENAMED));
+    expect(renamed.title).toBe("Renamed");
+    expect(renamed.slug).toBe("renamed");
+  });
+
+  it("throws ApiError with the typed envelope code on a 409 slug collision", async () => {
+    await expect(
+      renameDoc(RENAMED.doc_id, "Taken", jsonClient(409, { error: "slug_collision" })),
+    ).rejects.toMatchObject({ status: 409, code: "slug_collision" });
+  });
+
+  it("throws an ApiError instance on a 404", async () => {
+    await expect(
+      renameDoc(RENAMED.doc_id, "Gone", jsonClient(404, { error: "not_found" })),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("classifyRenameError (same 409 rule as create — sibling slug collision)", () => {
+  it("maps a 409 ApiError to duplicate_title", () => {
+    expect(classifyRenameError(new ApiError(409, "slug_collision"))).toBe("duplicate_title");
+  });
+
+  it("maps other ApiErrors to rename_failed", () => {
+    expect(classifyRenameError(new ApiError(500, "internal"))).toBe("rename_failed");
+  });
+
+  it("maps non-ApiError throwables (network faults) to rename_failed", () => {
+    expect(classifyRenameError(new TypeError("fetch failed"))).toBe("rename_failed");
+  });
+});
+
+describe("renameFailureMessage", () => {
+  it("tells the user to pick a different title on duplicate_title", () => {
+    expect(renameFailureMessage("duplicate_title")).toContain("already exists");
+  });
+
+  it("offers a retry on rename_failed", () => {
+    expect(renameFailureMessage("rename_failed")).toContain("Try again");
   });
 });
 

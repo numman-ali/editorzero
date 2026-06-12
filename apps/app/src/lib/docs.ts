@@ -94,6 +94,46 @@ export function createFailureMessage(kind: CreateFailure): string {
     : "Create failed. Try again.";
 }
 
+type DocRenameResponse = Awaited<ReturnType<ApiClient["docs"]["rename"][":doc_id"]["$post"]>>;
+type DocRenameSuccess = Extract<DocRenameResponse, { status: 200 }>;
+export type DocRenamed = Awaited<ReturnType<DocRenameSuccess["json"]>>;
+
+/**
+ * Rename a doc — the capability with real rename semantics (ADR 0038
+ * title-slot rule): one audited mutation updates `docs.title`, re-derives
+ * the slug ("slug tracks title" in v1), and rewrites the Y.Doc's
+ * heading-1 title block through the owned write path. Editing the
+ * heading in the canvas does NONE of that (a content op only) — which
+ * is why the editor offers this as its own control.
+ */
+export async function renameDoc(
+  docId: string,
+  title: string,
+  client: ApiClient = apiClient,
+): Promise<DocRenamed> {
+  const res = await client.docs.rename[":doc_id"].$post({
+    param: { doc_id: docId },
+    json: { title },
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type RenameFailure = "duplicate_title" | "rename_failed";
+
+/** Same 409 rule as `classifyCreateError` — the slug collision is sibling-scoped. */
+export function classifyRenameError(error: unknown): RenameFailure {
+  return isApiError(error) && error.status === 409 ? "duplicate_title" : "rename_failed";
+}
+
+export function renameFailureMessage(kind: RenameFailure): string {
+  return kind === "duplicate_title"
+    ? "A doc with this title already exists here. Pick a different title."
+    : "Rename failed. Try again.";
+}
+
 /**
  * Vocabulary lock (ADR 0040): the UI says "Space" for the read-scope
  * value the wire calls `space` (the Step-5 `access_mode` split retired

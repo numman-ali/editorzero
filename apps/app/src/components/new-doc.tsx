@@ -10,7 +10,7 @@ import {
   DOC_LIST_QUERY_KEY,
 } from "../lib/docs";
 
-import "./new-doc.css";
+import "./inline-form.css";
 
 /**
  * The `doc.create × Web UI` cell: the docs panel header's "+ New doc"
@@ -84,10 +84,10 @@ export function NewDoc() {
 
   const creating = state.kind === "creating";
   return (
-    <form className="newdoc" onSubmit={(event) => void handleSubmit(event)}>
+    <form className="inlineform" onSubmit={(event) => void handleSubmit(event)}>
       <input
         ref={inputRef}
-        className="newdoc-input"
+        className="inlineform-input"
         type="text"
         aria-label="Doc title"
         placeholder="Doc title"
@@ -111,7 +111,7 @@ export function NewDoc() {
         Cancel
       </button>
       {state.kind === "failed" ? (
-        <span className="newdoc-err" role="alert">
+        <span className="inlineform-err" role="alert">
           {createFailureMessage(state.failure)}
         </span>
       ) : null}

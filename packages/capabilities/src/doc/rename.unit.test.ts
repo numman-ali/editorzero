@@ -21,8 +21,8 @@ import {
   SPACES_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
-import { NotFoundError } from "@editorzero/errors";
-import { type CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { NotFoundError, SlugCollisionError } from "@editorzero/errors";
+import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
 import { MemorySyncService, readBlocks, type SeedBlock, seedBlocks } from "@editorzero/sync";
@@ -268,6 +268,75 @@ describe("doc.rename", () => {
     expect(row.updated_at).toBe(1);
   });
 
+  it("throws SlugCollisionError when a live same-level sibling holds the re-derived slug", async () => {
+    const SIBLING = DocId("018f0000-0000-7000-8000-0000000000d4");
+    await seedDocRow({ id: DOC_A1, workspace_id: WORKSPACE_A, title: "Target Doc" });
+    await seedDocRow({ id: SIBLING, workspace_id: WORKSPACE_A, title: "Launch Checklist" });
+    const { ctx } = buildCtx(WORKSPACE_A);
+
+    // Without the Step-0b pre-check this bubbles a raw UNIQUE violation
+    // from docs_root_slug_unique (→ internal/500), not a typed 409.
+    await expect(
+      docRename.handler(ctx, { doc_id: DOC_A1, title: "Launch Checklist" }),
+    ).rejects.toBeInstanceOf(SlugCollisionError);
+
+    // Pre-check precedes the UPDATE — the target row is untouched.
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("docs")
+      .select(["title", "slug", "updated_at"])
+      .where("id", "=", DOC_A1)
+      .executeTakeFirstOrThrow();
+    expect(row.title).toBe("Target Doc");
+    expect(row.updated_at).toBe(1);
+  });
+
+  it("excludes self from the collision pre-check (title-case tweak keeps the same slug)", async () => {
+    await seedDocRow({ id: DOC_A1, workspace_id: WORKSPACE_A, title: "launch checklist" });
+    await seedTitleBlock(DOC_A1, "launch checklist");
+    const { ctx } = buildCtx(WORKSPACE_A);
+
+    // Same derived slug as the doc's own row — must not refuse against
+    // itself.
+    const result = await docRename.handler(ctx, { doc_id: DOC_A1, title: "Launch Checklist" });
+    expect(result.title).toBe("Launch Checklist");
+    expect(result.slug).toBe("launch-checklist");
+  });
+
+  it("a trashed sibling holding the slug does not block (partial-index parity)", async () => {
+    await seedDocRow({ id: DOC_A1, workspace_id: WORKSPACE_A, title: "Target Doc" });
+    await seedTitleBlock(DOC_A1, "Target Doc");
+    await seedDocRow({
+      id: DOC_A2_DELETED,
+      workspace_id: WORKSPACE_A,
+      title: "Launch Checklist",
+      deleted_at: 999,
+    });
+    const { ctx } = buildCtx(WORKSPACE_A);
+
+    const result = await docRename.handler(ctx, { doc_id: DOC_A1, title: "Launch Checklist" });
+    expect(result.slug).toBe("launch-checklist");
+  });
+
+  it("the collision scope is level-local: a root doc's slug does not block a nested rename", async () => {
+    const COLLECTION = CollectionId("018f0000-0000-7000-8000-0000000000c1");
+    const NESTED = DocId("018f0000-0000-7000-8000-0000000000d5");
+    await seedDocRow({ id: DOC_A1, workspace_id: WORKSPACE_A, title: "Launch Checklist" });
+    await seedDocRow({
+      id: NESTED,
+      workspace_id: WORKSPACE_A,
+      title: "Nested Doc",
+      collection_id: COLLECTION,
+    });
+    await seedTitleBlock(NESTED, "Nested Doc");
+    const { ctx } = buildCtx(WORKSPACE_A);
+
+    // docs_nested_slug_unique is per-collection; the root namespace
+    // (docs_root_slug_unique) is a different partial index.
+    const result = await docRename.handler(ctx, { doc_id: NESTED, title: "Launch Checklist" });
+    expect(result.slug).toBe("launch-checklist");
+  });
+
   it("composes with Layer-2 scoping: workspace-A ctx cannot rename workspace-B doc", async () => {
     await seedDocRow({ id: DOC_B1, workspace_id: WORKSPACE_B, title: "B1" });
     const { ctx: ctxA } = buildCtx(WORKSPACE_A);
@@ -327,7 +396,9 @@ describe("doc.rename", () => {
     expect(docRename.id).toBe("doc.rename");
     expect(docRename.category).toBe("mutation");
     expect(docRename.requires).toEqual(["doc:write"]);
-    expect(docRename.surfaces).toEqual(["api", "cli", "mcp"]);
+    // "ui" since the editor toolbar's Rename control landed (proven by
+    // the marked Playwright spec in packages/e2e — ADR 0040 H11).
+    expect(docRename.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     expect(docRename.agentAllowed).toBeDefined();
   });
 

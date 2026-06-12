@@ -47,7 +47,11 @@
  * `doc.set_slug` capability; until that lands, the pragmatic choice is
  * "slug tracks title" so listings and URLs don't diverge. Empty slug
  * (title is all-punctuation / emoji) falls back to `"untitled"` — the
- * `docs.slug` NOT NULL constraint is the guardrail.
+ * `docs.slug` NOT NULL constraint is the guardrail. Because the
+ * re-derived slug lands in the same partial-unique namespace a create
+ * mints into, the handler runs the same NULL-aware sibling-slug
+ * pre-check (self-excluded) and throws `SlugCollisionError` (409,
+ * `code: "slug_collision"`) on hit — see Step 0b.
  *
  * **Title-slot rule.** Encapsulated in `@editorzero/sync`'s
  * `setDocTitle`: block 0 heading-1 → update in place; otherwise insert
@@ -65,8 +69,8 @@ import type {
   DenyReason,
   HandlerError,
 } from "@editorzero/audit";
-import { NotFoundError } from "@editorzero/errors";
-import { CapabilityId } from "@editorzero/ids";
+import { NotFoundError, SlugCollisionError } from "@editorzero/errors";
+import { CapabilityId, type DocId } from "@editorzero/ids";
 import {
   type DocRenameInput,
   DocRenameInputSchema,
@@ -121,7 +125,12 @@ export const docRename: Capability<DocRenameInput, DocRenameOutput> = {
   output: DocRenameOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" is declared because the Web UI actually binds this capability
+  // (the editor toolbar's Rename control; proven by the marked Playwright
+  // spec in packages/e2e). Declared surfaces = bound surfaces (ADR 0040
+  // H11) — packages/contract-tests fails the build if "ui" appears here
+  // without a proving spec, or vice versa.
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({
@@ -164,6 +173,47 @@ export const docRename: Capability<DocRenameInput, DocRenameOutput> = {
     }
     const acl = await loadDocReadResolver(ctx.db, ctx.principal);
     acl.assertCanRead(doc);
+
+    // Step 0b — sibling-slug pre-check ("slug tracks title", so a rename
+    // re-derives the slug into the same partial-unique namespace a create
+    // mints into). Without this, a live same-level sibling holding the
+    // target slug bubbles a raw UNIQUE violation from
+    // `docs_root_slug_unique` / `docs_nested_slug_unique`, which the
+    // dispatcher projects to `internal` (500) — the bug class the
+    // restore-path fix-forward closed for `collection.restore` /
+    // `doc.restore` (2026-06-12); the browser rename cell's 409 arm
+    // exposed the same gap here. Mirrors `doc.create`'s pre-check with
+    // one extra term: EXCLUDE SELF, so a title-case tweak whose slug is
+    // unchanged ("launch checklist" → "Launch Checklist") never refuses
+    // against the doc's own row. The race window (SELECT → UPDATE) stays
+    // guarded by the indexes as last-line enforcement.
+    let slugClash: { id: DocId } | undefined;
+    if (doc.collection_id === null) {
+      slugClash = await ctx.db
+        .selectFrom("docs")
+        .select(["id"])
+        .where("collection_id", "is", null)
+        .where("slug", "=", slug)
+        .where("deleted_at", "is", null)
+        .where("id", "!=", input.doc_id)
+        .executeTakeFirst();
+    } else {
+      slugClash = await ctx.db
+        .selectFrom("docs")
+        .select(["id"])
+        .where("collection_id", "=", doc.collection_id)
+        .where("slug", "=", slug)
+        .where("deleted_at", "is", null)
+        .where("id", "!=", input.doc_id)
+        .executeTakeFirst();
+    }
+    if (slugClash !== undefined) {
+      throw new SlugCollisionError({
+        slug,
+        parent_kind: doc.collection_id === null ? "workspace" : "collection",
+        parent_id: doc.collection_id,
+      });
+    }
 
     // Step 1 — UPDATE docs row first. The WorkspaceScopingPlugin
     // injects `workspace_id = ctx.tenant.workspace_id` on the

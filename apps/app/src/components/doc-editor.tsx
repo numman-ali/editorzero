@@ -12,6 +12,7 @@ import {
   saveFailureMessage,
 } from "../lib/doc-editor";
 import { DOC_LIST_QUERY_KEY } from "../lib/docs";
+import { RenameDoc } from "./rename-doc";
 
 import "./doc-editor.css";
 
@@ -30,6 +31,12 @@ import "./doc-editor.css";
  * discard, stated in the alert (the base is stale; merging is the
  * track-changes slice's territory).
  *
+ * The toolbar also hosts the `doc.rename` cell (`RenameDoc`) — title
+ * changes are a SEPARATE capability from content ops (title-slot rule:
+ * row title + slug + the canvas heading move together in one audited
+ * mutation), gated on a clean canvas so its re-base never discards
+ * unsaved edits.
+ *
  * Coverage: orchestration-only — policy lives unit-tested in
  * `lib/doc-editor.ts`; this file is in the e2e-covered set, proven by
  * the marked Playwright spec (`packages/e2e/test/editor.spec.ts`).
@@ -44,9 +51,11 @@ type SaveState =
 
 export function DocEditor({
   docId,
+  docTitle,
   initialBlocks,
 }: {
   docId: string;
+  docTitle: string;
   initialBlocks: readonly Block[];
 }) {
   const queryClient = useQueryClient();
@@ -99,6 +108,9 @@ export function DocEditor({
     }
   }
 
+  // Shared by the 409 Reload arm and the post-rename refresh: re-base,
+  // then settle to idle (`setContent` fires onUpdate, which would
+  // otherwise mark the just-loaded server state "dirty").
   async function handleReload(): Promise<void> {
     await rebaseFromServer();
     setSaveState({ kind: "idle" });
@@ -124,6 +136,15 @@ export function DocEditor({
               ? "Unsaved changes"
               : ""}
         </span>
+        <span className="doc-editor-spacer" />
+        {/* Dirty-canvas gate: the post-rename re-base replaces canvas
+            content wholesale, which is only safe while canvas == server. */}
+        <RenameDoc
+          docId={docId}
+          currentTitle={docTitle}
+          disabled={saveState.kind === "dirty" || saveState.kind === "saving"}
+          onRenamed={handleReload}
+        />
       </div>
       {failure !== null ? (
         <div className="doc-editor-alert" role="alert">

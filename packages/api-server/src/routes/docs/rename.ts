@@ -40,6 +40,10 @@
  *   403 — permission denied; caller lacks `doc:write`.
  *   404 — doc missing or soft-deleted (rename is a live-doc op, not
  *         resurrection — callers use `doc.restore` first).
+ *   409 — slug collision: "slug tracks title", and the re-derived slug
+ *         is held by a live same-level sibling (`slug_collision`, the
+ *         capability's typed pre-check — self-excluded, so a title-case
+ *         tweak never refuses against the doc's own row).
  *
  * **Audit + write-path tx live inside the dispatcher.** The dispatcher
  * opens one `BEGIN IMMEDIATE`, runs the handler (which UPDATEs
@@ -90,6 +94,11 @@ export const rename = new Hono<ApiEnv>().post(
         404: {
           description: "Doc not found (or soft-deleted).",
           content: jsonContent(errEnvelope("not_found")),
+        },
+        409: {
+          description:
+            "Slug collision — the re-derived slug (slug tracks title) is held by a live same-level sibling.",
+          content: jsonContent(errEnvelope("slug_collision")),
         },
       },
     }),

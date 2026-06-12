@@ -69,7 +69,6 @@ const UI_PENDING: readonly string[] = [
   "doc.move",
   "doc.publish",
   "doc.remove_guest",
-  "doc.rename",
   "doc.restore",
   "doc.unpublish",
   "permission.grant",
