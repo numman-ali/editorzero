@@ -518,7 +518,7 @@ describe("permission.list — registry + audit wiring", () => {
     expect(permissionList.id).toBe("permission.list");
     expect(permissionList.category).toBe("read");
     expect(permissionList.requires).toEqual(["workspace:read"]);
-    expect(permissionList.surfaces).toEqual(["api", "cli", "mcp"]);
+    expect(permissionList.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
   });
 
   it("projects the RESOURCE as the audit subject", () => {

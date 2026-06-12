@@ -7,7 +7,8 @@ against source) so the future ADR starts from evidence, not re-derivation. Decis
 
 ## Why it's a cluster, not a capability
 
-Eleven of the fifteen `UI_PENDING` cells (member / permission / guest verbs) are blocked not
+Eleven of the fourteen `UI_PENDING` cells (member / permission / guest verbs; counted after
+the `permission.list` read cell shipped raw-id per the audit precedent) are blocked not
 just on "resolve an id to a name" but on five interlocking gaps:
 
 1. **No id → identity resolution anywhere.** Every blocked capability takes and echoes raw ids

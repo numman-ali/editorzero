@@ -61,7 +61,9 @@ export const permissionList: Capability<PermissionListInput, PermissionListOutpu
   input: PermissionListInputSchema,
   output: PermissionListOutputSchema,
   requires: ["workspace:read"],
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" since the Sharing panel cell: the doc screen's read-only ACL
+  // disclosure (raw-id display — the audit-screen exactness precedent).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({
       kind: input.resource_kind,

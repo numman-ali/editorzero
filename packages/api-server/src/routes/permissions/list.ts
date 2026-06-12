@@ -20,8 +20,8 @@
  * invisible read posture; restore first).
  *
  * **403 — `permission_denied`.** Caller lacks `workspace:read`, or
- * the visibility rule denied: doc → caller cannot read the doc;
- * space → caller has neither baseline reach nor granting authority.
+ * the administer-tier visibility rule denied (both kinds — the panel
+ * is the sharing graph, not content; the Codex slice-1 SHOULD-FIX).
  */
 
 import { CapabilityId } from "@editorzero/ids";

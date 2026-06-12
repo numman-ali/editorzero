@@ -11,9 +11,10 @@ import { CREDENTIALS } from "./credentials";
  * proves-capability-cell: doc.publish
  * proves-capability-cell: doc.unpublish
  * proves-capability-cell: doc.move
+ * proves-capability-cell: permission.list
  *
  * The HTTP-first editor cells (ADR 0038; invariant 4, ADR 0033 §3 / 0040
- * H11). Seven markers, one screen: `/doc/$docId` loads a doc through
+ * H11). Eight markers, one screen: `/doc/$docId` loads a doc through
  * `doc.get` (loader + owned-model parse + Tiptap render), persists
  * edits through `doc.update` (browser diff → ops batch with per-block
  * hash preconditions → explicit Save), renames through the toolbar's
@@ -303,4 +304,61 @@ test("doc.move: same-bucket moves need no policy; a crossing demands the explici
   expect(dropCollection.ok()).toBe(true);
   const dropSpace = await page.request.post(`/spaces/archive/${space.space_id}`);
   expect(dropSpace.ok()).toBe(true);
+});
+
+test("permission.list: the Sharing disclosure renders the ACL edges with the guest marker (permission.list cell)", async ({
+  page,
+}) => {
+  await signIn(page);
+  // A dedicated doc keeps this panel's rows deterministic.
+  const created = await page.request.post("/docs/create", {
+    data: { title: "Sharing proving ground" },
+  });
+  expect(created.ok()).toBe(true);
+  const doc: { doc_id?: string } = await created.json();
+
+  // Closed by default (no fetch until opened); a fresh doc's panel is
+  // the honest empty state — access flows from roles, not grant rows.
+  await page.goto(`/doc/${doc.doc_id}`);
+  await page.getByRole("button", { name: "Show" }).click();
+  await expect(page.getByText("No explicit grants")).toBeVisible();
+
+  // Mint one standing-backed agent edge (agent subjects are standing-
+  // exempt — the only deterministically mintable subject while the
+  // deployment has a single user) and one guest edge, over the same
+  // wire every surface uses.
+  const granted = await page.request.post("/permissions/grant", {
+    data: {
+      resource_kind: "doc",
+      resource_id: doc.doc_id,
+      subject_kind: "agent",
+      subject_id: "agent-e2e-sharing",
+      role: "view",
+    },
+  });
+  expect(granted.ok()).toBe(true);
+  const guest = await page.request.post(`/docs/add_guest/${doc.doc_id}`, {
+    data: { subject_kind: "user", subject_id: "user-e2e-foreign", role: "comment" },
+  });
+  expect(guest.ok()).toBe(true);
+
+  await page.reload(); // fresh cache; the panel fetches on open
+  await page.getByRole("button", { name: "Show" }).click();
+  const panel = page.locator("section[aria-label='Sharing']");
+  const rows = panel.locator("table.tt tbody tr");
+  await expect(rows).toHaveCount(2);
+  // Newest first: the guest edge minted second leads, wearing the
+  // marker chip; the standing-backed agent edge carries none.
+  await expect(rows.nth(0)).toContainText("user user-e2e…");
+  await expect(rows.nth(0)).toContainText("comment");
+  await expect(rows.nth(0)).toContainText("guest");
+  await expect(rows.nth(1)).toContainText("agent agent-e2…");
+  await expect(rows.nth(1)).toContainText("view");
+  await expect(rows.nth(1)).not.toContainText("guest");
+  await expectNoAxeViolations(page); // the open panel with the table
+
+  // Hide collapses back to the closed row without losing the screen.
+  await page.getByRole("button", { name: "Hide" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show" })).toBeVisible();
 });

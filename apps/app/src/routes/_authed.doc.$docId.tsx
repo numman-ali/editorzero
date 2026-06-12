@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DocEditor } from "../components/doc-editor";
 import { MoveDoc } from "../components/move-doc";
 import { PublishDoc } from "../components/publish-doc";
+import { SharingDoc } from "../components/sharing-doc";
 import { collectionListQueryOptions, docPlacementLabel } from "../lib/collections";
 import { docQueryOptions } from "../lib/doc-editor";
 
@@ -66,6 +67,10 @@ function DocScreen() {
           <PublishDoc docId={docId} publishedSlug={data.doc.published_slug} />
         </div>
       </div>
+      {/* Sharing is doc-level ACL state (permission.list); a body-row
+          disclosure because its open state is a table — no place in the
+          header's inline row. */}
+      <SharingDoc docId={docId} />
       <DocEditor key={docId} docId={docId} docTitle={data.doc.title} initialBlocks={data.blocks} />
     </section>
   );

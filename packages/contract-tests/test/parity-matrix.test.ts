@@ -62,7 +62,6 @@ const UI_PENDING: readonly string[] = [
   "doc.remove_guest",
   "doc.restore",
   "permission.grant",
-  "permission.list",
   "permission.revoke",
   "space.member_add",
   "space.member_remove",
