@@ -15,11 +15,17 @@ import { Hono } from "hono";
 import type { ApiEnv } from "../../env";
 import { archive } from "./archive";
 import { create } from "./create";
+import { memberAdd } from "./member_add";
+import { memberRemove } from "./member_remove";
+import { memberUpdateRole } from "./member_update_role";
 import { restore } from "./restore";
 import { update } from "./update";
 
 export const spaces = new Hono<ApiEnv>()
   .route("/", archive)
   .route("/", create)
+  .route("/", memberAdd)
+  .route("/", memberRemove)
+  .route("/", memberUpdateRole)
   .route("/", restore)
   .route("/", update);

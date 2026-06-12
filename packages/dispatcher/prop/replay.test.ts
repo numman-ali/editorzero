@@ -94,6 +94,9 @@ import {
   registerCapability,
   spaceArchive,
   spaceCreate,
+  spaceMemberAdd,
+  spaceMemberRemove,
+  spaceMemberUpdateRole,
   spaceRestore,
   spaceUpdate,
   workspaceMemberAdd,
@@ -475,6 +478,9 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       registerCapability(permissionRevoke),
       registerCapability(spaceArchive),
       registerCapability(spaceCreate),
+      registerCapability(spaceMemberAdd),
+      registerCapability(spaceMemberRemove),
+      registerCapability(spaceMemberUpdateRole),
       registerCapability(spaceRestore),
       registerCapability(spaceUpdate),
     ]);
@@ -668,11 +674,28 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       name: "Walk Space v2",
       space_type: "open",
     });
-    // Archive → restore round-trip (slice 2b): the walk space is empty
-    // (no collections/docs/members), so the refusal counts pass; the
-    // restore authority is the admin backstop on the dead row. Replay
-    // must track deleted_at through BOTH flips (handler clock on
-    // archive, null on restore — state-as-of-delete rides through).
+    // Member family (slice 2c) on s1: add → promote → remove. SECOND_USER
+    // still holds live workspace membership here (the subject-standing
+    // rule); the remove must land BEFORE the archive below — archive
+    // refuses on a populated roster.
+    await step(spaceMemberAdd.id, { space_id: s1, user_id: SECOND_USER, role: "view" });
+    await step(spaceMemberUpdateRole.id, { space_id: s1, user_id: SECOND_USER, role: "edit" });
+    await step(spaceMemberRemove.id, { space_id: s1, user_id: SECOND_USER });
+    // A SECOND space whose roster row SURVIVES the walk — including past
+    // its subject's workspace.member_remove below (space membership rows
+    // persist through the workspace-level soft-delete exactly like
+    // grants; the L1 gate already cuts a removed member's access) — so
+    // the final projection compares a NON-EMPTY space_members map.
+    const s2 = readIdField(
+      await step(spaceCreate.id, { name: "Walk Space Two", space_type: "closed" }),
+      "space_id",
+    );
+    await step(spaceMemberAdd.id, { space_id: s2, user_id: SECOND_USER, role: "comment" });
+    // Archive → restore round-trip (slice 2b): s1's roster was emptied
+    // above, so the refusal counts pass; the restore authority is the
+    // admin backstop on the dead row. Replay must track deleted_at
+    // through BOTH flips (handler clock on archive, null on restore —
+    // state-as-of-delete rides through).
     await step(spaceArchive.id, { space_id: s1 });
     await step(spaceRestore.id, { space_id: s1 });
 
@@ -713,6 +736,9 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       "space.update",
       "space.archive",
       "space.restore",
+      "space.member_add",
+      "space.member_update_role",
+      "space.member_remove",
     ];
     for (const kind of EXPECTED_STATE_KINDS) {
       expect(emittedKinds.has(kind)).toBe(true);

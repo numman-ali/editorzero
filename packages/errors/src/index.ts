@@ -426,14 +426,29 @@ export class MemberAlreadyExistsError extends EditorZeroError {
   readonly httpStatus = 409;
   readonly workspace_id: WorkspaceId;
   readonly user_id: UserId;
+  /**
+   * Set when the duplicate roster is a SPACE's (`space.member_add`),
+   * absent for the workspace roster (`workspace.member_add`). One
+   * class + one wire code for both rosters — callers branch on the
+   * code, forensics read which roster from this field.
+   */
+  readonly space_id: SpaceId | undefined;
 
-  constructor(params: { message?: string; workspace_id: WorkspaceId; user_id: UserId }) {
+  constructor(params: {
+    message?: string;
+    workspace_id: WorkspaceId;
+    user_id: UserId;
+    space_id?: SpaceId;
+  }) {
     super(
       params.message ??
-        `user ${params.user_id} is already a member of workspace ${params.workspace_id}`,
+        (params.space_id === undefined
+          ? `user ${params.user_id} is already a member of workspace ${params.workspace_id}`
+          : `user ${params.user_id} is already a member of space ${params.space_id}`),
     );
     this.workspace_id = params.workspace_id;
     this.user_id = params.user_id;
+    this.space_id = params.space_id;
   }
 
   toHandlerError(): HandlerError {
