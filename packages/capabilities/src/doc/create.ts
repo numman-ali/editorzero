@@ -217,7 +217,12 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
   output: DocCreateOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" is declared because the Web UI actually binds this capability
+  // (the docs panel's "+ New doc" form; proven by the marked Playwright
+  // spec in packages/e2e). Declared surfaces = bound surfaces (ADR 0040
+  // H11) — packages/contract-tests fails the build if "ui" appears here
+  // without a proving spec, or vice versa.
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (_input) => ({ kind: "doc" }),
     effectOnAllow: (_input, output): AuditEffect => ({

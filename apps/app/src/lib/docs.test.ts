@@ -3,6 +3,9 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyCreateError,
+  createDoc,
+  createFailureMessage,
   DOC_LIST_QUERY_KEY,
   docAccessModeLabel,
   docListQueryOptions,
@@ -78,6 +81,67 @@ describe("docListQueryOptions", () => {
     // queryFn invocation (its context parameter is library-internal).
     const result = await new QueryClient().fetchQuery(options);
     expect(result.docs.map((d) => d.slug)).toEqual(["hello"]);
+  });
+});
+
+const CREATED = {
+  doc_id: "018f0000-0000-7000-8000-0000000000d2",
+  workspace_id: "018f0000-0000-7000-8000-0000000000aa",
+  collection_id: null,
+  title: "Drafted",
+  slug: "drafted",
+  order_key: "a0",
+  created_by: "018f0000-0000-7000-8000-0000000000bb",
+  access_mode: "space",
+  published_slug: null,
+  published_at: null,
+  seed_blocks: [],
+};
+
+describe("createDoc", () => {
+  it("resolves the 201 echo (navigation reads doc_id from it)", async () => {
+    const created = await createDoc("Drafted", jsonClient(201, CREATED));
+    expect(created.doc_id).toBe(CREATED.doc_id);
+    expect(created.title).toBe("Drafted");
+  });
+
+  it("throws ApiError with the typed envelope code on a 409 slug collision", async () => {
+    await expect(
+      createDoc("Drafted", jsonClient(409, { error: "slug_collision" })),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "slug_collision",
+    });
+  });
+
+  it("throws an ApiError instance on a 400", async () => {
+    await expect(
+      createDoc("", jsonClient(400, { error: "validation_failed" })),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("classifyCreateError (409 = unretryable title, everything else retryable)", () => {
+  it("maps a 409 ApiError to duplicate_title", () => {
+    expect(classifyCreateError(new ApiError(409, "slug_collision"))).toBe("duplicate_title");
+  });
+
+  it("maps other ApiErrors to create_failed", () => {
+    expect(classifyCreateError(new ApiError(500, "internal"))).toBe("create_failed");
+  });
+
+  it("maps non-ApiError throwables (network faults) to create_failed", () => {
+    expect(classifyCreateError(new TypeError("fetch failed"))).toBe("create_failed");
+  });
+});
+
+describe("createFailureMessage", () => {
+  it("tells the user to pick a different title on duplicate_title", () => {
+    expect(createFailureMessage("duplicate_title")).toContain("already exists");
+  });
+
+  it("offers a retry on create_failed", () => {
+    expect(createFailureMessage("create_failed")).toContain("Try again");
   });
 });
 

@@ -1,0 +1,46 @@
+/* New-doc inline form — screen-local styles (ADR 0036 tokens only).
+   The trigger button is pure token-sheet vocabulary (`btn--ultra
+   btn--sm`, the 03-documents bar affordance); only the inline form row
+   needs local rules. The input restates the mock's bar-input idiom
+   (mono, small, steel placeholder) as a bordered standalone field. */
+
+.newdoc {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.newdoc-input {
+  width: 190px;
+  max-width: 100%;
+  border: var(--rule) solid var(--hair-strong);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-1);
+  letter-spacing: 0.02em;
+  padding: 6px 9px;
+  border-radius: var(--radius);
+}
+
+.newdoc-input::placeholder {
+  color: var(--steel);
+}
+
+.newdoc-input:focus {
+  outline: none;
+  border-color: var(--ultra);
+}
+
+/* Full-width second row under the controls when the create fails —
+   the panel header is a wrapping flex row, so the alert never
+   squeezes the input. */
+.newdoc-err {
+  flex-basis: 100%;
+  text-align: right;
+  font-size: 12px;
+  color: var(--warn-ink);
+}

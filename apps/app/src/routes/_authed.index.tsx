@@ -1,15 +1,18 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { NewDoc } from "../components/new-doc";
 import { docAccessModeLabel, docListQueryOptions, docTagClass, formatUpdated } from "../lib/docs";
 
 /**
- * `/` — the Space landing: the `doc.list × Web UI` parity cell (invariant 4,
- * ADR 0033 §3 / 0040 H11). The loader warms the query cache before the
- * screen renders (`ensureQueryData` — rejects on error, so a failed list
- * lands in the route error boundary, never a half-rendered table), and the
- * component reads it back with `useSuspenseQuery` — no loading-state UI to
- * design at the bare-cell stage; the Base UI chrome slice owns that.
+ * `/` — the Space landing: the `doc.list × Web UI` parity cell, plus the
+ * `doc.create` cell's "+ New doc" affordance in the panel header
+ * (invariant 4, ADR 0033 §3 / 0040 H11). The loader warms the query cache
+ * before the screen renders (`ensureQueryData` — rejects on error, so a
+ * failed list lands in the route error boundary, never a half-rendered
+ * table), and the component reads it back with `useSuspenseQuery` — no
+ * loading-state UI to design at the bare-cell stage; the Base UI chrome
+ * slice owns that.
  *
  * Markup is the Meridian Zero `.panel` + `.tt` tabular-doc pattern straight
  * from the landed token sheet (03-documents mock vocabulary) — zero new
@@ -35,6 +38,9 @@ function Home() {
         <h2 className="t" id="docs-heading">
           Docs
         </h2>
+        <div className="r">
+          <NewDoc />
+        </div>
       </div>
       {docs.length === 0 ? (
         <p className="ord" style={{ padding: "15px" }}>

@@ -1,22 +1,24 @@
 /**
- * `doc.list` data-layer — the first Web UI capability cell (invariant 4,
+ * `doc.list` + `doc.create` data-layer — the list cell (the first Web UI
+ * capability cell) and the create cell's policy half (invariant 4,
  * ADR 0033 §3 / 0040 H11).
  *
- * Same split as `session.ts`: `fetchDocList` is the testable plain
- * function; `docListQueryOptions` is the react-query binding consumed by
- * BOTH the route loader (`ensureQueryData` — data resolves before the
- * screen renders) and the component (`useSuspenseQuery` reads the warmed
- * cache). The presentational helpers (`docAccessModeLabel`,
- * `docTagClass`, `formatUpdated`) live here so the route component
- * stays render-only (excluded from unit coverage; proven by the marked
- * Playwright spec in packages/e2e).
+ * Same split as `session.ts`: `fetchDocList`/`createDoc` are the testable
+ * plain functions; `docListQueryOptions` is the react-query binding
+ * consumed by BOTH the route loader (`ensureQueryData` — data resolves
+ * before the screen renders) and the component (`useSuspenseQuery` reads
+ * the warmed cache). The presentational helpers (`docAccessModeLabel`,
+ * `docTagClass`, `formatUpdated`) and the create-failure vocabulary live
+ * here so the route + form components stay render/orchestration-only
+ * (excluded from unit coverage; proven by the marked Playwright specs in
+ * packages/e2e).
  *
  * `DocList` is DERIVED from the materialized client type (SSOT — the wire
  * schema `DocListOutputSchema` is server-side; the `hc` client type is the
  * browser-safe projection). Branded id fields stay branded because
  * apps/app declares `@editorzero/ids` (see session.ts NB).
  */
-import { type ApiClient, ApiError } from "@editorzero/api-client";
+import { type ApiClient, ApiError, isApiError } from "@editorzero/api-client";
 import { queryOptions } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
@@ -51,6 +53,45 @@ export function docListQueryOptions(client: ApiClient = apiClient) {
     queryKey: DOC_LIST_QUERY_KEY,
     queryFn: () => fetchDocList(client),
   });
+}
+
+type DocCreateResponse = Awaited<ReturnType<ApiClient["docs"]["create"]["$post"]>>;
+// `doc.create` answers 201 Created (see the route's status-code note);
+// extract that arm — the others are the typed error envelopes.
+type DocCreateSuccess = Extract<DocCreateResponse, { status: 201 }>;
+export type DocCreated = Awaited<ReturnType<DocCreateSuccess["json"]>>;
+
+/**
+ * Create a doc at the workspace root (the bare cell takes no
+ * `collection_id` — placing into a collection needs a picker, a later
+ * increment). Returns the full 201 echo; callers navigate on `doc_id`.
+ */
+export async function createDoc(title: string, client: ApiClient = apiClient): Promise<DocCreated> {
+  const res = await client.docs.create.$post({ json: { title } });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type CreateFailure = "duplicate_title" | "create_failed";
+
+/**
+ * 409 is the one failure with its own UX arm: the capability refuses a
+ * sibling-slug collision (two titles kebab-casing to the same slug at
+ * the same level), so the user must pick a different title — retrying
+ * the same one can never succeed. Everything else is a generic
+ * retryable failure; auth-shaped errors bubble through the same surface
+ * (the route guard owns session loss).
+ */
+export function classifyCreateError(error: unknown): CreateFailure {
+  return isApiError(error) && error.status === 409 ? "duplicate_title" : "create_failed";
+}
+
+export function createFailureMessage(kind: CreateFailure): string {
+  return kind === "duplicate_title"
+    ? "A doc with this title already exists here. Pick a different title."
+    : "Create failed. Try again.";
 }
 
 /**
