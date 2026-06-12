@@ -320,9 +320,17 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     const principalMw = createPrincipalMiddleware({
       resolve: (c) => resolve(c.req.raw.headers),
     });
+    // Every capability-domain prefix mounted in the trunk chain below
+    // MUST appear here AND in the dispatcher block — a mounted domain
+    // without these 500s on its first live request (undefined
+    // `c.var.principal`). The auth-chain integration test walks the
+    // mounted prefixes and asserts 401-not-500 to keep this list
+    // honest (the `/permissions` slice shipped without it — caught
+    // only when the next domain landed).
     trunk.use("/docs/*", principalMw);
     trunk.use("/collections/*", principalMw);
     trunk.use("/workspaces/*", principalMw);
+    trunk.use("/permissions/*", principalMw);
     trunk.use("/audits/*", principalMw);
     trunk.use("/infra/whoami", principalMw);
     // `/mcp` is authenticated via the same principal chain (ADR 0026
@@ -352,6 +360,7 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     trunk.use("/docs/*", dispatcherMw);
     trunk.use("/collections/*", dispatcherMw);
     trunk.use("/workspaces/*", dispatcherMw);
+    trunk.use("/permissions/*", dispatcherMw);
     trunk.use("/audits/*", dispatcherMw);
   }
 

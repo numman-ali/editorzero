@@ -390,6 +390,28 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(body.error).toBe("unauthenticated");
   });
 
+  // Every capability domain the trunk mounts must carry the principal
+  // middleware: an unauthenticated request returns 401 (the middleware
+  // speaking), never 500 (an undefined `c.var.principal` crashing the
+  // route handler). The `/permissions` domain shipped WITHOUT the
+  // attachment (Step-8 slice-1 defect — its route unit tests inject a
+  // fake principal, so only a real-trunk request could catch it; found
+  // while mounting `/spaces`). This walk keeps the `app.ts` middleware
+  // list honest for every domain in the chain.
+  it.each([
+    ["/docs/list"],
+    ["/collections/list"],
+    ["/workspaces/get"],
+    ["/permissions/list"],
+    ["/audits/list"],
+  ])("unauthenticated request to mounted domain %s → 401, never 500", async (path) => {
+    const { trunk } = await buildStack();
+    const res = await trunk.request(path);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unauthenticated");
+  });
+
   // ── GET /infra/whoami — canonical principal-orientation route (ADR 0025) ─
   //
   // The CLI's `ez auth whoami` calls this route (not BA's
