@@ -1419,11 +1419,20 @@ interface Outcome {
 /**
  * Normalize a value for cross-driver comparison: any UUID string NOT
  * minted at plan time (handler-minted grant ids) collapses to
- * "<minted>"; arrays are canonicalized by sorted JSON so legitimate
- * cross-driver ordering differences over normalized keys can't flake
- * the equality.
+ * "<minted>".
+ *
+ * Array ORDER IS PRESERVED — ordering is part of the read contracts
+ * (`doc.list` by order_key, `space.list` by name+id, `permission.list`
+ * by created_at+id, all cross-driver-deterministic over seeded ids and
+ * the injected clock), so a backend returning the same rows in a
+ * different order must FAIL the digest equality (Codex review
+ * 2026-06-12 — blanket sorting masked exactly that). The single
+ * exception: `dropped_grants` is handler-sorted by `grant_id`, and
+ * runtime-minted ids are nondeterministic ACROSS drivers — its
+ * contract order is itself nondeterministic under normalization, so
+ * that one field digests as a bag.
  */
-function normalize(value: unknown, seededIds: ReadonlySet<string>): unknown {
+function normalize(value: unknown, seededIds: ReadonlySet<string>, key?: string): unknown {
   if (typeof value === "string") {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) &&
       !seededIds.has(value)
@@ -1432,14 +1441,17 @@ function normalize(value: unknown, seededIds: ReadonlySet<string>): unknown {
   }
   if (Array.isArray(value)) {
     const items = value.map((v) => normalize(v, seededIds));
-    return items
-      .map((v) => JSON.stringify(v))
-      .sort()
-      .map((s): unknown => JSON.parse(s));
+    if (key === "dropped_grants") {
+      return items
+        .map((v) => JSON.stringify(v))
+        .sort()
+        .map((s): unknown => JSON.parse(s));
+    }
+    return items;
   }
   if (value !== null && typeof value === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = normalize(v, seededIds);
+    for (const [k, v] of Object.entries(value)) out[k] = normalize(v, seededIds, k);
     return out;
   }
   return value;
@@ -1600,21 +1612,52 @@ async function runPlanOnDriver(plan: SeedPlan, driver: FuzzDriver): Promise<Outc
   }
 
   // Final sweep — prove the model tracked reality through every
-  // allowed mutation: per-user doc.list equality on the drifted world.
-  for (let i = 0; i < model.users.length; i++) {
-    const spec: PrincipalSpec = { kind: "user", user_index: i, agent_index: 0 };
+  // allowed mutation: BOTH read verbs, for EVERY principal shape
+  // (users, api-key agents, one delegated pairing per user — Codex
+  // review 2026-06-12: a user-doc.list-only sweep left late space
+  // mutations and the agent/delegated read semantics to opportunistic
+  // in-sequence hits). The non-member delegator skips dispatch — its
+  // structural deny is pinned per seed at the head of the op list.
+  const sweepSpecs: PrincipalSpec[] = [
+    ...model.users.map((_, i): PrincipalSpec => ({ kind: "user", user_index: i, agent_index: 0 })),
+    ...model.agents.map(
+      (_, a): PrincipalSpec => ({ kind: "api-key-agent", user_index: 0, agent_index: a }),
+    ),
+    ...model.users.map(
+      (_, i): PrincipalSpec => ({
+        kind: "delegated-agent",
+        user_index: i,
+        agent_index: i % model.agents.length,
+      }),
+    ),
+  ];
+  for (const [sweepIdx, spec] of sweepSpecs.entries()) {
     const s = subjectFor(model, spec);
     if (s === null) continue;
-    const result = await dispatcher.dispatch({
+    const principal = buildPrincipal(model, spec);
+    const docResult = await dispatcher.dispatch({
       capability_id: CapabilityId("doc.list"),
       input: {},
-      principal: buildPrincipal(model, spec),
+      principal,
       access: { workspace_id: model.workspace_id },
       trace_id: null,
     });
-    const got = new Set(DocListOutputSchema.parse(result).docs.map((d) => String(d.id)));
-    expect(got, `seed=${plan.seed} final doc.list sweep user#${i}`).toEqual(
+    const gotDocs = new Set(DocListOutputSchema.parse(docResult).docs.map((d) => String(d.id)));
+    expect(gotDocs, `seed=${plan.seed} final doc.list sweep principal#${sweepIdx}`).toEqual(
       oracleVisibleDocs(model, s),
+    );
+    const spaceResult = await dispatcher.dispatch({
+      capability_id: CapabilityId("space.list"),
+      input: {},
+      principal,
+      access: { workspace_id: model.workspace_id },
+      trace_id: null,
+    });
+    const gotSpaces = new Set(
+      SpaceListOutputSchema.parse(spaceResult).spaces.map((r) => String(r.space_id)),
+    );
+    expect(gotSpaces, `seed=${plan.seed} final space.list sweep principal#${sweepIdx}`).toEqual(
+      oracleVisibleSpaces(model, s),
     );
   }
 
