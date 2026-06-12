@@ -3,9 +3,13 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifySpaceCreateError,
+  createSpace,
   fetchSpace,
   fetchSpaceList,
   SPACE_LIST_QUERY_KEY,
+  SPACE_TYPES,
+  spaceCreateFailureMessage,
   spaceKindLabel,
   spaceListQueryOptions,
   spaceMetaLine,
@@ -159,5 +163,53 @@ describe("spaceMetaLine", () => {
     expect(spaceMetaLine({ type: "private", baseline_access: "view" })).toBe(
       "private · baseline view",
     );
+  });
+});
+
+describe("createSpace", () => {
+  it("resolves the full row echo on 200 (navigation reads space_id)", async () => {
+    const created = await createSpace("Design", "closed", jsonClient(200, ONE_SPACE));
+    expect(created.space_id).toBe(ONE_SPACE?.space_id);
+    expect(created.kind).toBe("team");
+  });
+
+  it("throws ApiError with the typed envelope code on a 409 slug collision", async () => {
+    await expect(
+      createSpace("Engineering", "open", jsonClient(409, { error: "slug_collision" })),
+    ).rejects.toMatchObject({ status: 409, code: "slug_collision" });
+  });
+
+  it("throws an ApiError instance on a 400", async () => {
+    await expect(
+      createSpace("", "open", jsonClient(400, { error: "validation_failed" })),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("SPACE_TYPES carries the wire vocabulary in declaration order", () => {
+    expect(SPACE_TYPES).toEqual(["open", "closed", "private"]);
+  });
+});
+
+describe("classifySpaceCreateError (the form-409 rule, workspace-level slugs)", () => {
+  it("maps a 409 ApiError to duplicate_name", () => {
+    expect(classifySpaceCreateError(new ApiError(409, "slug_collision"))).toBe("duplicate_name");
+  });
+
+  it("maps other ApiErrors to create_failed", () => {
+    expect(classifySpaceCreateError(new ApiError(500, "internal"))).toBe("create_failed");
+  });
+
+  it("maps non-ApiError throwables (network faults) to create_failed", () => {
+    expect(classifySpaceCreateError(new TypeError("fetch failed"))).toBe("create_failed");
+  });
+});
+
+describe("spaceCreateFailureMessage", () => {
+  it("tells the user to pick a different name on duplicate_name", () => {
+    expect(spaceCreateFailureMessage("duplicate_name")).toContain("already exists");
+  });
+
+  it("offers a retry on create_failed", () => {
+    expect(spaceCreateFailureMessage("create_failed")).toContain("Try again");
   });
 });

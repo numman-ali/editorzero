@@ -1,6 +1,6 @@
 /**
- * `space.list` + `space.get` data-layer — the Spaces screens' capability
- * cells (invariant 4, ADR 0033 §3 / 0040 H11).
+ * `space.list` + `space.get` + `space.create` data-layer — the Spaces
+ * screens' capability cells (invariant 4, ADR 0033 §3 / 0040 H11).
  *
  * Same split as `docs.ts`: `fetchSpaceList` is the testable plain
  * function; `spaceListQueryOptions` is the react-query binding consumed
@@ -15,7 +15,7 @@
  * `name ASC, id ASC` (the capability's contract) — the screen renders
  * wire order and adds none of its own.
  */
-import { type ApiClient, ApiError } from "@editorzero/api-client";
+import { type ApiClient, ApiError, isApiError } from "@editorzero/api-client";
 import { queryOptions } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
@@ -101,4 +101,50 @@ export function spaceQueryOptions(spaceId: string, client: ApiClient = apiClient
     queryKey: spaceQueryKey(spaceId),
     queryFn: () => fetchSpace(spaceId, client),
   });
+}
+
+/** The org-shaping wire values, rendered verbatim in the form's select. */
+export const SPACE_TYPES = ["open", "closed", "private"] as const;
+export type SpaceType = (typeof SPACE_TYPES)[number];
+
+type SpaceCreateResponse = Awaited<ReturnType<ApiClient["spaces"]["create"]["$post"]>>;
+// This route answers 200 (not the docs/collections 201) — extract that arm.
+type SpaceCreateSuccess = Extract<SpaceCreateResponse, { status: 200 }>;
+export type SpaceCreated = Awaited<ReturnType<SpaceCreateSuccess["json"]>>;
+
+/**
+ * Create a TEAM space (the capability mints `kind = 'team'` only;
+ * personal spaces are signup-seeded). `space_type` is the explicit
+ * org-shaping choice; `baseline_access` stays at the schema default
+ * (`view`) — the bare cell doesn't expose it (a later increment with
+ * the space-update controls). Returns the full row echo; callers
+ * navigate on `space_id`.
+ */
+export async function createSpace(
+  name: string,
+  spaceType: SpaceType,
+  client: ApiClient = apiClient,
+): Promise<SpaceCreated> {
+  const res = await client.spaces.create.$post({ json: { name, space_type: spaceType } });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type SpaceCreateFailure = "duplicate_name" | "create_failed";
+
+/**
+ * Same 409 rule as the doc/collection forms, scoped to the workspace
+ * level (space slugs are workspace-unique): retrying the same name can
+ * never succeed, so the 409 gets its own arm.
+ */
+export function classifySpaceCreateError(error: unknown): SpaceCreateFailure {
+  return isApiError(error) && error.status === 409 ? "duplicate_name" : "create_failed";
+}
+
+export function spaceCreateFailureMessage(kind: SpaceCreateFailure): string {
+  return kind === "duplicate_name"
+    ? "A Space with this name already exists. Pick a different name."
+    : "Create failed. Try again.";
 }

@@ -6,6 +6,7 @@ import { CREDENTIALS } from "./credentials";
 /**
  * proves-capability-cell: space.list
  * proves-capability-cell: space.get
+ * proves-capability-cell: space.create
  *
  * The `space.list` + `space.get` × Web UI parity cells (invariant 4,
  * ADR 0033 §3 / 0040 H11). The marker lines above are load-bearing:
@@ -110,4 +111,47 @@ test("space.get: a card's name links to the detail screen rendering the server r
   await page.getByRole("link", { name: "Personal", exact: true }).click();
   await expect(page.locator("h2.t")).toHaveText("Personal");
   await expect(page.getByText("private · baseline view")).toBeVisible();
+});
+
+test("space.create: the header form mints a team space and lands on its detail", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/space");
+
+  // Trigger morphs into the inline form; focus lands in the name input.
+  await page.getByRole("button", { name: "+ New space" }).click();
+  const input = page.getByRole("textbox", { name: "Space name" });
+  await expect(input).toBeFocused();
+  await input.fill("Design");
+  await page.getByRole("combobox", { name: "Space type" }).selectOption("closed");
+  await expectNoAxeViolations(page); // the open form is part of the audited surface
+  await page.getByRole("button", { name: "Create" }).click();
+
+  // create→detail: the new space's screen renders the minted row — the
+  // meta line proves the SELECT traveled (closed, not the open default)
+  // and the baseline stayed at the schema default.
+  await expect(page).toHaveURL(/\/space\/[0-9a-f-]{36}$/u);
+  await expect(page.locator("h2.t")).toHaveText("Design");
+  await expect(page.locator(".pth")).toHaveText("design");
+  await expect(page.locator(".status-tag")).toHaveText("Team");
+  await expect(page.getByText("closed · baseline view")).toBeVisible();
+
+  // Server state on the grid: the card joined in name-ASC order.
+  await page.goto("/space");
+  await expect(page.locator(".sp .nm")).toHaveText([
+    "Design",
+    "Engineering",
+    "Personal",
+    "Product",
+  ]);
+
+  // The 409 sibling-slug arm: an existing name refuses with the typed
+  // alert and the form stays open for a different name.
+  await page.getByRole("button", { name: "+ New space" }).click();
+  await page.getByRole("textbox", { name: "Space name" }).fill("Engineering");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("alert")).toContainText("already exists");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("button", { name: "+ New space" })).toBeVisible();
 });

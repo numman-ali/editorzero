@@ -1,6 +1,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { NewSpace } from "../components/new-space";
 import { spaceKindLabel, spaceListQueryOptions, spaceMetaLine } from "../lib/spaces";
 
 /**
@@ -43,6 +44,10 @@ function Spaces() {
         <h2 className="t" id="spaces-heading">
           Spaces
         </h2>
+        <div className="r">
+          {/* The space.create cell — create→detail, the new-doc pattern. */}
+          <NewSpace />
+        </div>
       </div>
       {spaces.length === 0 ? (
         <p className="ord" style={{ padding: "15px" }}>

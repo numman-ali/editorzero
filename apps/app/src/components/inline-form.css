@@ -36,6 +36,24 @@
   border-color: var(--ultra);
 }
 
+/* A select sharing the input's vocabulary (mono, bordered, ultra
+   focus) — natural width, the browser arrow stays. */
+.inlineform-select {
+  border: var(--rule) solid var(--hair-strong);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-1);
+  letter-spacing: 0.02em;
+  padding: 6px 9px;
+  border-radius: var(--radius);
+}
+
+.inlineform-select:focus {
+  outline: none;
+  border-color: var(--ultra);
+}
+
 /* Full-width second row under the controls when the mutation fails —
    the host header/toolbar is a wrapping flex row, so the alert never
    squeezes the input. */

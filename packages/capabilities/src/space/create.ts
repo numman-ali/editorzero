@@ -88,7 +88,11 @@ export const spaceCreate: Capability<SpaceCreateInput, SpaceCreateOutput> = {
   output: SpaceCreateOutputSchema,
   requires: ["workspace:admin"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the Spaces screen's "+ New space" form (the
+  // space.create × Web UI cell) — proven end-to-end by the marked
+  // Playwright spec in packages/e2e (proves-capability-cell:
+  // space.create).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "space" }),
     effectOnAllow: (_input, output): AuditEffect => ({

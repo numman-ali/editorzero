@@ -186,7 +186,7 @@ describe("space.create — registry + audit wiring", () => {
     expect(spaceCreate.category).toBe("mutation");
     expect(spaceCreate.requires).toEqual(["workspace:admin"]);
     expect(spaceCreate.agentAllowed).toEqual({});
-    expect(spaceCreate.surfaces).toEqual(["api", "cli", "mcp"]);
+    expect(spaceCreate.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     expect(spaceCreate.audit.collapsePolicy).toEqual({ collapsible: false });
   });
 
