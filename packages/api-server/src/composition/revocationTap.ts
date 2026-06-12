@@ -32,6 +32,27 @@
  *     close.
  *   - `space.archive` — the space's members (`space_members`), whose
  *     read standing to its docs flowed through the archived space.
+ *   - `doc.move` / `collection.move` — a bucket CROSSING narrows read
+ *     standing two ways, both derivable from the `acl_transition`
+ *     echo (absent on same-bucket moves — those change no reader):
+ *     `dropped_grants` preimages are revoked edges (the echo's own
+ *     docstring calls it "the `permission.revoke` posture") — their
+ *     user-kind subjects close; and the BEFORE bucket's
+ *     placement-derived readers lose standing when the AFTER bucket
+ *     does not cover them — the workspace root and open spaces keep
+ *     every member readable, closed/private spaces do not, so the
+ *     before-bucket readers (a space's members, or the workspace's
+ *     members for the root bucket) close only on a move into a
+ *     restrictive space. Over-close of readers who retain standing
+ *     some other way is accepted bluntness — re-attach re-runs
+ *     `collabAuthorize`, the authority.
+ *
+ * Named residual (ADR 0043 amendment): `space.update` can narrow
+ * `space_type` (open → closed/private), revoking placement-derived
+ * readers, but its output does not echo the BEFORE type, so narrowing
+ * is indistinguishable from a rename here. The fix shape is a type
+ * transition echo on the capability output (exactly how moves echo
+ * `acl_transition`) — it joins this map with that widening.
  *
  * Outputs are narrowed through the SSOT zod schemas
  * (`@editorzero/schemas`) — never cast. A parse miss means the
@@ -48,7 +69,7 @@ import type { SqliteDriver } from "@editorzero/db";
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
 import { SpaceId, UserId } from "@editorzero/ids";
 import type { Logger } from "@editorzero/observability";
-import { GrantRowOutputSchema } from "@editorzero/schemas/shared/grant";
+import { AclTransitionOutputSchema, GrantRowOutputSchema } from "@editorzero/schemas/shared/grant";
 import { z } from "zod";
 
 import type { CollabSocketRegistry } from "./collabSockets";
@@ -57,6 +78,8 @@ import type { CollabSocketRegistry } from "./collabSockets";
 const MemberOutputSchema = z.object({ user_id: z.string() }).loose();
 const DocDeleteOutputSchema = z.object({ doc_id: z.string() }).loose();
 const SpaceArchiveOutputSchema = z.object({ space_id: z.string() }).loose();
+/** Output slice shared by both movers — the crossing receipt is all the tap reads. */
+const MoveOutputSchema = z.object({ acl_transition: AclTransitionOutputSchema.optional() }).loose();
 
 export interface RevocationTapDeps {
   readonly registry: CollabSocketRegistry;
@@ -113,6 +136,57 @@ export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
     return rows.map((row) => row.user_id);
   };
 
+  const moveCrossingSubjects: Extractor = async (invocation, output) => {
+    const parsed = MoveOutputSchema.safeParse(output);
+    if (!parsed.success) throw new Error("output carries no recognizable move echo");
+    const transition = parsed.data.acl_transition;
+    // Same-bucket move: no crossing receipt, no reader change.
+    if (transition === undefined) return [];
+    const workspace = invocation.principal.workspace_id;
+    const affected = new Set<UserId>();
+    // Dropped grant edges are revocations regardless of placement
+    // direction (`adopt_baseline` hard-deletes them; the echo carries
+    // the preimages). Agent-kind subjects skip — no agent sockets.
+    for (const grant of transition.dropped_grants) {
+      if (grant.subject_kind === "user") affected.add(UserId(grant.subject_id));
+    }
+    // Placement-derived readers of the BEFORE bucket close only when
+    // the AFTER bucket excludes them: the root bucket and open spaces
+    // keep every workspace member readable; closed/private do not. A
+    // missing after-space row reads as restrictive — fail toward
+    // closing (re-attach is cheap; a leak is not).
+    const afterRestrictive =
+      transition.after_space_id !== null &&
+      (
+        await driver
+          .scoped(workspace)
+          .selectFrom("spaces")
+          .select("type")
+          .where("id", "=", transition.after_space_id)
+          .executeTakeFirst()
+      )?.type !== "open";
+    if (afterRestrictive) {
+      if (transition.before_space_id !== null) {
+        const rows = await driver
+          .scoped(workspace)
+          .selectFrom("space_members")
+          .select("user_id")
+          .where("space_id", "=", transition.before_space_id)
+          .execute();
+        for (const row of rows) affected.add(row.user_id);
+      } else {
+        const rows = await driver
+          .scoped(workspace)
+          .selectFrom("workspace_members")
+          .select("user_id")
+          .where("deleted_at", "is", null)
+          .execute();
+        for (const row of rows) affected.add(row.user_id);
+      }
+    }
+    return [...affected];
+  };
+
   const REVOKE_CLASS: ReadonlyMap<string, Extractor> = new Map([
     ["permission.revoke", grantEdgeSubject],
     ["doc.remove_guest", grantEdgeSubject],
@@ -122,6 +196,8 @@ export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
     ["workspace.member_update_role", memberSubject],
     ["doc.delete", docGuestSubjects],
     ["space.archive", spaceMemberSubjects],
+    ["doc.move", moveCrossingSubjects],
+    ["collection.move", moveCrossingSubjects],
   ]);
 
   return {

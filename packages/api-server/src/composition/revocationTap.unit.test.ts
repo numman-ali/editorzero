@@ -10,6 +10,7 @@ import {
   SPACE_MEMBERS_DDL,
   SPACES_DDL,
   type SqliteDriver,
+  WORKSPACE_MEMBERS_DDL,
 } from "@editorzero/db";
 import type { DispatchInvocation } from "@editorzero/dispatcher";
 import { CapabilityId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
@@ -24,7 +25,11 @@ const WORKSPACE_A = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const ADMIN = UserId("018f0000-0000-7000-8000-000000000002");
 const GUEST_USER = UserId("018f0000-0000-7000-8000-000000000003");
 const SECOND_GUEST = UserId("018f0000-0000-7000-8000-000000000004");
+const MEMBER_ONE = UserId("018f0000-0000-7000-8000-000000000005");
+const MEMBER_TWO = UserId("018f0000-0000-7000-8000-000000000006");
 const SPACE = SpaceId("018f0000-0000-7000-8000-00000000c001");
+const SPACE_CLOSED = SpaceId("018f0000-0000-7000-8000-00000000c002");
+const SPACE_OPEN = SpaceId("018f0000-0000-7000-8000-00000000c003");
 const DOC = "018f0000-0000-7000-8000-0000000000d1";
 
 let driver: SqliteDriver;
@@ -34,6 +39,7 @@ beforeEach(() => {
   driver.exec(SPACES_DDL);
   driver.exec(SPACE_MEMBERS_DDL);
   driver.exec(GRANTS_DDL);
+  driver.exec(WORKSPACE_MEMBERS_DDL);
 });
 
 afterEach(async () => {
@@ -98,6 +104,77 @@ function grantRowOutput(subject_kind: "user" | "agent", subject_id: string): unk
 
 function tapWith(registry: CollabSocketRegistry, logger = noopLogger) {
   return createRevocationTap({ registry, driver, logger });
+}
+
+function seedSpace(id: SpaceId, type: "open" | "closed" | "private"): Promise<unknown> {
+  return driver
+    .scoped(WORKSPACE_A)
+    .insertInto("spaces")
+    .values({
+      id,
+      workspace_id: WORKSPACE_A,
+      kind: "team",
+      type,
+      owner_user_id: null,
+      name: `Space ${id.slice(-4)}`,
+      slug: `space-${id.slice(-4)}`,
+      baseline_access: "view",
+      created_by: ADMIN,
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: null,
+    })
+    .execute();
+}
+
+function seedSpaceMember(space_id: SpaceId, user_id: UserId): Promise<unknown> {
+  return driver
+    .scoped(WORKSPACE_A)
+    .insertInto("space_members")
+    .values({
+      workspace_id: WORKSPACE_A,
+      space_id,
+      user_id,
+      role: "view",
+      created_at: 1,
+      updated_at: 1,
+    })
+    .execute();
+}
+
+function seedWorkspaceMember(user_id: UserId): Promise<unknown> {
+  return driver
+    .scoped(WORKSPACE_A)
+    .insertInto("workspace_members")
+    .values({
+      workspace_id: WORKSPACE_A,
+      user_id,
+      role: "member",
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: null,
+    })
+    .execute();
+}
+
+/** A move output, optionally carrying the crossing receipt. */
+function moveOutput(transition?: {
+  before_space_id: SpaceId | null;
+  after_space_id: SpaceId | null;
+  dropped_grants?: unknown[];
+}): unknown {
+  return {
+    doc_id: DOC,
+    new_collection_id: null,
+    ...(transition !== undefined && {
+      acl_transition: {
+        policy: "adopt_baseline",
+        before_space_id: transition.before_space_id,
+        after_space_id: transition.after_space_id,
+        dropped_grants: transition.dropped_grants ?? [],
+      },
+    }),
+  };
 }
 
 describe("createRevocationTap — affected-subject derivation", () => {
@@ -253,6 +330,67 @@ describe("createRevocationTap — affected-subject derivation", () => {
       archived_at: 999,
     });
     expect(registry.closedUsers.toSorted()).toEqual([GUEST_USER, SECOND_GUEST].toSorted());
+  });
+
+  it("ignores a same-bucket move (no crossing receipt, no reader change)", async () => {
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(invocation("doc.move"), moveOutput());
+    expect(registry.closedUsers).toEqual([]);
+  });
+
+  it("closes dropped-grant users AND before-space members on a crossing into a closed space", async () => {
+    await seedSpace(SPACE, "closed");
+    await seedSpace(SPACE_CLOSED, "closed");
+    await seedSpaceMember(SPACE, MEMBER_ONE);
+    await seedSpaceMember(SPACE, MEMBER_TWO);
+
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(
+      invocation("doc.move"),
+      moveOutput({
+        before_space_id: SPACE,
+        after_space_id: SPACE_CLOSED,
+        dropped_grants: [
+          grantRowOutput("user", GUEST_USER),
+          // Agent guest — no agent sockets exist; must not close.
+          grantRowOutput("agent", "018f0000-0000-7000-8000-00000000f001"),
+        ],
+      }),
+    );
+    expect(registry.closedUsers.toSorted()).toEqual(
+      [GUEST_USER, MEMBER_ONE, MEMBER_TWO].toSorted(),
+    );
+  });
+
+  it("keeps placement readers attached when the move lands in an OPEN space — only dropped grants close", async () => {
+    await seedSpace(SPACE, "closed");
+    await seedSpace(SPACE_OPEN, "open");
+    await seedSpaceMember(SPACE, MEMBER_ONE);
+
+    // collection.move shares the extractor — pinned via this lane.
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(
+      invocation("collection.move"),
+      moveOutput({
+        before_space_id: SPACE,
+        after_space_id: SPACE_OPEN,
+        dropped_grants: [grantRowOutput("user", GUEST_USER)],
+      }),
+    );
+    expect(registry.closedUsers).toEqual([GUEST_USER]);
+  });
+
+  it("closes the workspace's members on a root → closed-space crossing", async () => {
+    await seedSpace(SPACE_CLOSED, "closed");
+    await seedWorkspaceMember(MEMBER_ONE);
+    await seedWorkspaceMember(MEMBER_TWO);
+
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(
+      invocation("doc.move"),
+      moveOutput({ before_space_id: null, after_space_id: SPACE_CLOSED }),
+    );
+    expect(registry.closedUsers.toSorted()).toEqual([MEMBER_ONE, MEMBER_TWO].toSorted());
   });
 
   it("logs loud and closes nothing when a revoke-class output drifts (drift guard)", async () => {
