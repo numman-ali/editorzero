@@ -69,7 +69,9 @@
  * against whatever the live `docs` columns are, so it tracks the schema.
  */
 
-import type { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import type { CollectionId, DocId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
+import type { GrantRole, SpaceKind, SpaceType } from "@editorzero/scopes";
+
 import type { AuditRecord, DocVisibility, Role } from "./types";
 
 /** Reconstructed `workspaces` projection (excludes salt + create/update timestamps). */
@@ -136,16 +138,73 @@ export interface DocState {
 }
 
 /**
+ * Reconstructed `spaces` projection (ADR 0040 Step 4). The table landed
+ * ahead of its effects: no `space.*` effect kind exists yet (Step 7),
+ * so until then a correct replay yields an EMPTY map — and the live
+ * table is provably empty too (no capability writes it before Step 8).
+ * Carrying the key now keeps the §9.1 tuple lockstep with the schema,
+ * which is the Step-4 mandate.
+ */
+export interface SpaceState {
+  readonly id: SpaceId;
+  readonly workspace_id: WorkspaceId;
+  readonly kind: SpaceKind;
+  readonly type: SpaceType;
+  readonly owner_user_id: UserId | null;
+  readonly name: string;
+  readonly slug: string;
+  readonly baseline_access: GrantRole;
+  readonly created_by: UserId;
+  /** Epoch-ms the space was soft-deleted, or `null` if live. */
+  readonly deleted_at: number | null;
+}
+
+/** Reconstructed `space_members` projection (ADR 0040 Step 4 — see SpaceState). */
+export interface SpaceMemberState {
+  readonly workspace_id: WorkspaceId;
+  readonly space_id: SpaceId;
+  readonly user_id: UserId;
+  readonly role: GrantRole;
+}
+
+/**
+ * Reconstructed `grants` projection (ADR 0040 Step 4 — see SpaceState).
+ * Hard-DELETE lifecycle: a revoke REMOVES the key (forward-replay of
+ * grant-then-revoke nets to no entry — H1), so there is no deleted_at.
+ */
+export interface GrantState {
+  readonly id: GrantId;
+  readonly workspace_id: WorkspaceId;
+  readonly resource_kind: "space" | "doc";
+  readonly resource_id: string;
+  readonly subject_kind: "user" | "agent";
+  readonly subject_id: string;
+  readonly role: GrantRole;
+  readonly is_guest: 0 | 1;
+  readonly created_by: UserId;
+}
+
+/**
  * The reconstructed projection. Entities are keyed by id (members by a
- * `${workspace_id}::${user_id}` composite) so equality is order-
- * independent — a deep-equal against the same projection built from the
- * live DB is the invariant-3a assertion.
+ * `${workspace_id}::${user_id}` composite, space members by
+ * `${space_id}::${user_id}`) so equality is order-independent — a
+ * deep-equal against the same projection built from the live DB is the
+ * invariant-3a assertion.
+ *
+ * `collections` does NOT yet project `space_id` (the column landed in
+ * Step 4): no effect can set it until the Step-7 effect family, and a
+ * projected column no effect carries would fail replay the moment a
+ * fixture touched it. The field joins this projection IN THE SAME
+ * COMMIT as the effect that mutates it (the Step-7 lockstep rule).
  */
 export interface PersistentWorkspaceState {
   readonly workspaces: Readonly<Record<string, WorkspaceState>>;
   readonly members: Readonly<Record<string, MemberState>>;
   readonly collections: Readonly<Record<string, CollectionState>>;
   readonly docs: Readonly<Record<string, DocState>>;
+  readonly spaces: Readonly<Record<string, SpaceState>>;
+  readonly space_members: Readonly<Record<string, SpaceMemberState>>;
+  readonly grants: Readonly<Record<string, GrantState>>;
 }
 
 /** The starting point for a replay — an empty workspace universe. */
@@ -154,11 +213,19 @@ export const EMPTY_STATE: PersistentWorkspaceState = {
   members: {},
   collections: {},
   docs: {},
+  spaces: {},
+  space_members: {},
+  grants: {},
 };
 
 /** Composite key for the `members` projection. */
 export function memberKey(workspace_id: WorkspaceId, user_id: UserId): string {
   return `${workspace_id}::${user_id}`;
+}
+
+/** Composite key for the `space_members` projection (ADR 0040). */
+export function spaceMemberKey(space_id: SpaceId, user_id: UserId): string {
+  return `${space_id}::${user_id}`;
 }
 
 /**

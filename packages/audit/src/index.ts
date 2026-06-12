@@ -21,10 +21,14 @@ export {
   type CollectionState,
   type DocState,
   EMPTY_STATE,
+  type GrantState,
   type MemberState,
   memberKey,
   type PersistentWorkspaceState,
   type ReplayRow,
+  type SpaceMemberState,
+  type SpaceState,
+  spaceMemberKey,
   type WorkspaceState,
 } from "./state";
 export type {

@@ -18,6 +18,8 @@ import {
   isMetadataOnlyCapability,
   METADATA_ONLY_CAPABILITIES,
   ROLES,
+  SPACE_KINDS,
+  SPACE_TYPES,
   SUBJECT_KINDS,
 } from "./index";
 
@@ -37,6 +39,14 @@ describe("grant vocabulary (ADR 0040 Step 3)", () => {
 
   it("pins ACCESS_MODES exactly (doc-level mode switch, fork #5 resolution)", () => {
     expect(ACCESS_MODES).toEqual(["space", "private"]);
+  });
+
+  it("pins SPACE_KINDS exactly (Step 4 — kind↔owner CHECK ties to this set)", () => {
+    expect(SPACE_KINDS).toEqual(["team", "personal"]);
+  });
+
+  it("pins SPACE_TYPES exactly (Step 4 — open/closed/private discoverability ladder)", () => {
+    expect(SPACE_TYPES).toEqual(["open", "closed", "private"]);
   });
 
   it("SUBJECT_KINDS gained the space/grant audit subjects (team waits for Teams)", () => {

@@ -267,3 +267,15 @@ No MVP cut — the first bucket is *in the release*, just sequenced after a name
 - **External guest-editor live collab is requested** → gated on WS-attach hardening (#15); sequence after, do not fork.
 - **The flat-ACL `AccessPath` derivation can't be made local** (a doc-level decision needs a graph walk) → stop and redesign before enforcing the ceiling on reads; the locality guarantee is the model's load-bearing assumption.
 - **A cross-model review (Codex, at this ADR boundary) rejects the ceiling algebra or the guest read path on grounds this ADR doesn't anticipate** → revisit.
+
+## Amendments
+
+**2026-06-12 — Step 4 LANDED.** `spaces` / `space_members` / `grants` across the three lockstep files at one commit, `collections.space_id` (nullable, no FK — B1), `TENANT_SCOPE_COLUMNS` + the §9.1 `PersistentWorkspaceState` tuple extended in the same commit (the line-167 sequencing). Shapes this ADR left open, resolved at landing:
+
+- **`space_members.role` speaks `GRANT_ROLES`**, not the workspace `ROLES` vocabulary. The ceiling rule ("a doc grant may only *raise* a member's role") compares membership roles against grant roles, so they must be one ordered set; a second ladder would force a lossy mapping at every comparison.
+- **`spaces.baseline_access ∈ {edit, comment, view}`** (CHECK excludes `owner`): defined as the implicit `GrantRole` an `open` space confers on Org members holding no membership row. `closed`/`private` confer nothing implicitly. The Step-6 resolver is the sole consumer.
+- **kind↔owner tie is a table CHECK** — `(kind = 'personal') = (owner_user_id IS NOT NULL)`, identical text in both dialects — plus the `spaces_personal_unique` partial index (≤1 live personal space per member; the Step-8 signup seeding relies on the constraint, not convention).
+- **`grants.is_guest` is `INTEGER` 0/1 in BOTH dialects** (Kysely type `0 | 1`) rather than a Postgres-side BOOLEAN — dialect-uniform reads, and Check 7 string-compares constraint text. Hard-DELETE lifecycle (H1) is honored at the DDL level: no `deleted_at`/`updated_at` columns exist to misuse.
+- **The Step-4 coherence check landed twice as strong as specified**: the `Database`-keys ↔ `TENANT_SCOPE_COLUMNS`-keys leg is a compile-time `satisfies Record<keyof Database, "workspace_id" | "id">` on the map itself (a typed-reachable-but-unscoped table now fails tsc), and coherence **Check 11** covers the legs types can't see — schema interfaces ↔ DDL tables/columns, and scope-column existence in DDL. All three script legs negative-tested at landing.
+- **`CollectionState.space_id` is deliberately NOT in the replay projection yet**: no effect can carry it until the Step-7 family, and a projected column no effect sets would fail replay the moment a fixture touched it. It joins the projection in the same commit as the effect that mutates it (the Step-7 lockstep rule, documented in `packages/audit/src/state.ts`).
+- **`SPACE_KINDS` / `SPACE_TYPES`** joined the Step-3 vocabulary in `@editorzero/scopes` with exact-membership pins beside the `GRANT_ROLES` pin.

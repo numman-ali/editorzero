@@ -28,8 +28,24 @@
  *    system-level service that uses the unscoped base handle.
  */
 
-import type { AgentId, CollectionId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
-import type { CapabilityCategory, Role, SubjectKind } from "@editorzero/scopes";
+import type {
+  AgentId,
+  CollectionId,
+  DocId,
+  GrantId,
+  SpaceId,
+  TokenId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
+import type {
+  CapabilityCategory,
+  GrantRole,
+  Role,
+  SpaceKind,
+  SpaceType,
+  SubjectKind,
+} from "@editorzero/scopes";
 import type { Kysely } from "kysely";
 
 /**
@@ -48,8 +64,13 @@ import type { Kysely } from "kysely";
  *
  * Extending this map requires a paired change: add the key here AND
  * the table interface below AND (for `Database`-visible tables) an
- * entry on `Database`. The `tenant-tables.integration.test.ts` drift
- * guard enumerates every key and fails if a test isn't covering it.
+ * entry on `Database`. The `satisfies` clause makes that pairing a
+ * compile error instead of a convention: a `Database` key missing
+ * here fails tsc (a typed-reachable table the plugin would NOT scope
+ * — the tenant-leak drift class), and an extra key here that is not
+ * on `Database` fails as an excess property. The
+ * `tenant-tables.integration.test.ts` drift guard then enumerates
+ * every key and fails if a test isn't covering it.
  */
 export const TENANT_SCOPE_COLUMNS = {
   collections: "workspace_id",
@@ -59,7 +80,10 @@ export const TENANT_SCOPE_COLUMNS = {
   audit_events: "workspace_id",
   workspace_members: "workspace_id",
   workspaces: "id",
-} as const;
+  spaces: "workspace_id",
+  space_members: "workspace_id",
+  grants: "workspace_id",
+} as const satisfies Record<keyof Database, "workspace_id" | "id">;
 
 export type TenantScopedTable = keyof typeof TENANT_SCOPE_COLUMNS;
 export type TenantScopeColumn = (typeof TENANT_SCOPE_COLUMNS)[TenantScopedTable];
@@ -88,6 +112,11 @@ export interface CollectionsTable {
   readonly id: CollectionId;
   readonly workspace_id: WorkspaceId;
   readonly parent_id: CollectionId | null;
+  // Home Space (ADR 0040 Step 4). Nullable while the Space rollout is in
+  // flight — pre-Space collections live at workspace root. Handler-
+  // enforced, no SQL FK (matching `docs.collection_id`); Collections
+  // hold no ACL (B1) — this is pure navigation, never a grant source.
+  readonly space_id: SpaceId | null;
   readonly title: string;
   readonly slug: string;
   readonly order_key: string;
@@ -95,6 +124,102 @@ export interface CollectionsTable {
   readonly created_at: number;
   readonly updated_at: number;
   readonly deleted_at: number | null;
+}
+
+/**
+ * `spaces` — the membership ceiling inside the workspace (ADR 0040
+ * Model B: Org → Space hard-ceiling → Collection/Doc). A Space is NOT a
+ * renamed workspace: `workspaces` stays the physical tenant root, and
+ * `spaces` rides `TENANT_SCOPE_COLUMNS` like any other tenant table.
+ *
+ * `kind`/`owner_user_id` are tied by a table CHECK: a `personal` space
+ * carries its owner, a `team` space carries NULL. `baseline_access` is
+ * the GrantRole an `open` space confers on Org members who hold no
+ * membership row (`closed`/`private` confer nothing implicitly) —
+ * 'owner' is deliberately outside the CHECK (an implicit
+ * everyone-is-owner baseline is never valid). The Step-6 read-only
+ * resolver is the sole consumer of these semantics; until it lands no
+ * read path is Space-gated (ADR 0040 fork #2/H9 sequencing).
+ *
+ * `UNIQUE (id, workspace_id)` exists as the composite-FK target for
+ * `space_members` (the F99 tenant-integrity pattern, same as
+ * `collections.parent_id`).
+ */
+export interface SpacesTable {
+  readonly id: SpaceId;
+  readonly workspace_id: WorkspaceId;
+  readonly kind: SpaceKind;
+  readonly type: SpaceType;
+  readonly owner_user_id: UserId | null;
+  readonly name: string;
+  readonly slug: string;
+  readonly baseline_access: GrantRole;
+  readonly created_by: UserId;
+  readonly created_at: number;
+  readonly updated_at: number;
+  readonly deleted_at: number | null;
+}
+
+/**
+ * `space_members` — Space membership (ADR 0040). Mirrors
+ * `workspace_members`' composite-PK shape but speaks the GRANT_ROLES
+ * ladder, NOT the workspace ROLES vocabulary: the ceiling rule is
+ * "a Doc grant may only RAISE a member's role (view→comment/edit/
+ * owner)", so membership roles and grant roles must be the same
+ * ordered set for the comparison to be meaningful. The composite FK to
+ * `spaces(id, workspace_id)` makes a wrong-tenant `space_id` pairing
+ * unrepresentable (F99) — the polymorphic `grants` table deliberately
+ * CANNOT have this protection, which is why it gets the fuzzer +
+ * handler-check compensations instead (H6).
+ *
+ * No `deleted_at`: membership removal is a hard DELETE (the audit
+ * effect carries the preimage — same posture as grant revoke, H1).
+ */
+export interface SpaceMembersTable {
+  readonly workspace_id: WorkspaceId;
+  readonly space_id: SpaceId;
+  readonly user_id: UserId;
+  readonly role: GrantRole;
+  readonly created_at: number;
+  readonly updated_at: number;
+}
+
+/**
+ * `grants` — the single polymorphic ACL table (ADR 0040 fork #3).
+ * One row = one positive capability edge: `subject` may act as `role`
+ * on `resource`. `is_guest = 1` marks the deliberate cross-Space
+ * escape hatch (a principal who is not a member of the resource's
+ * Space) — the one row-type that crosses the ceiling, always explicit
+ * and audited.
+ *
+ * v1 enums (open for greenfield WIDENING, never reinterpretation):
+ * `resource_kind ∈ {space, doc}` (`collection` reserved — B1),
+ * `subject_kind ∈ {user, agent}` (`team` reserved — H13).
+ *
+ * **No composite FK by design (H6):** a polymorphic `resource_id`
+ * cannot carry per-kind composite FKs, so this table forgoes the F99
+ * pattern. Compensating controls, named in the ADR and binding:
+ * the unique `(workspace_id, resource_kind, resource_id, subject_kind,
+ * subject_id)` index (no duplicate edges), the Step-6 isolation-fuzzer
+ * property (every `resource_id` resolves within its `workspace_id`),
+ * and the Step-8 grant handler's same-tx target-existence check.
+ *
+ * Hard-DELETE lifecycle (H1): no `deleted_at`, no `updated_at` — a
+ * revoke removes the row and the audit effect carries the preimage;
+ * grant rows persist through their resource's soft-delete (inert while
+ * trashed) so restore recovers the grant set 1:1.
+ */
+export interface GrantsTable {
+  readonly id: GrantId;
+  readonly workspace_id: WorkspaceId;
+  readonly resource_kind: "space" | "doc";
+  readonly resource_id: string;
+  readonly subject_kind: "user" | "agent";
+  readonly subject_id: string;
+  readonly role: GrantRole;
+  readonly is_guest: 0 | 1;
+  readonly created_by: UserId;
+  readonly created_at: number;
 }
 
 /**
@@ -371,6 +496,9 @@ export interface Database {
   readonly audit_events: AuditEventsTable;
   readonly workspace_members: WorkspaceMembersTable;
   readonly workspaces: WorkspacesTable;
+  readonly spaces: SpacesTable;
+  readonly space_members: SpaceMembersTable;
+  readonly grants: GrantsTable;
 }
 
 /**

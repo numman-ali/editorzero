@@ -63,12 +63,16 @@ import {
   type AuditWriter,
   type CollectionState,
   type DocState,
+  type GrantState,
   type MemberState,
   memberKey,
   type PersistentWorkspaceState,
   REPLAY_CLASS,
   type ReplayRow,
   replay,
+  type SpaceMemberState,
+  type SpaceState,
+  spaceMemberKey,
   type WorkspaceState,
 } from "@editorzero/audit";
 import {
@@ -291,7 +295,85 @@ async function projectFromDb(d: SqliteDriver, ws: WorkspaceId): Promise<Persiste
     };
   }
 
-  return { workspaces, members, collections, docs };
+  // ADR 0040 Step-4 tables. No effect kind writes them yet (Step 7), so
+  // these projections are provably empty until then — but selecting them
+  // keeps the deep-equal honest the moment a fixture (or a bug) touches
+  // the live tables ahead of their effects.
+  const spaces: Record<string, SpaceState> = {};
+  for (const r of await sys
+    .selectFrom("spaces")
+    .select([
+      "id",
+      "workspace_id",
+      "kind",
+      "type",
+      "owner_user_id",
+      "name",
+      "slug",
+      "baseline_access",
+      "created_by",
+      "deleted_at",
+    ])
+    .where("workspace_id", "=", ws)
+    .execute()) {
+    spaces[r.id] = {
+      id: r.id,
+      workspace_id: r.workspace_id,
+      kind: r.kind,
+      type: r.type,
+      owner_user_id: r.owner_user_id,
+      name: r.name,
+      slug: r.slug,
+      baseline_access: r.baseline_access,
+      created_by: r.created_by,
+      deleted_at: r.deleted_at,
+    };
+  }
+
+  const space_members: Record<string, SpaceMemberState> = {};
+  for (const r of await sys
+    .selectFrom("space_members")
+    .select(["workspace_id", "space_id", "user_id", "role"])
+    .where("workspace_id", "=", ws)
+    .execute()) {
+    space_members[spaceMemberKey(r.space_id, r.user_id)] = {
+      workspace_id: r.workspace_id,
+      space_id: r.space_id,
+      user_id: r.user_id,
+      role: r.role,
+    };
+  }
+
+  const grants: Record<string, GrantState> = {};
+  for (const r of await sys
+    .selectFrom("grants")
+    .select([
+      "id",
+      "workspace_id",
+      "resource_kind",
+      "resource_id",
+      "subject_kind",
+      "subject_id",
+      "role",
+      "is_guest",
+      "created_by",
+    ])
+    .where("workspace_id", "=", ws)
+    .execute()) {
+    grants[r.id] = {
+      id: r.id,
+      workspace_id: r.workspace_id,
+      resource_kind: r.resource_kind,
+      resource_id: r.resource_id,
+      subject_kind: r.subject_kind,
+      subject_id: r.subject_id,
+      role: r.role,
+      is_guest: r.is_guest,
+      created_by: r.created_by,
+    };
+  }
+
+  return { workspaces, members, collections, docs, spaces, space_members, grants };
 }
 
 // ── Harness ──────────────────────────────────────────────────────────────────

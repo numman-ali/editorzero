@@ -96,6 +96,7 @@ export const COLLECTIONS_DDL = `
     id           TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     parent_id    TEXT,
+    space_id     TEXT,
     title        TEXT NOT NULL,
     slug         TEXT NOT NULL,
     order_key    TEXT NOT NULL,
@@ -203,9 +204,92 @@ export const OUTBOX_DDL = `
 ` as const;
 
 /**
+ * \`spaces\` — the ADR 0040 Model B membership ceiling. Parallel to
+ * the SQLite DDL; see \`sqlite-ddl.ts\` SPACES_DDL header for the
+ * constraint rationale (composite-FK target, kind↔owner CHECK,
+ * baseline_access excluding 'owner', the two partial unique indexes).
+ */
+export const SPACES_DDL = `
+  CREATE TABLE spaces (
+    id              TEXT PRIMARY KEY,
+    workspace_id    TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('team','personal')),
+    type            TEXT NOT NULL CHECK (type IN ('open','closed','private')),
+    owner_user_id   TEXT,
+    name            TEXT NOT NULL,
+    slug            TEXT NOT NULL,
+    baseline_access TEXT NOT NULL CHECK (baseline_access IN ('edit','comment','view')),
+    created_by      TEXT NOT NULL,
+    created_at      BIGINT NOT NULL,
+    updated_at      BIGINT NOT NULL,
+    deleted_at      BIGINT,
+    UNIQUE (id, workspace_id),
+    CHECK ((kind = 'personal') = (owner_user_id IS NOT NULL))
+  );
+  CREATE UNIQUE INDEX spaces_slug_unique
+    ON spaces(workspace_id, slug)
+    WHERE deleted_at IS NULL;
+  CREATE UNIQUE INDEX spaces_personal_unique
+    ON spaces(workspace_id, owner_user_id)
+    WHERE kind = 'personal' AND deleted_at IS NULL;
+` as const;
+
+/**
+ * \`space_members\` — Space membership on the GRANT_ROLES ladder.
+ * Parallel to the SQLite DDL; see \`sqlite-ddl.ts\` SPACE_MEMBERS_DDL
+ * header (composite FK per F99, hard-DELETE lifecycle, by-user index).
+ */
+export const SPACE_MEMBERS_DDL = `
+  CREATE TABLE space_members (
+    workspace_id TEXT    NOT NULL,
+    space_id     TEXT    NOT NULL,
+    user_id      TEXT    NOT NULL,
+    role         TEXT    NOT NULL CHECK (role IN ('owner','edit','comment','view')),
+    created_at   BIGINT NOT NULL,
+    updated_at   BIGINT NOT NULL,
+    PRIMARY KEY (workspace_id, space_id, user_id),
+    FOREIGN KEY (space_id, workspace_id) REFERENCES spaces(id, workspace_id)
+  );
+  CREATE INDEX space_members_by_user
+    ON space_members(workspace_id, user_id);
+` as const;
+
+/**
+ * \`grants\` — the single polymorphic ACL table (ADR 0040 fork #3).
+ * Parallel to the SQLite DDL; see \`sqlite-ddl.ts\` GRANTS_DDL header
+ * for why there is deliberately NO composite FK (H6) and which named
+ * controls compensate (edge-unique index, the two lookup indexes, the
+ * Step-6 fuzzer, the Step-8 handler check). \`is_guest\` stays
+ * INTEGER 0/1 in BOTH dialects (not BOOLEAN) so the Kysely column type
+ * is one cross-backend \`number\` — the same reasoning as epoch-ms
+ * timestamps, applied to a flag.
+ */
+export const GRANTS_DDL = `
+  CREATE TABLE grants (
+    id            TEXT PRIMARY KEY,
+    workspace_id  TEXT    NOT NULL,
+    resource_kind TEXT    NOT NULL CHECK (resource_kind IN ('space','doc')),
+    resource_id   TEXT    NOT NULL,
+    subject_kind  TEXT    NOT NULL CHECK (subject_kind IN ('user','agent')),
+    subject_id    TEXT    NOT NULL,
+    role          TEXT    NOT NULL CHECK (role IN ('owner','edit','comment','view')),
+    is_guest      INTEGER NOT NULL CHECK (is_guest IN (0,1)),
+    created_by    TEXT    NOT NULL,
+    created_at    BIGINT NOT NULL
+  );
+  CREATE UNIQUE INDEX grants_edge_unique
+    ON grants(workspace_id, resource_kind, resource_id, subject_kind, subject_id);
+  CREATE INDEX grants_by_subject
+    ON grants(workspace_id, subject_kind, subject_id, is_guest);
+  CREATE INDEX grants_by_resource
+    ON grants(workspace_id, resource_kind, resource_id);
+` as const;
+
+/**
  * Full DDL applied at driver bootstrap. Same concatenation order as
- * the SQLite parallel — `docs` must precede the child tables that FK
- * into it. Other orderings are free.
+ * the SQLite parallel — \`docs\` must precede the child tables that FK
+ * into it, and \`spaces\` precedes \`space_members\`. Other orderings
+ * are free.
  */
 export const FULL_DDL = [
   WORKSPACES_DDL,
@@ -217,4 +301,7 @@ export const FULL_DDL = [
   WORKSPACE_MEMBERS_DDL,
   AUDIT_EVENTS_DDL,
   OUTBOX_DDL,
+  SPACES_DDL,
+  SPACE_MEMBERS_DDL,
+  GRANTS_DDL,
 ].join("\n");

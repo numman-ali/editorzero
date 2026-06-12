@@ -27,7 +27,8 @@ import { FULL_DDL as SQLITE_FULL_DDL } from "../../src/drivers/sqlite-ddl";
 import type { SystemDatabase } from "../../src/schema";
 import type { TenantScopedDb } from "../../src/tenant";
 
-// biome-ignore lint/complexity/useLiteralKeys: tsconfig's `noPropertyAccessFromIndexSignature` (TS4111) forbids `process.env.FOO`; bracket access is the only form both tools accept.
+// Bracket access: tsconfig's `noPropertyAccessFromIndexSignature` (TS4111)
+// forbids `process.env.FOO`.
 export const SKIP_POSTGRES = process.env["EDITORZERO_SKIP_POSTGRES_TESTS"] === "1";
 
 /**
@@ -60,6 +61,9 @@ export interface Backend {
 }
 
 const DROP_TABLES_SQL = `
+  DROP TABLE IF EXISTS grants;
+  DROP TABLE IF EXISTS space_members;
+  DROP TABLE IF EXISTS spaces;
   DROP TABLE IF EXISTS outbox;
   DROP TABLE IF EXISTS audit_events;
   DROP TABLE IF EXISTS doc_counters;

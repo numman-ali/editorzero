@@ -110,6 +110,29 @@ export type GrantRole = (typeof GRANT_ROLES)[number];
 export const ACCESS_MODES = ["space", "private"] as const;
 export type AccessMode = (typeof ACCESS_MODES)[number];
 
+/**
+ * Space kind (ADR 0040 Model B): `"team"` = a shared membership
+ * boundary; `"personal"` = one member's private-drafts home
+ * (`spaces.owner_user_id` non-null iff personal — the DDL CHECK ties
+ * the two). One personal space per member, seeded by the signup hook
+ * (Step 8); enforced by the partial unique index on
+ * `(workspace_id, owner_user_id) WHERE kind = 'personal'`.
+ */
+export const SPACE_KINDS = ["team", "personal"] as const;
+export type SpaceKind = (typeof SPACE_KINDS)[number];
+
+/**
+ * Space type — the membership/visibility posture (ADR 0040 Model B's
+ * "default baseline (Open/Closed/Private)"): `"open"` = every Org
+ * member implicitly reads at the Space's `baseline_access` role
+ * without a membership row; `"closed"` = visible in the directory,
+ * access requires membership; `"private"` = membership-only and
+ * unlisted. The Step-6 resolver is the single consumer of these
+ * semantics (invariant 5 — no surface re-derives them).
+ */
+export const SPACE_TYPES = ["open", "closed", "private"] as const;
+export type SpaceType = (typeof SPACE_TYPES)[number];
+
 // ── Queue name (§3.14) ─────────────────────────────────────────────────────
 
 export const QUEUE_NAMES = [

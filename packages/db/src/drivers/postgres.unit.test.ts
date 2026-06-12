@@ -48,7 +48,8 @@ import { FULL_DDL } from "./postgres-ddl";
  */
 const POSTGRES_IMAGE = "postgres:17.4-bookworm";
 
-// biome-ignore lint/complexity/useLiteralKeys: tsconfig's `noPropertyAccessFromIndexSignature` (TS4111) forbids `process.env.FOO`; bracket access is the only form both tools accept.
+// Bracket access: tsconfig's `noPropertyAccessFromIndexSignature` (TS4111)
+// forbids `process.env.FOO`.
 const SKIP = process.env["EDITORZERO_SKIP_POSTGRES_TESTS"] === "1";
 
 let container: StartedPostgreSqlContainer | undefined;
@@ -73,7 +74,13 @@ beforeEach(async () => {
   if (driver === undefined) return;
   // Wipe + reapply the full schema. Order matters: child tables before
   // their parents (FK targets). `IF EXISTS` keeps the first run clean.
+  // Kept in sync with `test/integration/backends.ts` DROP_TABLES_SQL
+  // (plus this file's t_* scratch tables); a forgotten table fails
+  // loudly here as `relation … already exists` on the FULL_DDL reapply.
   await driver.exec(`
+    DROP TABLE IF EXISTS grants;
+    DROP TABLE IF EXISTS space_members;
+    DROP TABLE IF EXISTS spaces;
     DROP TABLE IF EXISTS outbox;
     DROP TABLE IF EXISTS audit_events;
     DROP TABLE IF EXISTS doc_counters;

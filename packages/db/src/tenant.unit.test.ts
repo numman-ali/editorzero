@@ -13,7 +13,7 @@
  * AST surgery is the implementation; the invariant is the output.
  */
 
-import { DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { DocId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
 import { sql } from "kysely";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -29,6 +29,11 @@ const BOB = UserId("018f0000-0000-7000-8000-0000000000b1");
 const DOC_A1 = DocId("018f0000-0000-7000-8000-0000000000d1");
 const DOC_A2 = DocId("018f0000-0000-7000-8000-0000000000d2");
 const DOC_B1 = DocId("018f0000-0000-7000-8000-0000000000d3");
+
+const SPACE_A = SpaceId("018f0000-0000-7000-8000-0000000000e1");
+const SPACE_B = SpaceId("018f0000-0000-7000-8000-0000000000e2");
+const GRANT_A = GrantId("018f0000-0000-7000-8000-0000000000f1");
+const GRANT_B = GrantId("018f0000-0000-7000-8000-0000000000f2");
 
 // ── Fixture harness ──────────────────────────────────────────────────────
 //
@@ -406,11 +411,12 @@ describe("WorkspaceScopingPlugin — join awareness (F87)", () => {
 // ── New tenant-scoped tables (F31 write-path schema) ─────────────────────
 //
 // `doc_snapshots`, `doc_updates`, `audit_events` joined `docs` in
-// `TENANT_SCOPED_TABLES` as part of the P3.5 schema expansion. The
-// plugin enforcement is table-blind — it keys off membership in that
-// list — so these tests prove the list extension took effect, not
-// that per-table behaviour is novel. One assertion per table: SELECT
-// from workspace A returns zero workspace-B rows.
+// `TENANT_SCOPED_TABLES` as part of the P3.5 schema expansion;
+// `spaces`, `space_members`, `grants` joined in the ADR 0040 Step-4
+// slice. The plugin enforcement is table-blind — it keys off
+// membership in that list — so these tests prove the list extension
+// took effect, not that per-table behaviour is novel. One assertion
+// per table: SELECT from workspace A returns zero workspace-B rows.
 
 describe("WorkspaceScopingPlugin — new tenant-scoped tables", () => {
   it("doc_snapshots SELECT is scoped to the caller's workspace", async () => {
@@ -537,6 +543,123 @@ describe("WorkspaceScopingPlugin — new tenant-scoped tables", () => {
 
     const seenFromA = await a.selectFrom("audit_events").selectAll().execute();
     expect(seenFromA.map((r) => r.id)).toEqual(["aud-a1"]);
+  });
+
+  function seedSpace(id: SpaceId, workspace_id: WorkspaceId, created_by: UserId) {
+    return {
+      id,
+      workspace_id,
+      kind: "team" as const,
+      type: "open" as const,
+      owner_user_id: null,
+      name: "General",
+      slug: id,
+      baseline_access: "edit" as const,
+      created_by,
+      created_at: 1,
+      updated_at: 1,
+      deleted_at: null,
+    };
+  }
+
+  it("spaces SELECT is scoped to the caller's workspace", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+
+    await a
+      .insertInto("spaces")
+      .values(seedSpace(SPACE_A, WORKSPACE_A, ALICE))
+      .execute();
+    await b
+      .insertInto("spaces")
+      .values(seedSpace(SPACE_B, WORKSPACE_B, BOB))
+      .execute();
+
+    const seenFromA = await a.selectFrom("spaces").selectAll().execute();
+    expect(seenFromA.map((r) => r.id)).toEqual([SPACE_A]);
+  });
+
+  it("space_members SELECT is scoped to the caller's workspace", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+
+    // `spaces` seed first — composite FK from `space_members(space_id, workspace_id)`.
+    await a
+      .insertInto("spaces")
+      .values(seedSpace(SPACE_A, WORKSPACE_A, ALICE))
+      .execute();
+    await b
+      .insertInto("spaces")
+      .values(seedSpace(SPACE_B, WORKSPACE_B, BOB))
+      .execute();
+
+    await a
+      .insertInto("space_members")
+      .values({
+        workspace_id: WORKSPACE_A,
+        space_id: SPACE_A,
+        user_id: ALICE,
+        role: "owner",
+        created_at: 1,
+        updated_at: 1,
+      })
+      .execute();
+    await b
+      .insertInto("space_members")
+      .values({
+        workspace_id: WORKSPACE_B,
+        space_id: SPACE_B,
+        user_id: BOB,
+        role: "owner",
+        created_at: 1,
+        updated_at: 1,
+      })
+      .execute();
+
+    const seenFromA = await a.selectFrom("space_members").selectAll().execute();
+    expect(seenFromA.map((r) => r.user_id)).toEqual([ALICE]);
+  });
+
+  it("grants SELECT is scoped to the caller's workspace", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+
+    // No parent seed: `grants` carries no FK by design (ADR 0040 H6) —
+    // the polymorphic `resource_id` is uncheckable at the DDL layer, so
+    // tenant scoping on the table itself is the floor under test here.
+    await a
+      .insertInto("grants")
+      .values({
+        id: GRANT_A,
+        workspace_id: WORKSPACE_A,
+        resource_kind: "doc",
+        resource_id: DOC_A1,
+        subject_kind: "user",
+        subject_id: BOB,
+        role: "view",
+        is_guest: 1,
+        created_by: ALICE,
+        created_at: 1,
+      })
+      .execute();
+    await b
+      .insertInto("grants")
+      .values({
+        id: GRANT_B,
+        workspace_id: WORKSPACE_B,
+        resource_kind: "doc",
+        resource_id: DOC_B1,
+        subject_kind: "user",
+        subject_id: ALICE,
+        role: "view",
+        is_guest: 1,
+        created_by: BOB,
+        created_at: 1,
+      })
+      .execute();
+
+    const seenFromA = await a.selectFrom("grants").selectAll().execute();
+    expect(seenFromA.map((r) => r.id)).toEqual([GRANT_A]);
   });
 });
 

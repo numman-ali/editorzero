@@ -64,6 +64,17 @@
  *       from); this fails the commit when a new server error class drifts the
  *       two apart. `unauthenticated` + the untyped 5xx family are not typed
  *       client arms and are excluded from both sides by construction.
+ *  [11] schema.ts ↔ DDL ↔ TENANT_SCOPE_COLUMNS three-way parity — the
+ *       `Database`/`SystemDatabase` table interfaces in `packages/db/src/
+ *       schema.ts` must declare the same tables and columns as
+ *       `sqlite-ddl.ts` (Check 7 pins sqlite ↔ postgres, so this is
+ *       transitive to both dialects), and every `TENANT_SCOPE_COLUMNS`
+ *       scope column must exist in its table's DDL. Kysely trusts the
+ *       interface blindly — a phantom interface column reads `undefined`,
+ *       a missing one hides a real NOT NULL column until runtime — and a
+ *       phantom scope column would make every plugin-scoped query throw.
+ *       (The fourth leg — `Database` keys ↔ `TENANT_SCOPE_COLUMNS` keys —
+ *       is compile-time-enforced by the `satisfies` on the map itself.)
  *
  * Deferred checks (no-ops today; activate when the real comparison is
  * implemented, not when a source file merely exists):
@@ -1193,6 +1204,177 @@ function parseServerErrorEnvelopes(src: string): string[] {
   return out;
 }
 
+// ── Check 11 — schema.ts ↔ DDL ↔ TENANT_SCOPE_COLUMNS three-way parity ─────
+//
+// Check 7 proves the two dialect DDL files agree with *each other*;
+// nothing yet proved the TypeScript schema agrees with the DDL it
+// fronts. ADR 0040 Step 4 is the first bulk table addition since P3.5
+// — three new tables across three lockstep files in one commit — and
+// the drift classes are silent:
+//   - a table on `Database`/`SystemDatabase` without DDL (typed-
+//     reachable, every query throws at runtime), or DDL without the
+//     interface (dead schema no handler can name);
+//   - a column in one but not the other — Kysely trusts the interface
+//     blindly: a phantom interface column selects as `undefined`; an
+//     interface missing a NOT NULL DDL column makes inserts fail only
+//     at runtime;
+//   - a `TENANT_SCOPE_COLUMNS` value naming a column the table's DDL
+//     doesn't have — the scoping plugin would emit predicates against
+//     a phantom column and every scoped query would throw.
+// Only sqlite-ddl.ts is compared: Check 7 already pins sqlite ↔
+// postgres, so schema ↔ sqlite parity is transitive to both dialects.
+// The fourth leg — `Database` keys ↔ `TENANT_SCOPE_COLUMNS` keys — is
+// enforced at compile time by the `satisfies Record<keyof Database, …>`
+// on the map declaration (schema.ts); tsc is the stronger gate there.
+//
+// Like Check 7 this deliberately ignores types: the interface-to-DDL
+// type mapping (branded TEXT, epoch-ms INTEGER/BIGINT, BLOB/BYTEA ↔
+// Uint8Array) is many-to-many by design and would make the check noisy
+// for every schema touch.
+
+async function checkSchemaDdlTenantParity(report: Report): Promise<void> {
+  const schemaPath = join(ROOT, "packages", "db", "src", "schema.ts");
+  const sqlitePath = join(ROOT, "packages", "db", "src", "drivers", "sqlite-ddl.ts");
+  const schemaSrcRaw = await readIfExists(schemaPath);
+  const sqliteSrc = await readIfExists(sqlitePath);
+  if (schemaSrcRaw === null || sqliteSrc === null) {
+    report.add({
+      severity: "warn",
+      message: "schema.ts or sqlite-ddl.ts missing — skipping schema↔DDL parity check",
+    });
+    return;
+  }
+  const schemaSrc = stripComments(schemaSrcRaw);
+
+  // table name → interface name, from the `Database` + `SystemDatabase`
+  // bodies (`readonly docs: DocsTable;`). SystemDatabase extends Database,
+  // so the union of both bodies is the full table set.
+  const tableInterfaces = new Map<string, string>();
+  for (const ifaceName of ["Database", "SystemDatabase"]) {
+    const body = interfaceBody(schemaSrc, ifaceName);
+    if (body === null) {
+      report.add({
+        severity: "error",
+        file: schemaPath,
+        message: `schema↔DDL parity: \`interface ${ifaceName}\` not found in schema.ts — check the parser if it was renamed`,
+      });
+      continue;
+    }
+    for (const { match } of findMatches(body, /readonly\s+(\w+)\s*:\s*(\w+)\s*;/g)) {
+      if (match[1] !== undefined && match[2] !== undefined) {
+        tableInterfaces.set(match[1], match[2]);
+      }
+    }
+  }
+  if (tableInterfaces.size === 0) return; // parse errors already reported
+
+  const ddl = parseDdl(sqliteSrc);
+
+  // Leg A — same table set, both directions.
+  for (const table of tableInterfaces.keys()) {
+    if (!ddl.has(table)) {
+      report.add({
+        severity: "error",
+        file: sqlitePath,
+        message: `schema↔DDL parity: table \`${table}\` is on Database/SystemDatabase but has no CREATE TABLE in sqlite-ddl.ts`,
+      });
+    }
+  }
+  for (const table of ddl.keys()) {
+    if (!tableInterfaces.has(table)) {
+      report.add({
+        severity: "error",
+        file: schemaPath,
+        message: `schema↔DDL parity: table \`${table}\` has DDL but no entry on Database/SystemDatabase in schema.ts`,
+      });
+    }
+  }
+
+  // Leg B — per-table column parity, both directions.
+  for (const [table, ifaceName] of tableInterfaces) {
+    const ddlTable = ddl.get(table);
+    if (ddlTable === undefined) continue; // Leg A reported it
+    const body = interfaceBody(schemaSrc, ifaceName);
+    if (body === null) {
+      report.add({
+        severity: "error",
+        file: schemaPath,
+        message: `schema↔DDL parity: \`interface ${ifaceName}\` (table \`${table}\`) not found in schema.ts`,
+      });
+      continue;
+    }
+    const ifaceCols = new Set<string>();
+    for (const { match } of findMatches(body, /readonly\s+(\w+)\s*:/g)) {
+      if (match[1] !== undefined) ifaceCols.add(match[1]);
+    }
+    for (const col of ifaceCols) {
+      if (!ddlTable.columns.has(col)) {
+        report.add({
+          severity: "error",
+          file: sqlitePath,
+          message: `schema↔DDL parity: \`${ifaceName}.${col}\` declared in schema.ts but \`${table}\` DDL has no such column`,
+        });
+      }
+    }
+    for (const col of ddlTable.columns.keys()) {
+      if (!ifaceCols.has(col)) {
+        report.add({
+          severity: "error",
+          file: schemaPath,
+          message: `schema↔DDL parity: \`${table}.${col}\` exists in DDL but \`${ifaceName}\` does not declare it`,
+        });
+      }
+    }
+  }
+
+  // Leg C — every TENANT_SCOPE_COLUMNS value names a real DDL column.
+  const tscMatch = /export\s+const\s+TENANT_SCOPE_COLUMNS\s*=\s*\{([\s\S]*?)\}\s*as\s+const/.exec(
+    schemaSrc,
+  );
+  if (!tscMatch?.[1]) {
+    report.add({
+      severity: "error",
+      file: schemaPath,
+      message:
+        "schema↔DDL parity: TENANT_SCOPE_COLUMNS not parseable — expected `export const TENANT_SCOPE_COLUMNS = { … } as const`",
+    });
+    return;
+  }
+  for (const { match } of findMatches(tscMatch[1], /(\w+)\s*:\s*"(\w+)"/g)) {
+    const table = match[1];
+    const scopeCol = match[2];
+    if (table === undefined || scopeCol === undefined) continue;
+    const ddlTable = ddl.get(table);
+    if (ddlTable === undefined) {
+      report.add({
+        severity: "error",
+        file: schemaPath,
+        message: `schema↔DDL parity: TENANT_SCOPE_COLUMNS names table \`${table}\` which has no DDL`,
+      });
+      continue;
+    }
+    if (!ddlTable.columns.has(scopeCol)) {
+      report.add({
+        severity: "error",
+        file: schemaPath,
+        message: `schema↔DDL parity: TENANT_SCOPE_COLUMNS scopes \`${table}\` on \`${scopeCol}\`, but the DDL has no such column — the plugin would emit predicates on a phantom column`,
+      });
+    }
+  }
+}
+
+/**
+ * Extract the body of `export interface <name> … { … }`. Sound only
+ * after `stripComments` (interface bodies here are flat field lists —
+ * no nested braces in code; a `}` inside a doc comment would otherwise
+ * truncate the match).
+ */
+function interfaceBody(src: string, name: string): string | null {
+  const re = new RegExp(`export\\s+interface\\s+${name}\\b[^{]*\\{([\\s\\S]*?)\\}`);
+  const m = re.exec(src);
+  return m?.[1] ?? null;
+}
+
 // ── Entrypoint ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -1207,6 +1389,7 @@ async function main(): Promise<void> {
     checkApiClientMaterializedType(report),
     checkDesignTokenCopies(report),
     checkApiErrorCodes(report),
+    checkSchemaDdlTenantParity(report),
   ]);
   report.print();
   if (report.errorCount > 0) {

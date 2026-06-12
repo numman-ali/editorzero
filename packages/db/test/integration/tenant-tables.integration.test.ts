@@ -6,8 +6,9 @@
  * instruments the compiled SQL on both dialects against the `docs` table.
  * This file extends the floor to every member of `TENANT_SCOPE_COLUMNS`
  * (`collections`, `docs`, `doc_snapshots`, `doc_updates`, `audit_events`,
- * `workspace_members`; `workspaces` is self-scoped on `id` and covered by
- * the dedicated WorkspaceScopingPlugin self-scope suite)
+ * `workspace_members`, `spaces`, `space_members`, `grants`; `workspaces`
+ * is self-scoped on `id` and covered by the dedicated
+ * WorkspaceScopingPlugin self-scope suite)
  * — the plugin is table-blind by design (it keys off list membership),
  * so the invariant we care about is not "does it work on table X" but
  * "does it actually run against table X on Postgres". `tenant.unit.test.ts`
@@ -20,7 +21,15 @@
  * `doc_updates` depend on `docs.id`; `audit_events` does not).
  */
 
-import { CapabilityId, CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import {
+  CapabilityId,
+  CollectionId,
+  DocId,
+  GrantId,
+  SpaceId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { TENANT_SCOPE_COLUMNS } from "../../src/schema";
@@ -39,6 +48,35 @@ const DOC_A = DocId("018f0000-0000-7000-8000-0000000000d1");
 const DOC_B = DocId("018f0000-0000-7000-8000-0000000000d2");
 const COLL_A = CollectionId("018f0000-0000-7000-8000-0000000000c1");
 const COLL_B = CollectionId("018f0000-0000-7000-8000-0000000000c2");
+const SPACE_A = SpaceId("018f0000-0000-7000-8000-0000000000e1");
+const SPACE_B = SpaceId("018f0000-0000-7000-8000-0000000000e2");
+const GRANT_A = GrantId("018f0000-0000-7000-8000-0000000000f1");
+const GRANT_B = GrantId("018f0000-0000-7000-8000-0000000000f2");
+
+function seedSpace(id: SpaceId, workspace_id: WorkspaceId, created_by: UserId) {
+  return {
+    id,
+    workspace_id,
+    kind: "team" as const,
+    type: "open" as const,
+    owner_user_id: null,
+    name: "space",
+    slug: id,
+    baseline_access: "view" as const,
+    created_by,
+    created_at: 1,
+    updated_at: 1,
+    deleted_at: null,
+  };
+}
+
+async function seedSpacesBothWorkspaces(backend: Backend) {
+  await backend.driver
+    .system()
+    .insertInto("spaces")
+    .values([seedSpace(SPACE_A, WORKSPACE_A, ALICE), seedSpace(SPACE_B, WORKSPACE_B, BOB)])
+    .execute();
+}
 
 function seedDoc(id: DocId, workspace_id: WorkspaceId, created_by: UserId) {
   return {
@@ -102,6 +140,9 @@ describe.each(backends)("tenant-table isolation — $name", ({ setup }) => {
         "doc_snapshots",
         "doc_updates",
         "docs",
+        "grants",
+        "space_members",
+        "spaces",
         "workspace_members",
         "workspaces",
       ].sort(),
@@ -302,5 +343,84 @@ describe.each(backends)("tenant-table isolation — $name", ({ setup }) => {
     const a = backend.driver.scoped(WORKSPACE_A);
     const seen = await a.selectFrom("workspace_members").select("user_id").execute();
     expect(seen.map((r) => r.user_id)).toEqual([ALICE]);
+  });
+
+  it("spaces: workspace-A handle returns only workspace-A rows", async () => {
+    await seedSpacesBothWorkspaces(backend);
+    const a = backend.driver.scoped(WORKSPACE_A);
+    const seen = await a.selectFrom("spaces").select("id").execute();
+    expect(seen.map((r) => r.id)).toEqual([SPACE_A]);
+  });
+
+  it("space_members: workspace-A handle returns only workspace-A rows", async () => {
+    // Composite FK: members need their parent spaces in place first.
+    await seedSpacesBothWorkspaces(backend);
+    await backend.driver
+      .system()
+      .insertInto("space_members")
+      .values([
+        {
+          workspace_id: WORKSPACE_A,
+          space_id: SPACE_A,
+          user_id: ALICE,
+          role: "owner",
+          created_at: 1,
+          updated_at: 1,
+        },
+        {
+          workspace_id: WORKSPACE_B,
+          space_id: SPACE_B,
+          user_id: BOB,
+          role: "owner",
+          created_at: 1,
+          updated_at: 1,
+        },
+      ])
+      .execute();
+
+    const a = backend.driver.scoped(WORKSPACE_A);
+    const seen = await a.selectFrom("space_members").select("user_id").execute();
+    expect(seen.map((r) => r.user_id)).toEqual([ALICE]);
+  });
+
+  it("grants: workspace-A handle returns only workspace-A rows", async () => {
+    // No FK by design (H6) — grants seed standalone; the resource ids
+    // reference docs that don't exist, which is exactly the latitude
+    // the polymorphic table has at the SQL layer (the compensating
+    // controls are the resolver fuzzer + handler check, not a FK).
+    await backend.driver
+      .system()
+      .insertInto("grants")
+      .values([
+        {
+          id: GRANT_A,
+          workspace_id: WORKSPACE_A,
+          resource_kind: "doc",
+          resource_id: DOC_A,
+          subject_kind: "user",
+          subject_id: ALICE,
+          role: "view",
+          is_guest: 0,
+          created_by: ALICE,
+          created_at: 1,
+        },
+        {
+          id: GRANT_B,
+          workspace_id: WORKSPACE_B,
+          resource_kind: "doc",
+          resource_id: DOC_B,
+          subject_kind: "user",
+          subject_id: BOB,
+          role: "view",
+          is_guest: 1,
+          created_by: BOB,
+          created_at: 1,
+        },
+      ])
+      .execute();
+
+    const a = backend.driver.scoped(WORKSPACE_A);
+    const seen = await a.selectFrom("grants").select("id").execute();
+    expect(seen.map((r) => r.id)).toEqual([GRANT_A]);
   });
 });

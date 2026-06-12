@@ -135,6 +135,7 @@ export const COLLECTIONS_DDL = `
     id           TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     parent_id    TEXT,
+    space_id     TEXT,
     title        TEXT NOT NULL,
     slug         TEXT NOT NULL,
     order_key    TEXT NOT NULL,
@@ -304,12 +305,118 @@ export const OUTBOX_DDL = `
 ` as const;
 
 /**
+ * \`spaces\` — the ADR 0040 Model B membership ceiling. Constraints,
+ * in order of intent:
+ *  - \`UNIQUE (id, workspace_id)\` — composite-FK target for
+ *    \`space_members\` (F99 tenant-integrity pattern).
+ *  - the kind↔owner CHECK — a \`personal\` space carries its owner,
+ *    a \`team\` space carries NULL; no third state is representable.
+ *  - \`baseline_access\` excludes \`'owner'\` — it is the implicit role
+ *    an \`open\` space confers on non-member Org members; an implicit
+ *    everyone-is-owner is never valid.
+ *  - \`spaces_slug_unique\` — live spaces are unique by slug per
+ *    workspace (soft-deleted rows excluded, same posture as
+ *    collections).
+ *  - \`spaces_personal_unique\` — at most ONE live personal space per
+ *    member (the Step-8 signup seeding relies on this being a
+ *    constraint, not a convention).
+ */
+export const SPACES_DDL = `
+  CREATE TABLE spaces (
+    id              TEXT PRIMARY KEY,
+    workspace_id    TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('team','personal')),
+    type            TEXT NOT NULL CHECK (type IN ('open','closed','private')),
+    owner_user_id   TEXT,
+    name            TEXT NOT NULL,
+    slug            TEXT NOT NULL,
+    baseline_access TEXT NOT NULL CHECK (baseline_access IN ('edit','comment','view')),
+    created_by      TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    deleted_at      INTEGER,
+    UNIQUE (id, workspace_id),
+    CHECK ((kind = 'personal') = (owner_user_id IS NOT NULL))
+  );
+  CREATE UNIQUE INDEX spaces_slug_unique
+    ON spaces(workspace_id, slug)
+    WHERE deleted_at IS NULL;
+  CREATE UNIQUE INDEX spaces_personal_unique
+    ON spaces(workspace_id, owner_user_id)
+    WHERE kind = 'personal' AND deleted_at IS NULL;
+` as const;
+
+/**
+ * \`space_members\` — Space membership on the GRANT_ROLES ladder (the
+ * ceiling rule compares membership roles to grant roles, so they share
+ * one vocabulary — ADR 0040). Composite FK to \`spaces(id,
+ * workspace_id)\` makes a wrong-tenant \`space_id\` unrepresentable
+ * (F99). Hard-DELETE membership (no \`deleted_at\`) — the removal
+ * effect carries the preimage. The \`(workspace_id, user_id)\` index
+ * serves the "which Spaces am I in" read the Step-6 resolver runs on
+ * every Space-scoped list.
+ */
+export const SPACE_MEMBERS_DDL = `
+  CREATE TABLE space_members (
+    workspace_id TEXT    NOT NULL,
+    space_id     TEXT    NOT NULL,
+    user_id      TEXT    NOT NULL,
+    role         TEXT    NOT NULL CHECK (role IN ('owner','edit','comment','view')),
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, space_id, user_id),
+    FOREIGN KEY (space_id, workspace_id) REFERENCES spaces(id, workspace_id)
+  );
+  CREATE INDEX space_members_by_user
+    ON space_members(workspace_id, user_id);
+` as const;
+
+/**
+ * \`grants\` — the single polymorphic ACL table (ADR 0040 fork #3).
+ * Deliberately NO composite FK (H6): \`resource_id\` is polymorphic
+ * over \`resource_kind ∈ {space, doc}\` so no per-kind FK can exist.
+ * The named compensating controls (binding, not advisory):
+ *  - \`grants_edge_unique\` — one row per (resource, subject) edge;
+ *    a re-grant is an UPDATE-shaped replace, never a duplicate row.
+ *  - \`grants_by_subject\` — the "what can this principal see" path
+ *    (the agent-speed read; \`is_guest\` included so guest enumeration
+ *    is index-only).
+ *  - \`grants_by_resource\` — the "who can see X" path.
+ *  - The Step-6 isolation fuzzer (resource_id resolves within
+ *    workspace_id) + the Step-8 handler same-tx existence check.
+ * Hard-DELETE lifecycle (H1): no \`deleted_at\`/\`updated_at\`; revoke
+ * removes the row, the audit effect carries the preimage, and rows
+ * persist (inert) through their resource's soft-delete so restore
+ * recovers the exact grant set.
+ */
+export const GRANTS_DDL = `
+  CREATE TABLE grants (
+    id            TEXT PRIMARY KEY,
+    workspace_id  TEXT    NOT NULL,
+    resource_kind TEXT    NOT NULL CHECK (resource_kind IN ('space','doc')),
+    resource_id   TEXT    NOT NULL,
+    subject_kind  TEXT    NOT NULL CHECK (subject_kind IN ('user','agent')),
+    subject_id    TEXT    NOT NULL,
+    role          TEXT    NOT NULL CHECK (role IN ('owner','edit','comment','view')),
+    is_guest      INTEGER NOT NULL CHECK (is_guest IN (0,1)),
+    created_by    TEXT    NOT NULL,
+    created_at    INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX grants_edge_unique
+    ON grants(workspace_id, resource_kind, resource_id, subject_kind, subject_id);
+  CREATE INDEX grants_by_subject
+    ON grants(workspace_id, subject_kind, subject_id, is_guest);
+  CREATE INDEX grants_by_resource
+    ON grants(workspace_id, resource_kind, resource_id);
+` as const;
+
+/**
  * The full DDL applied at driver bootstrap. Concatenation order
  * matters only for FK references — `docs` must come before
- * `doc_snapshots` / `doc_updates` / `doc_counters`. `collections` is
- * self-referential and has no FK dependency on `docs`, so either
- * order works; listing it first alongside docs keeps the document-
- * domain tables grouped at the top.
+ * `doc_snapshots` / `doc_updates` / `doc_counters`, and `spaces`
+ * before `space_members`. `collections` is self-referential and has
+ * no FK dependency on `docs`, so either order works; listing it first
+ * alongside docs keeps the document-domain tables grouped at the top.
  */
 export const FULL_DDL = [
   WORKSPACES_DDL,
@@ -321,4 +428,7 @@ export const FULL_DDL = [
   WORKSPACE_MEMBERS_DDL,
   AUDIT_EVENTS_DDL,
   OUTBOX_DDL,
+  SPACES_DDL,
+  SPACE_MEMBERS_DDL,
+  GRANTS_DDL,
 ].join("\n");
