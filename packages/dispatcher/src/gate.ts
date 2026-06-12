@@ -71,6 +71,7 @@ const ROLE_SCOPES: Readonly<Record<Role, readonly Scope[]>> = {
     "workspace:admin",
     "permission:grant",
     "permission:revoke",
+    "space:manage",
     "agent:create",
     "agent:revoke",
     "admin",
@@ -90,16 +91,20 @@ const ROLE_SCOPES: Readonly<Record<Role, readonly Scope[]>> = {
     "workspace:admin",
     "permission:grant",
     "permission:revoke",
+    "space:manage",
     "agent:create",
     "agent:revoke",
   ],
-  // `permission:grant` / `permission:revoke` on member is deliberately
-  // coarse (ADR 0040 Step 8): the L1 scope only says "this verb exists
-  // for you"; the REAL bound is the granting-authority ladder inside
-  // the handler (`acl/ceiling.ts` — doc owner-tier / space owner-tier /
-  // admin backstop). Same layering as doc:write + the placement gate:
-  // members create docs everywhere the ceiling lets them, and members
-  // share exactly the resources they have owner-tier standing on.
+  // `permission:grant` / `permission:revoke` / `space:manage` on member
+  // are deliberately coarse (ADR 0040 Step 8): the L1 scope only says
+  // "this verb exists for you"; the REAL bound is the authority ladder
+  // inside the handler (`acl/ceiling.ts` — doc owner-tier / space
+  // owner-tier / admin backstop). Same layering as doc:write + the
+  // placement gate: members create docs everywhere the ceiling lets
+  // them, share exactly the resources they have owner-tier standing
+  // on, and manage exactly the spaces they administer. (`space.create`
+  // alone requires `workspace:admin` — creation shapes the org and has
+  // no existing resource for the ladder to bound.)
   member: [
     "doc:read",
     "doc:write",
@@ -112,6 +117,7 @@ const ROLE_SCOPES: Readonly<Record<Role, readonly Scope[]>> = {
     "workspace:read",
     "permission:grant",
     "permission:revoke",
+    "space:manage",
   ],
   guest: ["doc:read", "block:read", "comment:read", "comment:write", "workspace:read"],
 };

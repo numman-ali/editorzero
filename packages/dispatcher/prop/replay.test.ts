@@ -92,6 +92,8 @@ import {
   permissionGrant,
   permissionRevoke,
   registerCapability,
+  spaceCreate,
+  spaceUpdate,
   workspaceMemberAdd,
   workspaceMemberRemove,
   workspaceMemberUpdateRole,
@@ -469,6 +471,8 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       registerCapability(docRestore),
       registerCapability(permissionGrant),
       registerCapability(permissionRevoke),
+      registerCapability(spaceCreate),
+      registerCapability(spaceUpdate),
     ]);
 
     const dispatcher = createDispatcher({
@@ -645,6 +649,22 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       role: "view",
     });
 
+    // ── Spaces (ADR 0040 Step 8 slice 2) — the first `space.create` /
+    //    `space.update` emitters. The walk's caller is the workspace
+    //    OWNER: `space.create` sits on `workspace:admin`, and
+    //    `space.update` reaches the team space via the admin backstop.
+    const s1 = readIdField(
+      await step(spaceCreate.id, { name: "Walk Space", space_type: "closed" }),
+      "space_id",
+    );
+    // Patch two fields at once; replay applies the patch's post-state
+    // values (the reducer merges, never re-derives).
+    await step(spaceUpdate.id, {
+      space_id: s1,
+      name: "Walk Space v2",
+      space_type: "open",
+    });
+
     await step(workspaceMemberRemove.id, { user_id: SECOND_USER });
 
     // ── Deferred-kind guard + coverage. Every effect a shipped capability
@@ -678,6 +698,8 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       "doc.restore",
       "acl.grant",
       "acl.revoke",
+      "space.create",
+      "space.update",
     ];
     for (const kind of EXPECTED_STATE_KINDS) {
       expect(emittedKinds.has(kind)).toBe(true);

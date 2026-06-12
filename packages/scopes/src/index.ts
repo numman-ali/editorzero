@@ -23,6 +23,7 @@ export const SCOPES = [
   "workspace:admin",
   "permission:grant",
   "permission:revoke",
+  "space:manage",
   "agent:create",
   "agent:revoke",
   "admin",
@@ -132,6 +133,16 @@ export type SpaceKind = (typeof SPACE_KINDS)[number];
  */
 export const SPACE_TYPES = ["open", "closed", "private"] as const;
 export type SpaceType = (typeof SPACE_TYPES)[number];
+
+/**
+ * Baseline-access roles — the GRANT_ROLES subset a Space may confer
+ * implicitly on Org members (`spaces.baseline_access` CHECK). `owner`
+ * is deliberately excluded: an implicit everyone-is-owner baseline is
+ * never valid (the DDL CHECK and this array must agree — Check 11
+ * covers the column, this is the TS-side source for schemas).
+ */
+export const BASELINE_ACCESS_ROLES = ["edit", "comment", "view"] as const;
+export type BaselineAccessRole = (typeof BASELINE_ACCESS_ROLES)[number];
 
 // ── Queue name (§3.14) ─────────────────────────────────────────────────────
 
@@ -302,6 +313,7 @@ export const AGENT_SCOPE_TIERS: Readonly<Record<AgentScopeTier, readonly Scope[]
     "comment:resolve",
     "permission:grant",
     "permission:revoke",
+    "space:manage",
     "agent:create",
     "agent:revoke",
   ],

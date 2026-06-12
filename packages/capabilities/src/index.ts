@@ -58,6 +58,8 @@ export { docUpdate } from "./doc/update";
 export { permissionGrant } from "./permission/grant";
 export { permissionList } from "./permission/list";
 export { permissionRevoke } from "./permission/revoke";
+export { spaceCreate } from "./space/create";
+export { spaceUpdate } from "./space/update";
 export { workspaceGet } from "./workspace/get";
 export { workspaceMemberAdd } from "./workspace/member_add";
 export { workspaceMemberList } from "./workspace/member_list";

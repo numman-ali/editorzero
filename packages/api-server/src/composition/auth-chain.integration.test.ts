@@ -403,6 +403,10 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     ["/collections/list"],
     ["/workspaces/get"],
     ["/permissions/list"],
+    // POST-only domain: the principal middleware still pattern-matches
+    // `/spaces/*` ahead of route resolution, so a bare GET proves the
+    // attachment exists (401) rather than falling through to a 404.
+    ["/spaces/create"],
     ["/audits/list"],
   ])("unauthenticated request to mounted domain %s → 401, never 500", async (path) => {
     const { trunk } = await buildStack();

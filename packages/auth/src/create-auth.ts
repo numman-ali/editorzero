@@ -55,8 +55,21 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import type { AuditEffect, AuditWriteInput } from "@editorzero/audit";
-import { asAuditTx, countTableRows, createAuditWriter, type SqliteDriver } from "@editorzero/db";
-import { CapabilityId, generateWorkspaceId, UserId, uuidV7, WorkspaceId } from "@editorzero/ids";
+import {
+  asAuditTx,
+  countTableRows,
+  createAuditWriter,
+  onConflictPersonalSpaceDoNothing,
+  type SqliteDriver,
+} from "@editorzero/db";
+import {
+  CapabilityId,
+  generateSpaceId,
+  generateWorkspaceId,
+  UserId,
+  uuidV7,
+  WorkspaceId,
+} from "@editorzero/ids";
 import { SYSTEM_WORKSPACE_BOOTSTRAP } from "@editorzero/scopes";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
@@ -134,7 +147,7 @@ const bootstrapAuditWriter = createAuditWriter();
 function bootstrapAuditRow(params: {
   workspace_id: WorkspaceId;
   user_id: UserId;
-  subject_kind: "workspace" | "user";
+  subject_kind: "workspace" | "user" | "space";
   subject_id: string | null;
   effect: AuditEffect;
 }): AuditWriteInput {
@@ -459,6 +472,71 @@ export function createAuth(options: CreateAuthOptions) {
                       workspace_id: wsId,
                       user_id: userId,
                       role: "owner",
+                    },
+                  }),
+                );
+              }
+
+              // **Personal space (ADR 0040 Step 8).** Every member's
+              // private drafts home, seeded at signup — `kind =
+              // 'personal'` + `owner_user_id` (the table CHECK ties the
+              // pair) with `type = 'private'` (structurally pinned;
+              // `space.update` refuses type/baseline patches on
+              // personal). `space.create` cannot mint these (team
+              // only), so this seed is the ONLY personal-space mint
+              // path; recovery after an archive is `space.restore`.
+              //
+              // Idempotency keys on the PARTIAL UNIQUE index
+              // `spaces_personal_unique` — NOT the PK: a debounced
+              // retry mints a DIFFERENT space id, so only the
+              // index-backed conflict target dedupes it (the partial-
+              // index matching subtlety lives with the helper in
+              // `@editorzero/db`). The slug "personal" is safe here
+              // by construction (the workspace is freshly minted,
+              // zero spaces); a future invitation/member-add flow
+              // seeding personal spaces into SHARED workspaces must
+              // mint per-user slugs — a recorded obligation for that
+              // slice.
+              const spaceId = generateSpaceId();
+              const spaceRow = await tx
+                .insertInto("spaces")
+                .values({
+                  id: spaceId,
+                  workspace_id: wsId,
+                  kind: "personal",
+                  type: "private",
+                  owner_user_id: userId,
+                  name: "Personal",
+                  slug: "personal",
+                  baseline_access: "view",
+                  created_by: userId,
+                  created_at: now,
+                  updated_at: now,
+                  deleted_at: null,
+                })
+                .onConflict(onConflictPersonalSpaceDoNothing)
+                .returning("id")
+                .executeTakeFirst();
+
+              if (spaceRow !== undefined) {
+                await bootstrapAuditWriter.write(
+                  asAuditTx(tx),
+                  bootstrapAuditRow({
+                    workspace_id: wsId,
+                    user_id: userId,
+                    subject_kind: "space",
+                    subject_id: spaceId,
+                    effect: {
+                      kind: "space.create",
+                      space_id: spaceId,
+                      workspace_id: wsId,
+                      space_kind: "personal",
+                      space_type: "private",
+                      owner_user_id: userId,
+                      name: "Personal",
+                      slug: "personal",
+                      baseline_access: "view",
+                      created_by: userId,
                     },
                   }),
                 );

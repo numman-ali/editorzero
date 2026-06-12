@@ -170,10 +170,28 @@ describe("@editorzero/auth", () => {
     const memberRow = await driver
       .system()
       .selectFrom("workspace_members")
-      .select(["role", "deleted_at"])
+      .select(["user_id", "role", "deleted_at"])
       .executeTakeFirstOrThrow();
     expect(memberRow.role).toBe("owner");
     expect(memberRow.deleted_at).toBeNull();
+
+    // Confirm the hook seeded the Personal space (ADR 0040 Step 8):
+    // the signing-up user's private drafts home. `kind='personal'` +
+    // `owner_user_id` per the table CHECK; `type='private'` is the
+    // structural pin `space.update` enforces; slug "personal" is safe
+    // in a freshly minted workspace.
+    const spaceRow = await driver
+      .system()
+      .selectFrom("spaces")
+      .select(["kind", "type", "owner_user_id", "name", "slug", "baseline_access", "deleted_at"])
+      .executeTakeFirstOrThrow();
+    expect(spaceRow.kind).toBe("personal");
+    expect(spaceRow.type).toBe("private");
+    expect(spaceRow.owner_user_id).toBe(memberRow.user_id);
+    expect(spaceRow.name).toBe("Personal");
+    expect(spaceRow.slug).toBe("personal");
+    expect(spaceRow.baseline_access).toBe("view");
+    expect(spaceRow.deleted_at).toBeNull();
 
     const signInResponse = await auth.api.signInEmail({
       body: {
@@ -200,12 +218,13 @@ describe("@editorzero/auth", () => {
     expect(principal.workspace_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
   });
 
-  it("genesis bootstrap is audited: workspace.create + member.add replay to the live state (invariant 3, ADR 0041)", async () => {
-    // ADR 0041: the post-commit bootstrap emits two `audit_events` rows under
+  it("genesis bootstrap is audited: workspace.create + member.add + space.create replay to the live state (invariant 3, ADR 0041)", async () => {
+    // ADR 0041: the post-commit bootstrap emits three `audit_events` rows under
     // the non-dispatch marker `system.workspace_bootstrap`, so the audit log
-    // ALONE reconstructs the genesis workspace + owner — closing invariant 3
-    // for signup. This is the unit-level proof; the dispatcher property suite
-    // (#23) carries the across-the-whole-system version.
+    // ALONE reconstructs the genesis workspace + owner + Personal space —
+    // closing invariant 3 for signup. This is the unit-level proof; the
+    // dispatcher property suite (#23) carries the across-the-whole-system
+    // version.
     const auth = buildAuth();
     await runAuthMigrations(auth);
 
@@ -231,7 +250,7 @@ describe("@editorzero/auth", () => {
     const userId = UserId(rawUserId);
     const wsId = WorkspaceId(rawWorkspaceId);
 
-    // Exactly two genesis audit rows, both under the system-bootstrap marker.
+    // Exactly three genesis audit rows, all under the system-bootstrap marker.
     const auditRows = await driver
       .system()
       .selectFrom("audit_events")
@@ -251,7 +270,7 @@ describe("@editorzero/auth", () => {
       .orderBy("id")
       .execute();
 
-    expect(auditRows).toHaveLength(2);
+    expect(auditRows).toHaveLength(3);
     for (const row of auditRows) {
       expect(row.capability_id).toBe(SYSTEM_WORKSPACE_BOOTSTRAP);
       expect(row.category).toBe("mutation");
@@ -263,15 +282,24 @@ describe("@editorzero/auth", () => {
 
     // Subjects mirror the capability conventions: workspace.create → the
     // workspace (carried by the row's workspace_id column, so subject_id null);
-    // member.add → the target user (member_add's subjectFrom).
+    // member.add → the target user (member_add's subjectFrom); space.create →
+    // the minted Personal space.
     const byKind = (kind: string) =>
       auditRows.find((r) => (JSON.parse(r.effect) as { kind: string }).kind === kind);
     const wsCreate = byKind("workspace.create");
     const memberAdd = byKind("member.add");
+    const spaceCreate = byKind("space.create");
     expect(wsCreate?.subject_kind).toBe("workspace");
     expect(wsCreate?.subject_id).toBeNull();
     expect(memberAdd?.subject_kind).toBe("user");
     expect(memberAdd?.subject_id).toBe(userId);
+    const seededSpace = await driver
+      .system()
+      .selectFrom("spaces")
+      .select(["id"])
+      .executeTakeFirstOrThrow();
+    expect(spaceCreate?.subject_kind).toBe("space");
+    expect(spaceCreate?.subject_id).toBe(seededSpace.id);
 
     // Each audit INSERT pairs with an `outbox(audit.appended)` row (the writer's
     // fan-out) — genesis is observable downstream, not silently swallowed.
@@ -282,7 +310,7 @@ describe("@editorzero/auth", () => {
       .where("workspace_id", "=", wsId)
       .where("event", "=", "audit.appended")
       .execute();
-    expect(outboxRows).toHaveLength(2);
+    expect(outboxRows).toHaveLength(3);
 
     // The invariant-3 proof: replay the genesis rows and assert the
     // reconstructed semantic projection equals the live workspace + owner.
@@ -306,6 +334,18 @@ describe("@editorzero/auth", () => {
       workspace_id: wsId,
       user_id: userId,
       role: "owner",
+      deleted_at: null,
+    });
+    expect(state.spaces[seededSpace.id]).toEqual({
+      id: seededSpace.id,
+      workspace_id: wsId,
+      kind: "personal",
+      type: "private",
+      owner_user_id: userId,
+      name: "Personal",
+      slug: "personal",
+      baseline_access: "view",
+      created_by: userId,
       deleted_at: null,
     });
   });
