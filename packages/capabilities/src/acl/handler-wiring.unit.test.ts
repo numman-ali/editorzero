@@ -29,7 +29,7 @@ import {
   SPACES_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
-import { PermissionDeniedError } from "@editorzero/errors";
+import { PermissionDeniedError, ValidationError } from "@editorzero/errors";
 import {
   AgentId,
   CollectionId,
@@ -437,26 +437,32 @@ describe("doc.create placement gate", () => {
   });
 });
 
-// ── doc.move bucket-transition rule (Codex Step-6 review HIGH 2) ──────────
+// ── doc.move bucket-transition regime (ADR 0040 §7 — Step-8 branch) ───────
 //
-// Step 6 forbids every move that changes the doc's ceiling bucket:
-// only legacy → legacy and same-space → same-space survive until the
-// Step-8 ladder + acl_transition audit land. The sharpest case is the
-// WIDENING one: a closed-space doc moved to root would fall back to
-// the workspace-legacy baseline and become readable by everyone.
+// Step 6's blanket same-bucket-only rule (Codex Step-6 review HIGH 2)
+// is REPLACED: a move that changes the doc's ceiling bucket is now an
+// explicit, audited ACL transition — administer authority on the
+// source + `canPlaceIn` standing in the destination + a REQUIRED
+// `acl_policy` (the "never silent" rail). The wiring pins here cover
+// the seam each arm reaches the resolver through; the full transition
+// matrix (policies, dropped-grant preimages, anomaly arms, the
+// owner-tier/standing MUST-FIX pin) lives in `../doc/move.unit.test.ts`.
 
-describe("doc.move bucket-transition rule", () => {
-  it("closed-space doc → root is denied even for the space member who CREATED it (widening)", async () => {
+describe("doc.move bucket-transition regime", () => {
+  it("closed-space doc → root (the Step-6 widening fear) is never silent: 400 without acl_policy, lands with it", async () => {
     const before = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
       .selectAll()
       .where("id", "=", D_FOREIGN)
       .executeTakeFirst();
-    await expectAclDeny(
-      () => docMove.handler(ctxFor(user(OTHER)), { doc_id: D_FOREIGN, new_collection_id: null }),
-      D_FOREIGN,
-    );
+    let thrown: unknown;
+    try {
+      await docMove.handler(ctxFor(user(OTHER)), { doc_id: D_FOREIGN, new_collection_id: null });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ValidationError);
     const after = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
@@ -464,9 +470,21 @@ describe("doc.move bucket-transition rule", () => {
       .where("id", "=", D_FOREIGN)
       .executeTakeFirst();
     expect(after).toEqual(before);
+
+    // With the explicit policy, the creator's administer + the legacy
+    // destination (always placeable) carry the widening — audited.
+    const out = await docMove.handler(ctxFor(user(OTHER)), {
+      doc_id: D_FOREIGN,
+      new_collection_id: null,
+      acl_policy: "keep_grants",
+    });
+    expect(out.new_collection_id).toBeNull();
+    expect(out.acl_transition?.policy).toBe("keep_grants");
+    expect(out.acl_transition?.before_space_id).toBe(S_CLOSED);
+    expect(out.acl_transition?.after_space_id).toBeNull();
   });
 
-  it("legacy doc → closed-space collection is denied for a non-member (crossing)", async () => {
+  it("legacy doc → closed-space collection is denied for a non-member (no administer — authority precedes the policy rail)", async () => {
     await expectAclDeny(
       () =>
         docMove.handler(ctxFor(user(OUTSIDER)), { doc_id: D_LEGACY, new_collection_id: C_CLOSED }),
@@ -474,26 +492,34 @@ describe("doc.move bucket-transition rule", () => {
     );
   });
 
-  it("legacy doc → closed-space collection is denied even for a space MEMBER — no cross-bucket moves at all", async () => {
-    await expectAclDeny(
-      () => docMove.handler(ctxFor(user(OTHER)), { doc_id: D_LEGACY, new_collection_id: C_CLOSED }),
-      D_LEGACY,
-    );
+  it("legacy doc → closed-space collection: administer + membership cross WITH a policy (was Step-6 denied)", async () => {
+    const out = await docMove.handler(ctxFor(user(OTHER)), {
+      doc_id: D_LEGACY,
+      new_collection_id: C_CLOSED,
+      acl_policy: "adopt_baseline",
+    });
+    expect(out.new_collection_id).toBe(C_CLOSED);
+    expect(out.acl_transition?.before_space_id).toBeNull();
+    expect(out.acl_transition?.after_space_id).toBe(S_CLOSED);
   });
 
-  it("closed-space doc → a DIFFERENT space's collection is denied (re-homing)", async () => {
-    await expectAclDeny(
-      () => docMove.handler(ctxFor(user(OTHER)), { doc_id: D_FOREIGN, new_collection_id: C_OPEN }),
-      D_FOREIGN,
-    );
+  it("closed-space doc → a DIFFERENT space's collection re-homes with a policy (open-space baseline standing)", async () => {
+    const out = await docMove.handler(ctxFor(user(OTHER)), {
+      doc_id: D_FOREIGN,
+      new_collection_id: C_OPEN,
+      acl_policy: "keep_grants",
+    });
+    expect(out.acl_transition?.before_space_id).toBe(S_CLOSED);
+    expect(out.acl_transition?.after_space_id).toBe(S_OPEN);
   });
 
-  it("same-space re-parent is allowed for a member", async () => {
+  it("same-space re-parent is allowed for a member (same bucket — no policy, no transition echo)", async () => {
     const out = await docMove.handler(ctxFor(user(OTHER)), {
       doc_id: D_FOREIGN,
       new_collection_id: C_CLOSED2,
     });
     expect(out.new_collection_id).toBe(C_CLOSED2);
+    expect(out.acl_transition).toBeUndefined();
     const row = await driver
       .scoped(WORKSPACE_A)
       .selectFrom("docs")
@@ -503,18 +529,25 @@ describe("doc.move bucket-transition rule", () => {
     expect(row?.collection_id).toBe(C_CLOSED2);
   });
 
-  it("legacy → legacy (root re-seat) stays allowed", async () => {
+  it("legacy → legacy (root re-seat) stays allowed (same bucket — no policy, no transition echo)", async () => {
     const out = await docMove.handler(ctxFor(user(OUTSIDER)), {
       doc_id: D_LEGACY,
       new_collection_id: null,
     });
     expect(out.new_collection_id).toBeNull();
+    expect(out.acl_transition).toBeUndefined();
   });
 
-  it("an anomaly-placed doc is immovable even by its creator — fail closed on either side", async () => {
-    await expectAclDeny(
-      () => docMove.handler(ctxFor(user(OTHER)), { doc_id: D_ANOMALY, new_collection_id: null }),
-      D_ANOMALY,
-    );
+  it("an anomaly-placed doc is movable OUT by its creator — the named repair verb (dangling ref → before_space_id null)", async () => {
+    const out = await docMove.handler(ctxFor(user(OTHER)), {
+      doc_id: D_ANOMALY,
+      new_collection_id: null,
+      acl_policy: "keep_grants",
+    });
+    expect(out.new_collection_id).toBeNull();
+    // C_DANGLING's space ref points at a spaces row that never
+    // existed — the honest binding is null, not a guess.
+    expect(out.acl_transition?.before_space_id).toBeNull();
+    expect(out.acl_transition?.after_space_id).toBeNull();
   });
 });

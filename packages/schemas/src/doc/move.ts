@@ -27,16 +27,38 @@
  * nullable response field is `CollectionIdOutputSchema.nullable()`,
  * which composes the same `string | null → CollectionId | null`
  * narrowing the capability hand-rolled inline.
+ *
+ * **`acl_policy` is `.optional()`, conditionally REQUIRED by the
+ * handler (ADR 0040 §7, Step-8 cross-boundary branch).** A move that
+ * crosses the doc's space-bucket boundary is an ACL transition and
+ * must carry the caller's explicit choice (`adopt_baseline` — shed
+ * every doc-scoped grant, guest edges included — or `keep_grants`);
+ * absent on a crossing → typed 400 (`acl_transition_policy_required`,
+ * the "never silent" prompt contract enforced server-side so every
+ * surface inherits it). Present on a SAME-bucket move → typed 400 too
+ * (`acl_policy_not_applicable` — accepting-and-ignoring would let the
+ * caller believe a transition happened). Zod cannot express the
+ * conditionality (it depends on stored placement); the handler owns it.
+ *
+ * **`acl_transition` on the output** echoes the applied transition on
+ * a crossing (absent on same-bucket): the policy, both resolved space
+ * bindings, and the FULL preimage of every dropped grant row — the
+ * effect projects from this echo, and the caller gets the offboarding
+ * receipt (the `permission.revoke` echo posture; rows are hard-deleted).
  */
 
 import { z } from "zod";
 
+import { GrantRowOutputSchema } from "../shared/grant";
 import {
   CollectionIdInputSchema,
   CollectionIdOutputSchema,
   DocIdInputSchema,
   DocIdOutputSchema,
+  SpaceIdOutputSchema,
 } from "../shared/ids";
+
+export const AclTransitionPolicySchema = z.enum(["adopt_baseline", "keep_grants"]);
 
 export const DocMoveInputSchema = z
   .object({
@@ -45,6 +67,7 @@ export const DocMoveInputSchema = z
     // on the wire. `.optional()` rejected for the same reason
     // `collection.move` rejects it — move is explicit.
     new_collection_id: CollectionIdInputSchema.nullable(),
+    acl_policy: AclTransitionPolicySchema.optional(),
   })
   .strict();
 
@@ -53,6 +76,14 @@ export const DocMoveOutputSchema = z.object({
   new_collection_id: CollectionIdOutputSchema.nullable(),
   new_order_key: z.string(),
   updated_at: z.number(),
+  acl_transition: z
+    .object({
+      policy: AclTransitionPolicySchema,
+      before_space_id: SpaceIdOutputSchema.nullable(),
+      after_space_id: SpaceIdOutputSchema.nullable(),
+      dropped_grants: z.array(GrantRowOutputSchema),
+    })
+    .optional(),
 });
 
 export type DocMoveWireInput = z.input<typeof DocMoveInputSchema>;

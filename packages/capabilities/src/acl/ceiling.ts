@@ -167,6 +167,17 @@ export interface DocReadResolver {
   /** Resolve a placement's Space bucket (in-memory, no extra query). */
   placementOf(collection_id: CollectionId | null): Placement;
   /**
+   * The placement's STORED space ref when the spaces row still exists —
+   * live or trashed — `null` for root, unspaced collections, and
+   * dangling refs (missing collection row / missing spaces row). The
+   * forensic sibling of `placementOf`: where `placementOf` collapses a
+   * trashed-space binding to `anomaly` (fail-closed authority), this
+   * answers "what did the stored ref say" for audit honesty —
+   * `doc.move`'s `acl_transition.before_space_id` on a repair move.
+   * Same preloaded snapshot as `placementOf`, so the two can't skew.
+   */
+  storedSpaceRefOf(collection_id: CollectionId | null): SpaceId | null;
+  /**
    * Placement authority — may this principal put a doc INTO this
    * placement (Codex Step-6 HIGH 1)? This is the BASELINE-reach term
    * of the read union only: Space membership, a Space-level grant, or
@@ -432,6 +443,12 @@ export async function loadDocReadResolver(
       }
     },
     placementOf,
+    storedSpaceRefOf: (collection_id) => {
+      if (collection_id === null) return null;
+      const spaceId = collectionSpace.get(collection_id);
+      if (spaceId === undefined || spaceId === null) return null;
+      return spaces.has(spaceId) ? spaceId : null;
+    },
     canPlaceIn,
     assertCanPlaceIn: (collection_id) => {
       if (!canPlaceIn(collection_id)) {

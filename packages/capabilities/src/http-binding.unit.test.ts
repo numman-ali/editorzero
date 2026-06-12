@@ -179,14 +179,15 @@ describe("deriveHttpBinding", () => {
     });
   });
 
-  it("doc.move → POST /docs/move/:doc_id with body={new_collection_id}", () => {
+  it("doc.move → POST /docs/move/:doc_id with body={new_collection_id, acl_policy}", () => {
     // Same shape as `collection.move`: path param from the matching
-    // `<domain>_id`, target-collection reference in the body.
+    // `<domain>_id`, target-collection reference in the body — plus the
+    // conditionally-required cross-boundary `acl_policy` (ADR 0040 §7).
     expect(deriveHttpBinding(registerCapability(docMove))).toEqual({
       verb: "POST",
       pathTemplate: "/docs/move/:doc_id",
       paramName: "doc_id",
-      bodyOrQueryKeys: ["new_collection_id"],
+      bodyOrQueryKeys: ["acl_policy", "new_collection_id"],
     });
   });
 

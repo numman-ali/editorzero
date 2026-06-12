@@ -35,10 +35,33 @@ import type { AccessMode, GrantRole, Scope, SpaceKind, SpaceType } from "@editor
 import type { BlockPostState, BlockVisibility, DocPurgePreimage, Role, SeedBlock } from "./types";
 
 /**
+ * One grant row hard-deleted by a cross-boundary `doc.move` under
+ * `adopt_baseline` — the FULL preimage, field-for-field `GrantState`
+ * (the same hard-delete-preimage rule the Step-7 review applied to
+ * `acl.revoke` / `space.member_remove`: the row is gone, so the audit
+ * body must answer who lost what without joining prior history).
+ * Reshaped from ids-only while the field had zero emitters (the
+ * Step-7 reshape-legitimacy rule; Codex guest-era review concurring —
+ * ids were replay-sufficient but operationally thin).
+ */
+export interface AclTransitionDroppedGrant {
+  readonly grant_id: GrantId;
+  readonly workspace_id: WorkspaceId;
+  readonly resource_kind: "space" | "doc";
+  readonly resource_id: string;
+  readonly subject_kind: "user" | "agent";
+  readonly subject_id: string;
+  readonly role: GrantRole;
+  readonly is_guest: 0 | 1;
+  readonly created_by: UserId;
+}
+
+/**
  * ACL consequence of a cross-boundary `doc.move` (ADR 0040 §7 "ACL
- * transitions on move", Step 7). A move that changes the doc's space
- * binding stays ONE audit row (invariant 3), so the ACL consequence
- * rides the `doc.move` effect rather than emitting sibling rows.
+ * transitions on move", Step 7; emitter landed with the Step-8
+ * cross-boundary branch). A move that changes the doc's space binding
+ * stays ONE audit row (invariant 3), so the ACL consequence rides the
+ * `doc.move` effect rather than emitting sibling rows.
  *
  * - `policy` is the transition the capability applied: `adopt_baseline`
  *   (doc-level grants dropped; the destination's baseline takes over) or
@@ -46,21 +69,22 @@ import type { BlockPostState, BlockVisibility, DocPurgePreimage, Role, SeedBlock
  * - `before_space_id` / `after_space_id` are the resolved space bindings
  *   of the source and destination collections (`null` = the legacy
  *   no-space bucket) — post-state facts, not re-derivable from the
- *   `new_collection_id` alone once later moves rebind collections.
- * - `dropped_grant_ids` is the exact set of doc-level grant rows the
+ *   `new_collection_id` alone once later moves rebind collections. On
+ *   an anomaly-source repair move, `before_space_id` is the stored
+ *   space ref when it still resolves to a (trashed) row, `null` when
+ *   the ref dangles — honest about what was knowable.
+ * - `dropped_grants` is the exact set of doc-level grant rows the
  *   handler hard-deleted under `adopt_baseline` (empty for
- *   `keep_grants`). Grants are hard-DELETE (H1), so this list is the
- *   only durable record; replay removes precisely these keys.
+ *   `keep_grants`), full preimage each. Replay removes precisely
+ *   these keys; forensics read the row standalone.
  *
- * Until the Step-8 cross-boundary branch ships, every `doc.move` is
- * same-bucket (the Step-6 transition rule denies the rest) and the
- * field is absent.
+ * Absent on every same-bucket move.
  */
 export interface AclTransition {
   readonly policy: "adopt_baseline" | "keep_grants";
   readonly before_space_id: SpaceId | null;
   readonly after_space_id: SpaceId | null;
-  readonly dropped_grant_ids: readonly GrantId[];
+  readonly dropped_grants: readonly AclTransitionDroppedGrant[];
 }
 
 // prettier-ignore

@@ -600,6 +600,15 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       readIdField(await step(docCreate.id, { title: "Doc Two", collection_id: c1 }), "doc_id"),
     );
     await step(docRename.id, { doc_id: d1, title: "Doc One Renamed" });
+    // Same-bucket move (legacy → legacy). The CROSS-boundary branch
+    // (`acl_transition` + dropped-grant preimages, ADR 0040 §7) is NOT
+    // walk-reachable yet: every capability-minted collection is legacy
+    // (`collection.create` pins `space_id = null`), and seeding a
+    // space-bound collection outside dispatch would break the replay
+    // property by construction. The reducer's transition semantics are
+    // pinned fixture-level in `@editorzero/audit` reducer tests; ADD
+    // crossing steps here the moment a space-collection capability
+    // lands (tracked in ADR 0040 Step-8 build order).
     await step(docMove.id, { doc_id: d1, new_collection_id: c1 });
     await step(docPublish.id, { doc_id: d1 });
     // Idempotent re-publish: the effect carries the SAME handler-reused

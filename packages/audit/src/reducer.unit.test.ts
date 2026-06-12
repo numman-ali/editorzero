@@ -568,7 +568,21 @@ const STATE_KIND_FIXTURES = {
       policy: "adopt_baseline",
       before_space_id: SPACE,
       after_space_id: null,
-      dropped_grant_ids: [GRANT],
+      // Full preimage per dropped row (the hard-delete-preimage rule —
+      // same class as acl.revoke; reshaped from ids-only pre-emitter).
+      dropped_grants: [
+        {
+          grant_id: GRANT,
+          workspace_id: WS,
+          resource_kind: "doc",
+          resource_id: DOC,
+          subject_kind: "user",
+          subject_id: USER2,
+          role: "view",
+          is_guest: 0,
+          created_by: USER,
+        },
+      ],
     },
   },
   "doc.publish": { kind: "doc.publish", doc_id: DOC, published_slug: "d", published_at: 1 },
@@ -883,7 +897,7 @@ describe("replay reducer — collection space binding + doc.move acl_transition"
     seed_blocks: [],
   });
 
-  it("doc.move adopt_baseline drops exactly the listed grants", () => {
+  it("doc.move adopt_baseline drops exactly the listed grants (removal by preimage id)", () => {
     const state = replay([
       docCreate,
       grantOnDoc,
@@ -896,7 +910,19 @@ describe("replay reducer — collection space binding + doc.move acl_transition"
           policy: "adopt_baseline",
           before_space_id: SPACE,
           after_space_id: null,
-          dropped_grant_ids: [GRANT],
+          dropped_grants: [
+            {
+              grant_id: GRANT,
+              workspace_id: WS,
+              resource_kind: "doc",
+              resource_id: DOC,
+              subject_kind: "user",
+              subject_id: USER2,
+              role: "view",
+              is_guest: 0,
+              created_by: USER,
+            },
+          ],
         },
       }),
     ]);
@@ -917,7 +943,7 @@ describe("replay reducer — collection space binding + doc.move acl_transition"
           policy: "keep_grants",
           before_space_id: SPACE,
           after_space_id: null,
-          dropped_grant_ids: [],
+          dropped_grants: [],
         },
       }),
     ]);

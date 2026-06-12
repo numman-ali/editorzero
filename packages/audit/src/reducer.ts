@@ -479,10 +479,12 @@ function applyStateEffect(
       });
       // Cross-boundary move (ADR 0040 §7): under `adopt_baseline` the
       // handler hard-deleted the listed doc grants in the same write;
-      // replay removes exactly those keys. Absent / empty = no-op
-      // (every same-bucket move, and `keep_grants` crossings).
-      const dropped = effect.acl_transition?.dropped_grant_ids ?? [];
-      return dropped.reduce((s, grant_id) => removeGrant(s, grant_id), moved);
+      // replay removes exactly those keys (the preimage fields are
+      // forensic — removal is by id, the acl.revoke posture). Absent /
+      // empty = no-op (every same-bucket move, and `keep_grants`
+      // crossings).
+      const dropped = effect.acl_transition?.dropped_grants ?? [];
+      return dropped.reduce((s, grant) => removeGrant(s, grant.grant_id), moved);
     }
     case "doc.publish":
       // Both values come from the effect (ADR 0040 Step 5): the slug is

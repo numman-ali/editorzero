@@ -5,7 +5,17 @@
  * (or the workspace root via `new_collection_id: null`). Docs are tree
  * leaves, so the shape is strictly simpler than `collection.move` — no
  * cycle walk, no subtree-height check. Target existence + target-scope
- * slug uniqueness are the two preconditions.
+ * slug uniqueness are the base preconditions.
+ *
+ * **Cross-boundary moves are audited ACL transitions (ADR 0040 §7).**
+ * When the move crosses the doc's space-bucket boundary the handler
+ * requires `acl_policy` (`adopt_baseline` | `keep_grants`) and demands
+ * administer authority on the source + placement standing in the
+ * destination; the response then carries `acl_transition` (the applied
+ * policy, both space bindings, and full preimages of every dropped
+ * grant row). Same-bucket moves must OMIT `acl_policy`. Both
+ * conditional rails are typed 400s — see the handler header in
+ * `@editorzero/capabilities` for the full contract.
  *
  * **Code-first shape (ADR 0029) — pattern P3 (path param + JSON body).**
  * The capability input merges a path-param `doc_id` with a JSON-body
@@ -41,11 +51,15 @@
  * is `/docs/move/:doc_id`.
  *
  * **Status — 200 OK** (metadata mutation, no resource minted).
- * **400** — malformed body (`new_collection_id` not UUIDv7 or missing) or
- * malformed path param. **404** — doc or target collection missing/
- * soft-deleted (cross-workspace targets surface as 404 via tenant scoping;
- * no existence leakage). **409 `slug_collision`** — the moved doc's slug
- * clashes with a live sibling in the target scope.
+ * **400** — malformed body/path param, OR the conditional `acl_policy`
+ * rails: missing on a crossing (`acl_transition_policy_required`) /
+ * present on a same-bucket move (`acl_policy_not_applicable`) — both
+ * surface as `validation_failed` with the cause in `issues`. **403** —
+ * `doc:write` missing, or a crossing without source administer /
+ * destination placement standing. **404** — doc or target collection
+ * missing/soft-deleted (cross-workspace targets surface as 404 via
+ * tenant scoping; no existence leakage). **409 `slug_collision`** — the
+ * moved doc's slug clashes with a live sibling in the target scope.
  */
 
 import { CapabilityId } from "@editorzero/ids";
@@ -59,7 +73,7 @@ import { describeRoute, errEnvelope, factory, jsonContent, validator } from "../
 const DOC_MOVE_ID = CapabilityId("doc.move");
 
 const ParamSchema = DocMoveInputSchema.pick({ doc_id: true });
-const BodySchema = DocMoveInputSchema.pick({ new_collection_id: true });
+const BodySchema = DocMoveInputSchema.pick({ new_collection_id: true, acl_policy: true });
 
 export const move = new Hono<ApiEnv>().post(
   "/move/:doc_id",
@@ -73,7 +87,8 @@ export const move = new Hono<ApiEnv>().post(
           content: jsonContent(DocMoveOutputSchema),
         },
         400: {
-          description: "Validation error (malformed body or path param).",
+          description:
+            "Validation error — malformed body/path param, `acl_policy` missing on a cross-boundary move (`acl_transition_policy_required`), or `acl_policy` sent on a same-bucket move (`acl_policy_not_applicable`).",
           content: jsonContent(errEnvelope("validation_failed")),
         },
         401: {
@@ -81,7 +96,8 @@ export const move = new Hono<ApiEnv>().post(
           content: jsonContent(errEnvelope("unauthenticated")),
         },
         403: {
-          description: "Permission denied — caller lacks `doc:write`.",
+          description:
+            "Permission denied — caller lacks `doc:write`, or a cross-boundary move without administer authority on the source doc / placement standing in the destination.",
           content: jsonContent(errEnvelope("permission_denied")),
         },
         404: {

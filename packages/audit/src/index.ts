@@ -15,7 +15,7 @@
  * `AuditDeny`, or `AuditError` variant (F32 — §9.3).
  */
 
-export type { AuditEffect } from "./effect";
+export type { AclTransition, AclTransitionDroppedGrant, AuditEffect } from "./effect";
 export { applyAuditRow, REPLAY_CLASS, type ReplayClass, replay } from "./reducer";
 export {
   type CollectionState,
