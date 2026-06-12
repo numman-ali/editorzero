@@ -62,7 +62,11 @@ export const workspaceGet: Capability<WorkspaceGetInput, WorkspaceGetOutput> = {
   input: WorkspaceGetInputSchema,
   output: WorkspaceGetOutputSchema,
   requires: ["workspace:read"],
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" is declared because the Web UI actually binds this capability
+  // (the sidebar workspace identity block on every authed screen; proven
+  // by the marked Playwright spec in packages/e2e). Declared surfaces =
+  // bound surfaces (ADR 0040 H11).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     // Subject is the workspace itself; the audit row's workspace_id
     // column already carries the tenant, so subject_id is left off

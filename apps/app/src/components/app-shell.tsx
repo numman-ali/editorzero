@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 
 import type { WhoamiSession } from "../lib/session";
+import type { WorkspaceGet } from "../lib/workspace";
 import { SideContent } from "./side-content";
 
 import "./app-shell.css";
@@ -26,12 +27,20 @@ import "./app-shell.css";
  * `chrome.spec.ts` drives the drawer), excluded from vitest unit coverage
  * like `routes/**`; the testable display logic lives in `lib/principal.ts`.
  */
-export function AppShell({ session, children }: { session: WhoamiSession; children: ReactNode }) {
+export function AppShell({
+  session,
+  workspace,
+  children,
+}: {
+  session: WhoamiSession;
+  workspace: WorkspaceGet;
+  children: ReactNode;
+}) {
   const [navOpen, setNavOpen] = useState(false);
   return (
     <div className="win">
       <aside className="side">
-        <SideContent session={session} />
+        <SideContent session={session} workspace={workspace} />
       </aside>
       <div className="main">
         <header className="bar">
@@ -45,7 +54,11 @@ export function AppShell({ session, children }: { session: WhoamiSession; childr
                 <Drawer.Popup className="shell-drawer">
                   <Drawer.Title className="sr-only">Navigation</Drawer.Title>
                   <Drawer.Content className="side">
-                    <SideContent session={session} onNavigate={() => setNavOpen(false)} />
+                    <SideContent
+                      session={session}
+                      workspace={workspace}
+                      onNavigate={() => setNavOpen(false)}
+                    />
                   </Drawer.Content>
                 </Drawer.Popup>
               </Drawer.Viewport>

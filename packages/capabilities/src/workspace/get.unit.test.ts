@@ -193,7 +193,9 @@ describe("workspace.get", () => {
     expect(workspaceGet.id).toBe("workspace.get");
     expect(workspaceGet.category).toBe("read");
     expect(workspaceGet.requires).toEqual(["workspace:read"]);
-    expect(workspaceGet.surfaces).toEqual(["api", "cli", "mcp"]);
+    // "ui" since the sidebar identity block landed (proven by the marked
+    // Playwright spec; the contract-tests matrix enforces the bond).
+    expect(workspaceGet.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
   });
 
   it("projects a workspace subject without id (tenant already on the audit row)", () => {
