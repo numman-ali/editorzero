@@ -60,6 +60,8 @@ export { permissionList } from "./permission/list";
 export { permissionRevoke } from "./permission/revoke";
 export { spaceArchive } from "./space/archive";
 export { spaceCreate } from "./space/create";
+export { spaceGet } from "./space/get";
+export { spaceList } from "./space/list";
 export { spaceMemberAdd } from "./space/member_add";
 export { spaceMemberRemove } from "./space/member_remove";
 export { spaceMemberUpdateRole } from "./space/member_update_role";
