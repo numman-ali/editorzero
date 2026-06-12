@@ -1,6 +1,6 @@
 /**
- * `space.list` data-layer — the Spaces screen's capability cell
- * (invariant 4, ADR 0033 §3 / 0040 H11).
+ * `space.list` + `space.get` data-layer — the Spaces screens' capability
+ * cells (invariant 4, ADR 0033 §3 / 0040 H11).
  *
  * Same split as `docs.ts`: `fetchSpaceList` is the testable plain
  * function; `spaceListQueryOptions` is the react-query binding consumed
@@ -68,4 +68,37 @@ export function spaceKindLabel(kind: SpaceSummary["kind"]): string {
  */
 export function spaceMetaLine(space: Pick<SpaceSummary, "type" | "baseline_access">): string {
   return `${space.type} · baseline ${space.baseline_access}`;
+}
+
+type SpaceGetResponse = Awaited<ReturnType<ApiClient["spaces"]["get"][":space_id"]["$get"]>>;
+type SpaceGetSuccess = Extract<SpaceGetResponse, { status: 200 }>;
+/** The full space row — `space.get` returns it verbatim (no wrapper). */
+export type SpaceDetail = Awaited<ReturnType<SpaceGetSuccess["json"]>>;
+
+export function spaceQueryKey(spaceId: string) {
+  return ["space.get", spaceId] as const;
+}
+
+/**
+ * Fetch one space. Visibility is the capability's two-rule gate
+ * (baseline reach ∨ administer; personal = owner-only) — an invisible
+ * or trashed space 404s, which the route loader surfaces through the
+ * error boundary.
+ */
+export async function fetchSpace(
+  spaceId: string,
+  client: ApiClient = apiClient,
+): Promise<SpaceDetail> {
+  const res = await client.spaces.get[":space_id"].$get({ param: { space_id: spaceId } });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export function spaceQueryOptions(spaceId: string, client: ApiClient = apiClient) {
+  return queryOptions({
+    queryKey: spaceQueryKey(spaceId),
+    queryFn: () => fetchSpace(spaceId, client),
+  });
 }

@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { spaceKindLabel, spaceListQueryOptions, spaceMetaLine } from "../lib/spaces";
 
@@ -18,10 +18,10 @@ import { spaceKindLabel, spaceListQueryOptions, spaceMetaLine } from "../lib/spa
  *
  * Markup is the Meridian Zero `.spaces` grid + `.sp` card pattern from
  * the landed token sheet (02-spaces mock vocabulary) — zero new CSS.
- * Cards are non-interactive list items at the bare-cell stage (the e2e
- * honesty bar: no space detail route exists yet to link to); the grid
- * renders wire order verbatim (`name ASC, id ASC` — the capability's
- * ordering contract, pinned server-side).
+ * Each card's NAME links into the space's detail screen
+ * (`/space/$spaceId`, the `space.get` cell — the docs-table `.nm` Link
+ * idiom); the grid renders wire order verbatim (`name ASC, id ASC` —
+ * the capability's ordering contract, pinned server-side).
  *
  * Coverage: render-only by design — every decision (query options,
  * labels, the meta line) lives unit-tested in `lib/spaces.ts`; this
@@ -29,7 +29,7 @@ import { spaceKindLabel, spaceListQueryOptions, spaceMetaLine } from "../lib/spa
  * (`packages/e2e/test/spaces.spec.ts`, `proves-capability-cell:
  * space.list`).
  */
-export const Route = createFileRoute("/_authed/space")({
+export const Route = createFileRoute("/_authed/space/")({
   loader: ({ context }) => context.queryClient.ensureQueryData(spaceListQueryOptions()),
   component: Spaces,
 });
@@ -53,7 +53,14 @@ function Spaces() {
           {spaces.map((space, index) => (
             <li className="sp" key={space.space_id}>
               <div className="ord">SP·{String(index + 1).padStart(2, "0")}</div>
-              <div className="nm">{space.name}</div>
+              <div className="nm">
+                {/* The anchor inherits the .nm display face (global
+                    `a { color:inherit }`) — the block div keeps the
+                    card's margin rhythm. */}
+                <Link to="/space/$spaceId" params={{ spaceId: space.space_id }}>
+                  {space.name}
+                </Link>
+              </div>
               <div className="ds">{space.slug}</div>
               <div className="ft">
                 <span className="status-tag">{spaceKindLabel(space.kind)}</span>

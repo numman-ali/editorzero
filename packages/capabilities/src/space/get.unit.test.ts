@@ -274,7 +274,7 @@ describe("space.get — registry + audit wiring", () => {
     expect(spaceGet.id).toBe("space.get");
     expect(spaceGet.category).toBe("read");
     expect(spaceGet.requires).toEqual(["workspace:read"]);
-    expect(spaceGet.surfaces).toEqual(["api", "cli", "mcp"]);
+    expect(spaceGet.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
   });
 
   it("projects the space as the audit subject and logs an access row", async () => {

@@ -5,12 +5,14 @@ import { CREDENTIALS } from "./credentials";
 
 /**
  * proves-capability-cell: space.list
+ * proves-capability-cell: space.get
  *
- * The `space.list × Web UI` parity cell (invariant 4, ADR 0033 §3 / 0040
- * H11). The marker line above is load-bearing: `packages/contract-tests`
- * scans the e2e specs for `proves-capability-cell:` and fails the build if
- * a capability declares `"ui"` without a spec carrying its marker — this
- * file is what lets `space.list` declare the surface.
+ * The `space.list` + `space.get` × Web UI parity cells (invariant 4,
+ * ADR 0033 §3 / 0040 H11). The marker lines above are load-bearing:
+ * `packages/contract-tests` scans the e2e specs for
+ * `proves-capability-cell:` and fails the build if a capability declares
+ * `"ui"` without a spec carrying its marker — this file is what lets
+ * the two space read capabilities declare the surface.
  *
  * The proof is end-to-end against real server data: the signup hook seeds
  * the founder's Personal space (ADR 0040 slice 2a), so the FIRST
@@ -78,4 +80,34 @@ test("team spaces created over the API render in server order with kind chips", 
   await expect(page.getByRole("heading", { name: "Spaces" })).toBeVisible();
 
   await expectNoAxeViolations(page);
+});
+
+test("space.get: a card's name links to the detail screen rendering the server row", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/space");
+
+  // The card NAME is the link into the detail screen (the docs-row idiom).
+  await page.getByRole("link", { name: "Engineering" }).click();
+  await expect(page).toHaveURL(/\/space\/[0-9a-f-]{36}$/u);
+
+  // Header: name + slug + kind chip; body: the .kv fact rows rendering
+  // the row space.get returns — type · baseline, then the audit dates.
+  // Every value is server state minted by the create call in the
+  // previous test; nothing here is seeded by this spec.
+  await expect(page.locator("h2.t")).toHaveText("Engineering");
+  await expect(page.locator(".pth")).toHaveText("engineering");
+  await expect(page.locator(".status-tag")).toHaveText("Team");
+  await expect(page.getByText("open · baseline view")).toBeVisible();
+  await expect(page.locator(".kv .v.mono").first()).toHaveText(/^\d{4}-\d{2}-\d{2}$/u);
+
+  await expectNoAxeViolations(page);
+
+  // The seeded Personal space resolves through the same gate (owner-only
+  // visibility) — its detail renders the signup-seeded row.
+  await page.goto("/space");
+  await page.getByRole("link", { name: "Personal", exact: true }).click();
+  await expect(page.locator("h2.t")).toHaveText("Personal");
+  await expect(page.getByText("private · baseline view")).toBeVisible();
 });

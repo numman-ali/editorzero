@@ -60,7 +60,10 @@ export const spaceGet: Capability<SpaceGetInput, SpaceGetOutput> = {
   input: SpaceGetInputSchema,
   output: SpaceGetOutputSchema,
   requires: ["workspace:read"],
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the /space/$spaceId detail screen (the space.get ×
+  // Web UI cell) — proven end-to-end by the marked Playwright spec in
+  // packages/e2e (proves-capability-cell: space.get).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "space", id: SpaceId(input.space_id) }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),
