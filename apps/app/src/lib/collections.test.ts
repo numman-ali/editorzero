@@ -6,14 +6,21 @@ import {
   COLLECTION_LIST_QUERY_KEY,
   type CollectionSummary,
   classifyCollectionCreateError,
+  classifyCollectionDeleteError,
+  classifyCollectionUpdateError,
   collectionCreateFailureMessage,
+  collectionDeleteFailureMessage,
   collectionListQueryOptions,
+  collectionSpaceLabel,
+  collectionUpdateFailureMessage,
   createCollection,
+  deleteCollection,
   docPlacementLabel,
   fetchCollectionList,
   flattenCollectionTree,
   placementBinding,
   treeRowIndent,
+  updateCollection,
 } from "./collections";
 
 /** Same fake-client pattern as `docs.test.ts`/`spaces.test.ts`. */
@@ -238,6 +245,92 @@ describe("docPlacementLabel", () => {
     expect(docPlacementLabel(C1, [c])).toBe("Field Guides");
     expect(docPlacementLabel("018f0000-0000-7000-8000-00000000dead", [c])).toBe(
       "unknown collection",
+    );
+  });
+});
+
+describe("updateCollection", () => {
+  it("returns the typed post-state on 200", async () => {
+    const body = {
+      collection_id: C1,
+      title: "Receipt Ledger",
+      slug: "receipt-ledger",
+      updated_at: 9,
+    };
+    const result = await updateCollection(C1, "Receipt Ledger", jsonClient(200, body));
+    expect(result.title).toBe("Receipt Ledger");
+    expect(result.slug).toBe("receipt-ledger");
+  });
+
+  it("throws a typed ApiError on the sibling-slug 409", async () => {
+    await expect(
+      updateCollection(C1, "Field Guides", jsonClient(409, { error: "slug_collision" })),
+    ).rejects.toThrow(new ApiError(409, "slug_collision"));
+  });
+});
+
+describe("classifyCollectionUpdateError", () => {
+  it("maps 409 to duplicate_title, 404 to missing, the rest to update_failed", () => {
+    expect(classifyCollectionUpdateError(new ApiError(409, "slug_collision"))).toBe(
+      "duplicate_title",
+    );
+    expect(classifyCollectionUpdateError(new ApiError(404, "not_found"))).toBe("missing");
+    expect(classifyCollectionUpdateError(new ApiError(500, "internal"))).toBe("update_failed");
+    expect(classifyCollectionUpdateError(new TypeError("fetch failed"))).toBe("update_failed");
+  });
+});
+
+describe("collectionUpdateFailureMessage", () => {
+  it("speaks each arm", () => {
+    expect(collectionUpdateFailureMessage("duplicate_title")).toContain("already exists");
+    expect(collectionUpdateFailureMessage("missing")).toContain("no longer exists");
+    expect(collectionUpdateFailureMessage("update_failed")).toContain("Try again");
+  });
+});
+
+describe("deleteCollection", () => {
+  it("returns the deletion anchor on 200", async () => {
+    const body = { collection_id: C1, deleted_at: 42 };
+    const result = await deleteCollection(C1, jsonClient(200, body));
+    expect(result.deleted_at).toBe(42);
+  });
+
+  it("throws a typed ApiError on the no-cascade 409", async () => {
+    await expect(
+      deleteCollection(C1, jsonClient(409, { error: "has_live_descendants" })),
+    ).rejects.toThrow(new ApiError(409, "has_live_descendants"));
+  });
+});
+
+describe("classifyCollectionDeleteError", () => {
+  it("maps 409 to not_empty, 404 to missing, the rest to delete_failed", () => {
+    expect(classifyCollectionDeleteError(new ApiError(409, "has_live_descendants"))).toBe(
+      "not_empty",
+    );
+    expect(classifyCollectionDeleteError(new ApiError(404, "not_found"))).toBe("missing");
+    expect(classifyCollectionDeleteError(new ApiError(500, "internal"))).toBe("delete_failed");
+    expect(classifyCollectionDeleteError(new TypeError("fetch failed"))).toBe("delete_failed");
+  });
+});
+
+describe("collectionDeleteFailureMessage", () => {
+  it("speaks each arm — not_empty is actionable, counts never cross the wire", () => {
+    expect(collectionDeleteFailureMessage("not_empty")).toContain("Empty it first");
+    expect(collectionDeleteFailureMessage("missing")).toContain("no longer exists");
+    expect(collectionDeleteFailureMessage("delete_failed")).toContain("Try again");
+  });
+});
+
+describe("collectionSpaceLabel", () => {
+  const spaces = [{ space_id: "018f0000-0000-7000-8000-00000000aaaa", name: "Engineering" }];
+
+  it("renders the legacy bucket, a bound space's name, or the honest unknown", () => {
+    expect(collectionSpaceLabel(null, spaces)).toBe("workspace");
+    expect(collectionSpaceLabel("018f0000-0000-7000-8000-00000000aaaa", spaces)).toBe(
+      "Engineering",
+    );
+    expect(collectionSpaceLabel("018f0000-0000-7000-8000-00000000dead", spaces)).toBe(
+      "unknown space",
     );
   });
 });

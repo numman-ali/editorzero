@@ -353,7 +353,7 @@ describe("collection.delete", () => {
       expect(collectionDelete.id).toBe("collection.delete");
       expect(collectionDelete.category).toBe("mutation");
       expect(collectionDelete.requires).toEqual(["doc:delete"]);
-      expect(collectionDelete.surfaces).toEqual(["api", "cli", "mcp"]);
+      expect(collectionDelete.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     });
 
     it("emits the collection.soft_delete effect on allow (carrying deleted_at)", () => {

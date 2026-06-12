@@ -112,22 +112,30 @@ export function SideContent({
             {tree.map((node) => {
               const indent = treeRowIndent(node.depth);
               return (
-                <li
-                  className={indent.className}
-                  key={node.id}
-                  {...(indent.padding !== undefined && {
-                    style: { paddingLeft: indent.padding },
-                  })}
-                >
-                  {node.hasChildren && (
-                    <span className="tw" aria-hidden="true">
-                      ▾
+                <li key={node.id}>
+                  {/* The whole row is the link (the `.tree .row`
+                      hover/cursor tokens anticipated it); activeProps
+                      MERGE `on` onto the base row classes. */}
+                  <Link
+                    className={indent.className}
+                    to="/collection/$collectionId"
+                    params={{ collectionId: node.id }}
+                    activeProps={{ className: "on", "aria-current": "page" }}
+                    onClick={onNavigate}
+                    {...(indent.padding !== undefined && {
+                      style: { paddingLeft: indent.padding },
+                    })}
+                  >
+                    {node.hasChildren && (
+                      <span className="tw" aria-hidden="true">
+                        ▾
+                      </span>
+                    )}
+                    <span className="ic" aria-hidden="true">
+                      ▯
                     </span>
-                  )}
-                  <span className="ic" aria-hidden="true">
-                    ▯
-                  </span>
-                  {node.title}
+                    {node.title}
+                  </Link>
                 </li>
               );
             })}

@@ -94,7 +94,11 @@ export const collectionUpdate: Capability<CollectionUpdateInput, CollectionUpdat
   output: CollectionUpdateOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the /collection/$collectionId detail screen's Edit
+  // disclosure (the collection.update × Web UI cell) — proven end-to-end
+  // by the marked Playwright spec in packages/e2e
+  // (proves-capability-cell: collection.update).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "collection", id: input.collection_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

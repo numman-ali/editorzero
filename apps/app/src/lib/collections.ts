@@ -82,6 +82,103 @@ export function collectionCreateFailureMessage(kind: CollectionCreateFailure): s
     : "Create failed. Try again.";
 }
 
+type CollectionUpdateResponse = Awaited<
+  ReturnType<ApiClient["collections"]["update"][":collection_id"]["$post"]>
+>;
+type CollectionUpdateSuccess = Extract<CollectionUpdateResponse, { status: 200 }>;
+export type CollectionUpdated = Awaited<ReturnType<CollectionUpdateSuccess["json"]>>;
+
+/**
+ * Retitle a collection — the capability's whole v1 mutable surface
+ * (`slug` re-derives in the handler; placement changes belong to
+ * `collection.move`). The form's no-change close happens in the
+ * component; this always sends.
+ */
+export async function updateCollection(
+  collectionId: string,
+  title: string,
+  client: ApiClient = apiClient,
+): Promise<CollectionUpdated> {
+  const res = await client.collections.update[":collection_id"].$post({
+    param: { collection_id: collectionId },
+    json: { title },
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type CollectionUpdateFailure = "duplicate_title" | "missing" | "update_failed";
+
+/**
+ * 409 = the derived slug collides with a live sibling (retrying the
+ * same title can never succeed); 404 = the collection vanished under
+ * the screen (trashed elsewhere); everything else is retryable.
+ */
+export function classifyCollectionUpdateError(error: unknown): CollectionUpdateFailure {
+  if (isApiError(error) && error.status === 409) return "duplicate_title";
+  if (isApiError(error) && error.status === 404) return "missing";
+  return "update_failed";
+}
+
+export function collectionUpdateFailureMessage(kind: CollectionUpdateFailure): string {
+  switch (kind) {
+    case "duplicate_title":
+      return "A collection with this title already exists here. Pick a different title.";
+    case "missing":
+      return "This collection no longer exists. It may have been trashed elsewhere.";
+    case "update_failed":
+      return "Save failed. Try again.";
+  }
+}
+
+type CollectionDeleteResponse = Awaited<
+  ReturnType<ApiClient["collections"]["delete"][":collection_id"]["$post"]>
+>;
+type CollectionDeleteSuccess = Extract<CollectionDeleteResponse, { status: 200 }>;
+export type CollectionDeleted = Awaited<ReturnType<CollectionDeleteSuccess["json"]>>;
+
+/**
+ * Soft-delete a collection (invariant 6 — `collection.restore` revives
+ * it 1:1, though restore is API/CLI/MCP-only until a trash-listing
+ * capability exists; the doc-trash gap class). The capability refuses
+ * while live sub-collections or docs remain — no cascade; the caller
+ * empties it first.
+ */
+export async function deleteCollection(
+  collectionId: string,
+  client: ApiClient = apiClient,
+): Promise<CollectionDeleted> {
+  const res = await client.collections.delete[":collection_id"].$post({
+    param: { collection_id: collectionId },
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type CollectionDeleteFailure = "not_empty" | "missing" | "delete_failed";
+
+/** 409 `has_live_descendants` — counts do not cross the wire (code-only envelope). */
+export function classifyCollectionDeleteError(error: unknown): CollectionDeleteFailure {
+  if (isApiError(error) && error.status === 409) return "not_empty";
+  if (isApiError(error) && error.status === 404) return "missing";
+  return "delete_failed";
+}
+
+export function collectionDeleteFailureMessage(kind: CollectionDeleteFailure): string {
+  switch (kind) {
+    case "not_empty":
+      return "This collection still has sub-collections or docs in it. Empty it first.";
+    case "missing":
+      return "This collection no longer exists. It may have been trashed already.";
+    case "delete_failed":
+      return "Delete failed. Try again.";
+  }
+}
+
 /** One renderable tree row: the summary plus its computed depth. */
 export type CollectionTreeRow = {
   readonly id: CollectionSummary["id"];
@@ -187,4 +284,19 @@ export function docPlacementLabel(
 ): string {
   if (collectionId === null) return "root";
   return collections.find((c) => c.id === collectionId)?.title ?? "unknown collection";
+}
+
+/**
+ * The detail screen's binding fact: `null` is the legacy no-space
+ * bucket ("workspace"); otherwise the bound space's name. An id the
+ * spaces list cannot resolve (archived under the screen) degrades to
+ * the honest "unknown space" — the binding exists, its target is gone
+ * from the live list.
+ */
+export function collectionSpaceLabel(
+  spaceId: string | null,
+  spaces: readonly { space_id: string; name: string }[],
+): string {
+  if (spaceId === null) return "workspace";
+  return spaces.find((s) => s.space_id === spaceId)?.name ?? "unknown space";
 }
