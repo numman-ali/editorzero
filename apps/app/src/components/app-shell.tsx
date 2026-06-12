@@ -2,6 +2,7 @@ import { Drawer } from "@base-ui/react/drawer";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
+import type { CollectionSummary } from "../lib/collections";
 import type { WhoamiSession } from "../lib/session";
 import type { WorkspaceGet } from "../lib/workspace";
 import { SideContent } from "./side-content";
@@ -30,17 +31,19 @@ import "./app-shell.css";
 export function AppShell({
   session,
   workspace,
+  collections,
   children,
 }: {
   session: WhoamiSession;
   workspace: WorkspaceGet;
+  collections: readonly CollectionSummary[];
   children: ReactNode;
 }) {
   const [navOpen, setNavOpen] = useState(false);
   return (
     <div className="win">
       <aside className="side">
-        <SideContent session={session} workspace={workspace} />
+        <SideContent session={session} workspace={workspace} collections={collections} />
       </aside>
       <div className="main">
         <header className="bar">
@@ -57,6 +60,7 @@ export function AppShell({
                     <SideContent
                       session={session}
                       workspace={workspace}
+                      collections={collections}
                       onNavigate={() => setNavOpen(false)}
                     />
                   </Drawer.Content>

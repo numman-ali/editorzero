@@ -204,7 +204,9 @@ describe("collection.list", () => {
     expect(collectionList.id).toBe("collection.list");
     expect(collectionList.category).toBe("read");
     expect(collectionList.requires).toEqual(["doc:read"]);
-    expect(collectionList.surfaces).toEqual(["api", "cli", "mcp"]);
+    // "ui" since the sidebar Collections tree landed (proven by the marked
+    // Playwright spec; the contract-tests matrix enforces the bond).
+    expect(collectionList.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
   });
 
   it("emits the audit.access_log effect on allow", () => {

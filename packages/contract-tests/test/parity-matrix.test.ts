@@ -61,7 +61,6 @@ const UI_PENDING: readonly string[] = [
   "audit.list",
   "collection.create",
   "collection.delete",
-  "collection.list",
   "collection.move",
   "collection.restore",
   "collection.update",

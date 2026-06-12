@@ -4,10 +4,11 @@
  *
  * Same split as `session.ts`/`docs.ts`: `fetchWorkspaceGet` is the
  * testable plain function; `workspaceGetQueryOptions` is the
- * react-query binding consumed by the `_authed` layout's `beforeLoad`
- * (`ensureQueryData` — the block renders on every authed screen, so the
- * layout is the warm point) and `useWorkspace` is the thin hook the
- * layout component reads the cache back through. `workspaceMonogram`
+ * react-query binding consumed by the `_authed` layout — `beforeLoad`
+ * warms it (`ensureQueryData`; the block renders on every authed
+ * screen, so the layout is the warm point) and the layout component
+ * reads the cache back through a direct `useQuery` (route files are
+ * e2e-covered, the doc.list pattern — no hook indirection here). `workspaceMonogram`
  * lives here so the chrome component stays render-only.
  *
  * `WorkspaceGet` is DERIVED from the materialized client type (SSOT —
@@ -15,7 +16,7 @@
  * client type is the browser-safe projection).
  */
 import { type ApiClient, ApiError } from "@editorzero/api-client";
-import { queryOptions, useQuery } from "@tanstack/react-query";
+import { queryOptions } from "@tanstack/react-query";
 
 import { apiClient } from "./api-client";
 import { readErrorCode } from "./wire-error";
@@ -47,12 +48,6 @@ export function workspaceGetQueryOptions(client: ApiClient = apiClient) {
     queryKey: WORKSPACE_GET_QUERY_KEY,
     queryFn: () => fetchWorkspaceGet(client),
   });
-}
-
-// Thin react-query wrapper (the `useSession` pattern); its body runs only
-// inside a React render, so behaviour is e2e-covered, not unit-covered.
-export function useWorkspace() {
-  return useQuery(workspaceGetQueryOptions());
 }
 
 /**

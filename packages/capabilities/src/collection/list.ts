@@ -55,7 +55,11 @@ export const collectionList: Capability<CollectionListInput, CollectionListOutpu
   input: CollectionListInputSchema,
   output: CollectionListOutputSchema,
   requires: ["doc:read"],
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" is declared because the Web UI actually binds this capability
+  // (the sidebar Collections tree on every authed screen; proven by the
+  // marked Playwright spec in packages/e2e). Declared surfaces = bound
+  // surfaces (ADR 0040 H11).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

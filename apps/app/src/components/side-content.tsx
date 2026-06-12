@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 
+import { type CollectionSummary, flattenCollectionTree, treeRowIndent } from "../lib/collections";
 import { describePrincipal } from "../lib/principal";
 import type { WhoamiSession } from "../lib/session";
 import { type WorkspaceGet, workspaceMonogram } from "../lib/workspace";
@@ -21,16 +22,27 @@ import { type WorkspaceGet, workspaceMonogram } from "../lib/workspace";
  * IDENTITY block, not the mock's switcher: the deployment IS one
  * workspace (ADR 0040 Model B — `workspaces` is the tenant root), so
  * there is nothing to switch to and the block is non-interactive.
+ *
+ * The Collections tree under the nav is the `collection.list` cell:
+ * READ-ONLY rows at the bare-cell stage — there is no collection screen
+ * to link to, and drag-reorder is its own later cell (ADR 0037's Owned
+ * Tree note budgets it; it binds collection.move/doc.move). Always
+ * expanded — the `.tw` caret marks rows that HAVE children, it is not a
+ * toggle yet. The section is absent entirely when no collections exist
+ * (nothing to navigate — same honesty bar as the nav entries).
  */
 export function SideContent({
   session,
   workspace,
+  collections,
   onNavigate,
 }: {
   session: WhoamiSession;
   workspace: WorkspaceGet;
+  collections: readonly CollectionSummary[];
   onNavigate?: () => void;
 }) {
+  const tree = flattenCollectionTree(collections);
   const principal = describePrincipal(session);
   const avatarClass = principal.kind === "agent" ? "av av--agent" : "av av--u";
   return (
@@ -78,6 +90,37 @@ export function SideContent({
           Spaces
         </Link>
       </nav>
+      {tree.length > 0 && (
+        <>
+          <div className="nav-h kicker">Collections</div>
+          <nav className="tree" aria-label="Collections">
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {tree.map((node) => {
+                const indent = treeRowIndent(node.depth);
+                return (
+                  <li
+                    className={indent.className}
+                    key={node.id}
+                    {...(indent.padding !== undefined && {
+                      style: { paddingLeft: indent.padding },
+                    })}
+                  >
+                    {node.hasChildren && (
+                      <span className="tw" aria-hidden="true">
+                        ▾
+                      </span>
+                    )}
+                    <span className="ic" aria-hidden="true">
+                      ▯
+                    </span>
+                    {node.title}
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+        </>
+      )}
       <div className="foot">
         <span className={avatarClass} aria-hidden="true">
           {principal.monogram}
