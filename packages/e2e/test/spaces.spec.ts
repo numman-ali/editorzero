@@ -7,6 +7,7 @@ import { CREDENTIALS } from "./credentials";
  * proves-capability-cell: space.list
  * proves-capability-cell: space.get
  * proves-capability-cell: space.create
+ * proves-capability-cell: space.update
  *
  * The `space.list` + `space.get` × Web UI parity cells (invariant 4,
  * ADR 0033 §3 / 0040 H11). The marker lines above are load-bearing:
@@ -154,4 +155,61 @@ test("space.create: the header form mints a team space and lands on its detail",
   await expect(page.getByRole("alert")).toContainText("already exists");
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("button", { name: "+ New space" })).toBeVisible();
+});
+
+test("space.update: the Edit disclosure patches the row; personal spaces pin their selects", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/space");
+  await page.getByRole("link", { name: "Design" }).click();
+  await expect(page.locator("h2.t")).toHaveText("Design");
+
+  // Facts morph into the PATCH form, prefilled with the row.
+  await page.getByRole("button", { name: "Edit space" }).click();
+  const nameInput = page.getByRole("textbox", { name: "Space name" });
+  await expect(nameInput).toBeFocused();
+  await expect(nameInput).toHaveValue("Design");
+  await nameInput.fill("Design Studio");
+  await page.getByRole("textbox", { name: "Space slug" }).fill("design-studio");
+  await page.getByRole("combobox", { name: "Space type" }).selectOption("open");
+  await page.getByRole("combobox", { name: "Baseline access" }).selectOption("edit");
+  await expectNoAxeViolations(page); // the open form is part of the audited surface
+  await page.getByRole("button", { name: "Save" }).click();
+
+  // One PATCH, four visible effects: header name + slug re-render from
+  // the invalidated doc.get-style cache; the meta line carries the new
+  // type AND baseline (both selects traveled).
+  await expect(page.locator("h2.t")).toHaveText("Design Studio");
+  await expect(page.locator(".pth")).toHaveText("design-studio");
+  await expect(page.getByText("open · baseline edit")).toBeVisible();
+
+  // The grid card reflects the same server state.
+  await page.goto("/space");
+  await expect(page.locator(".sp .nm")).toHaveText([
+    "Design Studio",
+    "Engineering",
+    "Personal",
+    "Product",
+  ]);
+  await expect(page.getByText("design-studio", { exact: true })).toBeVisible();
+
+  // 409: an explicit slug colliding with a live sibling refuses with
+  // the typed alert; the form stays open.
+  await page.getByRole("link", { name: "Design Studio" }).click();
+  await page.getByRole("button", { name: "Edit space" }).click();
+  await page.getByRole("textbox", { name: "Space slug" }).fill("personal");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("alert")).toContainText("already exists");
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  // Personal spaces structurally pin type + baseline — the form must
+  // not offer the selects (name + slug stay patchable, cosmetic).
+  await page.goto("/space");
+  await page.getByRole("link", { name: "Personal", exact: true }).click();
+  await page.getByRole("button", { name: "Edit space" }).click();
+  await expect(page.getByRole("textbox", { name: "Space name" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Space type" })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Baseline access" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Cancel" }).click();
 });

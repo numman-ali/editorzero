@@ -1,6 +1,7 @@
 /**
- * `space.list` + `space.get` + `space.create` data-layer — the Spaces
- * screens' capability cells (invariant 4, ADR 0033 §3 / 0040 H11).
+ * `space.list` + `space.get` + `space.create` + `space.update`
+ * data-layer — the Spaces screens' capability cells (invariant 4,
+ * ADR 0033 §3 / 0040 H11).
  *
  * Same split as `docs.ts`: `fetchSpaceList` is the testable plain
  * function; `spaceListQueryOptions` is the react-query binding consumed
@@ -147,4 +148,90 @@ export function spaceCreateFailureMessage(kind: SpaceCreateFailure): string {
   return kind === "duplicate_name"
     ? "A Space with this name already exists. Pick a different name."
     : "Create failed. Try again.";
+}
+
+/**
+ * Baseline-access wire vocabulary (`BASELINE_ACCESS_ROLES` in
+ * `@editorzero/scopes`), mirrored as a renderable const — the unit pin
+ * + the e2e selectOption fail if the server vocabulary moves.
+ */
+export const SPACE_BASELINE_ROLES = ["edit", "comment", "view"] as const;
+export type SpaceBaselineRole = (typeof SPACE_BASELINE_ROLES)[number];
+
+type SpaceUpdateResponse = Awaited<ReturnType<ApiClient["spaces"]["update"][":space_id"]["$post"]>>;
+type SpaceUpdateSuccess = Extract<SpaceUpdateResponse, { status: 200 }>;
+export type SpaceUpdated = Awaited<ReturnType<SpaceUpdateSuccess["json"]>>;
+
+/** The PATCH subset `space.update` accepts — at least one field. */
+export type SpaceUpdatePatch = {
+  name?: string;
+  slug?: string;
+  space_type?: SpaceType;
+  baseline_access?: SpaceBaselineRole;
+};
+
+/**
+ * Compute the wire patch from the form draft: only CHANGED fields
+ * travel (the capability audits exactly what the caller sent — an
+ * unchanged value would still be a judged transition), trimmed; an
+ * empty diff returns null and the form closes without a wire call
+ * (the rename-doc no-op precedent). Type/baseline are compared only
+ * when the draft carries them — the personal-space form never offers
+ * those fields (the model pins them; see EditSpace).
+ */
+export function diffSpacePatch(
+  current: Pick<SpaceDetail, "name" | "slug" | "type" | "baseline_access">,
+  draft: {
+    name: string;
+    slug: string;
+    space_type?: SpaceType;
+    baseline_access?: SpaceBaselineRole;
+  },
+): SpaceUpdatePatch | null {
+  const patch: SpaceUpdatePatch = {};
+  const name = draft.name.trim();
+  const slug = draft.slug.trim();
+  if (name !== "" && name !== current.name) patch.name = name;
+  if (slug !== "" && slug !== current.slug) patch.slug = slug;
+  if (draft.space_type !== undefined && draft.space_type !== current.type) {
+    patch.space_type = draft.space_type;
+  }
+  if (draft.baseline_access !== undefined && draft.baseline_access !== current.baseline_access) {
+    patch.baseline_access = draft.baseline_access;
+  }
+  return Object.keys(patch).length === 0 ? null : patch;
+}
+
+/**
+ * Patch a space. Authority is administer-tier (`assertCanAdministerSpace`
+ * — personal: owner only; team: space owner-tier ∨ workspace owner/admin
+ * backstop); a slug change re-runs the workspace-level sibling pre-check
+ * (self-excluded) → typed 409.
+ */
+export async function updateSpace(
+  spaceId: string,
+  patch: SpaceUpdatePatch,
+  client: ApiClient = apiClient,
+): Promise<SpaceUpdated> {
+  const res = await client.spaces.update[":space_id"].$post({
+    param: { space_id: spaceId },
+    json: patch,
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type SpaceUpdateFailure = "duplicate_slug" | "update_failed";
+
+/** 409 = the explicit slug collided with a live sibling; unretryable as-is. */
+export function classifySpaceUpdateError(error: unknown): SpaceUpdateFailure {
+  return isApiError(error) && error.status === 409 ? "duplicate_slug" : "update_failed";
+}
+
+export function spaceUpdateFailureMessage(kind: SpaceUpdateFailure): string {
+  return kind === "duplicate_slug"
+    ? "A Space with this slug already exists. Pick a different slug."
+    : "Update failed. Try again.";
 }

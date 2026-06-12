@@ -1,8 +1,8 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { formatUpdated } from "../lib/docs";
-import { spaceKindLabel, spaceMetaLine, spaceQueryOptions } from "../lib/spaces";
+import { EditSpace } from "../components/edit-space";
+import { spaceKindLabel, spaceQueryOptions } from "../lib/spaces";
 
 /**
  * `/space/$spaceId` — the space detail screen: the `space.get × Web UI`
@@ -14,11 +14,12 @@ import { spaceKindLabel, spaceMetaLine, spaceQueryOptions } from "../lib/spaces"
  *
  * The screen renders the row `space.get` returns verbatim: name + slug
  * in the panel header (the doc-screen idiom), the kind chip, then the
- * `.kv` fact rows (the token sheet's editor-rail key-value vocabulary —
- * zero new CSS). Owner / created-by stay off-screen for now: they are
- * raw user ids, and no member-list capability exists yet to resolve
- * them to names (the punch-list roster gap) — rendering UUIDs would be
- * noise, not honesty.
+ * body — `EditSpace`, the `space.update` cell: the `.kv` fact rows
+ * with the Edit disclosure that swaps them for the PATCH form. Owner /
+ * created-by stay off-screen for now: they are raw user ids, and no
+ * member-list capability exists yet to resolve them to names (the
+ * punch-list roster gap) — rendering UUIDs would be noise, not
+ * honesty.
  *
  * Coverage: render-only; decisions (query options, labels, the meta
  * line, date formatting) live unit-tested in `lib/spaces.ts` +
@@ -46,20 +47,7 @@ function SpaceScreen() {
           <span className="status-tag">{spaceKindLabel(space.kind)}</span>
         </div>
       </div>
-      <div style={{ padding: "15px" }}>
-        <div className="kv">
-          <span className="k">access</span>
-          <span className="v">{spaceMetaLine(space)}</span>
-        </div>
-        <div className="kv">
-          <span className="k">created</span>
-          <span className="v mono">{formatUpdated(space.created_at)}</span>
-        </div>
-        <div className="kv">
-          <span className="k">updated</span>
-          <span className="v mono">{formatUpdated(space.updated_at)}</span>
-        </div>
-      </div>
+      <EditSpace space={space} />
     </section>
   );
 }

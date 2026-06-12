@@ -75,7 +75,6 @@ const UI_PENDING: readonly string[] = [
   "space.member_remove",
   "space.member_update_role",
   "space.restore",
-  "space.update",
   "workspace.member_add",
   "workspace.member_list",
   "workspace.member_remove",

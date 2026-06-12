@@ -4,9 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifySpaceCreateError,
+  classifySpaceUpdateError,
   createSpace,
+  diffSpacePatch,
   fetchSpace,
   fetchSpaceList,
+  SPACE_BASELINE_ROLES,
   SPACE_LIST_QUERY_KEY,
   SPACE_TYPES,
   spaceCreateFailureMessage,
@@ -15,6 +18,8 @@ import {
   spaceMetaLine,
   spaceQueryKey,
   spaceQueryOptions,
+  spaceUpdateFailureMessage,
+  updateSpace,
 } from "./spaces";
 
 /**
@@ -211,5 +216,99 @@ describe("spaceCreateFailureMessage", () => {
 
   it("offers a retry on create_failed", () => {
     expect(spaceCreateFailureMessage("create_failed")).toContain("Try again");
+  });
+});
+
+const CURRENT: Parameters<typeof diffSpacePatch>[0] = {
+  name: "Design",
+  slug: "design",
+  type: "closed",
+  baseline_access: "view",
+};
+
+describe("diffSpacePatch (only changed fields travel)", () => {
+  it("returns null when nothing changed (the form closes without a wire call)", () => {
+    expect(
+      diffSpacePatch(CURRENT, {
+        name: "Design",
+        slug: "design",
+        space_type: "closed",
+        baseline_access: "view",
+      }),
+    ).toBeNull();
+  });
+
+  it("trims and diffs name + slug; unchanged fields stay off the wire", () => {
+    expect(diffSpacePatch(CURRENT, { name: "  Design Studio  ", slug: "design" })).toEqual({
+      name: "Design Studio",
+    });
+  });
+
+  it("carries type/baseline only when the draft offers them AND they changed", () => {
+    expect(
+      diffSpacePatch(CURRENT, {
+        name: "Design",
+        slug: "design-studio",
+        space_type: "open",
+        baseline_access: "edit",
+      }),
+    ).toEqual({ slug: "design-studio", space_type: "open", baseline_access: "edit" });
+    // The personal-space form never offers the selects — the draft has
+    // no type/baseline keys, so the patch cannot carry the pinned fields.
+    expect(diffSpacePatch(CURRENT, { name: "Drafts", slug: "design" })).toEqual({
+      name: "Drafts",
+    });
+  });
+
+  it("ignores blanked-out fields (an empty input is no instruction)", () => {
+    expect(diffSpacePatch(CURRENT, { name: "  ", slug: "" })).toBeNull();
+  });
+
+  it("SPACE_BASELINE_ROLES mirrors the wire vocabulary in declaration order", () => {
+    expect(SPACE_BASELINE_ROLES).toEqual(["edit", "comment", "view"]);
+  });
+});
+
+describe("updateSpace", () => {
+  it("resolves the patched row echo on 200", async () => {
+    const updated = await updateSpace(
+      "018f0000-0000-7000-8000-00000000005a",
+      { name: "Design Studio" },
+      jsonClient(200, { ...ONE_SPACE, name: "Design Studio" }),
+    );
+    expect(updated.name).toBe("Design Studio");
+  });
+
+  it("throws ApiError with the typed envelope code on a 409 slug collision", async () => {
+    await expect(
+      updateSpace(
+        "018f0000-0000-7000-8000-00000000005a",
+        { slug: "personal" },
+        jsonClient(409, { error: "slug_collision" }),
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "slug_collision" });
+  });
+
+  it("throws an ApiError instance on a 400 (pinned personal fields)", async () => {
+    await expect(
+      updateSpace(
+        "018f0000-0000-7000-8000-00000000005b",
+        { space_type: "open" },
+        jsonClient(400, { error: "validation_failed" }),
+      ),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("classifySpaceUpdateError + spaceUpdateFailureMessage", () => {
+  it("maps a 409 to duplicate_slug with the pick-a-different-slug line", () => {
+    expect(classifySpaceUpdateError(new ApiError(409, "slug_collision"))).toBe("duplicate_slug");
+    expect(spaceUpdateFailureMessage("duplicate_slug")).toContain("already exists");
+  });
+
+  it("maps everything else to the generic retry arm", () => {
+    expect(classifySpaceUpdateError(new ApiError(500, "internal"))).toBe("update_failed");
+    expect(classifySpaceUpdateError(new TypeError("fetch failed"))).toBe("update_failed");
+    expect(spaceUpdateFailureMessage("update_failed")).toContain("Try again");
   });
 });
