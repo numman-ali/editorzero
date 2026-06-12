@@ -56,6 +56,14 @@
  * `eb("render_version", "+", 1)` increment pattern
  * publish/unpublish/delete use (architecture.md §5.4).
  *
+ * **Sibling-slug precondition.** The docs slug indexes are PARTIAL
+ * (live rows only), so a sibling may claim a trashed doc's slug; the
+ * restore UPDATE would re-enter the index domain as a raw UNIQUE
+ * violation (untyped 500). Pre-check → typed `SlugCollisionError`
+ * (409); rename or delete the live holder first. Same fix-forward as
+ * `collection.restore`, found while deriving `space.restore` (ADR
+ * 0040 Step 8 slice 2b).
+ *
  * **v1 scope — `deleted_at` clear + version bump only; cascade side-
  * effects deferred.** ADR 0017 §Restore lists search-index rebuild
  * (via `restore_search` queue in `QUEUE_NAMES`), embedding re-
@@ -73,8 +81,8 @@ import type {
   DenyReason,
   HandlerError,
 } from "@editorzero/audit";
-import { NotFoundError, ParentDeletedError } from "@editorzero/errors";
-import { CapabilityId, type CollectionId } from "@editorzero/ids";
+import { NotFoundError, ParentDeletedError, SlugCollisionError } from "@editorzero/errors";
+import { CapabilityId, type CollectionId, type DocId } from "@editorzero/ids";
 import {
   type DocRestoreInput,
   DocRestoreInputSchema,
@@ -136,7 +144,7 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
     // parent is restored first — otherwise the tree is inconsistent.
     const current = await ctx.db
       .selectFrom("docs")
-      .select(["id", "collection_id", "created_by", "access_mode"])
+      .select(["id", "collection_id", "created_by", "access_mode", "slug"])
       .where("id", "=", input.doc_id)
       .where("deleted_at", "is not", null)
       .executeTakeFirst();
@@ -173,6 +181,43 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
           parent_id,
         });
       }
+    }
+
+    // Step 2b — sibling-slug precondition. The docs slug indexes are
+    // PARTIAL (live rows only), so a sibling may have claimed this
+    // doc's slug while it sat in the trash — the restore UPDATE would
+    // hit `docs_root_slug_unique`/`docs_nested_slug_unique` as a raw
+    // UNIQUE violation (untyped 500). Pre-check the restore target
+    // scope (NULL-aware collection, excluding self) → the same typed
+    // 409 the create/rename path raises. Found while deriving
+    // `space.restore`'s identical precondition (ADR 0040 Step 8
+    // slice 2b); `collection.restore` gained the same check.
+    let slugHolder: { id: DocId } | undefined;
+    if (current.collection_id === null) {
+      slugHolder = await ctx.db
+        .selectFrom("docs")
+        .select(["id"])
+        .where("collection_id", "is", null)
+        .where("slug", "=", current.slug)
+        .where("id", "!=", input.doc_id)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+    } else {
+      slugHolder = await ctx.db
+        .selectFrom("docs")
+        .select(["id"])
+        .where("collection_id", "=", current.collection_id)
+        .where("slug", "=", current.slug)
+        .where("id", "!=", input.doc_id)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+    }
+    if (slugHolder !== undefined) {
+      throw new SlugCollisionError({
+        slug: current.slug,
+        parent_kind: current.collection_id === null ? "workspace" : "collection",
+        parent_id: current.collection_id,
+      });
     }
 
     // Step 3 — restore. Same alias-aware `WorkspaceScopingPlugin`

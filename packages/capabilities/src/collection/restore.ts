@@ -42,6 +42,16 @@
  * corrupt state, and the parent-depth count is the load-bearing
  * piece today.
  *
+ * **Sibling-slug precondition.** The slug uniqueness indexes are
+ * PARTIAL (live rows only), so while this collection sat in the
+ * trash a sibling may have legitimately claimed its slug — the
+ * restore UPDATE would then hit the index as a raw UNIQUE violation
+ * (untyped 500). Pre-check the restore target scope (NULL-aware
+ * parent, excluding self) → typed `SlugCollisionError`, the same
+ * 409 `collection.create`/`collection.update` raise; rename (or
+ * delete) the live holder first. Found while deriving
+ * `space.restore`'s identical precondition (Step 8 slice 2b).
+ *
  * **Not-deleted handling.** `deleted_at IS NULL` → 404 (honest
  * projection, mirror of `doc.restore`). Restoring a live collection
  * has no defined state change; silently returning 200 would emit a
@@ -66,7 +76,12 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
-import { NotFoundError, ParentDeletedError, ValidationError } from "@editorzero/errors";
+import {
+  NotFoundError,
+  ParentDeletedError,
+  SlugCollisionError,
+  ValidationError,
+} from "@editorzero/errors";
 import { CapabilityId, type CollectionId } from "@editorzero/ids";
 import {
   type CollectionRestoreInput,
@@ -117,7 +132,7 @@ export const collectionRestore: Capability<CollectionRestoreInput, CollectionRes
     // UPDATE fires.
     const current = await ctx.db
       .selectFrom("collections")
-      .select(["id", "parent_id"])
+      .select(["id", "parent_id", "slug"])
       .where("id", "=", input.collection_id)
       .where("deleted_at", "is not", null)
       .executeTakeFirst();
@@ -147,6 +162,39 @@ export const collectionRestore: Capability<CollectionRestoreInput, CollectionRes
           parent_id,
         });
       }
+    }
+
+    // Step 2b — sibling-slug precondition (see header). NULL-aware
+    // parent scope mirrors `collection.create`'s pre-check; excluding
+    // self is defensive (this row is trashed, the sibling query
+    // filters live rows — but a future partial-index change must not
+    // silently turn the row into its own collision).
+    let slugHolder: { id: CollectionId } | undefined;
+    if (current.parent_id === null) {
+      slugHolder = await ctx.db
+        .selectFrom("collections")
+        .select(["id"])
+        .where("parent_id", "is", null)
+        .where("slug", "=", current.slug)
+        .where("id", "!=", input.collection_id)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+    } else {
+      slugHolder = await ctx.db
+        .selectFrom("collections")
+        .select(["id"])
+        .where("parent_id", "=", current.parent_id)
+        .where("slug", "=", current.slug)
+        .where("id", "!=", input.collection_id)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+    }
+    if (slugHolder !== undefined) {
+      throw new SlugCollisionError({
+        slug: current.slug,
+        parent_kind: current.parent_id === null ? "workspace" : "collection",
+        parent_id: current.parent_id,
+      });
     }
 
     // Step 3 — depth-cap check. Closes the cross-slice gap Codex

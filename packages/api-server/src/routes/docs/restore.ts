@@ -42,11 +42,19 @@
  *         delete — symmetric rollback rights).
  *   404 — doc missing OR already live (not-trashed). Restore on an
  *         already-live doc is 404 to avoid no-op audit rows.
+ *   409 — restore precondition failed: `parent_deleted` (the doc's parent
+ *         collection is itself soft-deleted or missing — restore it first;
+ *         this arm existed in the handler since the collections slice but
+ *         was missing from this declaration) or `slug_collision` (a live
+ *         sibling claimed the trashed doc's slug — rename or delete the
+ *         holder first; Step-8 slice-2b fix-forward). The `error` code
+ *         discriminates.
  */
 
 import { CapabilityId } from "@editorzero/ids";
 import { DocRestoreInputSchema, DocRestoreOutputSchema } from "@editorzero/schemas/doc/restore";
 import { Hono } from "hono";
+import { z } from "zod";
 
 import type { ApiEnv } from "../../env";
 import { errorResponse } from "../../lib/errors";
@@ -80,6 +88,14 @@ export const restore = new Hono<ApiEnv>().post(
         404: {
           description: "Doc not found, or already live (not soft-deleted).",
           content: jsonContent(errEnvelope("not_found")),
+        },
+        409: {
+          description:
+            "Restore precondition failed. `parent_deleted` = the doc's parent collection " +
+            "is soft-deleted or missing (restore it first). `slug_collision` = a live " +
+            "sibling claimed this doc's slug while it was trashed (rename or delete the " +
+            "holder first). The `error` code discriminates.",
+          content: jsonContent(z.object({ error: z.enum(["parent_deleted", "slug_collision"]) })),
         },
       },
     }),

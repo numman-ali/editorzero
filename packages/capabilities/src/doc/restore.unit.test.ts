@@ -14,7 +14,7 @@ import {
   SPACES_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
-import { NotFoundError, ParentDeletedError } from "@editorzero/errors";
+import { NotFoundError, ParentDeletedError, SlugCollisionError } from "@editorzero/errors";
 import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
@@ -373,6 +373,65 @@ describe("doc.restore", () => {
         title: "Trashed",
         collection_id: null,
         deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A);
+      const out = await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });
+      expect(out.doc_id).toBe(DOC_A2_DELETED);
+    });
+  });
+
+  describe("sibling-slug precondition (Step-8 slice-2b fix-forward)", () => {
+    it("a LIVE sibling claimed the slug while trashed → typed 409, nothing mutated", async () => {
+      // Both seeded with title "Same" → slug "same"; legal because the
+      // partial index covers live rows only.
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Same",
+        collection_id: null,
+        deleted_at: 999,
+      });
+      await seedDocRow({
+        id: DOC_A1_LIVE,
+        workspace_id: WORKSPACE_A,
+        title: "Same",
+        collection_id: null,
+      });
+
+      const ctx = buildCtx(WORKSPACE_A);
+      const err = await docRestore
+        .handler(ctx, { doc_id: DOC_A2_DELETED })
+        .then(() => null)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SlugCollisionError);
+      if (err instanceof SlugCollisionError) {
+        expect(err.slug).toBe("same");
+        expect(err.parent_kind).toBe("workspace");
+      }
+
+      const row = await driver
+        .scoped(WORKSPACE_A)
+        .selectFrom("docs")
+        .select(["deleted_at"])
+        .where("id", "=", DOC_A2_DELETED)
+        .executeTakeFirstOrThrow();
+      expect(row.deleted_at).toBe(999);
+    });
+
+    it("a same-slug doc in a DIFFERENT collection does not block (per-collection index scope)", async () => {
+      await seedCollection({ id: LIVE_COLLECTION, workspace_id: WORKSPACE_A });
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Same",
+        collection_id: LIVE_COLLECTION,
+        deleted_at: 999,
+      });
+      await seedDocRow({
+        id: DOC_A1_LIVE,
+        workspace_id: WORKSPACE_A,
+        title: "Same",
+        collection_id: null,
       });
       const ctx = buildCtx(WORKSPACE_A);
       const out = await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });

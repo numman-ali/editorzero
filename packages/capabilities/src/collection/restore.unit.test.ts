@@ -7,7 +7,12 @@
  */
 
 import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
-import { NotFoundError, ParentDeletedError, ValidationError } from "@editorzero/errors";
+import {
+  NotFoundError,
+  ParentDeletedError,
+  SlugCollisionError,
+  ValidationError,
+} from "@editorzero/errors";
 import { CollectionId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { Principal, UserPrincipal } from "@editorzero/principal";
@@ -241,6 +246,77 @@ describe("collection.restore", () => {
         .where("id", "=", DELETED_CHILD_UNDER_DELETED)
         .executeTakeFirst();
       expect(row?.deleted_at).not.toBeNull();
+    });
+  });
+
+  describe("sibling-slug precondition (Step-8 slice-2b fix-forward)", () => {
+    it("a LIVE root sibling claimed the slug while trashed → typed 409, nothing mutated", async () => {
+      await seed();
+      // The partial index frees a trashed slug — a new live root
+      // collection legitimately takes "trashed-root".
+      const a = driver.scoped(WORKSPACE_A);
+      await a
+        .insertInto("collections")
+        .values({
+          id: CollectionId("018f0000-0000-7000-8000-0000000000c7"),
+          workspace_id: WORKSPACE_A,
+          parent_id: null,
+          title: "Usurper",
+          slug: "trashed-root",
+          order_key: "a6",
+          created_by: ALICE,
+          created_at: 2,
+          updated_at: 2,
+          deleted_at: null,
+        })
+        .execute();
+
+      const err = await collectionRestore
+        .handler(
+          buildCtx(userPrincipal()),
+          collectionRestore.input.parse({ collection_id: DELETED_ROOT }),
+        )
+        .then(() => null)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SlugCollisionError);
+      if (err instanceof SlugCollisionError) {
+        expect(err.slug).toBe("trashed-root");
+        expect(err.parent_kind).toBe("workspace");
+      }
+
+      const row = await a
+        .selectFrom("collections")
+        .select(["deleted_at"])
+        .where("id", "=", DELETED_ROOT)
+        .executeTakeFirstOrThrow();
+      expect(row.deleted_at).toBe(500);
+    });
+
+    it("a NESTED sibling collision scopes to the parent; a same-slug cousin elsewhere does not block", async () => {
+      await seed();
+      const a = driver.scoped(WORKSPACE_A);
+      // Same slug as DELETED_CHILD_UNDER_LIVE but under a DIFFERENT
+      // parent — not a collision (per-parent index scope).
+      await a
+        .insertInto("collections")
+        .values({
+          id: CollectionId("018f0000-0000-7000-8000-0000000000c8"),
+          workspace_id: WORKSPACE_A,
+          parent_id: LIVE_ROOT,
+          title: "Cousin",
+          slug: "child-live",
+          order_key: "a7",
+          created_by: ALICE,
+          created_at: 2,
+          updated_at: 2,
+          deleted_at: null,
+        })
+        .execute();
+      const out = await collectionRestore.handler(
+        buildCtx(userPrincipal()),
+        collectionRestore.input.parse({ collection_id: DELETED_CHILD_UNDER_LIVE }),
+      );
+      expect(out.collection_id).toBe(DELETED_CHILD_UNDER_LIVE);
     });
   });
 

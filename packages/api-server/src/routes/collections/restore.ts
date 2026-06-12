@@ -38,7 +38,10 @@
  * **Error arms.** `NotFoundError` → 404 (collection absent or already
  * live); `ParentDeletedError` → 409 (the parent collection is itself
  * soft-deleted or missing — restore it first, else the tree would be
- * inconsistent). `errorResponse` maps both.
+ * inconsistent); `SlugCollisionError` → 409 (a live sibling claimed the
+ * trashed collection's slug while it sat in the trash — rename or delete
+ * the holder first; Step-8 slice-2b fix-forward). `errorResponse` maps
+ * all three; the 409 `error` code discriminates the two causes.
  *
  * **Audit + permission + dispatcher-tx live inside the dispatcher.** This
  * is a metadata-only mutation (ADR 0018 §7); the handler only dispatches.
@@ -50,6 +53,7 @@ import {
   CollectionRestoreOutputSchema,
 } from "@editorzero/schemas/collection/restore";
 import { Hono } from "hono";
+import { z } from "zod";
 
 import type { ApiEnv } from "../../env";
 import { errorResponse } from "../../lib/errors";
@@ -85,8 +89,12 @@ export const restore = new Hono<ApiEnv>().post(
           content: jsonContent(errEnvelope("not_found")),
         },
         409: {
-          description: "Parent collection is soft-deleted or missing; restore it first.",
-          content: jsonContent(errEnvelope("parent_deleted")),
+          description:
+            "Restore precondition failed. `parent_deleted` = the parent collection is " +
+            "soft-deleted or missing (restore it first). `slug_collision` = a live sibling " +
+            "claimed this collection's slug while it was trashed (rename or delete the " +
+            "holder first). The `error` code discriminates.",
+          content: jsonContent(z.object({ error: z.enum(["parent_deleted", "slug_collision"]) })),
         },
       },
     }),
