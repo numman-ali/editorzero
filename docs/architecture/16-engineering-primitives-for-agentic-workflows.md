@@ -201,119 +201,23 @@ export interface DocPurgePreimage {
   doc_id: DocId;
   title: string;
   collection_id: CollectionId | null;
-  visibility: "workspace" | "public" | "private";
+  access_mode: AccessMode;                 // {space, private} — the Step-5 de-overload
+  published_slug: string | null;           // publish pair at purge time (normally null:
+  published_at: number | null;             //   soft-delete already cleared it)
   blocks: BlockPostState[];                // full block array at purge time
   snapshot_seq_at_purge: number;           // for forensics; the snapshot itself is gone
 }
 
-// AuditEffect carries everything needed to replay PersistentWorkspaceState
-// (invariant 3a). See §9.1 / §9.2.
-// NOTE (ADR 0040 Step 5): the *doc-level* `visibility {workspace,public,private}`
-// fields below (doc.create, DocPurgePreimage) are the live shape. Step 5
-// de-overloads them into `access_mode {space,private}` (read scope) + `published_at`
-// (orthogonal publish) — the `public` value retires; "published" = `published_at
-// IS NOT NULL` — which reshapes `doc.create`. The replay engine (Step 2) is built
-// against the live shape first; this catalog moves with the schema. (Block-level
-// `visibility {default,internal,public}` above is the search-redaction axis — a
-// separate column, unaffected by 0040.)
-export type AuditEffect =
-  // Lifecycle ---------------------------------------------------------------
-  | { kind: "workspace.create"; workspace_id: WorkspaceId; slug: string; name: string; created_by: UserId }
-  | { kind: "workspace.update"; workspace_id: WorkspaceId; patch: Partial<{ name: string; trash_retention_days: number; settings: unknown }> }
-  | { kind: "workspace.soft_delete"; workspace_id: WorkspaceId }
-  | { kind: "workspace.restore";     workspace_id: WorkspaceId }
-  | { kind: "workspace.purge";       workspace_id: WorkspaceId; member_count_at_purge: number }
-  | { kind: "member.add";    workspace_id: WorkspaceId; user_id: UserId; role: Role }
-  | { kind: "member.remove"; workspace_id: WorkspaceId; user_id: UserId }
-  | { kind: "member.update_role"; workspace_id: WorkspaceId; user_id: UserId; role: Role }
-  // Space (ADR 0040 Step 7; spaces-row kind/type land as space_kind/space_type — `kind` is the discriminant)
-  | { kind: "space.create";  space_id: SpaceId; workspace_id: WorkspaceId; space_kind: SpaceKind; space_type: SpaceType; owner_user_id: UserId | null; name: string; slug: string; baseline_access: GrantRole; created_by: UserId }
-  | { kind: "space.update";  space_id: SpaceId; patch: Partial<{ name: string; slug: string; space_type: SpaceType; baseline_access: GrantRole }> }
-  | { kind: "space.archive"; space_id: SpaceId; deleted_at: number }
-  | { kind: "space.restore"; space_id: SpaceId }
-  | { kind: "space.member_add";    workspace_id: WorkspaceId; space_id: SpaceId; user_id: UserId; role: GrantRole }
-  | { kind: "space.member_remove"; space_id: SpaceId; user_id: UserId }   // hard-DELETE: removes the projection key
-  | { kind: "space.member_update_role"; space_id: SpaceId; user_id: UserId; role: GrantRole }
-  // Collection --------------------------------------------------------------
-  | { kind: "collection.create"; collection_id: CollectionId; workspace_id: WorkspaceId; parent_id: CollectionId | null; space_id: SpaceId | null; title: string; slug: string; order_key: string }
-  | { kind: "collection.update"; collection_id: CollectionId; patch: Partial<{ title: string; slug: string; order_key: string }> }
-  | { kind: "collection.move";   collection_id: CollectionId; new_parent_id: CollectionId | null; new_order_key: string; new_space_id: SpaceId | null }  // new_space_id rebinds the WHOLE subtree on replay (denormalization invariant)
-  | { kind: "collection.soft_delete"; collection_id: CollectionId }
-  | { kind: "collection.restore";     collection_id: CollectionId }
-  // Doc ---------------------------------------------------------------------
-  | { kind: "doc.create"; doc_id: DocId; workspace_id: WorkspaceId; collection_id: CollectionId | null; title: string; slug: string; order_key: string; visibility: "workspace"|"public"|"private"; seed_blocks: SeedBlock[] }  // seed_blocks = pre-minted BlockIds + shape for replay reconstruction (invariant 3a)
-  | { kind: "doc.rename"; doc_id: DocId; title: string }
-  | { kind: "doc.move";   doc_id: DocId; new_collection_id: CollectionId | null; new_order_key: string; acl_transition?: { policy: "adopt_baseline"|"keep_grants"; before_space_id: SpaceId | null; after_space_id: SpaceId | null; dropped_grant_ids: GrantId[] } }  // present only on cross-boundary moves (ADR 0040 §7); one audit row per move (invariant 3)
-  | { kind: "doc.publish";   doc_id: DocId; published_at: number }
-  | { kind: "doc.unpublish"; doc_id: DocId }
-  | { kind: "doc.soft_delete"; doc_id: DocId }
-  | { kind: "doc.restore";     doc_id: DocId }
-  | { kind: "doc.purge"; preimage: DocPurgePreimage }        // full preimage for restore token + audit replay
-  | { kind: "doc.reconcile_base_token"; doc_id: DocId; token: string; expires_at: number }  // F66/F73: transient; GC is auditable
-  // Block (projection state; CRDT content is invariant 3b) ------------------
-  | { kind: "block.insert"; doc_id: DocId; post: BlockPostState }
-  | { kind: "block.update"; doc_id: DocId; post: BlockPostState }   // full post-state, not patch
-  | { kind: "block.remove"; doc_id: DocId; block_id: BlockId }
-  | { kind: "block.set_visibility"; doc_id: DocId; block_id: BlockId; visibility: "default"|"internal"|"public" }
-  // doc.update batch (F12 + F33): one audit row per handler invocation ------
-  | { kind: "doc.update_batch"; doc_id: DocId; ops: Array<
-        | { op: "insert"; block: BlockPostState; after_block_id: BlockId | null; parent_block_id: BlockId | null }
-        | { op: "update"; block_id: BlockId; post: BlockPostState }
-        | { op: "move";   block_id: BlockId; new_parent_block_id: BlockId | null; new_order_key: string }
-        | { op: "remove"; block_id: BlockId; preimage: BlockPostState }
-        | { op: "set_visibility"; block_id: BlockId; visibility: "default"|"internal"|"public" }
-      > }
-  // Version -----------------------------------------------------------------
-  | { kind: "version.create";  doc_id: DocId; version_id: string; name: string | null; snapshot_seq: number }
-  | { kind: "version.restore"; doc_id: DocId; from_version_id: string; pre_restore_version_id: string; snapshot_seq_before: number; snapshot_seq_after: number }
-  // Comment / attachment ----------------------------------------------------
-  | { kind: "comment.create"; comment_id: string; doc_id: DocId; anchor: unknown; thread_root_id: string | null; body_markdown: string }
-  | { kind: "comment.update"; comment_id: string; body_markdown: string }
-  | { kind: "comment.resolve"; comment_id: string; resolved_by: UserId | AgentId }
-  | { kind: "comment.soft_delete"; comment_id: string }
-  | { kind: "attachment.request_upload"; upload_id: string; workspace_id: WorkspaceId; storage_key: string; declared_size: number; declared_content_type: string; declared_sha256: string | null; expires_at: number }   // F57/F80
-  | { kind: "attachment.confirm_upload"; upload_id: string; attachment_id: string; storage_key: string; filename: string; content_type: string; bytes: number; sha256: string }                                         // F57/F80
-  | { kind: "attachment.soft_delete"; attachment_id: string }
-  // Permissions (reshaped at ADR 0040 Step 7 to mirror the polymorphic grants table;
-  // never emitted before then, so not an append-only violation. Revoke carries the
-  // full forensic preimage — the row is hard-DELETEd, the audit row is the only record.)
-  | { kind: "acl.grant";  grant_id: GrantId; workspace_id: WorkspaceId; resource_kind: "space"|"doc"; resource_id: string; subject_kind: "user"|"agent"; subject_id: string; role: GrantRole; is_guest: 0|1; created_by: UserId }
-  | { kind: "acl.revoke"; grant_id: GrantId; resource_kind: "space"|"doc"; resource_id: string; subject_kind: "user"|"agent"; subject_id: string; role: GrantRole; is_guest: 0|1 }
-  // Principals --------------------------------------------------------------
-  | { kind: "agent.create"; agent_id: AgentId; owner_user_id: UserId | null; name: string }
-  | { kind: "agent.rename"; agent_id: AgentId; name: string }
-  | { kind: "agent.revoke"; agent_id: AgentId }
-  | { kind: "token.create"; token_id: TokenId; bound_to: { agent_id: AgentId } | { user_id: UserId }; scopes: Scope[]; expires_at: number | null }
-  | { kind: "token.revoke"; token_id: TokenId }
-  // Mirror ------------------------------------------------------------------
-  | { kind: "mirror.configure"; patch: Partial<{ remote_url: string; branch: string; auth_kind: string; path_template: string; debounce_ms: number; batch_window_ms: number }> }
-  | { kind: "mirror.enable";  }
-  | { kind: "mirror.disable"; }
-  | { kind: "mirror.reset_state"; mirror_id: MirrorId; workspace_id: WorkspaceId; cleared_state: true; reprojected: boolean; touched_credentials: false }   // F50 + F58
-  | { kind: "mirror.reset_auth";  mirror_id: MirrorId; workspace_id: WorkspaceId; revoked_secret_ref: true; disabled: boolean; cleared_state: false }      // F58
-  // Custom domain -----------------------------------------------------------
-  | { kind: "custom_domain.add";    domain: string }
-  | { kind: "custom_domain.verify"; custom_domain_id: CustomDomainId; verification_method: "dns" | "http" }   // F50: richer than old {domain}
-  | { kind: "custom_domain.remove"; domain: string }
-  // Webhooks (F56) ----------------------------------------------------------
-  | { kind: "webhook.created";  webhook_id: string; workspace_id: WorkspaceId; url: string; events: string[]; resolved_ip: string }
-  | { kind: "webhook.updated";  webhook_id: string; patch: Partial<{ url: string; events: string[]; active: boolean; resolved_ip: string; resolution_policy: "manual" | "auto_on_failure" }> }
-  | { kind: "webhook.deleted";  webhook_id: string }
-  | { kind: "webhook.rotated";  webhook_id: string; new_secret_version: number; dual_accept_until: number }
-  | { kind: "webhook.circuit_broken"; webhook_id: string; failure_count: number; broken_at: number }
-  | { kind: "webhook.test_delivery";  webhook_id: string; delivery_id: string; status: number | null; error: string | null }
-  // Admin actions (F50) — replay is a no-op; enumerated for exhaustiveness --
-  | { kind: "admin.reembed_workspace"; workspace_id: WorkspaceId; model_from: string; model_to: string }
-  | { kind: "admin.reindex_workspace"; workspace_id: WorkspaceId; index_kind: "fts" | "hnsw" }
-  | { kind: "admin.evict_doc";     doc_id: DocId }
-  | { kind: "admin.unlock_doc";    doc_id: DocId }
-  | { kind: "admin.job_requeue";   job_id: string; queue: string }
-  | { kind: "admin.job_cancel";    job_id: string; queue: string }
-  | { kind: "admin.queue_pause";   queue: string }
-  | { kind: "admin.queue_resume";  queue: string }
-  | { kind: "admin.secret_rotate"; secret_kind: string; dual_accept_until: number }
-  | { kind: "admin.diagnose";      workspace_id: WorkspaceId; bundle_id: string; with_content: boolean };   // §9.7 bundle export
 ```
+
+#### `AuditEffect` — canonical in code, not mirrored here
+
+**The discriminated union lives at `packages/audit/src/effect.ts`; that file is the single source of truth** (~70 kinds, per-field docstrings explaining each carried value). This catalog stopped mirroring the union at ADR 0040 Step 7: the inline copy drifted repeatedly (six stale shapes found at the Step-7 review — Codex MEDIUM) because every effect commit had to edit two files, and a stale prose copy of the *replay contract* is worse than none (code-as-spec — AGENTS.md). What belongs here is the architecture of the contract, which does not churn per-kind:
+
+- **Replay classes.** `REPLAY_CLASS` (`packages/audit/src/reducer.ts`) partitions every kind: `state` (has a reducer transition into `PersistentWorkspaceState` — §9.1), `content` (Yjs binary path — invariant 3b, replayed from `doc_updates`, not effects), `audit-only` (reads + admin actions — forensic rows, no state mutation), `deferred` (kind reserved, no transition yet; the classification flips to `state` in the same commit that adds the transition + fixture).
+- **Effect-carries-everything (invariant 3a).** An effect carries every handler-computed value — replay never infers from the audit envelope or a DDL default: attribution (`created_by` = the human behind an agent, never the envelope principal), handler clocks (`deleted_at`), handler-derived strings (slugs, collision-suffixed publish URLs), and — for hard-DELETE rows (`grants`, `space_members`) — the **full row preimage on the removing effect**, because after the delete the audit row is the only durable record of what was removed.
+- **Post-state, not deltas.** Mutating effects carry the post-state of what changed (`block.update` carries the full `BlockPostState`; `space.update` carries the patched values the handler wrote), so replay applies carried values rather than re-deriving them.
+- **Forcing functions.** `STATE_KIND_FIXTURES satisfies Record<StateKind, …>` in the reducer unit suite makes a transition-less `state` kind a compile error; the dispatcher replay property deep-equals `replay(audit_log)` against a live-DB projection after every real capability dispatch.
 
 **Audit record envelope (F32).** Every persisted `audit_events` row is one of three variants:
 

@@ -485,7 +485,13 @@ const STATE_KIND_FIXTURES = {
     user_id: USER,
     role: "edit",
   },
-  "space.member_remove": { kind: "space.member_remove", space_id: SPACE, user_id: USER },
+  "space.member_remove": {
+    kind: "space.member_remove",
+    workspace_id: WS,
+    space_id: SPACE,
+    user_id: USER,
+    role: "edit",
+  },
   "space.member_update_role": {
     kind: "space.member_update_role",
     space_id: SPACE,
@@ -507,12 +513,14 @@ const STATE_KIND_FIXTURES = {
   "acl.revoke": {
     kind: "acl.revoke",
     grant_id: GRANT,
+    workspace_id: WS,
     resource_kind: "doc",
     resource_id: DOC,
     subject_kind: "user",
     subject_id: USER2,
     role: "view",
     is_guest: 0,
+    created_by: USER,
   },
   "collection.create": {
     kind: "collection.create",
@@ -646,7 +654,13 @@ describe("replay reducer — space family (ADR 0040 Step 7)", () => {
         user_id: USER2,
         role: "view",
       }),
-      allow({ kind: "space.member_remove", space_id: SPACE, user_id: USER2 }),
+      allow({
+        kind: "space.member_remove",
+        workspace_id: WS,
+        space_id: SPACE,
+        user_id: USER2,
+        role: "view",
+      }),
     ]);
     expect(afterRemove.space_members).toEqual({});
     // Re-add after remove starts a fresh row (no resurrecting state).
@@ -659,7 +673,13 @@ describe("replay reducer — space family (ADR 0040 Step 7)", () => {
         user_id: USER2,
         role: "owner",
       }),
-      allow({ kind: "space.member_remove", space_id: SPACE, user_id: USER2 }),
+      allow({
+        kind: "space.member_remove",
+        workspace_id: WS,
+        space_id: SPACE,
+        user_id: USER2,
+        role: "owner",
+      }),
       allow({
         kind: "space.member_add",
         workspace_id: WS,
@@ -681,7 +701,13 @@ describe("replay reducer — space family (ADR 0040 Step 7)", () => {
     expect(
       applyAuditRow(
         EMPTY_STATE,
-        allow({ kind: "space.member_remove", space_id: SPACE, user_id: USER }),
+        allow({
+          kind: "space.member_remove",
+          workspace_id: WS,
+          space_id: SPACE,
+          user_id: USER,
+          role: "view",
+        }),
       ),
     ).toBe(EMPTY_STATE);
     expect(
@@ -729,12 +755,14 @@ describe("replay reducer — grants (ADR 0040 Step 7)", () => {
       allow({
         kind: "acl.revoke",
         grant_id: GRANT,
+        workspace_id: WS,
         resource_kind: "space",
         resource_id: SPACE,
         subject_kind: "agent",
         subject_id: BOT_SUBJECT,
         role: "comment",
         is_guest: 1,
+        created_by: USER,
       }),
     ]);
     expect(state.grants).toEqual({});
@@ -767,12 +795,14 @@ describe("replay reducer — grants (ADR 0040 Step 7)", () => {
         allow({
           kind: "acl.revoke",
           grant_id: GRANT,
+          workspace_id: WS,
           resource_kind: "doc",
           resource_id: DOC,
           subject_kind: "user",
           subject_id: USER2,
           role: "view",
           is_guest: 0,
+          created_by: USER,
         }),
       ),
     ).toBe(EMPTY_STATE);

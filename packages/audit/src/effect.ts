@@ -164,7 +164,12 @@ export type AuditEffect =
   | { kind: "space.restore"; space_id: SpaceId }
   // `space_members` is hard-DELETE (Step-4 DDL has no deleted_at):
   // `member_remove` REMOVES the projection key — add-then-remove nets
-  // to no entry, mirroring the grants H1 posture.
+  // to no entry, mirroring the grants H1 posture. Like `acl.revoke`,
+  // the remove carries the FULL row preimage (`workspace_id` + the
+  // removed `role`), not just the key: after the hard delete this
+  // audit row is the only durable record of what membership was
+  // removed (Codex Step-7 review HIGH 2). The reducer removes by key
+  // and ignores the preimage fields — they are forensic.
   | {
       kind: "space.member_add";
       workspace_id: WorkspaceId;
@@ -172,7 +177,13 @@ export type AuditEffect =
       user_id: UserId;
       role: GrantRole;
     }
-  | { kind: "space.member_remove"; space_id: SpaceId; user_id: UserId }
+  | {
+      kind: "space.member_remove";
+      workspace_id: WorkspaceId;
+      space_id: SpaceId;
+      user_id: UserId;
+      role: GrantRole;
+    }
   | { kind: "space.member_update_role"; space_id: SpaceId; user_id: UserId; role: GrantRole }
   // ── Collection (§3.5) ────────────────────────────────────────────────────
   | {
@@ -377,19 +388,25 @@ export type AuditEffect =
       is_guest: 0 | 1;
       created_by: UserId;
     }
-  // Carries the FULL forensic preimage, not just the id: the grants row
-  // is hard-DELETEd on revoke (H1), so this audit row is the only
-  // durable record of what access was removed — an auditor must never
-  // need to join back to a row that no longer exists.
+  // Carries the FULL forensic preimage — every `GrantState` field, not
+  // just the id: the grants row is hard-DELETEd on revoke (H1), so this
+  // audit row is the only durable record of what access was removed —
+  // an auditor must never need to join back to a row that no longer
+  // exists, NOR lean on the envelope for `workspace_id`, NOR replay
+  // prior rows to recover who originally created the grant (Codex
+  // Step-7 review HIGH 1: same class as the created_by/handler-clock
+  // findings — the effect carries the handler-read row, full stop).
   | {
       kind: "acl.revoke";
       grant_id: GrantId;
+      workspace_id: WorkspaceId;
       resource_kind: "space" | "doc";
       resource_id: string;
       subject_kind: "user" | "agent";
       subject_id: string;
       role: GrantRole;
       is_guest: 0 | 1;
+      created_by: UserId;
     }
   // ── Principals (§3.3) ────────────────────────────────────────────────────
   | { kind: "agent.create"; agent_id: AgentId; owner_user_id: UserId | null; name: string }
