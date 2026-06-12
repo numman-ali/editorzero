@@ -1,0 +1,47 @@
+# The §8.1a 100k-nightly soak (ADR 0040): the tenant-isolation fuzzer at
+# EDITORZERO_FUZZ_SEEDS=1200 — ≈100k dispatches per driver, both backends
+# (Postgres via testcontainers; Docker ships on ubuntu-latest runners).
+#
+# This is deliberately NOT per-commit CI — the repo's verification stack
+# is local pre-commit/pre-push hooks (AGENTS.md). A scheduled soak is the
+# one job hooks cannot host: it needs wall-clock the developer loop must
+# never pay. Seeds stay 1..N (mulberry32), so every soak CONTAINS the
+# per-push run and a red night reproduces locally with
+# `EDITORZERO_FUZZ_SEEDS=<n> pnpm fuzz:soak` at any scale ≥ the failing
+# seed.
+name: nightly-fuzz
+
+on:
+  schedule:
+    # 03:17 UTC — off the :00 thundering herd.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: "EDITORZERO_FUZZ_SEEDS override"
+        required: false
+        default: "1200"
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # pnpm version comes from the root `packageManager` field (SSOT).
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run the soak (both drivers)
+        env:
+          EDITORZERO_FUZZ_SEEDS: ${{ inputs.seeds || '1200' }}
+        run: pnpm fuzz:soak

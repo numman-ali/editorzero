@@ -21,6 +21,7 @@
     "test:affected": "pnpm -r --filter \"...[origin/main]\" test",
     "test:watch": "vitest",
     "test:prop": "vitest run --config vitest.prop.config.ts",
+    "fuzz:soak": "EDITORZERO_FUZZ_SEEDS=\"${EDITORZERO_FUZZ_SEEDS:-1200}\" vitest run --config vitest.prop.config.ts packages/api-server/prop/tenant-isolation.test.ts",
     "coherence": "tsx scripts/coherence.ts",
     "smoke:deploy": "./scripts/smoke-deploy.sh",
     "prepare": "lefthook install"

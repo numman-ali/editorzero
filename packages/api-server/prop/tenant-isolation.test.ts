@@ -69,6 +69,15 @@
  * ONCE per seed as plain data, then executed per driver against a
  * fresh schema.
  *
+ * **Soak lane**: `EDITORZERO_FUZZ_SEEDS` raises the seed count without
+ * touching determinism (seeds stay 1..N, so every soak run CONTAINS the
+ * per-commit run; a soak failure names its seed and reproduces at any
+ * scale ≥ that seed). `pnpm fuzz:soak` at the root pins 1200 seeds —
+ * ≈100k dispatches per driver, the §8.1a nightly target — and the
+ * scheduled workflow (.github/workflows/nightly-fuzz.yml) runs it on
+ * cron. Timeouts scale with the knob; not a secret, so plain
+ * `process.env` (the SKIP_POSTGRES precedent).
+ *
  * Out of scope here, owned elsewhere: transact-bearing capabilities
  * (doc.get / doc.create / doc.update / doc.rename need a
  * HocuspocusSync — the matrix is exactly the metadata-only + pure-read
@@ -118,8 +127,48 @@ import { createApiDispatcher } from "../src/composition/createApiDispatcher";
 
 // ── Scale ──────────────────────────────────────────────────────────────────
 
-const SEEDS = 12;
-const OPS_PER_SEED = 84; // 12 × 84 = 1008 dispatches per driver
+/**
+ * Soak knob — see the header. Default = the per-commit pre-push scale.
+ * RAISE-ONLY: the anti-vacuity floor (≥1 allow + ≥1 refusal per verb
+ * per run) is calibrated at 12 seeds — below that, rare-allow verbs
+ * (doc.restore needs a delete drawn first) starve and the floor itself
+ * fails the run, proven by a 2-seed probe at lane-landing time.
+ */
+function readFuzzSeeds(): number {
+  const raw = process.env["EDITORZERO_FUZZ_SEEDS"];
+  if (raw === undefined || raw === "") return 12;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 12 || n > 100_000) {
+    throw new Error(
+      `EDITORZERO_FUZZ_SEEDS must be an integer in [12, 100000] (the anti-vacuity floor is calibrated at 12); got "${raw}"`,
+    );
+  }
+  return n;
+}
+
+/**
+ * Triage knob — run EXACTLY one seed (the one a red soak names) and
+ * dump its full plan to stderr. Skips the run-scoped anti-vacuity
+ * floor; everything else (both drivers, the cross-backend comparison)
+ * runs as normal. Not a secret; the SKIP_POSTGRES precedent.
+ */
+function readSeedFocus(): number | null {
+  const raw = process.env["EDITORZERO_FUZZ_SEED_FOCUS"];
+  if (raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`EDITORZERO_FUZZ_SEED_FOCUS must be a positive integer; got "${raw}"`);
+  }
+  return n;
+}
+
+const SEED_FOCUS = readSeedFocus();
+const SEEDS = readFuzzSeeds();
+const OPS_PER_SEED = 84; // 12 × 84 = 1008 dispatches per driver at the default scale
+// Per-leg ceiling: ~10s/seed headroom at the default (the 120s status
+// quo); the soak's measured cost is well under 1s/seed/leg, so 2s/seed
+// keeps slow-runner margin without letting a hang burn the whole job.
+const LEG_TIMEOUT_MS = Math.max(120_000, SEEDS * 2_000);
 const SKIP_POSTGRES = process.env["EDITORZERO_SKIP_POSTGRES_TESTS"] === "1";
 
 /** Pinned image — kept in sync with `packages/db` (ADR 0023 §2). */
@@ -723,6 +772,53 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
       input: {
         collection_id: liveLegacyCol.id,
         destination: { kind: "space_root", space_id: personalSpace.id },
+        acl_policy: "adopt_baseline",
+      },
+      polluted: false,
+    });
+  }
+  // Pinned runtime-guest × adopt_baseline crossing (seed-130 soak
+  // regression): mint a guest edge AT RUN TIME on a space-placed doc
+  // (so the model tracks it under a placeholder id, not a seeded one),
+  // then cross that doc's collection out of the space under
+  // adopt_baseline. The system hard-deletes the edge and echoes its
+  // REAL grant id — the model must drop it by preimage edge or the
+  // subject haunts the final doc.list sweep with a phantom grant. The
+  // subject is an api-key agent: agents never ride user-baseline
+  // rungs, so after the drop the agent deterministically sees nothing.
+  const firstAgent = world.agents[0];
+  const guestCrossingCol = world.collections.find(
+    (c) =>
+      c.deleted_at === null &&
+      c.space_id !== null &&
+      world.spaces.some((sp) => sp.id === c.space_id && sp.deleted_at === null) &&
+      world.docs.some((d) => d.collection_id === c.id && d.deleted_at === null),
+  );
+  const guestCrossingDoc = world.docs.find(
+    (d) => d.collection_id === guestCrossingCol?.id && d.deleted_at === null,
+  );
+  if (
+    firstAgent !== undefined &&
+    guestCrossingCol !== undefined &&
+    guestCrossingDoc !== undefined
+  ) {
+    ops.push({
+      capability: "doc.add_guest",
+      principal: { kind: "user", user_index: 0, agent_index: 0 },
+      input: {
+        doc_id: guestCrossingDoc.id,
+        subject_kind: "agent",
+        subject_id: firstAgent,
+        role: "view",
+      },
+      polluted: false,
+    });
+    ops.push({
+      capability: "collection.move",
+      principal: { kind: "user", user_index: 0, agent_index: 0 },
+      input: {
+        collection_id: guestCrossingCol.id,
+        destination: { kind: "legacy_root" },
         acl_policy: "adopt_baseline",
       },
       polluted: false,
@@ -1409,7 +1505,16 @@ function applyAllowed(world: World, op: Op, output: unknown, mintModelId: () => 
       // Subtree FIRST (it is rooted at the pre-move linkage), then the
       // root's re-parent; the whole subtree adopts the output binding
       // (denormalization invariant). Crossing under adopt_baseline
-      // drops exactly the echoed grant ids.
+      // drops exactly the echoed rows — matched by PREIMAGE EDGE
+      // (resource, subject), NOT by grant id: runtime-minted grants
+      // (the permission.grant / doc.add_guest arm below) live in the
+      // model under placeholder ids, so the echo's real ids can never
+      // name them. Id-keyed dropping left a hard-deleted guest edge
+      // alive in the model and the final sweep diverged (soak find,
+      // seed 130). adopt_baseline deletes BOTH lanes of an edge, so
+      // the (resource, subject) pair identifies the dropped rows
+      // exactly; echoed resource_kind is always "doc" by the DELETE's
+      // own filter.
       const subtree = modelSubtree(world, moved.id);
       for (const id of subtree) {
         const c = world.collections.find((x) => x.id === id);
@@ -1417,10 +1522,18 @@ function applyAllowed(world: World, op: Op, output: unknown, mintModelId: () => 
       }
       moved.parent_id = parsed.new_parent_id;
       if (parsed.acl_transition !== undefined) {
-        const droppedIds = new Set<string>(
-          parsed.acl_transition.dropped_grants.map((g) => String(g.grant_id)),
+        const droppedEdges = new Set<string>(
+          parsed.acl_transition.dropped_grants.map(
+            (g) => `${g.resource_id}|${g.subject_kind}|${g.subject_id}`,
+          ),
         );
-        world.grants = world.grants.filter((g) => !droppedIds.has(g.id));
+        world.grants = world.grants.filter(
+          (g) =>
+            !(
+              g.resource_kind === "doc" &&
+              droppedEdges.has(`${g.resource_id}|${g.subject_kind}|${g.subject_id}`)
+            ),
+        );
       }
       return;
     }
@@ -1886,6 +1999,15 @@ async function runPlanOnDriver(plan: SeedPlan, driver: FuzzDriver): Promise<Outc
       };
     }
     outcomes.push(outcome);
+    if (SEED_FOCUS !== null) {
+      // Triage companion to the plan dump: the plan says what was
+      // ATTEMPTED; this says what the system DECIDED, per op — the
+      // first question every divergence trace asks.
+      process.stderr.write(
+        `FOCUS op#${outcomes.length - 1} ${op.capability} → ${outcome.kind}` +
+          `${outcome.code === null ? "" : ` (${outcome.code})`}\n`,
+      );
+    }
 
     // Property 1 — pollution never allows.
     if (op.polluted && outcome.kind === "allow") {
@@ -2074,21 +2196,36 @@ function assertMatrixCoverage(plans: readonly SeedPlan[], bySeed: Map<number, Ou
 }
 
 describe(`§8.1a tenant-isolation fuzz — ${SEEDS} worlds × ${OPS_PER_SEED} ops per driver`, () => {
-  const plans = Array.from({ length: SEEDS }, (_, i) => makePlan(i + 1));
+  const plans =
+    SEED_FOCUS === null
+      ? Array.from({ length: SEEDS }, (_, i) => makePlan(i + 1))
+      : [makePlan(SEED_FOCUS)];
+  if (SEED_FOCUS !== null) {
+    // Red-night triage affordance: the full deterministic plan (world +
+    // ops) on stderr so a failing seed can be hand-traced against the
+    // §7/§8 rules without instrumenting the suite.
+    process.stderr.write(`FOCUS plan seed=${SEED_FOCUS}\n${JSON.stringify(plans[0], null, 1)}\n`);
+  }
   const sqliteOutcomes = new Map<number, Outcome[]>();
 
-  it("sqlite: isolation + authority oracle + read-set equality hold over the full matrix", async () => {
-    for (const plan of plans) {
-      const driver = createSqliteDriver({ path: ":memory:" });
-      driver.exec(SQLITE_FULL_DDL);
-      try {
-        sqliteOutcomes.set(plan.seed, await runPlanOnDriver(plan, driver));
-      } finally {
-        await driver.close();
+  it(
+    "sqlite: isolation + authority oracle + read-set equality hold over the full matrix",
+    async () => {
+      for (const plan of plans) {
+        const driver = createSqliteDriver({ path: ":memory:" });
+        driver.exec(SQLITE_FULL_DDL);
+        try {
+          sqliteOutcomes.set(plan.seed, await runPlanOnDriver(plan, driver));
+        } finally {
+          await driver.close();
+        }
       }
-    }
-    assertMatrixCoverage(plans, sqliteOutcomes);
-  }, 120_000);
+      // The anti-vacuity floor is RUN-scoped (calibrated at the 12-seed
+      // matrix); a single focused seed cannot and need not satisfy it.
+      if (SEED_FOCUS === null) assertMatrixCoverage(plans, sqliteOutcomes);
+    },
+    LEG_TIMEOUT_MS,
+  );
 
   it.skipIf(SKIP_POSTGRES)(
     "postgres: same properties + outcome-sequence equivalence with sqlite",
@@ -2116,6 +2253,6 @@ describe(`§8.1a tenant-isolation fuzz — ${SEEDS} worlds × ${OPS_PER_SEED} op
         await driver.close();
       }
     },
-    600_000,
+    Math.max(600_000, LEG_TIMEOUT_MS),
   );
 });
