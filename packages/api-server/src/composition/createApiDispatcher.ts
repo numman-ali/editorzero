@@ -18,11 +18,12 @@
  * provided) is a *deployment* decision, not a *dispatcher* decision.
  * So the factory that makes those choices lives where the trunk lives.
  *
- * **Driver parameter is `SqliteDriver` today; widens to `SqliteDriver
- * | PostgresDriver` once Postgres integration lands in a follow-up
- * slice** (ADR 0023). The driver surface (`.withSystemTx`, `.system()`,
- * `.scoped()`) is the same across both; this factory reads only that
- * surface, not SQLite-specific bits, so the widening is mechanical.
+ * **Driver parameter is structural (`ApiDispatcherDriver`)** — exactly
+ * the subset both `SqliteDriver` and `PostgresDriver` share
+ * (`.withSystemTx`, `.scoped`), same posture as `LoadRolesDriver` in
+ * `@editorzero/db` (ADR 0023). The §8.1a tenant-isolation fuzzer
+ * drives this factory against BOTH dialects; production boot still
+ * passes the concrete `SqliteDriver`.
  *
  * **`sync` is optional.** When a `HocuspocusSync` is passed, the
  * write-path `ctx.transact` routes through `sync.bind({ sqlTx,
@@ -87,8 +88,16 @@ import {
 import { type Logger, noopLogger, noopTracer, type Tracer } from "@editorzero/observability";
 import type { HocuspocusSync } from "@editorzero/sync";
 
+/**
+ * Structural driver surface the factory consumes — the subset
+ * `SqliteDriver` and `PostgresDriver` agree on. The factory reads
+ * nothing dialect-specific, so either driver slots in (the §8.1a
+ * dual-driver fuzzer relies on this; ADR 0023's Postgres boot will).
+ */
+export type ApiDispatcherDriver = Pick<SqliteDriver, "withSystemTx" | "scoped">;
+
 export interface CreateApiDispatcherOptions {
-  readonly driver: SqliteDriver;
+  readonly driver: ApiDispatcherDriver;
   readonly registry: Registry;
   /**
    * Permission gate. Defaults to `scopeOnlyGate()` — scope-only deny

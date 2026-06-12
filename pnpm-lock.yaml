@@ -377,6 +377,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.3.6)
+      '@testcontainers/postgresql':
+        specifier: ^11.14.0
+        version: 11.14.0
       '@types/json-schema':
         specifier: 7.0.15
         version: 7.0.15
