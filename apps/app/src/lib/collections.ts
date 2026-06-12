@@ -159,3 +159,32 @@ export function treeRowIndent(depth: number): { className: string; padding: stri
   if (depth === 2) return { className: "row ind2", padding: undefined };
   return { className: "row", padding: `${10 + 16 * depth}px` };
 }
+
+/**
+ * The placement BUCKET a collection id resolves to: `null` is the
+ * legacy no-space bucket (workspace root, or a collection without a
+ * space binding); a string is the bound space's id. `doc.move`'s
+ * policy rails key on source-vs-target bucket (ADR 0040 Step 8): a
+ * crossing REQUIRES an `acl_policy`, same-bucket REFUSES one — and the
+ * wire's ValidationError envelope is code-generic, so the browser
+ * derives the bucket here instead of discovering it via a refused
+ * round-trip. A collection id missing from the live list (trashed —
+ * anomalous placement) degrades to `null`; the server rails stay the
+ * authority and the generic failure arm covers the residual.
+ */
+export function placementBinding(
+  collectionId: string | null,
+  collections: readonly CollectionSummary[],
+): string | null {
+  if (collectionId === null) return null;
+  return collections.find((c) => c.id === collectionId)?.space_id ?? null;
+}
+
+/** The doc header's placement label: workspace root or the collection title. */
+export function docPlacementLabel(
+  collectionId: string | null,
+  collections: readonly CollectionSummary[],
+): string {
+  if (collectionId === null) return "root";
+  return collections.find((c) => c.id === collectionId)?.title ?? "unknown collection";
+}

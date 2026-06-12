@@ -9,8 +9,10 @@ import {
   collectionCreateFailureMessage,
   collectionListQueryOptions,
   createCollection,
+  docPlacementLabel,
   fetchCollectionList,
   flattenCollectionTree,
+  placementBinding,
   treeRowIndent,
 } from "./collections";
 
@@ -35,6 +37,7 @@ function row(id: string, title: string, parent_id: string | null): CollectionSum
     title,
     slug: title.toLowerCase().replace(/\s+/gu, "-"),
     parent_id,
+    space_id: null,
     created_at: 1,
     updated_at: 1,
   };
@@ -200,5 +203,41 @@ describe("collectionCreateFailureMessage", () => {
 
   it("offers a retry on create_failed", () => {
     expect(collectionCreateFailureMessage("create_failed")).toContain("Try again");
+  });
+});
+
+describe("placementBinding (the doc.move bucket derivation)", () => {
+  const SPACE = "018f0000-0000-7000-8000-00000000aaaa";
+  const bound: CollectionSummary = { ...row(C1, "Bound", null), space_id: SPACE };
+  const legacy = row("018f0000-0000-7000-8000-0000000000c2", "Legacy", null);
+
+  it("workspace root is the legacy bucket", () => {
+    expect(placementBinding(null, [bound, legacy])).toBeNull();
+  });
+
+  it("a bound collection resolves to its space; an unbound one to legacy", () => {
+    expect(placementBinding(bound.id, [bound, legacy])).toBe(SPACE);
+    expect(placementBinding(legacy.id, [bound, legacy])).toBeNull();
+  });
+
+  it("an id missing from the live list degrades to legacy (server rails stay authoritative)", () => {
+    expect(placementBinding("018f0000-0000-7000-8000-00000000dead", [bound])).toBeNull();
+  });
+
+  it("crossing = binding inequality (root→bound crosses; root→legacy does not)", () => {
+    const cols = [bound, legacy];
+    expect(placementBinding(null, cols) !== placementBinding(bound.id, cols)).toBe(true);
+    expect(placementBinding(null, cols) !== placementBinding(legacy.id, cols)).toBe(false);
+  });
+});
+
+describe("docPlacementLabel", () => {
+  it("renders root, a collection title, or the honest unknown", () => {
+    const c = row(C1, "Field Guides", null);
+    expect(docPlacementLabel(null, [c])).toBe("root");
+    expect(docPlacementLabel(C1, [c])).toBe("Field Guides");
+    expect(docPlacementLabel("018f0000-0000-7000-8000-00000000dead", [c])).toBe(
+      "unknown collection",
+    );
   });
 });

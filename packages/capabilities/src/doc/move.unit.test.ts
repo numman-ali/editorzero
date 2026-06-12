@@ -466,7 +466,7 @@ describe("doc.move", () => {
       expect(docMove.id).toBe("doc.move");
       expect(docMove.category).toBe("mutation");
       expect(docMove.requires).toEqual(["doc:write"]);
-      expect(docMove.surfaces).toEqual(["api", "cli", "mcp"]);
+      expect(docMove.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     });
 
     it("emits the doc.move effect on allow with new_collection_id + new_order_key", () => {

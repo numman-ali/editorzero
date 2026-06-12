@@ -10,9 +10,10 @@ import { CREDENTIALS } from "./credentials";
  * proves-capability-cell: doc.delete
  * proves-capability-cell: doc.publish
  * proves-capability-cell: doc.unpublish
+ * proves-capability-cell: doc.move
  *
  * The HTTP-first editor cells (ADR 0038; invariant 4, ADR 0033 §3 / 0040
- * H11). Six markers, one screen: `/doc/$docId` loads a doc through
+ * H11). Seven markers, one screen: `/doc/$docId` loads a doc through
  * `doc.get` (loader + owned-model parse + Tiptap render), persists
  * edits through `doc.update` (browser diff → ops batch with per-block
  * hash preconditions → explicit Save), renames through the toolbar's
@@ -228,4 +229,78 @@ test("doc.publish/doc.unpublish: the header toggle mints + clears the publish pa
   await expect(page.getByText(/^published · /u)).toHaveCount(0);
   await page.goto("/");
   await expect(page.locator(".st-pub")).toHaveCount(0);
+});
+
+test("doc.move: same-bucket moves need no policy; a crossing demands the explicit pole (doc.move cell)", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/");
+  await page.getByRole("link", { name: RENAMED_TITLE }).click();
+  await page.waitForURL(/\/doc\/[0-9a-f-]{36}$/u);
+  const docId = new URL(page.url()).pathname.split("/").at(-1);
+  await expect(page.getByText("· root")).toBeVisible();
+
+  // Same-bucket: root → "Field Guides" (both legacy). The sharing
+  // select must NOT render — no crossing, no policy question.
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  const destination = page.getByRole("combobox", { name: "Destination" });
+  await expect(destination).toBeFocused();
+  await destination.selectOption({ label: "Field Guides" });
+  await expect(page.getByRole("combobox", { name: "Sharing policy" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Move doc" }).click();
+  await expect(page.getByText("· Field Guides")).toBeVisible();
+
+  // Cross-boundary: a fresh team space + a collection BOUND to it
+  // (created over the same HTTP API every surface uses).
+  const spaceRes = await page.request.post("/spaces/create", {
+    data: { name: "Mobility", space_type: "open" },
+  });
+  expect(spaceRes.ok()).toBe(true);
+  const space: { space_id?: string } = await spaceRes.json();
+  const boundRes = await page.request.post("/collections/create", {
+    data: { title: "Mobility Docs", space_id: space.space_id },
+  });
+  expect(boundRes.ok()).toBe(true);
+  const bound: { collection_id?: string } = await boundRes.json();
+
+  await page.reload(); // pick up the new collection in the layout cache
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await page.getByRole("combobox", { name: "Destination" }).selectOption({
+    label: "Mobility Docs",
+  });
+  // The crossing is derived CLIENT-side (legacy → space bucket): the
+  // sharing select appears and the submit stays disabled until a pole
+  // is chosen — the never-silent rail in chrome.
+  const policy = page.getByRole("combobox", { name: "Sharing policy" });
+  await expect(policy).toBeVisible();
+  await expect(page.getByRole("button", { name: "Move doc" })).toBeDisabled();
+  await expectNoAxeViolations(page); // the open form incl. the policy select
+  await policy.selectOption({ label: "Adopt destination sharing" });
+  await page.getByRole("button", { name: "Move doc" }).click();
+  await expect(page.getByText("· Mobility Docs")).toBeVisible();
+
+  // Server-state proof while space-placed: the placement survived.
+  const got = await page.request.get(`/docs/get/${docId}`);
+  expect(got.ok()).toBe(true);
+  const body: { doc?: { collection_id?: string | null } } = await got.json();
+  expect(body.doc?.collection_id).toBe(bound.collection_id);
+
+  // Crossing BACK (space → legacy) through the other pole — then the
+  // scratch space + collection leave the stage (suite hygiene: the
+  // spaces spec pins exact card arrays), proving collection.delete +
+  // space.archive compose with the move over the same API.
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await page.getByRole("combobox", { name: "Destination" }).selectOption({
+    label: "Workspace root",
+  });
+  await page.getByRole("combobox", { name: "Sharing policy" }).selectOption({
+    label: "Keep current sharing",
+  });
+  await page.getByRole("button", { name: "Move doc" }).click();
+  await expect(page.getByText("· root")).toBeVisible();
+  const dropCollection = await page.request.post(`/collections/delete/${bound.collection_id}`);
+  expect(dropCollection.ok()).toBe(true);
+  const dropSpace = await page.request.post(`/spaces/archive/${space.space_id}`);
+  expect(dropSpace.ok()).toBe(true);
 });

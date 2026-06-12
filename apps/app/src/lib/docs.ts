@@ -1,7 +1,6 @@
 /**
- * `doc.list` + `doc.create` data-layer — the list cell (the first Web UI
- * capability cell) and the create cell's policy half (invariant 4,
- * ADR 0033 §3 / 0040 H11).
+ * `doc.list` + `doc.create` (+ the editor verbs' policy halves) — the
+ * docs data-layer (invariant 4, ADR 0033 §3 / 0040 H11).
  *
  * Same split as `session.ts`: `fetchDocList`/`createDoc` are the testable
  * plain functions; `docListQueryOptions` is the react-query binding
@@ -227,4 +226,54 @@ export function docTagClass(published_at: DocSummary["published_at"]): string {
  */
 export function formatUpdated(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+/** The two ACL-transition poles (ADR 0040 Step 8 — never silent). */
+export const MOVE_POLICIES = [
+  { value: "adopt_baseline", label: "Adopt destination sharing" },
+  { value: "keep_grants", label: "Keep current sharing" },
+] as const;
+export type MovePolicy = (typeof MOVE_POLICIES)[number]["value"];
+
+type DocMoveResponse = Awaited<ReturnType<ApiClient["docs"]["move"][":doc_id"]["$post"]>>;
+type DocMoveSuccess = Extract<DocMoveResponse, { status: 200 }>;
+export type DocMoved = Awaited<ReturnType<DocMoveSuccess["json"]>>;
+
+/**
+ * Re-parent a doc. Same-bucket moves send NO `acl_policy` (the server
+ * refuses one); cross-boundary moves REQUIRE the explicit pole — the
+ * form derives the crossing via `placementBinding` and only then offers
+ * the choice, so the server's never-silent rail is satisfied by
+ * construction rather than by refused round-trips.
+ */
+export async function moveDoc(
+  docId: string,
+  newCollectionId: string | null,
+  aclPolicy: MovePolicy | undefined,
+  client: ApiClient = apiClient,
+): Promise<DocMoved> {
+  const res = await client.docs.move[":doc_id"].$post({
+    param: { doc_id: docId },
+    json:
+      aclPolicy === undefined
+        ? { new_collection_id: newCollectionId }
+        : { new_collection_id: newCollectionId, acl_policy: aclPolicy },
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type MoveFailure = "target_missing" | "move_failed";
+
+/** 404 = the destination vanished between cache and submit. */
+export function classifyMoveError(error: unknown): MoveFailure {
+  return isApiError(error) && error.status === 404 ? "target_missing" : "move_failed";
+}
+
+export function moveFailureMessage(kind: MoveFailure): string {
+  return kind === "target_missing"
+    ? "That destination no longer exists. Refresh and pick again."
+    : "Move failed. Try again.";
 }

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyCreateError,
+  classifyMoveError,
   classifyRenameError,
   createDoc,
   createFailureMessage,
@@ -15,6 +16,9 @@ import {
   docTagClass,
   fetchDocList,
   formatUpdated,
+  MOVE_POLICIES,
+  moveDoc,
+  moveFailureMessage,
   publishDoc,
   publishFailureMessage,
   renameDoc,
@@ -293,5 +297,61 @@ describe("formatUpdated", () => {
   it("renders a deterministic UTC date", () => {
     expect(formatUpdated(Date.UTC(2026, 5, 11, 23, 59, 59))).toBe("2026-06-11");
     expect(formatUpdated(0)).toBe("1970-01-01");
+  });
+});
+
+describe("moveDoc", () => {
+  const MOVED = {
+    doc_id: "018f0000-0000-7000-8000-0000000000d2",
+    collection_id: "018f0000-0000-7000-8000-0000000000c1",
+    dropped_grants: [],
+  };
+
+  it("resolves the 200 echo; a same-bucket move sends no acl_policy", async () => {
+    const moved = await moveDoc(
+      MOVED.doc_id,
+      MOVED.collection_id,
+      undefined,
+      jsonClient(200, MOVED),
+    );
+    expect(moved.doc_id).toBe(MOVED.doc_id);
+  });
+
+  it("a crossing move carries the chosen pole", async () => {
+    const moved = await moveDoc(
+      MOVED.doc_id,
+      MOVED.collection_id,
+      "adopt_baseline",
+      jsonClient(200, MOVED),
+    );
+    expect(moved.doc_id).toBe(MOVED.doc_id);
+  });
+
+  it("throws ApiError with the typed envelope code on a 404 destination", async () => {
+    await expect(
+      moveDoc(
+        MOVED.doc_id,
+        MOVED.collection_id,
+        undefined,
+        jsonClient(404, { error: "not_found" }),
+      ),
+    ).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("MOVE_POLICIES carries the two ADR poles in order", () => {
+    expect(MOVE_POLICIES.map((p) => p.value)).toEqual(["adopt_baseline", "keep_grants"]);
+  });
+});
+
+describe("classifyMoveError + moveFailureMessage", () => {
+  it("maps a 404 to target_missing with the refresh line", () => {
+    expect(classifyMoveError(new ApiError(404, "not_found"))).toBe("target_missing");
+    expect(moveFailureMessage("target_missing")).toContain("Refresh");
+  });
+
+  it("maps everything else to the generic retry arm", () => {
+    expect(classifyMoveError(new ApiError(400, "validation_failed"))).toBe("move_failed");
+    expect(classifyMoveError(new TypeError("fetch failed"))).toBe("move_failed");
+    expect(moveFailureMessage("move_failed")).toContain("Try again");
   });
 });

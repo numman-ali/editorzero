@@ -79,7 +79,7 @@ export const collectionList: Capability<CollectionListInput, CollectionListOutpu
   handler: async (ctx) => {
     const rows = await ctx.db
       .selectFrom("collections")
-      .select(["id", "title", "slug", "parent_id", "created_at", "updated_at"])
+      .select(["id", "title", "slug", "parent_id", "space_id", "created_at", "updated_at"])
       .where("deleted_at", "is", null)
       .orderBy("order_key")
       .execute();

@@ -64,7 +64,6 @@ const UI_PENDING: readonly string[] = [
   "collection.restore",
   "collection.update",
   "doc.add_guest",
-  "doc.move",
   "doc.remove_guest",
   "doc.restore",
   "permission.grant",

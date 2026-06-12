@@ -33,6 +33,7 @@ interface FixtureOutput {
     title: string;
     slug: string;
     parent_id: string | null;
+    space_id: string | null;
     created_at: number;
     updated_at: number;
   }>;
@@ -64,6 +65,7 @@ describe("GET /collections/list", () => {
           title: "Reference",
           slug: "reference",
           parent_id: null,
+          space_id: null,
           created_at: 1,
           updated_at: 1,
         },

@@ -21,7 +21,7 @@
 
 import { z } from "zod";
 
-import { CollectionIdOutputSchema } from "../shared/ids";
+import { CollectionIdOutputSchema, SpaceIdOutputSchema } from "../shared/ids";
 
 export const CollectionListInputSchema = z.object({}).strict();
 
@@ -30,6 +30,13 @@ const CollectionSummarySchema = z.object({
   title: z.string(),
   slug: z.string(),
   parent_id: CollectionIdOutputSchema.nullable(),
+  // The space binding (null = the legacy no-space bucket). Projected so
+  // movers on EVERY surface can compute placement-bucket crossings
+  // client-side — the doc.move policy rails key on source-vs-target
+  // binding, and the wire's ValidationError envelope is code-generic,
+  // so a client that cannot derive the bucket cannot know a policy
+  // choice is required until after a refused round-trip.
+  space_id: SpaceIdOutputSchema.nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });

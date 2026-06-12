@@ -1,8 +1,10 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { DocEditor } from "../components/doc-editor";
+import { MoveDoc } from "../components/move-doc";
 import { PublishDoc } from "../components/publish-doc";
+import { collectionListQueryOptions, docPlacementLabel } from "../lib/collections";
 import { docQueryOptions } from "../lib/doc-editor";
 
 /**
@@ -40,6 +42,9 @@ export const Route = createFileRoute("/_authed/doc/$docId")({
 function DocScreen() {
   const { docId } = Route.useParams();
   const { data } = useSuspenseQuery(docQueryOptions(docId));
+  // Layout-warmed cache; the placement label resolves collection_id to
+  // a title (the doc.move cell made placement user-visible here).
+  const { data: collectionData } = useQuery(collectionListQueryOptions());
   return (
     <section className="panel" aria-labelledby="doc-heading">
       <div className="ph">
@@ -47,7 +52,14 @@ function DocScreen() {
           {data.doc.title}
         </h2>
         <span className="pth">{data.doc.slug}</span>
+        <span className="ord">
+          · {docPlacementLabel(data.doc.collection_id, collectionData?.collections ?? [])}
+        </span>
         <div className="r">
+          {/* Placement is doc-level state — Move lives here with
+              title/slug, not in the editor toolbar (no canvas
+              interaction; contrast rename). */}
+          <MoveDoc docId={docId} currentCollectionId={data.doc.collection_id} />
           {/* Publish is doc-level state (orthogonal to content, ADR 0040
               Step 5) — it lives here with title + slug, not in the
               editor toolbar with the content verbs. */}

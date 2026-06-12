@@ -114,7 +114,10 @@ export const docMove: Capability<DocMoveInput, DocMoveOutput> = {
   output: DocMoveOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the doc header's Move disclosure (the doc.move ×
+  // Web UI cell) — proven end-to-end by the marked Playwright spec in
+  // packages/e2e (proves-capability-cell: doc.move).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "doc", id: input.doc_id }),
     effectOnAllow: (_input, output): AuditEffect => ({
