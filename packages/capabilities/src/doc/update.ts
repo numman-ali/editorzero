@@ -85,6 +85,7 @@ import {
 import { readBlocks, writeBlocks } from "@editorzero/sync";
 import type * as Y from "yjs";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -151,6 +152,22 @@ export const docUpdate: Capability<Input, Output> = {
   },
   handler: async (ctx, input) => {
     const now = ctx.now();
+
+    // Step 0 — ceiling pre-read (ADR 0040 Step 6). Content capability:
+    // ctx.db is the plain auto-commit handle, so the deny must land
+    // before the UPDATE below (no tx to roll it back) and before any
+    // Y.Doc mutation.
+    const doc = await ctx.db
+      .selectFrom("docs")
+      .select(["id", "created_by", "access_mode", "collection_id"])
+      .where("id", "=", input.doc_id)
+      .where("deleted_at", "is", null)
+      .executeTakeFirst();
+    if (doc === undefined) {
+      throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
+    }
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    acl.assertCanRead(doc);
 
     // Step 1 — UPDATE-first for 404 short-circuit + updated_at bump.
     // Same pattern as `doc.rename`: a SELECT would avoid the row-side

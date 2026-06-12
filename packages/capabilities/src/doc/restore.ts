@@ -82,6 +82,7 @@ import {
   DocRestoreOutputSchema,
 } from "@editorzero/schemas/doc/restore";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -135,7 +136,7 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
     // parent is restored first — otherwise the tree is inconsistent.
     const current = await ctx.db
       .selectFrom("docs")
-      .select(["id", "collection_id"])
+      .select(["id", "collection_id", "created_by", "access_mode"])
       .where("id", "=", input.doc_id)
       .where("deleted_at", "is not", null)
       .executeTakeFirst();
@@ -143,6 +144,13 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
     if (current === undefined) {
       throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
     }
+
+    // Ceiling assert (ADR 0040 Step 6) — evaluated over the TRASHED
+    // row's stored placement: the doc's Space binding survives the
+    // trash (soft-deleted collections still bind in the resolver), so
+    // who may restore is who could read it where it lived.
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    acl.assertCanRead(current);
 
     // Step 2 — parent-collection precondition. Only fires when
     // `collection_id IS NOT NULL` (workspace-root docs have no parent

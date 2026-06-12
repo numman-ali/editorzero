@@ -355,11 +355,20 @@ function countOutboxInserts(tags: readonly QueryTag[], event: string): number {
 
 /**
  * Expected query count inside the metadata-only write-path tx.
- * Empirically observed breakdown (6 queries — ADR 0040 Step 5 added
- * the two SELECTs the slug mint needs):
+ * Empirically observed breakdown (10 queries — ADR 0040 Step 5 added
+ * the two SELECTs the slug mint needs; Step 6 added the four ceiling
+ * preload SELECTs):
  *
  *   1 — handler `SELECT docs` (publish-state read: internal slug +
- *       existing pair for the idempotent re-publish branch)
+ *       existing pair for the idempotent re-publish branch; Step 6
+ *       widened its column list with the ceiling fields)
+ * + 4 — ceiling resolver preload (`loadDocReadResolver`, ADR 0040
+ *       Step 6): one SELECT each on `collections`, `spaces`,
+ *       `space_members`, `grants`. Runs INSIDE the tx because ctx.db
+ *       IS the tx handle for metadata-only capabilities — the preload
+ *       reads the tx snapshot, deny throws abort the whole tx. The
+ *       user principal of this trial issues all four (an agent-subject
+ *       trial would skip `space_members`).
  * + 1 — handler `SELECT docs` (published-slug taken set for the
  *       collision-suffix mint; runs because the seed doc is
  *       unpublished — a re-publish trial would skip it)
@@ -377,8 +386,8 @@ function countOutboxInserts(tags: readonly QueryTag[], event: string): number {
  * iteration loop's no-op arm (ordinal > last in-tx query) covers the
  * "fault past the tail" case explicitly.
  */
-const EXPECTED_META_TX_QUERIES = 6;
-const MAX_ORDINAL = 8;
+const EXPECTED_META_TX_QUERIES = 10;
+const MAX_ORDINAL = 12;
 
 describe("metadata-only atomicity (§17.1 row 7b)", () => {
   it("baseline: happy-path metadata-only tx issues the expected shape of queries", async () => {
@@ -399,11 +408,17 @@ describe("metadata-only atomicity (§17.1 row 7b)", () => {
     // Per-table tag breakdown — proves the specific writes ran inside
     // the plugin-wrapped tx. If a regression moves the handler's UPDATE
     // outside the tx and a different UPDATE moves in, `callsIssued`
-    // stays at 6 but `countUpdates(..., "docs")` flips. The two mint
+    // stays at 10 but `countUpdates(..., "docs")` flips. The two mint
     // SELECTs must also run INSIDE the tx — moving them out re-opens
     // the Postgres mint race ADR 0040 Step 5 documents.
     expect(countSelects(result.tags, "docs")).toBe(2);
     expect(countUpdates(result.tags, "docs")).toBe(1);
+    // Step-6 ceiling preload — all four in-tx (snapshot-consistent
+    // with the row the deny decision is about).
+    expect(countSelects(result.tags, "collections")).toBe(1);
+    expect(countSelects(result.tags, "spaces")).toBe(1);
+    expect(countSelects(result.tags, "space_members")).toBe(1);
+    expect(countSelects(result.tags, "grants")).toBe(1);
     expect(countInserts(result.tags, "audit_events")).toBe(1);
     expect(countOutboxInserts(result.tags, "audit.appended")).toBe(1);
     expect(countOutboxInserts(result.tags, "doc.publish_changed")).toBe(1);

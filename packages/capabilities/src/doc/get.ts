@@ -30,6 +30,19 @@
  * capability's input has no `AccessPath`, so Layer-2 scoping
  * enforces the isolation directly.
  *
+ * **Ceiling check (ADR 0040 Step 6).** After the row resolves, the
+ * doc-read ceiling (`acl/ceiling.ts` — the sole read authority)
+ * asserts the principal is in `who-can-read(doc)`; a miss throws
+ * `PermissionDeniedError` through the F88 deny channel (403 + deny
+ * audit row, `reason_code: "acl_deny"`). Ordering is deliberate:
+ * the trash/missing 404 fires FIRST (a ceiling-denied caller learns
+ * nothing about trashed docs), and the deny fires BEFORE
+ * `ctx.transact` (no Y.Doc is opened for a caller who can't read
+ * it). Within a workspace the 403 does reveal that a live doc id
+ * exists — accepted: the deny audit row is the forensic point of
+ * the channel, and same-tenant existence is low-sensitivity
+ * (recorded in the ADR's Step-6 amendment).
+ *
  * **Audit — read-collapsible, per-doc bucket.** Reads collapse per
  * `AUDIT_READ_COLLAPSE_WINDOW_MS` (F93 — SSOT constant). Unlike
  * `doc.list` (constant key), two `doc.get` calls with different
@@ -69,6 +82,7 @@ import {
 import { readBlocks } from "@editorzero/sync";
 import type * as Y from "yjs";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -139,6 +153,7 @@ export const docGet: Capability<DocGetInput, DocGetOutput> = {
         "access_mode",
         "published_slug",
         "published_at",
+        "created_by",
         "created_at",
         "updated_at",
       ])
@@ -156,6 +171,11 @@ export const docGet: Capability<DocGetInput, DocGetOutput> = {
       // visibility into trash. 404 is the honest projection.
       throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
     }
+
+    // Ceiling assert (header: §Ceiling check) — after the 404, before
+    // the Y.Doc opens.
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    acl.assertCanRead(row);
 
     // Read-only `ctx.transact`: the callback projects the block
     // array and returns it; `readBlocks` never mutates the Y.Doc.
@@ -194,6 +214,10 @@ export const docGet: Capability<DocGetInput, DocGetOutput> = {
       });
     }
 
+    // `row` carries `created_by` for the ceiling assert above; the
+    // dispatcher's output parse (`DocMetaSchema`, non-strict) strips
+    // it from the wire — the schema is the wire SSOT (ADR 0034), so
+    // no handler-side re-projection to drift.
     return { doc: row, blocks };
   },
 };

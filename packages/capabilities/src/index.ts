@@ -20,6 +20,15 @@ export type {
 export type { Registry } from "./registry";
 export { createRegistry, RegistryLookupError, registerCapability } from "./registry";
 
+// ── ACL ceiling resolver (ADR 0040 Step 6) ─────────────────────────────────
+//
+// Not a capability — the handler-side read authority (F88 deny channel).
+// Exported for the prop-lane fuzzer and for any future surface-adjacent
+// consumer that must reason about read sets (never to re-implement them).
+
+export type { CeilingDocRow, DocReadResolver, Placement } from "./acl/ceiling";
+export { loadDocReadResolver } from "./acl/ceiling";
+
 // ── Capabilities (registered into `createRegistry` by a consumer) ─────────
 //
 // Capabilities export the `Capability<I, O>` value. Registration into a

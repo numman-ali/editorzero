@@ -88,6 +88,7 @@ import {
   DocDeleteOutputSchema,
 } from "@editorzero/schemas/doc/delete";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -135,6 +136,20 @@ export const docDelete: Capability<DocDeleteInput, DocDeleteOutput> = {
   },
   handler: async (ctx, input) => {
     const now = ctx.now();
+
+    // Ceiling pre-read (ADR 0040 Step 6): trashing is gated on READ
+    // reach. Runs inside the dispatcher tx; deny aborts atomically.
+    const doc = await ctx.db
+      .selectFrom("docs")
+      .select(["id", "created_by", "access_mode", "collection_id"])
+      .where("id", "=", input.doc_id)
+      .where("deleted_at", "is", null)
+      .executeTakeFirst();
+    if (doc === undefined) {
+      throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
+    }
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    acl.assertCanRead(doc);
 
     // Single-statement UPDATE + RETURNING inside the dispatcher's
     // `BEGIN IMMEDIATE`. The `deleted_at IS NULL` WHERE gate guarantees

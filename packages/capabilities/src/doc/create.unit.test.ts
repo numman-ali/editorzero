@@ -9,7 +9,15 @@
  */
 
 import type { SeedBlock } from "@editorzero/audit";
-import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
+import {
+  COLLECTIONS_DDL,
+  createSqliteDriver,
+  DOCS_DDL,
+  GRANTS_DDL,
+  SPACE_MEMBERS_DDL,
+  SPACES_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
 import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
 import {
   AgentId,
@@ -43,6 +51,9 @@ let sync: MemorySyncService;
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(COLLECTIONS_DDL);
+  driver.exec(SPACES_DDL);
+  driver.exec(SPACE_MEMBERS_DDL);
+  driver.exec(GRANTS_DDL);
   driver.exec(DOCS_DDL);
   sync = new MemorySyncService();
 });

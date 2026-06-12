@@ -513,6 +513,8 @@ function denyMessage(reason: DenyReason): string {
       return "principal workspace does not match target workspace";
     case "human_only":
       return "capability is human-only; agent denied";
+    case "delegator_not_member":
+      return "delegated agent's acting_as user holds no active workspace membership";
     case "rate_limited":
       return `rate limited on bucket ${reason.bucket}; retry after ${reason.retry_after_ms}ms`;
     case "acl_deny":

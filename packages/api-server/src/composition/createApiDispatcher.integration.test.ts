@@ -26,13 +26,15 @@ import {
 import {
   createDocUpdatesReader,
   createDocUpdatesWriter,
+  createLoadRoles,
   createSqliteDriver,
   SQLITE_FULL_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
+import { workspaceAwareGate } from "@editorzero/dispatcher";
 import { PermissionDeniedError } from "@editorzero/errors";
-import { CapabilityId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
-import type { AccessPath, UserPrincipal } from "@editorzero/principal";
+import { AgentId, CapabilityId, DocId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
+import type { AccessPath, AgentPrincipal, UserPrincipal } from "@editorzero/principal";
 import { HocuspocusSync } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type * as Y from "yjs";
@@ -725,6 +727,173 @@ describe("createApiDispatcher", () => {
     } finally {
       await sync.close();
     }
+  });
+
+  // ── H8 at the composition seam (Codex Step-6 review MEDIUM) ─────────
+  //
+  // `gate.unit.test.ts` proves `workspaceAwareGate`'s policy against
+  // call-counting fakes; `server.ts` wires it with
+  // `createLoadRoles(driver)`. These tests close the seam between the
+  // two: the REAL gate + the REAL role loader, injected into
+  // `createApiDispatcher` exactly as `createApiServer` does
+  // (server.ts), driven by a synthetic delegated principal against
+  // seeded `workspace_members` rows. No HTTP-auth path can mint a
+  // delegated agent yet (no agents table), so this seam is where the
+  // production H8 composition is provable today.
+
+  describe("workspaceAwareGate at the dispatcher seam (H8)", () => {
+    const DELEGATOR = UserId("018f0000-0000-7000-8000-00000000d0e1");
+    const AGENT = AgentId("018f0000-0000-7000-8000-0000000000b1");
+    const AGENT_TOKEN = TokenId("018f0000-0000-7000-8000-0000000000bb");
+
+    function delegatedAgent(): AgentPrincipal {
+      return {
+        kind: "agent",
+        id: AGENT,
+        workspace_id: WORKSPACE_ID,
+        owner_user_id: null,
+        scopes: ["doc:read", "doc:write"],
+        token_id: AGENT_TOKEN,
+        token_kind: "agent-auth",
+        acting_as: DELEGATOR,
+      };
+    }
+
+    function gatedDispatcher(fixture: Capability<FixtureInput, FixtureOutput>) {
+      const registry = createRegistry([registerCapability(fixture)]);
+      return createApiDispatcher({
+        driver,
+        registry,
+        gate: workspaceAwareGate({ loadDelegatorRoles: createLoadRoles(driver) }),
+        now: () => 1,
+      });
+    }
+
+    async function seedDelegatorMembership(role: "guest" | "member") {
+      await driver
+        .system()
+        .insertInto("workspace_members")
+        .values({
+          workspace_id: WORKSPACE_ID,
+          user_id: DELEGATOR,
+          role,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: null,
+        })
+        .execute();
+    }
+
+    it("delegator with no live membership: delegator_not_member deny + deny audit row, handler never runs", async () => {
+      const fixture = buildFixture(async () => {
+        throw new Error("handler must not run on gate deny");
+      });
+      const dispatcher = gatedDispatcher(fixture);
+
+      let thrown: unknown;
+      try {
+        await dispatcher.dispatch({
+          capability_id: FIXTURE_ID,
+          input: { doc_id: DOC_ID, title: "Hello" },
+          principal: delegatedAgent(),
+          access: testAccess(),
+          trace_id: null,
+        });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(PermissionDeniedError);
+      if (thrown instanceof PermissionDeniedError) {
+        expect(thrown.reason).toEqual({ kind: "delegator_not_member" });
+      }
+
+      const audits = await driver
+        .system()
+        .selectFrom("audit_events")
+        .select(["outcome", "effect", "principal_kind", "acting_as_user_id"])
+        .execute();
+      expect(audits).toHaveLength(1);
+      expect(audits[0]?.outcome).toBe("deny");
+      expect(JSON.parse(audits[0]?.effect ?? "{}")).toMatchObject({
+        kind: "deny",
+        reason_code: "delegator_not_member",
+      });
+      // Investigator sees both identities on the deny row (ADR 0016).
+      expect(audits[0]?.principal_kind).toBe("agent");
+      expect(audits[0]?.acting_as_user_id).toBe(DELEGATOR);
+    });
+
+    it("guest delegator intersects away the agent's doc:write claim: missing_scope carries the INTERSECTED set", async () => {
+      await seedDelegatorMembership("guest");
+      const fixture = buildFixture(async () => {
+        throw new Error("handler must not run on gate deny");
+      });
+      const dispatcher = gatedDispatcher(fixture);
+
+      let thrown: unknown;
+      try {
+        await dispatcher.dispatch({
+          capability_id: FIXTURE_ID,
+          input: { doc_id: DOC_ID, title: "Hello" },
+          principal: delegatedAgent(),
+          access: testAccess(),
+          trace_id: null,
+        });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(PermissionDeniedError);
+      if (thrown instanceof PermissionDeniedError) {
+        // The agent CLAIMS doc:write; guest's role union lacks it. The
+        // surviving set is the intersection — proof the gate evaluated
+        // agent.scopes ∩ roleScopes(delegator), not the raw claim.
+        expect(thrown.reason).toEqual({
+          kind: "missing_scope",
+          required: ["doc:write"],
+          principal_scopes: ["doc:read"],
+        });
+      }
+
+      const audits = await driver
+        .system()
+        .selectFrom("audit_events")
+        .select(["outcome", "effect"])
+        .execute();
+      expect(audits).toHaveLength(1);
+      expect(audits[0]?.outcome).toBe("deny");
+      expect(JSON.parse(audits[0]?.effect ?? "{}")).toMatchObject({
+        kind: "deny",
+        reason_code: "missing_scope",
+      });
+    });
+
+    it("member delegator covers the claim: delegated dispatch allows and lands the allow audit row", async () => {
+      await seedDelegatorMembership("member");
+      const fixture = buildFixture(async (_ctx, input) => ({
+        doc_id: input.doc_id,
+        title: input.title,
+      }));
+      const dispatcher = gatedDispatcher(fixture);
+
+      const result = await dispatcher.dispatch({
+        capability_id: FIXTURE_ID,
+        input: { doc_id: DOC_ID, title: "Hello" },
+        principal: delegatedAgent(),
+        access: testAccess(),
+        trace_id: null,
+      });
+      expect(result).toEqual({ doc_id: DOC_ID, title: "Hello" });
+
+      const audits = await driver
+        .system()
+        .selectFrom("audit_events")
+        .select(["outcome", "principal_kind", "acting_as_user_id"])
+        .execute();
+      expect(audits).toHaveLength(1);
+      expect(audits[0]?.outcome).toBe("allow");
+      expect(audits[0]?.principal_kind).toBe("agent");
+      expect(audits[0]?.acting_as_user_id).toBe(DELEGATOR);
+    });
   });
 
   it("runRead rejects ctx.transact when no sync is wired", async () => {

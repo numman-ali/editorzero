@@ -12,7 +12,15 @@
  *   - registry metadata + audit projections
  */
 
-import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
+import {
+  COLLECTIONS_DDL,
+  createSqliteDriver,
+  DOCS_DDL,
+  GRANTS_DDL,
+  SPACE_MEMBERS_DDL,
+  SPACES_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
 import { NotFoundError, SlugCollisionError } from "@editorzero/errors";
 import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
@@ -42,6 +50,9 @@ let driver: SqliteDriver;
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(COLLECTIONS_DDL);
+  driver.exec(SPACES_DDL);
+  driver.exec(SPACE_MEMBERS_DDL);
+  driver.exec(GRANTS_DDL);
   driver.exec(DOCS_DDL);
 });
 

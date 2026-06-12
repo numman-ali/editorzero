@@ -76,6 +76,7 @@ import {
 import { setDocTitle } from "@editorzero/sync";
 import type * as Y from "yjs";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -147,6 +148,22 @@ export const docRename: Capability<DocRenameInput, DocRenameOutput> = {
     const now = ctx.now();
     const title = input.title;
     const slug = slugify(title);
+
+    // Step 0 — ceiling pre-read (ADR 0040 Step 6). This is a CONTENT
+    // capability: ctx.db here is the plain auto-commit handle, NOT a
+    // dispatcher tx — a deny discovered after the UPDATE could not
+    // roll it back, so the read MUST precede the first write.
+    const doc = await ctx.db
+      .selectFrom("docs")
+      .select(["id", "created_by", "access_mode", "collection_id"])
+      .where("id", "=", input.doc_id)
+      .where("deleted_at", "is", null)
+      .executeTakeFirst();
+    if (doc === undefined) {
+      throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
+    }
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    acl.assertCanRead(doc);
 
     // Step 1 — UPDATE docs row first. The WorkspaceScopingPlugin
     // injects `workspace_id = ctx.tenant.workspace_id` on the

@@ -53,6 +53,23 @@
  * (schema.ts header: no FK in DDL so tests can stand DOCS_DDL up
  * in isolation; the SELECT+reject pattern substitutes).
  *
+ * **Placement ceiling (ADR 0040 Step 6; Codex review HIGH 1).** A
+ * live target collection must also be REACHABLE: creating a doc is
+ * a placement-changing write, and `created_by` makes the caller a
+ * permanent implicit owner of the new doc — so an outsider who can
+ * plant a doc inside a closed/private Space's collection would
+ * punch a permanent hole through that Space's ceiling. After the
+ * existence check the handler loads the ceiling resolver and
+ * `assertCanPlaceIn(collection_id)`: legacy placements (unspaced
+ * collection) always pass, anomalies always fail, live-space
+ * placements require baseline reach (membership / space grant /
+ * open-space user baseline). Denies throw `acl_deny` scoped to the
+ * collection — a 403 with a deny audit row, AFTER the 404 check so
+ * unreachable-vs-nonexistent stays distinguishable only for rows
+ * that actually exist in the caller's workspace (same 403-reveal
+ * posture as `doc.get`). Root creates (`collection_id null`) skip
+ * the resolver load entirely — zero overhead on the common path.
+ *
  * **`access_mode` is not caller-settable (ADR 0040 Step 5).**
  * `doc.list`/`doc.get` still return every non-deleted doc in the
  * workspace — the ceiling resolver (Step 6) is what makes
@@ -122,6 +139,7 @@ import {
 import { seedBlocks } from "@editorzero/sync";
 import type * as Y from "yjs";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -246,6 +264,12 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
       if (row === undefined) {
         throw new NotFoundError({ subject_kind: "collection", subject_id: collection_id });
       }
+      // Placement ceiling (file header §Placement ceiling): the caller
+      // must REACH the target placement, not merely know its id. Runs
+      // before any write — on deny, no docs row and no Y.Doc seed
+      // exist. Root creates never get here (no resolver load).
+      const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+      acl.assertCanPlaceIn(collection_id);
     }
     const title = input.title;
     const slug = slugify(title);

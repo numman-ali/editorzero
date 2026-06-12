@@ -18,7 +18,25 @@
  *      with the tenant-scoped handle. Cross-workspace targets are
  *      invisible to the plugin, so they surface as 404 too — no
  *      leakage of existence across workspace boundaries.
- *   3. **Target-scope slug collision pre-check.** The
+ *   3. **No cross-ceiling moves (ADR 0040 Step 6; Codex review
+ *      HIGH 2).** A move that changes the doc's Space bucket changes
+ *      who can read it: closed-space → root would widen the doc to
+ *      the whole workspace (legacy baseline); root → closed-space
+ *      would narrow it; space → different-space re-homes it. Step 6
+ *      forbids ALL of these — the only allowed transitions are
+ *      legacy → legacy and same-space → same-space (re-parenting
+ *      within one ceiling bucket, including the no-op re-seat).
+ *      Everything else throws `acl_deny` on the doc, AFTER the
+ *      target's 404 existence check. Resolved via the resolver's
+ *      `placementOf` (in-memory — no extra queries; the atomicity
+ *      pin is unchanged). Anomaly placements (dangling refs,
+ *      soft-deleted space) fail closed on either side. The Step-8
+ *      ACL family replaces this with the write-ladder check + an
+ *      `acl_transition` audit field; until then placement between
+ *      buckets is simply immovable, which can never widen a read
+ *      set. Live pre-Spaces data is all-legacy, so the rule lands
+ *      with zero observable narrowing today.
+ *   4. **Target-scope slug collision pre-check.** The
  *      `(workspace_id, collection_id, slug)` partial unique indexes
  *      are NULL-aware (root: `collection_id IS NULL`; nested:
  *      `collection_id IS NOT NULL`); the pre-check mirrors the shape
@@ -47,7 +65,7 @@ import type {
   DenyReason,
   HandlerError,
 } from "@editorzero/audit";
-import { NotFoundError, SlugCollisionError } from "@editorzero/errors";
+import { NotFoundError, PermissionDeniedError, SlugCollisionError } from "@editorzero/errors";
 import { CapabilityId, type DocId, uuidV7 } from "@editorzero/ids";
 import {
   type DocMoveInput,
@@ -56,6 +74,7 @@ import {
   DocMoveOutputSchema,
 } from "@editorzero/schemas/doc/move";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -110,7 +129,7 @@ export const docMove: Capability<DocMoveInput, DocMoveOutput> = {
     // `collection_id` is needed to detect the no-op same-scope case.
     const current = await ctx.db
       .selectFrom("docs")
-      .select(["id", "collection_id", "slug"])
+      .select(["id", "collection_id", "slug", "created_by", "access_mode"])
       .where("id", "=", doc_id)
       .where("deleted_at", "is", null)
       .executeTakeFirst();
@@ -118,6 +137,11 @@ export const docMove: Capability<DocMoveInput, DocMoveOutput> = {
     if (current === undefined) {
       throw new NotFoundError({ subject_kind: "doc", subject_id: doc_id });
     }
+
+    // Ceiling assert (ADR 0040 Step 6) — the caller must be able to
+    // read the doc they are moving.
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    acl.assertCanRead(current);
 
     // Step 2 — target collection existence (only when non-null). The
     // tenant-scoped handle makes cross-workspace targets invisible,
@@ -136,6 +160,22 @@ export const docMove: Capability<DocMoveInput, DocMoveOutput> = {
           subject_id: new_collection_id,
         });
       }
+    }
+
+    // Step 2b — bucket-transition rule (file header precondition 3).
+    // Only legacy → legacy and same-space → same-space survive;
+    // anything that would change the doc's ceiling bucket is denied
+    // until the Step-8 ladder + `acl_transition` audit land. Both
+    // placements resolve in-memory off the resolver loaded above.
+    const src = acl.placementOf(current.collection_id);
+    const dst = acl.placementOf(new_collection_id);
+    const sameBucket =
+      (src.kind === "legacy" && dst.kind === "legacy") ||
+      (src.kind === "space" && dst.kind === "space" && src.space_id === dst.space_id);
+    if (!sameBucket) {
+      throw new PermissionDeniedError({
+        reason: { kind: "acl_deny", scope: { doc_id } },
+      });
     }
 
     // Step 3 — target-scope sibling-slug pre-check. Only runs when the

@@ -13,8 +13,10 @@
 import type {
   AgentId,
   BlockId,
+  CollectionId,
   DocId,
   SessionId,
+  SpaceId,
   TokenId,
   UserId,
   WorkspaceId,
@@ -105,6 +107,16 @@ export interface AccessPath {
   readonly workspace_id: WorkspaceId;
   readonly doc_id?: DocId;
   readonly block_id?: BlockId;
+  /**
+   * Space / collection placement of the target (ADR 0040 Step 6).
+   * Inert until the Step-7/8 capabilities that route placement-aware
+   * mutations (cross-boundary `doc.move`, space-scoped listings) start
+   * populating them — the ceiling resolver itself derives placement
+   * from rows, not from the caller's claim, so these fields are
+   * forensic/audit context rather than authorization input.
+   */
+  readonly space_id?: SpaceId;
+  readonly collection_id?: CollectionId;
   /** Reserved; always null in v1 per §8.2 + ADR 0015. */
   readonly selector?: SubBlockSelector | null;
 }

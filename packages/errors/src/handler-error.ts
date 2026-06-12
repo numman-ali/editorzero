@@ -19,6 +19,15 @@ export type DenyReason =
   | { kind: "missing_scope"; required: readonly Scope[]; principal_scopes: readonly Scope[] }
   | { kind: "cross_workspace" }
   | { kind: "human_only" }
+  /**
+   * Delegated agent (`acting_as` set) whose delegator holds no active
+   * `workspace_members` row (ADR 0040 Step 6, H8). Distinct from
+   * `missing_scope` because the failure is structural — the delegation
+   * itself is unresolvable (delegator removed / revoked), not a scope
+   * arithmetic shortfall. Audit forensics need to tell these apart:
+   * this kind firing means an agent token outlived its delegator.
+   */
+  | { kind: "delegator_not_member" }
   | { kind: "rate_limited"; bucket: string; retry_after_ms: number }
   | {
       kind: "acl_deny";

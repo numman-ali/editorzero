@@ -16,8 +16,8 @@
  */
 
 import type { DenyReason } from "@editorzero/errors";
-import type { CapabilityId } from "@editorzero/ids";
-import type { AccessPath, Principal } from "@editorzero/principal";
+import type { CapabilityId, UserId, WorkspaceId } from "@editorzero/ids";
+import { type AccessPath, isDelegated, type Principal } from "@editorzero/principal";
 import { AGENT_SCOPE_TIERS, type Role, type Scope } from "@editorzero/scopes";
 
 export type GateResult = { outcome: "allow" } | { outcome: "deny"; reason: DenyReason };
@@ -107,13 +107,59 @@ const ROLE_SCOPES: Readonly<Record<Role, readonly Scope[]>> = {
   guest: ["doc:read", "block:read", "comment:read", "comment:write", "workspace:read"],
 };
 
-function effectiveScopes(principal: Principal): ReadonlySet<Scope> {
-  if (principal.kind === "agent") return new Set(principal.scopes);
+function roleScopeUnion(roles: readonly Role[]): Set<Scope> {
   const union = new Set<Scope>();
-  for (const role of principal.roles) {
+  for (const role of roles) {
     for (const scope of ROLE_SCOPES[role]) union.add(scope);
   }
   return union;
+}
+
+function effectiveScopes(principal: Principal): ReadonlySet<Scope> {
+  if (principal.kind === "agent") return new Set(principal.scopes);
+  return roleScopeUnion(principal.roles);
+}
+
+/**
+ * Checks 1 + 2 (cross-workspace, humanOnly) — shared by both gates and
+ * deliberately run BEFORE any DB lookup so a cross-tenant or
+ * agent-on-human-only request never costs a delegator query. Returns
+ * `null` when the structural checks pass.
+ */
+function structuralDeny(
+  principal: Principal,
+  capability: CapabilityGateMeta,
+  access: AccessPath,
+): GateResult | null {
+  if (principal.workspace_id !== access.workspace_id) {
+    return { outcome: "deny", reason: { kind: "cross_workspace" } };
+  }
+  if (capability.humanOnly === true && principal.kind === "agent") {
+    return { outcome: "deny", reason: { kind: "human_only" } };
+  }
+  return null;
+}
+
+/** Check 3 — `requires ⊆ principalScopes`, with a structured shortfall. */
+function scopeSubsetCheck(
+  capability: CapabilityGateMeta,
+  principalScopes: ReadonlySet<Scope>,
+): GateResult {
+  const missing: Scope[] = [];
+  for (const required of capability.requires) {
+    if (!principalScopes.has(required)) missing.push(required);
+  }
+  if (missing.length > 0) {
+    return {
+      outcome: "deny",
+      reason: {
+        kind: "missing_scope",
+        required: missing,
+        principal_scopes: [...principalScopes],
+      },
+    };
+  }
+  return { outcome: "allow" };
 }
 
 /**
@@ -122,39 +168,84 @@ function effectiveScopes(principal: Principal): ReadonlySet<Scope> {
  *   2. `humanOnly` flag — agents are denied from human-only capabilities (§8.5).
  *   3. `requires` is a subset of the principal's effective scopes.
  *
- * NOT checked here (lands with `@editorzero/db`): workspace overrides,
- * collection / doc ACLs, agent↔delegator intersection for `acting_as`,
- * rate-limit buckets. A real `workspaceAwareGate` composes this gate's
- * scope check with the ACL resolvers.
+ * NOT checked here: the `acting_as` ∩ delegator intersection
+ * (`workspaceAwareGate` owns it — H8) and rate-limit buckets. Kept as
+ * the dependency-free default for unit harnesses; production
+ * composition (`createApiServer`) passes `workspaceAwareGate`.
  */
 export function scopeOnlyGate(): PermissionGate {
   return {
+    check: async (principal, capability, access) =>
+      structuralDeny(principal, capability, access) ??
+      scopeSubsetCheck(capability, effectiveScopes(principal)),
+  };
+}
+
+// ── workspaceAwareGate (ADR 0040 Step 6) ──────────────────────────────────
+
+/**
+ * Role lookup for the delegator of an `acting_as` agent token.
+ * Structurally identical to `@editorzero/db`'s `LoadRoles` — declared
+ * locally so the gate stays a pure-policy module with an injected
+ * seam instead of a db dependency; `createApiServer` passes the same
+ * `createLoadRoles(driver)` callable the auth resolver uses (one role
+ * source, two consumers).
+ */
+export type LoadDelegatorRoles = (
+  workspaceId: WorkspaceId,
+  userId: UserId,
+) => Promise<readonly Role[] | null>;
+
+export interface WorkspaceAwareGateDeps {
+  readonly loadDelegatorRoles: LoadDelegatorRoles;
+}
+
+/**
+ * The production gate (ADR 0040 Step 6). Same ordered checks as
+ * `scopeOnlyGate`, plus the **`acting_as` ∩ delegator intersection**
+ * (H8): a delegated agent's effective scopes are
+ * `agent.scopes ∩ roleScopes(delegator)`, resolved against the LIVE
+ * `workspace_members` row at check time — so removing the delegator
+ * from the workspace instantly narrows every outstanding agent-auth
+ * token to nothing (`delegator_not_member`), and demoting them
+ * narrows the agent with them. Without this, `effectiveScopes`
+ * takes the agent token's scope claim verbatim and a delegated token
+ * outlives/escalates past its delegator.
+ *
+ * The doc-level ACL ceiling does NOT live here: per the F88 channel
+ * (ADR 0040 H4/H10), row-level read authority is the handler-side
+ * ceiling resolver (`@editorzero/capabilities` → `acl/ceiling.ts`)
+ * throwing `PermissionDeniedError` post-parse. The gate stays
+ * row-blind: principal × capability × AccessPath, one DB lookup at
+ * most (the delegator's membership row).
+ *
+ * Check order: cross_workspace → human_only → delegation resolution →
+ * scope arithmetic. The structural checks run first so a cross-tenant
+ * or agent-on-human-only request never costs a DB lookup; delegation
+ * resolution runs before scope arithmetic so a stale delegation is
+ * reported as `delegator_not_member`, never a misleading
+ * `missing_scope`.
+ */
+export function workspaceAwareGate(deps: WorkspaceAwareGateDeps): PermissionGate {
+  return {
     check: async (principal, capability, access) => {
-      if (principal.workspace_id !== access.workspace_id) {
-        return { outcome: "deny", reason: { kind: "cross_workspace" } };
+      const structural = structuralDeny(principal, capability, access);
+      if (structural !== null) return structural;
+
+      if (isDelegated(principal)) {
+        const delegatorRoles = await deps.loadDelegatorRoles(
+          principal.workspace_id,
+          principal.acting_as,
+        );
+        if (delegatorRoles === null) {
+          return { outcome: "deny", reason: { kind: "delegator_not_member" } };
+        }
+        const delegatorScopes = roleScopeUnion(delegatorRoles);
+        const intersection = new Set(principal.scopes.filter((s) => delegatorScopes.has(s)));
+        return scopeSubsetCheck(capability, intersection);
       }
 
-      if (capability.humanOnly === true && principal.kind === "agent") {
-        return { outcome: "deny", reason: { kind: "human_only" } };
-      }
-
-      const principalScopes = effectiveScopes(principal);
-      const missing: Scope[] = [];
-      for (const required of capability.requires) {
-        if (!principalScopes.has(required)) missing.push(required);
-      }
-      if (missing.length > 0) {
-        return {
-          outcome: "deny",
-          reason: {
-            kind: "missing_scope",
-            required: missing,
-            principal_scopes: [...principalScopes],
-          },
-        };
-      }
-
-      return { outcome: "allow" };
+      return scopeSubsetCheck(capability, effectiveScopes(principal));
     },
   };
 }

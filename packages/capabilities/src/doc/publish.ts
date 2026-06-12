@@ -70,6 +70,7 @@ import {
   DocPublishOutputSchema,
 } from "@editorzero/schemas/doc/publish";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -122,13 +123,30 @@ export const docPublish: Capability<DocPublishInput, DocPublishOutput> = {
     // below, so a cross-workspace target is invisible (404 projection).
     const doc = await ctx.db
       .selectFrom("docs")
-      .select(["id", "slug", "published_slug", "published_at"])
+      .select([
+        "id",
+        "slug",
+        "published_slug",
+        "published_at",
+        "created_by",
+        "access_mode",
+        "collection_id",
+      ])
       .where("id", "=", input.doc_id)
       .where("deleted_at", "is", null)
       .executeTakeFirst();
     if (doc === undefined) {
       throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
     }
+
+    // Ceiling assert (ADR 0040 Step 6): publishing is gated on READ
+    // reach — you cannot expose a doc you cannot read. Runs inside the
+    // metadata-only tx (ctx.db IS the tx handle here); the deny throw
+    // aborts the tx, so nothing escapes. The privacy invariant's other
+    // half (a private-Space doc needs an explicit publish to go
+    // public) is exactly this capability being the only door.
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    acl.assertCanRead(doc);
 
     let published_slug: string;
     let published_at: number;

@@ -56,6 +56,7 @@ import {
   DocUnpublishOutputSchema,
 } from "@editorzero/schemas/doc/unpublish";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -100,10 +101,26 @@ export const docUnpublish: Capability<DocUnpublishInput, DocUnpublishOutput> = {
   handler: async (ctx, input) => {
     const now = ctx.now();
 
-    // Same single-UPDATE + expression-builder increment shape as the
-    // other metadata mutators — single-statement with RETURNING inside
-    // the dispatcher's write-path tx keeps the "0 rows = not found"
-    // branch atomic with the write.
+    // Ceiling pre-read (ADR 0040 Step 6). The UPDATE below was a blind
+    // single-statement before this slice; the ceiling needs the row's
+    // placement fields BEFORE any mutation, so a read joins it. Both
+    // run inside the same dispatcher tx — the 404/deny branches stay
+    // atomic with the write.
+    const doc = await ctx.db
+      .selectFrom("docs")
+      .select(["id", "created_by", "access_mode", "collection_id"])
+      .where("id", "=", input.doc_id)
+      .where("deleted_at", "is", null)
+      .executeTakeFirst();
+    if (doc === undefined) {
+      throw new NotFoundError({ subject_kind: "doc", subject_id: input.doc_id });
+    }
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    acl.assertCanRead(doc);
+
+    // Single-UPDATE + expression-builder increment shape, with
+    // RETURNING inside the dispatcher's write-path tx — the
+    // "0 rows = not found" branch stays atomic with the write.
     const row = await ctx.db
       .updateTable("docs")
       .set((eb) => ({

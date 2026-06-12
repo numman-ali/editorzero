@@ -9,6 +9,17 @@
  * sub-slice will add cursor-based paging behind the same input
  * schema (a field becomes non-optional; no breaking shape change).
  *
+ * **Ceiling filter (ADR 0040 Step 6).** The result set passes through
+ * the doc-read ceiling (`acl/ceiling.ts` — the sole read authority):
+ * one resolver load (≤ 4 indexed SELECTs), then a pure in-memory
+ * filter. Docs outside `who-can-read` are silently OMITTED — a list
+ * is a projection of the caller's readable set, so exclusion is the
+ * correct semantics and per-doc deny audit rows would be noise (the
+ * call still audits as one allowed read). "Shared with me" (guest
+ * grants into other Spaces) falls out of the same union — no second
+ * query. Pre-Step-7/8 data (no Spaces, no grants) filters nothing:
+ * the NULL-space legacy baseline keeps today's read set intact.
+ *
  * Output IDs are re-branded inside the zod schema (the shared
  * `*OutputSchema` transforms in `@editorzero/schemas`). The DocId /
  * CollectionId factories are idempotent on valid input, so this is a
@@ -29,6 +40,7 @@ import {
   DocListOutputSchema,
 } from "@editorzero/schemas/doc/list";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -93,12 +105,17 @@ export const docList: Capability<DocListInput, DocListOutput> = {
         "access_mode",
         "published_slug",
         "published_at",
+        "created_by",
         "created_at",
         "updated_at",
       ])
       .where("deleted_at", "is", null)
       .orderBy("order_key")
       .execute();
-    return { docs: rows };
+    // Ceiling filter (header: §Ceiling filter). `created_by` is
+    // SELECTed for the predicate and stripped from the wire by the
+    // non-strict output schema (the wire SSOT — ADR 0034).
+    const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+    return { docs: rows.filter((row) => acl.canRead(row)) };
   },
 };

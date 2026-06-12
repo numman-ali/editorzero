@@ -67,7 +67,7 @@ import {
   SQLITE_FULL_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
-import { DocId, UserId } from "@editorzero/ids";
+import { CollectionId, DocId, SpaceId, UserId } from "@editorzero/ids";
 import { SYSTEM_AUDIT_CAPABILITY_IDS } from "@editorzero/scopes";
 import { HocuspocusSync } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1163,6 +1163,103 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
     expect(audits).toHaveLength(1);
     expect(audits[0]?.capability_id).toBe("doc.unpublish");
     expect(audits[0]?.outcome).toBe("deny");
+  });
+
+  it("GET /docs/get/:doc_id 403s with an acl_deny audit row when the ceiling excludes the caller — even a workspace OWNER (ADR 0040 Step 6, no role bypass)", async () => {
+    // End-to-end F88: real session → scope gate passes (owner holds
+    // doc:read) → handler's ceiling assert throws → 403 + ONE deny
+    // audit row with reason_code "acl_deny". The world is seeded
+    // directly (no capability mutates Spaces/grants until Step 7/8):
+    // ada's own doc is re-homed into a closed Space and re-attributed
+    // to a foreign creator, leaving her with no ceiling term at all —
+    // her OWNER role must not save her (roles gate capabilities; the
+    // ceiling gates rows).
+    const { trunk } = await buildStack({
+      registerDocCreate: true,
+      registerDocGet: true,
+      withSync: true,
+    });
+    await signUp(trunk, "ada@example.com");
+    const signInRes = await signIn(trunk, "ada@example.com");
+    const cookie = sessionCookieFrom(signInRes);
+
+    const createRes = await trunk.request("/docs/create", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Sealed doc" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { doc_id } = (await createRes.json()) as { doc_id: string };
+
+    // Sanity: pre-seed, the root doc reads fine (legacy baseline).
+    const before = await trunk.request(`/docs/get/${doc_id}`, { headers: { cookie } });
+    expect(before.status).toBe(200);
+
+    const docRow = await driver
+      .system()
+      .selectFrom("docs")
+      .select("workspace_id")
+      .where("id", "=", DocId(doc_id))
+      .executeTakeFirstOrThrow();
+    const SPACE = SpaceId("018f0000-0000-7000-8000-00000000e0e1");
+    const COL = CollectionId("018f0000-0000-7000-8000-00000000c0c1");
+    const FOREIGN_CREATOR = UserId("018f0000-0000-7000-8000-00000000feed");
+    await driver
+      .system()
+      .insertInto("spaces")
+      .values({
+        id: SPACE,
+        workspace_id: docRow.workspace_id,
+        kind: "team",
+        type: "closed",
+        owner_user_id: null,
+        name: "sealed",
+        slug: "sealed",
+        baseline_access: "view",
+        created_by: FOREIGN_CREATOR,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: null,
+      })
+      .execute();
+    await driver
+      .system()
+      .insertInto("collections")
+      .values({
+        id: COL,
+        workspace_id: docRow.workspace_id,
+        parent_id: null,
+        space_id: SPACE,
+        title: "sealed",
+        slug: "sealed",
+        order_key: "a0",
+        created_by: FOREIGN_CREATOR,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: null,
+      })
+      .execute();
+    await driver
+      .system()
+      .updateTable("docs")
+      .set({ collection_id: COL, created_by: FOREIGN_CREATOR })
+      .where("id", "=", DocId(doc_id))
+      .execute();
+
+    const res = await trunk.request(`/docs/get/${doc_id}`, { headers: { cookie } });
+    expect(res.status).toBe(403);
+
+    const denies = await driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "=", "doc.get")
+      .where("outcome", "=", "deny")
+      .select(["capability_id", "outcome", "effect"])
+      .execute();
+    expect(denies).toHaveLength(1);
+    const effect = denies[0]?.effect;
+    const parsed: unknown = typeof effect === "string" ? JSON.parse(effect) : effect;
+    expect(parsed).toMatchObject({ kind: "deny", reason_code: "acl_deny" });
   });
 
   it("POST /docs/unpublish/:doc_id for a doc in a different workspace denies before reaching the SELECT (scope gate fires first)", async () => {

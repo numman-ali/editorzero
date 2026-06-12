@@ -50,6 +50,7 @@ import {
   ensureSchema,
   type SqliteDriver,
 } from "@editorzero/db";
+import { workspaceAwareGate } from "@editorzero/dispatcher";
 import { HocuspocusSync } from "@editorzero/sync";
 
 import { createApiApp } from "./app";
@@ -147,8 +148,17 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     docUpdatesReader: createDocUpdatesReader(),
     systemDb: driver.system(),
   });
-  const dispatcher = createApiDispatcher({ driver, registry, sync });
+  // One role source, two consumers (ADR 0040 Step 6): the auth
+  // resolver turns sessions into principals with `loadRoles`, and the
+  // production gate uses the SAME callable to resolve a delegated
+  // agent's `acting_as` user at check time — the H8 intersection.
   const loadRoles = createLoadRoles(driver);
+  const dispatcher = createApiDispatcher({
+    driver,
+    registry,
+    sync,
+    gate: workspaceAwareGate({ loadDelegatorRoles: loadRoles }),
+  });
   const resolver = createBetterAuthResolver({ auth, loadRoles });
 
   const app = createApiApp({
