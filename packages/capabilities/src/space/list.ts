@@ -51,7 +51,10 @@ export const spaceList: Capability<SpaceListInput, SpaceListOutput> = {
   input: SpaceListInputSchema,
   output: SpaceListOutputSchema,
   requires: ["workspace:read"],
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" is declared because the Web UI actually binds this capability
+  // (the /space screen renders it; proven by the marked Playwright spec
+  // in packages/e2e). Declared surfaces = bound surfaces (ADR 0040 H11).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

@@ -80,7 +80,6 @@ const UI_PENDING: readonly string[] = [
   "space.archive",
   "space.create",
   "space.get",
-  "space.list",
   "space.member_add",
   "space.member_remove",
   "space.member_update_role",

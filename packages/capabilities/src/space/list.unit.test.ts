@@ -236,7 +236,9 @@ describe("space.list — registry + audit wiring", () => {
     expect(spaceList.id).toBe("space.list");
     expect(spaceList.category).toBe("read");
     expect(spaceList.requires).toEqual(["workspace:read"]);
-    expect(spaceList.surfaces).toEqual(["api", "cli", "mcp"]);
+    // "ui" since the /space screen landed (proven by the marked
+    // Playwright spec; the contract-tests matrix enforces the bond).
+    expect(spaceList.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
   });
 
   it("pivots the audit subject on the workspace and logs an access row", async () => {

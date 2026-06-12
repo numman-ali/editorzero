@@ -9,12 +9,14 @@ import type { WhoamiSession } from "../lib/session";
  * the principal chip + nav cannot drift between the two renders.
  *
  * The primary nav carries ONLY screens that exist (the e2e honesty bar —
- * same rule that kept SSO buttons off the login). Today that is the
- * documents list at `/` (the doc.list ui cell). The mock's remaining
- * entries (Overview, Spaces, Shared with me, Trash) join as their routes +
- * capability cells land (ADR 0040; `UI_PENDING` in contract-tests governs).
- * The Space switcher waits for a `workspace.get` ui cell — there is no
- * workspace *name* on whoami to render yet.
+ * same rule that kept SSO buttons off the login). Today: the documents
+ * list at `/` (the doc.list ui cell) and the Spaces screen at `/space`
+ * (the space.list cell — singular route, `/spaces` is the reserved API
+ * domain). The mock's remaining entries (Overview, Shared with me,
+ * Trash) join as their routes + capability cells land (ADR 0040;
+ * `UI_PENDING` in contract-tests governs). The Space switcher waits for
+ * a `workspace.get` ui cell — there is no workspace *name* on whoami to
+ * render yet.
  */
 export function SideContent({
   session,
@@ -49,6 +51,16 @@ export function SideContent({
             ▤
           </span>
           All Documents
+        </Link>
+        <Link
+          to="/space"
+          activeProps={{ className: "on", "aria-current": "page" }}
+          onClick={onNavigate}
+        >
+          <span className="ic" aria-hidden="true">
+            ◫
+          </span>
+          Spaces
         </Link>
       </nav>
       <div className="foot">

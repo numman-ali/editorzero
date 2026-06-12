@@ -52,4 +52,13 @@ describe("reservedPrefixDenylist", () => {
     const denylist = reservedPrefixDenylist();
     expect(denylist.some((matcher) => matcher.test("/doc/0190-abc"))).toBe(false);
   });
+
+  it("keeps the Spaces route's singular spelling out of the reserved set", () => {
+    // Same resolution for the space.list cell: the screen is `/space`
+    // because `/spaces` is the trunk's API domain — the SW must keep
+    // serving the client route offline while bypassing the API prefix.
+    const denylist = reservedPrefixDenylist();
+    expect(denylist.some((matcher) => matcher.test("/space"))).toBe(false);
+    expect(denylist.some((matcher) => matcher.test("/spaces/list"))).toBe(true);
+  });
 });
