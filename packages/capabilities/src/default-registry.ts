@@ -32,6 +32,7 @@ import { collectionMove } from "./collection/move";
 import { collectionRestore } from "./collection/restore";
 import { collectionUpdate } from "./collection/update";
 import { docAddGuest } from "./doc/add_guest";
+import { docApplyUpdate } from "./doc/apply_update";
 import { docCreate } from "./doc/create";
 import { docDelete } from "./doc/delete";
 import { docGet } from "./doc/get";
@@ -79,6 +80,7 @@ export function createDefaultRegistry(): Registry {
     registerCapability(collectionRestore),
     registerCapability(collectionUpdate),
     registerCapability(docAddGuest),
+    registerCapability(docApplyUpdate),
     registerCapability(docCreate),
     registerCapability(docDelete),
     registerCapability(docGet),

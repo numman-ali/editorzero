@@ -40,6 +40,7 @@ This matrix incorporates red-team fixes F12, F13, F15, F19, F22.
 | `doc.get` | doc:read | H | A | ✓ | ✓ | ✓ (resource) | ✓ | 600 | read |
 | `doc.list` | doc:read | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |
 | `doc.update` (F12: **canonical batch mutation**; replaces separate `block.insert/update/remove`. [ADR 0022](../adr/0022-agent-editing-constraints.md): per-op `expect_prior_content_hash?` on `update`/`move`/`remove`/`set_visibility` ops; `precondition_policy?: "strict"` reserved.) | doc:write, block:write | H | A | ✓ | ✓ | ✓ | ✓ | 600 (bucket `doc.write`) | `doc.update_batch` |
+| `doc.apply_update` ([ADR 0043](../adr/0043-audited-ws-write-lane.md) Decision 2: **raw Yjs delta** — the WS write lane's capability, and the same push for Yjs-native agents over HTTP/CLI/MCP. Owned-namespace validation + id repair inside the transact; audit effect carries the EXACT persisted post-repair blob (null = marked no-op); UI cell lands with the SPA collab-provider slice) | doc:write, block:write | H | A | ✓ | ✓ | ✓ | ✓ | 600 (bucket `doc.write`) | `doc.apply_update` |
 | `doc.update_from_markdown` (F66/F73: takes opaque `reconcile_base_token` from `doc.get`/`doc.get_markdown`) | doc:write, block:write | H | A | ✓ | ✓ | ✓ | — | 300 (bucket `doc.write`) | `doc.update_batch` (post-reconcile) |
 | `doc.rename` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `doc.rename` |
 | `doc.move` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `doc.move` |

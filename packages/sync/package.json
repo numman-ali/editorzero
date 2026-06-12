@@ -28,6 +28,7 @@
     "@hocuspocus/server": "3.4.4",
     "@tiptap/pm": "catalog:",
     "@tiptap/y-tiptap": "catalog:",
+    "lib0": "0.2.117",
     "y-protocols": "^1.0.6",
     "yjs": "catalog:"
   },
@@ -38,7 +39,6 @@
     "@types/better-sqlite3": "catalog:",
     "@types/ws": "^8.5.0",
     "better-sqlite3": "catalog:",
-    "lib0": "0.2.117",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "ws": "8.20.0"

@@ -24,26 +24,16 @@ export class MemorySyncService implements SyncService {
       throw new Error("MemorySyncService: transact called after close()");
     }
     const ydoc = this.#getOrCreate(doc_id);
-    // Y.Doc#transact is synchronous; it batches every mutation issued
-    // inside the callback into a single update payload. If `fn` is async,
-    // only the sync prefix up to the first `await` is batched — exactly
-    // matches the Hocuspocus-backed impl's behaviour (Yjs transactions
-    // are sync by design). We capture the raw return (T | Promise<T>)
-    // inside the batch and `await` it outside so errors propagate
-    // through the returned promise the same way for sync and async fns.
-    let inner: T | Promise<T> | undefined;
-    let thrown: unknown;
-    let didThrow = false;
-    ydoc.transact(() => {
-      try {
-        inner = fn(ydoc);
-      } catch (e) {
-        thrown = e;
-        didThrow = true;
-      }
-    });
-    if (didThrow) throw thrown;
-    return await (inner as T | Promise<T>);
+    // `fn` runs directly against the doc — NO ambient `ydoc.transact`
+    // wrapper, matching the Hocuspocus-backed impl post-ADR-0043 (the
+    // clone is handed to `fn` bare; each mutation's update event fires
+    // synchronously, which the capture brackets in both the write-path
+    // binding and `applyForeignUpdate` rely on — an outer transaction
+    // would defer every event past the listeners' detach). Owned-layer
+    // writes still batch internally: `writeBlocks` / `seedBlocks` /
+    // `setDocTitle` wrap their reconciliation in updateYFragment's own
+    // transaction, so they emit one event per call either way.
+    return await fn(ydoc);
   }
 
   async close(): Promise<void> {

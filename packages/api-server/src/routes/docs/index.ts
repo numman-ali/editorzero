@@ -47,6 +47,7 @@ import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
 import { addGuest } from "./add_guest";
+import { applyUpdate } from "./apply_update";
 import { create } from "./create";
 import { del } from "./delete";
 import { get } from "./get";
@@ -69,6 +70,7 @@ export const docs = new Hono<ApiEnv>()
   .route("/", restore)
   .route("/", rename)
   .route("/", update)
+  .route("/", applyUpdate)
   .route("/", move)
   .route("/", addGuest)
   .route("/", removeGuest);

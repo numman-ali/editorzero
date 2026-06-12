@@ -68,8 +68,24 @@
  * on the `doc_counters` row (SQLite serialises whole txs; Postgres
  * blocks the counter UPDATE until the prior tx resolves), and Yjs
  * update application is commutative — out-of-order `commit()`
- * scheduling between two dispatches merges to the same state, with
- * the watermark tracked as a monotonic max.
+ * scheduling between two dispatches merges to the same state.
+ *
+ * **The watermark is CONTIGUOUS, not a max.** Committed seqs per doc
+ * are gap-free (the counter UPDATE rolls back with its tx), but two
+ * dispatches' `commit()`s can interleave out of seq order — seq 2 can
+ * apply to the resident while committed seq 1 hasn't yet. A
+ * max-watermark would jump to 2 and the next transact's tail read
+ * (`seq > watermark`) would silently skip the committed-but-unapplied
+ * row 1: a clone missing durable state, handed to a handler as truth.
+ * So the watermark only advances across gap-free applied seqs;
+ * ahead-of-gap applies park in `#aheadSeqs` until the gap fills. In
+ * the window, tail reads re-fetch the already-applied-ahead rows —
+ * re-applying a contained update to the clone is a Yjs no-op, so the
+ * clone is complete AND convergent. This is also what guarantees the
+ * transact clone starts with no pending structs — a precondition the
+ * foreign-update lane's `not_integrable` refusal relies on
+ * (`foreign-update.ts`): pending-after-apply is always the caller's
+ * payload, never lane residue.
  *
  * **Why first-load write-path hydration reads the OPEN tx handle and
  * is still committed-only.** `onLoadDocument` fires once, at first
@@ -298,14 +314,25 @@ export class HocuspocusSync {
    */
   readonly #docLocks: Map<DocId, Promise<void>> = new Map();
   /**
-   * The resident-freshness watermark: max `doc_updates.seq` applied
-   * to the resident Y.Doc. Set at hydration, advanced (monotonic max)
-   * by `commit()`, dropped on document unload. A doc absent from the
-   * map and absent from `#server.documents` simply re-hydrates; a
-   * resident doc is always watermarked (hydration runs before any
-   * open path hands out a reference).
+   * The resident-freshness watermark: the highest `doc_updates.seq` S
+   * such that EVERY committed seq ≤ S has been applied to the resident
+   * Y.Doc (contiguous — see the class docstring for why a max would
+   * hand transact clones stale state). Set at hydration (committed
+   * rows are gap-free, so last-row seq is contiguous by construction),
+   * advanced by `commit()` via `#advanceWatermark`, dropped on
+   * document unload. A doc absent from the map and absent from
+   * `#server.documents` simply re-hydrates; a resident doc is always
+   * watermarked (hydration runs before any open path hands out a
+   * reference).
    */
   readonly #appliedSeq: Map<DocId, number> = new Map();
+  /**
+   * Seqs applied to the resident ABOVE the contiguous watermark — the
+   * out-of-order `commit()` window. Drained into `#appliedSeq` by
+   * `#advanceWatermark` as gaps fill; cleared with the watermark on
+   * unload/rehydration. Bounded by in-flight dispatch concurrency.
+   */
+  readonly #aheadSeqs: Map<DocId, Set<number>> = new Map();
   #closed = false;
 
   constructor(deps: HocuspocusSyncDeps) {
@@ -321,6 +348,7 @@ export class HocuspocusSync {
     const reader = deps.docUpdatesReader;
     const systemDb = deps.systemDb;
     const appliedSeq = this.#appliedSeq;
+    const aheadSeqs = this.#aheadSeqs;
     // `unloadImmediately: false` keeps Y.Docs resident across the
     // per-doc `debounce` window after the last direct connection
     // drops (§6.4 assumes hot docs stay in memory under burst writes).
@@ -395,7 +423,10 @@ export class HocuspocusSync {
             Y.applyUpdate(document, row.update_blob);
           }
           const last = rows[rows.length - 1];
+          // Committed rows are gap-free, so the last seq is contiguous
+          // by construction — fresh watermark, no ahead set.
           appliedSeq.set(doc_id, last === undefined ? 0 : last.seq);
+          aheadSeqs.delete(doc_id);
           return;
         }
         if (maybeCtx?.__read === true || maybeCtx?.__ws === true) {
@@ -405,6 +436,7 @@ export class HocuspocusSync {
           }
           const last = rows[rows.length - 1];
           appliedSeq.set(doc_id, last === undefined ? 0 : last.seq);
+          aheadSeqs.delete(doc_id);
           return;
         }
       },
@@ -415,6 +447,7 @@ export class HocuspocusSync {
       // and immediate) in 3.4.4.
       afterUnloadDocument: async ({ documentName }) => {
         appliedSeq.delete(documentName as DocId);
+        aheadSeqs.delete(documentName as DocId);
       },
     });
   }
@@ -739,10 +772,11 @@ export class HocuspocusSync {
    *
    * If the doc is not resident there is nothing to apply or
    * broadcast — the next hydration reads the committed rows,
-   * staged blobs included. The watermark advances as a monotonic max:
-   * two dispatches' `commit()`s may interleave out of seq order
-   * (Yjs application is commutative — same merged state either way),
-   * and the max keeps later catch-up reads from re-fetching either.
+   * staged blobs included. Two dispatches' `commit()`s may interleave
+   * out of seq order (Yjs application is commutative — same merged
+   * state either way); the watermark advances contiguously via
+   * `#advanceWatermark` so tail reads never skip a committed row that
+   * hasn't reached the resident (class docstring).
    */
   async #applyCommitted(doc_id: DocId, updates: readonly StagedUpdate[]): Promise<void> {
     try {
@@ -750,15 +784,12 @@ export class HocuspocusSync {
         const document = this.#server.documents.get(doc_id);
         if (document === undefined) {
           this.#appliedSeq.delete(doc_id);
+          this.#aheadSeqs.delete(doc_id);
           return;
         }
         for (const update of updates) {
           Y.applyUpdate(document, update.blob);
-        }
-        const last = updates[updates.length - 1];
-        if (last !== undefined) {
-          const current = this.#appliedSeq.get(doc_id) ?? 0;
-          this.#appliedSeq.set(doc_id, Math.max(current, last.seq));
+          this.#advanceWatermark(doc_id, update.seq);
         }
       });
     } catch (error) {
@@ -767,5 +798,38 @@ export class HocuspocusSync {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * Record `seq` as applied to the resident and advance the contiguous
+   * watermark as far as the gap-free prefix allows. An apply that lands
+   * ahead of a gap parks in `#aheadSeqs`; the apply that fills the gap
+   * drains every parked successor in one pass.
+   */
+  #advanceWatermark(doc_id: DocId, seq: number): void {
+    const current = this.#appliedSeq.get(doc_id) ?? 0;
+    if (seq <= current) {
+      return;
+    }
+    if (seq > current + 1) {
+      let ahead = this.#aheadSeqs.get(doc_id);
+      if (ahead === undefined) {
+        ahead = new Set();
+        this.#aheadSeqs.set(doc_id, ahead);
+      }
+      ahead.add(seq);
+      return;
+    }
+    let next = seq;
+    const ahead = this.#aheadSeqs.get(doc_id);
+    if (ahead !== undefined) {
+      while (ahead.delete(next + 1)) {
+        next += 1;
+      }
+      if (ahead.size === 0) {
+        this.#aheadSeqs.delete(doc_id);
+      }
+    }
+    this.#appliedSeq.set(doc_id, next);
   }
 }

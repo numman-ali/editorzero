@@ -479,13 +479,14 @@ describe("HocuspocusSync.bind().transact", () => {
     expect(await readBody(DOC_ID_A)).toBe("x");
   });
 
-  it("out-of-order commit() across two bindings converges (watermark = monotonic max)", async () => {
+  it("out-of-order commit() across two bindings converges (contiguous watermark)", async () => {
     // Two dispatches commit SQL in seq order but call `commit()` in
     // REVERSE order — the scheduling the dispatcher cannot rule out
     // across concurrent requests. Yjs application is commutative
     // (blob 2 parks as pending structs until blob 1 arrives), so the
-    // resident converges to the same state either way, and the
-    // watermark (monotonic max) never regresses.
+    // resident converges to the same state either way. The watermark
+    // advances contiguously: seq 2 parks in the ahead set until seq 1
+    // applies, then both drain in one pass.
     await seedDocMetadata(DOC_ID_A);
 
     let boundA: BoundSyncService | undefined;
@@ -512,8 +513,9 @@ describe("HocuspocusSync.bind().transact", () => {
 
     expect(await readBody(DOC_ID_A)).toBe("12");
     // A third dispatch on top of the out-of-order pair: clone = fully
-    // converged resident + empty tail (watermark 2 — the max, so the
-    // tail re-fetches neither blob).
+    // converged resident + empty tail (the ahead set drained when seq 1
+    // landed, so the watermark sits at 2 and the tail re-fetches
+    // neither blob).
     await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         const body = ydoc.getText("body");
@@ -522,6 +524,68 @@ describe("HocuspocusSync.bind().transact", () => {
     });
     expect(await readBody(DOC_ID_A)).toBe("123");
     expect((await fetchDocUpdates(DOC_ID_A)).map((r) => r.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("a transact INSIDE the out-of-order window still reads full committed state (contiguous watermark)", async () => {
+    // The window a max-watermark gets wrong: seq 2 has applied to the
+    // resident but committed seq 1 has not. A max would jump to 2 and
+    // the next transact's tail (`seq > watermark`) would skip row 1 —
+    // a clone silently missing durable state, handed to a handler as
+    // truth (and carrying pending structs, which would false-refuse
+    // the foreign-update lane's `not_integrable` check). The
+    // contiguous watermark holds below the gap, so the tail re-serves
+    // both rows and the clone is complete AND pending-free.
+    await seedDocMetadata(DOC_ID_A);
+
+    let boundA: BoundSyncService | undefined;
+    await driver.withSystemTx(async (tx) => {
+      boundA = sync.bind(bindCtx(tx));
+      await boundA.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "1");
+      });
+    });
+    let boundB: BoundSyncService | undefined;
+    await driver.withSystemTx(async (tx) => {
+      boundB = sync.bind(bindCtx(tx));
+      await boundB.transact(DOC_ID_A, (ydoc) => {
+        const body = ydoc.getText("body");
+        body.insert(body.length, "2");
+      });
+    });
+    if (boundA === undefined || boundB === undefined) throw new Error("bind never ran");
+
+    // Open the window: B applied (parks ahead of the seq-1 gap), A not.
+    await boundB.commit();
+
+    let midWindowBody = "";
+    let midWindowPending = true;
+    await runTx(async (bound) => {
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        midWindowBody = ydoc.getText("body").toString();
+        midWindowPending = ydoc.store.pendingStructs !== null;
+        ydoc.getText("body").insert(ydoc.getText("body").length, "3");
+      });
+    });
+    expect(midWindowBody).toBe("12");
+    expect(midWindowPending).toBe(false);
+
+    // The gap finally fills; the ahead set (seqs 2 and 3) drains in one
+    // pass and the resident converges.
+    await boundA.commit();
+    expect(await readBody(DOC_ID_A)).toBe("123");
+
+    // Post-window probe: the watermark drained to 3, so a fourth
+    // transact's tail is empty and its clone is the converged resident.
+    let postWindowBody = "";
+    await runTx(async (bound) => {
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        const body = ydoc.getText("body");
+        postWindowBody = body.toString();
+        body.insert(body.length, "4");
+      });
+    });
+    expect(postWindowBody).toBe("123");
+    expect(await readBody(DOC_ID_A)).toBe("1234");
   });
 
   it("commit() after the doc unloaded is a quiet no-op — the next hydration covers it", async () => {

@@ -17,6 +17,7 @@ const EXPECTED_IDS = [
   "collection.restore",
   "collection.update",
   "doc.add_guest",
+  "doc.apply_update",
   "doc.create",
   "doc.delete",
   "doc.get",

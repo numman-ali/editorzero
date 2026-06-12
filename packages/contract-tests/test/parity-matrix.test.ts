@@ -59,6 +59,9 @@ const capabilities = registry.list();
 const UI_PENDING: readonly string[] = [
   "collection.restore",
   "doc.add_guest",
+  // The ui cell lands with the SPA collab-provider slice (ADR 0043) —
+  // the live editor over WS is its proving spec.
+  "doc.apply_update",
   "doc.remove_guest",
   "doc.restore",
   "permission.grant",

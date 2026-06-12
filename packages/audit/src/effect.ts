@@ -343,6 +343,25 @@ export type AuditEffect =
         | { op: "set_visibility"; block_id: BlockId; visibility: BlockVisibility }
       >;
     }
+  // ── doc.apply_update (ADR 0043) — raw Yjs delta, WS-originated or direct ──
+  | {
+      kind: "doc.apply_update";
+      doc_id: DocId;
+      /**
+       * Base64 of the EXACT merged post-repair update blob persisted to
+       * `doc_updates` — never the raw client input, which the id-repair
+       * step may have extended (ADR 0043 review MUST-FIX 2, the
+       * effect-carries-handler-computed-truth class). `null` is the marked
+       * no-op lane: the update was fully contained, nothing was persisted,
+       * and the row exists to keep sync chatter honest rather than to
+       * record a mutation. Invariant 3's "the audit log alone reconstructs
+       * final state" stays literal for this lane — replaying the non-null
+       * blobs in audit order reproduces the fragment.
+       */
+      update_b64: string | null;
+      /** Server-minted ids for blocks the client sent id-less (`id: ""`). */
+      minted_block_ids: BlockId[];
+    }
   // ── Version (§3.8) ───────────────────────────────────────────────────────
   | {
       kind: "version.create";

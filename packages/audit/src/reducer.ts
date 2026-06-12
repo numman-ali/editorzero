@@ -120,6 +120,7 @@ export const REPLAY_CLASS = {
   "block.remove": "content",
   "block.set_visibility": "content",
   "doc.update_batch": "content",
+  "doc.apply_update": "content",
   "version.create": "content",
   "version.restore": "content",
 

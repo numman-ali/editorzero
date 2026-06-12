@@ -55,20 +55,28 @@ describe("MemorySyncService.transact", () => {
     expect(b).toBe("B");
   });
 
-  it("batches sync mutations into a single Yjs update", async () => {
+  it("delivers update events synchronously inside fn (no ambient transaction wrapper)", async () => {
+    // Post-ADR-0043 contract parity with the Hocuspocus-backed impl:
+    // `fn` gets the doc bare, so each mutation's update event fires
+    // while fn is still on the stack — the capture brackets in the
+    // write-path binding and `applyForeignUpdate` rely on exactly
+    // this. (The pre-0043 Memory impl wrapped fn in `ydoc.transact`,
+    // which deferred every event past the bracket's detach.)
     svc = new MemorySyncService();
     const updates: Uint8Array[] = [];
-    // Subscribe via a priming transact so we can grab the Y.Doc handle.
     const ydoc = await svc.transact(DOC_A, (d) => d);
     ydoc.on("update", (update: Uint8Array) => {
       updates.push(update);
     });
+    let seenInsideFn = 0;
     await svc.transact(DOC_A, (d) => {
       d.getText("body").insert(0, "a");
       d.getText("body").insert(1, "b");
       d.getText("body").insert(2, "c");
+      seenInsideFn = updates.length;
     });
-    expect(updates).toHaveLength(1);
+    expect(seenInsideFn).toBe(3);
+    expect(updates).toHaveLength(3);
   });
 
   it("supports async callbacks and resolves to their awaited value", async () => {

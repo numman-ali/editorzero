@@ -19,6 +19,14 @@
 
 export { DOC_FRAGMENT, readBlocks, type SeedBlock, seedBlocks, writeBlocks } from "./blocks";
 export {
+  type AppliedForeignUpdate,
+  applyForeignUpdate,
+  base64ToBytes,
+  bytesToBase64,
+  type ForeignUpdateRefusalReason,
+  ForeignUpdateRefusedError,
+} from "./foreign-update";
+export {
   type CollabAuthorizePayload,
   HocuspocusSync,
   type HocuspocusSyncDeps,

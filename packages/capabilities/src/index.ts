@@ -46,6 +46,7 @@ export { collectionMove } from "./collection/move";
 export { collectionRestore } from "./collection/restore";
 export { collectionUpdate } from "./collection/update";
 export { docAddGuest } from "./doc/add_guest";
+export { docApplyUpdate } from "./doc/apply_update";
 export { docCreate } from "./doc/create";
 export { docDelete } from "./doc/delete";
 export { docGet } from "./doc/get";
