@@ -94,6 +94,16 @@ export function SideContent({
           </span>
           Spaces
         </Link>
+        <Link
+          to="/audit"
+          activeProps={{ className: "on", "aria-current": "page" }}
+          onClick={onNavigate}
+        >
+          <span className="ic" aria-hidden="true">
+            ≣
+          </span>
+          Audit
+        </Link>
       </nav>
       <NewCollection />
       {tree.length > 0 && (

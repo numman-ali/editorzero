@@ -53,7 +53,11 @@ export const auditGet: Capability<AuditGetInput, AuditGetOutput> = {
   input: AuditGetInputSchema,
   output: AuditGetOutputSchema,
   requires: ["workspace:admin"],
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the /audit/$auditId detail screen (the audit.get ×
+  // Web UI cell — the full forensic record) — proven end-to-end by the
+  // marked Playwright spec in packages/e2e
+  // (proves-capability-cell: audit.get).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

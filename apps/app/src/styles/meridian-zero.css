@@ -348,6 +348,10 @@ a{ color:inherit; text-decoration:none; }
 .st-pub{ color:var(--ok); border-color:#a7d9bf; background:#e4f4eb; }
 .st-draft{ color:var(--steel); border-color:var(--hair-strong); background:var(--surface); }
 .st-rev{ color:var(--agent-ink); border-color:var(--agent-edge); background:var(--agent-wash); }
+/* Generic warn variant (audit deny/error chips; the chip text carries the
+   distinction — color is never the only channel). Fully token-based so the
+   dark/high-contrast theme remaps in themes.css carry it. */
+.st-warn{ color:var(--warn-ink); border-color:var(--warn-ink); background:var(--warn-wash); }
 
 /* ============================================================
    (c) READING VIEW

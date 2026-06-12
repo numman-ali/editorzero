@@ -90,7 +90,11 @@ export const auditList: Capability<AuditListInput, AuditListOutput> = {
   input: AuditListInputSchema,
   output: AuditListOutputSchema,
   requires: ["workspace:admin"],
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the /audit trail screen (the audit.list × Web UI
+  // cell — the app's first cursor-paginated screen) — proven end-to-end
+  // by the marked Playwright spec in packages/e2e
+  // (proves-capability-cell: audit.list).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),
