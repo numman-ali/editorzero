@@ -79,7 +79,7 @@ const SYNC_STEP1 = 0;
 const SYNC_STEP2 = 1;
 const SYNC_UPDATE = 2;
 
-function boot(): Promise<BootedApp> {
+function boot(collabReadOnly?: boolean): Promise<BootedApp> {
   return getApiApp({
     config: parseRuntimeConfig({
       EDITORZERO_PUBLIC_ORIGIN: PUBLIC_ORIGIN,
@@ -89,6 +89,9 @@ function boot(): Promise<BootedApp> {
       EDITORZERO_REGISTRATION_MODE: "open",
     }),
     secret: TEST_SECRET,
+    // ADR 0043: default (true) = production posture; the write-lane
+    // suite lifts to false to exercise the audited dispatch gate.
+    ...(collabReadOnly !== undefined && { collabReadOnly }),
   });
 }
 
@@ -159,6 +162,33 @@ function buildUpdateFrame(documentName: string, update: Uint8Array): Uint8Array 
   return toUint8Array(encoder);
 }
 
+/** A SyncStep2 frame — the OTHER update-bearing subtype the gate covers. */
+function buildSyncStep2Frame(documentName: string, update: Uint8Array): Uint8Array {
+  const encoder = createEncoder();
+  writeVarString(encoder, documentName);
+  writeVarUint(encoder, MessageType.Sync);
+  writeVarUint(encoder, SYNC_STEP2);
+  writeVarUint8Array(encoder, update);
+  return toUint8Array(encoder);
+}
+
+/** The unaudited cross-client relay ADR 0043 Decision 3 shuts. */
+function buildBroadcastStatelessFrame(documentName: string, payload: string): Uint8Array {
+  const encoder = createEncoder();
+  writeVarString(encoder, documentName);
+  writeVarUint(encoder, MessageType.BroadcastStateless);
+  writeVarString(encoder, payload);
+  return toUint8Array(encoder);
+}
+
+/** A message type no client legitimately sends (native would ignore it). */
+function buildUnknownTypeFrame(documentName: string): Uint8Array {
+  const encoder = createEncoder();
+  writeVarString(encoder, documentName);
+  writeVarUint(encoder, 42);
+  return toUint8Array(encoder);
+}
+
 type AuthOutcome = "authenticated" | "denied" | "rejected";
 
 interface AuthResult {
@@ -180,6 +210,8 @@ class CollabClient {
   readonly #open: Promise<void>;
   /** Local replicas, keyed by documentName, fed by SyncStep2/Update frames. */
   readonly docs = new Map<string, Y.Doc>();
+  /** Per-document Close frames received (refused per-doc connections land here). */
+  readonly #docCloses = new Map<string, string>();
   #pendingAuth: ((result: AuthResult) => void) | null = null;
   #pendingSyncStatus: ((saved: boolean) => void) | null = null;
   #closed = false;
@@ -248,6 +280,12 @@ class CollabClient {
         this.#pendingSyncStatus = null;
         settle(saved);
       }
+      return;
+    }
+    if (type === MessageType.CLOSE) {
+      // The server severed THIS document's connection (multiplexed
+      // per-doc close) — how a refused write/frame manifests.
+      this.#docCloses.set(documentName, readVarString(decoder));
     }
   }
 
@@ -277,14 +315,35 @@ class CollabClient {
 
   /** Send a raw Yjs update; resolve with the server's SyncStatus ack. */
   sendUpdate(documentName: string, update: Uint8Array): Promise<boolean> {
+    return this.sendForAck(buildUpdateFrame(documentName, update));
+  }
+
+  /** Send any ack-bearing frame; resolve with the SyncStatus answer. */
+  sendForAck(frame: Uint8Array): Promise<boolean> {
     return new Promise<boolean>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("sync status timed out")), WS_TIMEOUT_MS);
       this.#pendingSyncStatus = (saved) => {
         clearTimeout(timer);
         resolve(saved);
       };
-      this.#ws.send(buildUpdateFrame(documentName, update));
+      this.#ws.send(frame);
     });
+  }
+
+  /** Send raw bytes — refusal-path tests hand-craft hostile frames. */
+  sendRaw(frame: Uint8Array): void {
+    this.#ws.send(frame);
+  }
+
+  /** Resolve with the Close reason once the server severs `documentName`. */
+  async waitForDocClose(documentName: string): Promise<string> {
+    const deadline = Date.now() + WS_TIMEOUT_MS;
+    for (;;) {
+      const reason = this.#docCloses.get(documentName);
+      if (reason !== undefined) return reason;
+      if (Date.now() > deadline) throw new Error("timed out waiting for per-doc Close frame");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   }
 
   /** Poll the local replica until its fragment text contains `needle`. */
@@ -452,6 +511,22 @@ describe("production WS attach (ADR 0030 hardening)", () => {
     client.close();
   });
 
+  it("closes the per-doc connection on a BroadcastStateless frame (ADR 0043 rail, live in production posture)", async () => {
+    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
+    expect((await client.attach(docInA)).outcome).toBe("authenticated");
+    client.sendRaw(buildBroadcastStatelessFrame(docInA, "relay me"));
+    await client.waitForDocClose(docInA);
+    client.close();
+  });
+
+  it("closes the per-doc connection on an unknown message type (total classification)", async () => {
+    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
+    expect((await client.attach(docInA)).outcome).toBe("authenticated");
+    client.sendRaw(buildUnknownTypeFrame(docInA));
+    await client.waitForDocClose(docInA);
+    client.close();
+  });
+
   it("hydrates committed state on attach and converges live HTTP writes (one instance)", async () => {
     const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
     expect((await client.attach(docInA)).outcome).toBe("authenticated");
@@ -504,5 +579,192 @@ describe("production WS attach (ADR 0030 hardening)", () => {
     expect((await lingering.attach(docInA)).outcome).toBe("authenticated");
     // Deliberately NOT closed — afterAll's running.close() must settle
     // while this socket is live (ServerAttachment terminates it).
+  });
+});
+
+describe("audited WS write lane (ADR 0043 Decision 3 — readOnly lifted)", () => {
+  let booted: BootedApp | undefined;
+  let running: RunningServer | undefined;
+  let cookie = "";
+  let docId = "";
+
+  function activePort(): number {
+    if (running === undefined) throw new Error("server not started");
+    return running.port;
+  }
+
+  function openClient(): CollabClient {
+    return new CollabClient(activePort(), { origin: PUBLIC_ORIGIN, cookie });
+  }
+
+  async function docUpdatesCount(): Promise<number> {
+    if (booted === undefined) throw new Error("not booted");
+    const rows = await booted.driver
+      .system()
+      .selectFrom("doc_updates")
+      .where("doc_id", "=", DocId(docId))
+      .select("id")
+      .execute();
+    return rows.length;
+  }
+
+  /** Audit rows for the WS lane's capability, by outcome — invariant 3's trail. */
+  async function applyUpdateAuditCount(outcome: "allow" | "error"): Promise<number> {
+    if (booted === undefined) throw new Error("not booted");
+    const rows = await booted.driver
+      .system()
+      .selectFrom("audit_events")
+      .where("capability_id", "=", "doc.apply_update")
+      .where("outcome", "=", outcome)
+      .select("id")
+      .execute();
+    return rows.length;
+  }
+
+  async function docGetBody(): Promise<string> {
+    const res = await fetch(`http://127.0.0.1:${activePort()}/docs/get/${docId}`, {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    return res.text();
+  }
+
+  function paragraphElement(text: string): Y.XmlElement {
+    const para = new Y.XmlElement("paragraph");
+    para.insert(0, [new Y.XmlText(text)]);
+    return para;
+  }
+
+  /** The attached replica for `docId` — throws if startSync wasn't run. */
+  function replicaOf(client: CollabClient): Y.Doc {
+    const doc = client.docs.get(docId);
+    if (doc === undefined) throw new Error("no local replica — call startSync first");
+    return doc;
+  }
+
+  beforeAll(async () => {
+    // The SAME production composition as the suite above with ONE
+    // delta: `collabReadOnly: false` — the staged ADR 0043 increment-5
+    // lift, pulled forward here to exercise the write lane end-to-end.
+    booted = await boot(false);
+    const bootedNow = booted;
+    running = await startServer(bootedNow, 0, [
+      (server) => attachCollab(server, bootedNow, { publicOrigin: PUBLIC_ORIGIN }),
+    ]);
+    cookie = await signUp(running.port, "carol@example.com");
+    docId = await createDoc(running.port, cookie, "Carol's lane doc");
+  });
+
+  afterAll(async () => {
+    await running?.close();
+  });
+
+  it("authenticates with a read-write grant once the posture lifts", async () => {
+    const client = openClient();
+    const result = await client.attach(docId);
+    expect(result.outcome).toBe("authenticated");
+    expect(result.scope).toBe("read-write");
+    client.close();
+  });
+
+  it("commits a novel WS update through the audited dispatch lane — ack, rows, audit, broadcast", async () => {
+    const writer = openClient();
+    expect((await writer.attach(docId)).outcome).toBe("authenticated");
+    writer.startSync(docId);
+    await writer.waitForText(docId, "Carol's lane doc");
+
+    const watcher = openClient();
+    expect((await watcher.attach(docId)).outcome).toBe("authenticated");
+    watcher.startSync(docId);
+    await watcher.waitForText(docId, "Carol's lane doc");
+
+    const rowsBefore = await docUpdatesCount();
+    const auditBefore = await applyUpdateAuditCount("allow");
+
+    // Edit the hydrated replica and send the incremental delta —
+    // exactly what a collab provider puts on the wire.
+    const replica = replicaOf(writer);
+    const before = Y.encodeStateVector(replica);
+    replica.getXmlFragment(DOC_FRAGMENT).insert(1, [paragraphElement("WS lane write")]);
+    const delta = Y.encodeStateAsUpdate(replica, before);
+
+    const saved = await writer.sendUpdate(docId, delta);
+    expect(saved).toBe(true);
+
+    // One dispatch: one doc_updates row, one allow audit row
+    // (invariants 3 + 7 over the WS lane).
+    expect(await docUpdatesCount()).toBe(rowsBefore + 1);
+    expect(await applyUpdateAuditCount("allow")).toBe(auditBefore + 1);
+    // Durable through the same read path HTTP callers use…
+    expect(await docGetBody()).toContain("WS lane write");
+    // …and broadcast live to the other attached client (post-commit).
+    await watcher.waitForText(docId, "WS lane write");
+
+    writer.close();
+    watcher.close();
+  });
+
+  it("skips dispatch for a contained re-send — ack true, no new rows, no audit spam", async () => {
+    const client = openClient();
+    expect((await client.attach(docId)).outcome).toBe("authenticated");
+    client.startSync(docId);
+    await client.waitForText(docId, "WS lane write");
+
+    const rowsBefore = await docUpdatesCount();
+    const auditBefore = await applyUpdateAuditCount("allow");
+
+    // Re-send the full known state — handshake-style chatter: the
+    // preflight classifies it contained and never dispatches.
+    const contained = Y.encodeStateAsUpdate(replicaOf(client));
+    const saved = await client.sendUpdate(docId, contained);
+    expect(saved).toBe(true);
+
+    expect(await docUpdatesCount()).toBe(rowsBefore);
+    expect(await applyUpdateAuditCount("allow")).toBe(auditBefore);
+    client.close();
+  });
+
+  it("gates novel SyncStep2 payloads through the same dispatch lane", async () => {
+    const client = openClient();
+    expect((await client.attach(docId)).outcome).toBe("authenticated");
+    client.startSync(docId);
+    await client.waitForText(docId, "WS lane write");
+
+    const rowsBefore = await docUpdatesCount();
+
+    const replica = replicaOf(client);
+    const before = Y.encodeStateVector(replica);
+    replica.getXmlFragment(DOC_FRAGMENT).insert(1, [paragraphElement("Step2 lane write")]);
+    const delta = Y.encodeStateAsUpdate(replica, before);
+
+    const saved = await client.sendForAck(buildSyncStep2Frame(docId, delta));
+    expect(saved).toBe(true);
+    expect(await docUpdatesCount()).toBe(rowsBefore + 1);
+    expect(await docGetBody()).toContain("Step2 lane write");
+    client.close();
+  });
+
+  it("closes the connection on a refused delta (foreign shared type) and stages nothing", async () => {
+    const client = openClient();
+    expect((await client.attach(docId)).outcome).toBe("authenticated");
+
+    const rowsBefore = await docUpdatesCount();
+    const errorAuditBefore = await applyUpdateAuditCount("error");
+    const bodyBefore = await docGetBody();
+
+    // A delta that smuggles a NON-owned shared type next to the
+    // fragment — `doc.apply_update` refuses it (`foreign_shared_type`)
+    // and the gate turns the refusal into a per-doc close.
+    const scratch = new Y.Doc();
+    scratch.getMap("evil").set("k", "v");
+    client.sendRaw(buildUpdateFrame(docId, Y.encodeStateAsUpdate(scratch)));
+    await client.waitForDocClose(docId);
+
+    // Nothing landed — and the refusal itself is on the audit trail
+    // (outcome=error, the dispatcher's audited failure lane).
+    expect(await docUpdatesCount()).toBe(rowsBefore);
+    expect(await docGetBody()).toBe(bodyBefore);
+    expect(await applyUpdateAuditCount("error")).toBe(errorAuditBefore + 1);
+    client.close();
   });
 });

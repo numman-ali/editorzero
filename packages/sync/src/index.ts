@@ -18,6 +18,7 @@
  */
 
 export { DOC_FRAGMENT, readBlocks, type SeedBlock, seedBlocks, writeBlocks } from "./blocks";
+export type { CollabApplyUpdatePayload } from "./collab-gate";
 export {
   type AppliedForeignUpdate,
   applyForeignUpdate,

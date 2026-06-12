@@ -1,0 +1,230 @@
+/**
+ * The collab WS policy pair, tested at the composition seam (ADR 0030
+ * attach standing + ADR 0043 Decision 3 write dispatch).
+ *
+ * The real WS wiring (Hocuspocus hooks, frames, closes) is covered by
+ * the apps/server cohost integration suite; THESE tests pin the policy
+ * semantics directly: the shared principal resolve (cookie arm), the
+ * attach-time authority terms (scope arithmetic + ACL ceiling +
+ * soft-delete deny), the exact `doc.apply_update` dispatch shape, and
+ * the fail-closed late-binding guard.
+ */
+
+import type { BetterAuthResolver } from "@editorzero/auth";
+import {
+  COLLECTIONS_DDL,
+  createSqliteDriver,
+  DOCS_DDL,
+  GRANTS_DDL,
+  SPACE_MEMBERS_DDL,
+  SPACES_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
+import type { DispatchInvocation } from "@editorzero/dispatcher";
+import { DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { noopLogger } from "@editorzero/observability";
+import type { UserPrincipal } from "@editorzero/principal";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createCollabPolicies } from "./collabPolicies";
+
+const WORKSPACE_A = WorkspaceId("018f0000-0000-7000-8000-000000000001");
+const ALICE = UserId("018f0000-0000-7000-8000-000000000002");
+const DOC_LIVE = DocId("018f0000-0000-7000-8000-0000000000a1");
+const DOC_TRASHED = DocId("018f0000-0000-7000-8000-0000000000a2");
+const DOC_MISSING = DocId("018f0000-0000-7000-8000-0000000000a3");
+
+const GOOD_COOKIE = "better-auth.session_token=good";
+
+let driver: SqliteDriver;
+
+beforeEach(() => {
+  driver = createSqliteDriver({ path: ":memory:" });
+  driver.exec(COLLECTIONS_DDL);
+  driver.exec(SPACES_DDL);
+  driver.exec(SPACE_MEMBERS_DDL);
+  driver.exec(GRANTS_DDL);
+  driver.exec(DOCS_DDL);
+});
+
+afterEach(async () => {
+  await driver.close();
+});
+
+function alice(roles: UserPrincipal["roles"] = ["member"]): UserPrincipal {
+  return {
+    kind: "user",
+    id: ALICE,
+    workspace_id: WORKSPACE_A,
+    roles,
+    session_id: null,
+    token_id: null,
+  };
+}
+
+/** Resolver fake: the good cookie resolves, anything else is null. */
+function resolverFor(principal: UserPrincipal): BetterAuthResolver {
+  return (headers) => Promise.resolve(headers.get("cookie") === GOOD_COOKIE ? principal : null);
+}
+
+async function seedDoc(id: DocId, deleted_at: number | null = null): Promise<void> {
+  await driver
+    .scoped(WORKSPACE_A)
+    .insertInto("docs")
+    .values({
+      id,
+      workspace_id: WORKSPACE_A,
+      collection_id: null,
+      title: "Collab policy doc",
+      slug: "collab-policy-doc",
+      order_key: id,
+      access_mode: "space",
+      published_slug: null,
+      published_at: null,
+      render_version: 0,
+      created_by: ALICE,
+      created_at: 1,
+      updated_at: 1,
+      deleted_at,
+    })
+    .execute();
+}
+
+interface PoliciesOptions {
+  readonly principal?: UserPrincipal;
+  readonly warn?: ReturnType<typeof vi.fn>;
+}
+
+function policies(options: PoliciesOptions = {}) {
+  return createCollabPolicies({
+    resolver: resolverFor(options.principal ?? alice()),
+    driver,
+    logger: options.warn === undefined ? noopLogger : { ...noopLogger, warn: options.warn },
+  });
+}
+
+describe("collabAuthorize (attach standing)", () => {
+  it("admits a member with doc:read on a live in-workspace doc", async () => {
+    await seedDoc(DOC_LIVE);
+    await expect(
+      policies().collabAuthorize({
+        documentName: DOC_LIVE,
+        requestHeaders: { cookie: GOOD_COOKIE },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("denies when no session resolves — and logs the structured warn", async () => {
+    await seedDoc(DOC_LIVE);
+    const warn = vi.fn();
+    await expect(
+      policies({ warn }).collabAuthorize({
+        documentName: DOC_LIVE,
+        requestHeaders: { cookie: "better-auth.session_token=revoked" },
+      }),
+    ).rejects.toThrow(/no authenticated session/);
+    expect(warn).toHaveBeenCalledWith(
+      "collab attach denied",
+      expect.objectContaining({ event: "hocuspocus.authenticate", "collab.document": DOC_LIVE }),
+    );
+  });
+
+  it("denies an absent cookie header outright", async () => {
+    await expect(
+      policies().collabAuthorize({ documentName: DOC_LIVE, requestHeaders: {} }),
+    ).rejects.toThrow(/no authenticated session/);
+  });
+
+  it("denies a principal whose roles grant no doc:read", async () => {
+    await seedDoc(DOC_LIVE);
+    await expect(
+      policies({ principal: alice([]) }).collabAuthorize({
+        documentName: DOC_LIVE,
+        requestHeaders: { cookie: GOOD_COOKIE },
+      }),
+    ).rejects.toThrow(/lacks doc:read/);
+  });
+
+  it("denies a doc that does not exist in the principal's workspace", async () => {
+    await expect(
+      policies().collabAuthorize({
+        documentName: DOC_MISSING,
+        requestHeaders: { cookie: GOOD_COOKIE },
+      }),
+    ).rejects.toThrow(/not found in principal workspace/);
+  });
+
+  it("denies a soft-deleted doc (restore is the sanctioned route back)", async () => {
+    await seedDoc(DOC_TRASHED, 999);
+    await expect(
+      policies().collabAuthorize({
+        documentName: DOC_TRASHED,
+        requestHeaders: { cookie: GOOD_COOKIE },
+      }),
+    ).rejects.toThrow(/not found in principal workspace/);
+  });
+});
+
+describe("collabApplyUpdate (per-frame write dispatch)", () => {
+  it("fails closed before the dispatcher is wired", async () => {
+    await expect(
+      policies().collabApplyUpdate({
+        documentName: DOC_LIVE,
+        requestHeaders: { cookie: GOOD_COOKIE },
+        update: "AAAA",
+      }),
+    ).rejects.toThrow(/dispatcher not wired/);
+  });
+
+  it("re-resolves the principal per frame — a dead session never reaches the dispatcher", async () => {
+    const collab = policies();
+    const dispatch = vi.fn(() => Promise.resolve({}));
+    collab.wireDispatcher({ dispatch });
+    await expect(
+      collab.collabApplyUpdate({
+        documentName: DOC_LIVE,
+        requestHeaders: { cookie: "better-auth.session_token=revoked" },
+        update: "AAAA",
+      }),
+    ).rejects.toThrow(/no authenticated session/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("dispatches doc.apply_update with the wire input, fresh principal, and F86-aligned access", async () => {
+    const principal = alice();
+    const collab = policies({ principal });
+    const calls: DispatchInvocation[] = [];
+    collab.wireDispatcher({
+      dispatch: (invocation) => {
+        calls.push(invocation);
+        return Promise.resolve({});
+      },
+    });
+    await collab.collabApplyUpdate({
+      documentName: DOC_LIVE,
+      requestHeaders: { cookie: GOOD_COOKIE },
+      update: "QUJDRA==",
+    });
+    expect(calls).toHaveLength(1);
+    const invocation = calls[0];
+    if (invocation === undefined) throw new Error("dispatch not called");
+    expect(invocation.capability_id).toBe("doc.apply_update");
+    expect(invocation.input).toEqual({ doc_id: DOC_LIVE, update: "QUJDRA==" });
+    expect(invocation.principal).toBe(principal);
+    expect(invocation.access).toEqual({ workspace_id: WORKSPACE_A });
+    expect(invocation.trace_id).toBeNull();
+  });
+
+  it("propagates dispatcher refusals to the gate (the frame's refusal)", async () => {
+    const refusal = new Error("validation_failed");
+    const collab = policies();
+    collab.wireDispatcher({ dispatch: () => Promise.reject(refusal) });
+    await expect(
+      collab.collabApplyUpdate({
+        documentName: DOC_LIVE,
+        requestHeaders: { cookie: GOOD_COOKIE },
+        update: "AAAA",
+      }),
+    ).rejects.toBe(refusal);
+  });
+});

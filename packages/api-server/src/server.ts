@@ -39,7 +39,7 @@ import {
   createBetterAuthResolver,
   runAuthMigrations,
 } from "@editorzero/auth";
-import { createDefaultRegistry, loadDocReadResolver } from "@editorzero/capabilities";
+import { createDefaultRegistry } from "@editorzero/capabilities";
 import { loadEnvConfig, type RuntimeConfig, resolveSecretRef } from "@editorzero/config";
 import {
   createDocUpdatesReader,
@@ -49,12 +49,12 @@ import {
   ensureSchema,
   type SqliteDriver,
 } from "@editorzero/db";
-import { effectiveScopes, workspaceAwareGate } from "@editorzero/dispatcher";
-import { DocId } from "@editorzero/ids";
+import { workspaceAwareGate } from "@editorzero/dispatcher";
 import { type Logger, noopLogger } from "@editorzero/observability";
-import { type CollabAuthorizePayload, HocuspocusSync } from "@editorzero/sync";
+import { HocuspocusSync } from "@editorzero/sync";
 
 import { createApiApp } from "./app";
+import { createCollabPolicies } from "./composition/collabPolicies";
 import { createApiDispatcher } from "./composition/createApiDispatcher";
 
 /**
@@ -88,6 +88,16 @@ export interface GetApiAppOptions {
    * production entrypoint passes its `consoleLogger`.
    */
   readonly logger?: Logger;
+  /**
+   * WS connection write posture, threaded to
+   * `HocuspocusSyncDeps.collabReadOnly`. DEFAULT TRUE — production
+   * stays read-only until ADR 0043 increment 5 (socket registry +
+   * event-driven revocation closes) gates the lift. The audited write
+   * lane itself (the `beforeHandleMessage` gate dispatching
+   * `doc.apply_update`) is ALWAYS wired; integration tests pass FALSE
+   * to exercise it end-to-end.
+   */
+  readonly collabReadOnly?: boolean;
 }
 
 export interface BootedApp {
@@ -159,74 +169,22 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
   const resolver = createBetterAuthResolver({ auth, loadRoles });
 
   /**
-   * Per-document WS authorization (ADR 0030 blockers 1–3). Runs once
-   * per (socket, documentName) Auth frame; ANY throw denies that one
-   * document attach — Hocuspocus answers a generic `permission-denied`
-   * frame, so refusal reasons stay server-side (the structured warn
-   * below is the observable channel).
-   *
-   * Authority = the same two terms the dispatcher gate would apply to
-   * `doc.get`, REUSED not re-implemented (invariant 5): the gate's
-   * `effectiveScopes` arithmetic (`doc:read`), then the Step-6 ceiling
-   * (`loadDocReadResolver(...).assertCanRead`) on the live doc row.
-   * The principal is re-resolved from the upgrade request's headers on
-   * EVERY frame — session revoked after the socket opened ⇒ the next
-   * document attach is denied; nothing is trusted from connection
-   * context. Cookie-path = user principals only: `effectiveScopes`
-   * takes an agent token's scope claim verbatim (the live H8
-   * intersection lives in `workspaceAwareGate`), so an agent-capable
-   * WS path must come back for the H8-aware term (slice B).
-   *
-   * Soft-deleted docs deny: live collaboration on a trashed doc is not
-   * a state the product has — restore first (ADR 0017's recovery
-   * capability is the sanctioned route back).
+   * Both collab WS policies — attach standing (`onAuthenticate`) and
+   * the per-frame write dispatch (the `beforeHandleMessage` gate, ADR
+   * 0043 Decision 3) — built in `composition/collabPolicies.ts` on one
+   * shared principal resolve. The dispatcher is late-bound below:
+   * sync must exist before the dispatcher that writes through it.
    */
-  const collabAuthorize = async ({
-    documentName,
-    requestHeaders,
-  }: CollabAuthorizePayload): Promise<void> => {
-    try {
-      const headers = new Headers();
-      if (typeof requestHeaders.cookie === "string") {
-        headers.set("cookie", requestHeaders.cookie);
-      }
-      const principal = await resolver(headers);
-      if (principal === null) {
-        throw new Error("collab: no authenticated session");
-      }
-      if (principal.kind !== "user") {
-        throw new Error("collab: cookie path admits user principals only");
-      }
-      if (!effectiveScopes(principal).has("doc:read")) {
-        throw new Error("collab: principal lacks doc:read");
-      }
-      const doc_id = DocId(documentName);
-      const scoped = driver.scoped(principal.workspace_id);
-      const doc = await scoped
-        .selectFrom("docs")
-        .select(["id", "created_by", "access_mode", "collection_id", "deleted_at"])
-        .where("id", "=", doc_id)
-        .executeTakeFirst();
-      if (doc === undefined || doc.deleted_at !== null) {
-        throw new Error("collab: document not found in principal workspace");
-      }
-      const acl = await loadDocReadResolver(scoped, principal);
-      acl.assertCanRead(doc);
-    } catch (error) {
-      logger.warn("collab attach denied", {
-        event: "hocuspocus.authenticate",
-        "collab.document": documentName,
-        "collab.reason": error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
-  };
+  const collab = createCollabPolicies({ resolver, driver, logger });
 
   const sync = new HocuspocusSync({
     docUpdatesWriter: createDocUpdatesWriter(),
     docUpdatesReader: createDocUpdatesReader(),
     systemDb: driver.system(),
-    collabAuthorize,
+    collabAuthorize: collab.collabAuthorize,
+    collabApplyUpdate: collab.collabApplyUpdate,
+    ...(options.collabReadOnly !== undefined && { collabReadOnly: options.collabReadOnly }),
+    logger,
   });
   const dispatcher = createApiDispatcher({
     driver,
@@ -234,6 +192,7 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     sync,
     gate: workspaceAwareGate({ loadDelegatorRoles: loadRoles }),
   });
+  collab.wireDispatcher(dispatcher);
 
   const app = createApiApp({
     auth,

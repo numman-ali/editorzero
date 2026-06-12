@@ -34,6 +34,7 @@ export type LogEvent =
   | "hocuspocus.authenticate"
   | "hocuspocus.store_document"
   | "hocuspocus.change_rejected"
+  | "hocuspocus.write_gate"
   | "audit.appended"
   | "session.revoke_close"
   | "mirror.projected"

@@ -135,6 +135,7 @@ import type { Principal } from "@editorzero/principal";
 import { Hocuspocus, type onAuthenticatePayload } from "@hocuspocus/server";
 import * as Y from "yjs";
 
+import { type CollabApplyUpdatePayload, createCollabWriteGate } from "./collab-gate";
 import type { BoundSyncService } from "./service";
 
 /**
@@ -195,11 +196,9 @@ export interface HocuspocusSyncDeps {
    * multiplexed socket. Throw to deny: Hocuspocus answers
    * `permission-denied` for that document only; other documents on
    * the socket are unaffected. After the policy passes, the class
-   * FORCES `connectionConfig.readOnly = true` — invariant 3 (every
-   * mutation = exactly one audit row) is unsatisfiable over the WS
-   * write lane until updates route through the audited dispatcher
-   * path (ADR 0043 Decisions 2–3, the next increments of this
-   * slice), so no policy can grant WS write access today.
+   * sets `connectionConfig.readOnly` from `collabReadOnly` (default
+   * TRUE — see that knob for the ADR 0043 staging), so no attach
+   * policy can widen write posture.
    *
    * OPTIONAL with a deny-all default, which is by-construction
    * fail-closed: Hocuspocus treats a *hook-less* server as requiring
@@ -213,6 +212,32 @@ export interface HocuspocusSyncDeps {
    * affect HTTP-path writes.
    */
   readonly collabAuthorize?: (payload: CollabAuthorizePayload) => Promise<void>;
+  /**
+   * WS write policy for the `beforeHandleMessage` gate (ADR 0043
+   * Decision 3): called once per NOVEL update-bearing frame on a
+   * non-readOnly connection, with the extracted Yjs payload as base64.
+   * The composition root's policy re-resolves the principal from the
+   * upgrade headers and dispatches `doc.apply_update`; a throw refuses
+   * the frame and Hocuspocus closes that per-document connection.
+   * OPTIONAL with a reject-all default (fail-closed, like
+   * `collabAuthorize`) — see `createCollabWriteGate`. The gate itself
+   * is ALWAYS registered: its protocol rails (`BroadcastStateless`
+   * refused, unknown frame types closed, total classification of
+   * update-bearing subtypes) hold regardless of write posture.
+   */
+  readonly collabApplyUpdate?: (payload: CollabApplyUpdatePayload) => Promise<void>;
+  /**
+   * The `connectionConfig.readOnly` value every authorized WS attach
+   * gets. DEFAULT TRUE — the shipped production posture until ADR
+   * 0043 increment 5 (socket registry + event-driven revocation
+   * closes) lands; Decision 5 explicitly gates the universal lift on
+   * it, because per-frame re-resolution protects the next write but
+   * not a passive revoked socket that keeps receiving broadcasts.
+   * Test compositions pass FALSE to exercise the audited write lane
+   * (the gate dispatches only on non-readOnly connections; readOnly
+   * connections keep the native nacked-not-applied contract).
+   */
+  readonly collabReadOnly?: boolean;
   /**
    * Post-commit apply failures are liveness, not correctness — the
    * mutation is durable; only the live broadcast lagged. They log
@@ -349,6 +374,7 @@ export class HocuspocusSync {
     const systemDb = deps.systemDb;
     const appliedSeq = this.#appliedSeq;
     const aheadSeqs = this.#aheadSeqs;
+    const collabReadOnly = deps.collabReadOnly ?? true;
     // `unloadImmediately: false` keeps Y.Docs resident across the
     // per-doc `debounce` window after the last direct connection
     // drops (§6.4 assumes hot docs stay in memory under burst writes).
@@ -372,15 +398,26 @@ export class HocuspocusSync {
       // `openDirectConnection` builds its connectionConfig directly).
       onAuthenticate: async ({ documentName, requestHeaders, connectionConfig }) => {
         await collabAuthorize({ documentName, requestHeaders });
-        // Invariant 3: WS-applied updates would bypass the audited
-        // dispatcher write lane, so no policy outcome can grant write.
-        // Hocuspocus enforces this server-side — Update/SyncStep2
-        // frames from a readOnly connection are nacked, not applied.
-        // ADR 0043 Decisions 2–3 (the hook-gated adapter over
-        // `doc.apply_update`) lift this deliberately, later in the
-        // slice.
-        connectionConfig.readOnly = true;
+        // Production posture stays readOnly (true) until ADR 0043
+        // increment 5 — the gate below makes a lifted connection's
+        // writes audited (every novel frame = one `doc.apply_update`
+        // dispatch), and readOnly connections keep the native
+        // nacked-not-applied contract. See the `collabReadOnly` deps
+        // docstring for the staging.
+        connectionConfig.readOnly = collabReadOnly;
       },
+      // The audited-WS-write-lane gate (ADR 0043 Decision 3). ALWAYS
+      // registered — its protocol rails (BroadcastStateless refused,
+      // unknown types closed) hold regardless of write posture, and
+      // its default write policy rejects (fail-closed). Never fires
+      // for DirectConnections (no `Connection` object), so the
+      // dispatcher's own writes can't re-enter the gate.
+      beforeHandleMessage: createCollabWriteGate({
+        ...(deps.collabApplyUpdate !== undefined && {
+          collabApplyUpdate: deps.collabApplyUpdate,
+        }),
+        logger: this.#logger,
+      }),
       // Hydration: the Document passed in is the server's canonical
       // Y.Doc instance for this documentName. Applying updates
       // directly to it is what Hocuspocus itself would do if we
