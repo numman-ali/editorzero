@@ -11,9 +11,10 @@
  * `vitest.config.ts`, mirroring apps/cli's bin entry).
  *
  * **SQLite single-box floor today** (ADR 0027): one process — the API
- * trunk, SQLite, embedded sync. `serveStatic` for the SPA bundle and the
- * `/collab` WebSocket upgrade mount here once the co-hosting smoke
- * (deliverable #2) lands.
+ * trunk, SQLite, embedded sync, and (when `EDITORZERO_SPA_DIST` points at
+ * a built `apps/app/dist`) the SPA bundle via `attachSpa`. The `/collab`
+ * WebSocket upgrade stays unmounted — production WS attach is gated on
+ * the ADR 0030 red-team blockers (task #15).
  */
 
 import { getApiApp } from "@editorzero/api-server";
@@ -21,6 +22,7 @@ import { loadEnvConfig } from "@editorzero/config";
 import { consoleLogger } from "@editorzero/observability";
 
 import { startServer } from "./runtime";
+import { attachSpa } from "./spa";
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -30,11 +32,15 @@ async function main(): Promise<void> {
   const log = consoleLogger();
   const config = loadEnvConfig();
   const booted = await getApiApp({ config });
+  if (config.spa_dist !== undefined) {
+    attachSpa(booted.app, config.spa_dist);
+  }
   const running = await startServer(booted, config.port);
   log.info("server listening", {
     event: "server.listening",
     "server.port": running.port,
     "server.origin": config.public_origin,
+    "server.spa_dist": config.spa_dist ?? "(none)",
   });
 
   let draining = false;

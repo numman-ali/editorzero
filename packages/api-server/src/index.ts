@@ -35,6 +35,10 @@ export {
   type CreateApiDispatcherOptions,
   createApiDispatcher,
 } from "./composition/createApiDispatcher";
+// The trunk's Hono env — exported so the serve layer (apps/server) can
+// instantiate generically-typed middleware (e.g. `serveStatic<ApiEnv>`)
+// against `BootedApp["app"]` without re-deriving the type.
+export type { ApiEnv } from "./env";
 export { openApiDocument } from "./lib/openapi";
 export {
   createDispatcherMiddleware,

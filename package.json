@@ -22,6 +22,7 @@
     "test:watch": "vitest",
     "test:prop": "vitest run --config vitest.prop.config.ts",
     "coherence": "tsx scripts/coherence.ts",
+    "smoke:deploy": "./scripts/smoke-deploy.sh",
     "prepare": "lefthook install"
   },
   "devDependencies": {

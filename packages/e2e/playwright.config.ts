@@ -9,9 +9,11 @@ import { TRUNK_ORIGIN, TRUNK_PORT, WEB_ORIGIN, WEB_PORT } from "./test/servers";
  * Web UI e2e harness (ADR 0033; verification stack step 7). Two real
  * servers, one browser origin:
  *
- *  - **trunk** — `apps/server` bundled from source (see
- *    `scripts/bundle-trunk.mjs`) and run under plain `node` against a
- *    fresh SQLite file per run. `getApiApp` self-migrates on boot.
+ *  - **trunk** — `apps/server` bundled from source (the canonical
+ *    `apps/server/scripts/bundle.mjs`, `--out` into this package's tmp/;
+ *    `better-sqlite3` stays external and resolves from THIS package's
+ *    devDependencies) and run under plain `node` against a fresh SQLite
+ *    file per run. `getApiApp` self-migrates on boot.
  *  - **web** — the apps/app Vite dev server, reverse-proxying the
  *    `RESERVED_API_PREFIXES` to the trunk (vite.config.ts honours
  *    `EDITORZERO_TRUNK_ORIGIN`).
@@ -44,7 +46,8 @@ export default defineConfig({
   webServer: [
     {
       // Fresh artifact + fresh DB every run: wipe tmp/, rebundle, boot.
-      command: "rm -rf tmp && node scripts/bundle-trunk.mjs && node tmp/server.mjs",
+      command:
+        "rm -rf tmp && node ../../apps/server/scripts/bundle.mjs --out tmp/server.mjs && node tmp/server.mjs",
       url: `${TRUNK_ORIGIN}/infra/health`,
       reuseExistingServer: false,
       timeout: 60_000,

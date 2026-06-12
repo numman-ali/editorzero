@@ -1,0 +1,20 @@
+# Build context hygiene: the image installs + builds from source inside the
+# build stage, so host-built artifacts must never leak in (darwin-native
+# binaries, stale dists, local DBs).
+.git
+.claude
+.design
+**/node_modules
+**/dist
+**/bundle
+**/tmp
+**/*.tsbuildinfo
+**/.tsbuildinfo.test
+**/test-results
+**/playwright-report
+data
+docs
+*.md
+meridian-preview.html
+Dockerfile
+docker-compose.yml

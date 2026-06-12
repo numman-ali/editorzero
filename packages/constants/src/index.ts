@@ -242,3 +242,15 @@ export const COLLECTION_MAX_DEPTH: number = 8;
 
 /** Better Auth secret rotation cadence (ADR 0010). */
 export const BETTER_AUTH_ROTATION_MS: number = 90 * DAY_MS;
+
+// ── Cross-surface URL contract (ADR 0035 §2) ───────────────────────────────
+//
+// Not a number, but the same SSOT charter: one enumeration, consumed by
+// the dev proxy, the client-route guard, the trunk's SPA fallback, and
+// (later) the PWA denylist. Lives in its own module; re-exported here so
+// every consumer imports `@editorzero/constants`.
+export {
+  isReservedApiPath,
+  RESERVED_API_PREFIXES,
+  type ReservedApiPrefix,
+} from "./reserved-prefixes";

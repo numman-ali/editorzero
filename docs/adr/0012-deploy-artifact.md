@@ -6,6 +6,15 @@
 
 > **See [ADR 0021](0021-surface-transport-topology.md) before editing the CLI section.** It names the CLI framework (`citty`), commits the CLI to being an HTTP client of the Hono trunk via `hc<AppType>`, adopts [AXI](https://github.com/kunchenguid/axi) as the agent-output contract (stdout format — TOON vs JSON vs alternatives — deferred to eval), and binds the session-hook self-install behaviour for Claude Code + Codex.
 
+> **Amendment (2026-06-12, first shipped artifact — `Dockerfile` + `docker-compose.yml` + `scripts/smoke-deploy.sh`).** The sketch below predates the shipped config/auth surface; where they differ, the shipped shape governs:
+>
+> - **Env names** — `DATABASE_URL` (a SQLite file path or `:memory:`; the composition root is SQLite-only today, a Postgres URL fails loud per ADR 0007-deferral), `EDITORZERO_PUBLIC_ORIGIN`, `BETTER_AUTH_SECRET` (required, no baked default), `EDITORZERO_SPA_DIST` (points the trunk at the baked SPA bundle — `attachSpa`, ADR 0027/0035). The sketch's `EDITORZERO_DB` / `EDITORZERO_EMBED_MODE` never existed.
+> - **Health check** lives at **`/infra/health`** (ADR 0025 prefix discipline), not `/health`.
+> - **First boot** — the sketch's "signed one-time installer URL (Pocketbase pattern)" is **superseded** by the registration gate (ADR 0030/0041): `EDITORZERO_REGISTRATION_MODE=first-user` (default) makes the first `/auth/sign-up/email` the audited genesis bootstrap and closes self-registration after it. No separate installer flow.
+> - **Migrations on startup** — `getApiApp` runs `ensureSchema` + Better Auth migrations at boot; Atlas CE remains the future dual-backend story, not a container entrypoint step.
+> - **Server artifact internals** — the runnable entrypoint is the **esbuild server bundle** (`apps/server/scripts/bundle.mjs`; `module: Preserve` dists are extensionless → unrunnable under plain node), with `better-sqlite3` external resolved from a `pnpm deploy --prod --legacy` pruned closure. Same bundle the e2e lane boots — the artifact is continuously exercised.
+> - **Compose** uses `build: .` until release engineering publishes `editorzero/editorzero:TAG` images; the smoke lane is `pnpm smoke:deploy` (manual — an image build per push is too heavy for the pre-push hook; revisit at the phase boundary).
+
 ## Context
 v1 honestly declared "docker-compose, full stop" because the Bun `--compile` single-binary route was 2026-young with native-dep pitfalls. The refresh confirmed Bun's server runtime is still not boring (ADR 0002) but revealed that **`bun build --compile` is production-grade for CLI distribution** — cross-compilation to Linux/macOS/Windows amd64/arm64, fast cold starts, embedded assets and SQLite, auto-loaded env. That's a real single-binary win for the `editorzero` CLI surface.
 

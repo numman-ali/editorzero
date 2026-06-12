@@ -74,6 +74,9 @@ importers:
       '@editorzero/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@editorzero/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@editorzero/ids':
         specifier: workspace:*
         version: link:../../packages/ids
@@ -181,12 +184,18 @@ importers:
       '@editorzero/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@editorzero/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@editorzero/observability':
         specifier: workspace:*
         version: link:../../packages/observability
       '@hono/node-server':
         specifier: ^1.19.14
         version: 1.19.14(hono@4.12.14)
+      better-sqlite3:
+        specifier: 'catalog:'
+        version: 12.9.0
     devDependencies:
       '@editorzero/ids':
         specifier: workspace:*
@@ -206,6 +215,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: 'catalog:'
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.8.3))
+      esbuild:
+        specifier: 0.27.7
+        version: 0.27.7
       lib0:
         specifier: 0.2.117
         version: 0.2.117
@@ -584,9 +596,6 @@ importers:
       better-sqlite3:
         specifier: 'catalog:'
         version: 12.9.0
-      esbuild:
-        specifier: 0.27.7
-        version: 0.27.7
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

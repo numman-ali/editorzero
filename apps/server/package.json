@@ -16,15 +16,18 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -b",
-    "clean": "rm -rf dist *.tsbuildinfo .tsbuildinfo.test",
+    "bundle": "node scripts/bundle.mjs",
+    "clean": "rm -rf dist bundle *.tsbuildinfo .tsbuildinfo.test",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run --coverage"
   },
   "dependencies": {
     "@editorzero/api-server": "workspace:*",
     "@editorzero/config": "workspace:*",
+    "@editorzero/constants": "workspace:*",
     "@editorzero/observability": "workspace:*",
-    "@hono/node-server": "^1.19.14"
+    "@hono/node-server": "^1.19.14",
+    "better-sqlite3": "catalog:"
   },
   "devDependencies": {
     "@editorzero/ids": "workspace:*",
@@ -33,6 +36,7 @@
     "@types/node": "catalog:",
     "@types/ws": "^8.5.0",
     "@vitest/coverage-v8": "catalog:",
+    "esbuild": "0.27.7",
     "lib0": "0.2.117",
     "typescript": "catalog:",
     "vitest": "catalog:",

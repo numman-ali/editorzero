@@ -1,0 +1,27 @@
+# editorzero single-box deploy (ADR 0012 default template / ADR 0027).
+# One service: the Hono trunk serving API + SPA over SQLite on ./data.
+#
+#   mkdir -p data                              # the container runs as `node`
+#   BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d
+#
+# First boot: registration is `first-user` (EDITORZERO_REGISTRATION_MODE,
+# ADR 0030/0041) — the first sign-up at /login is the audited genesis and
+# closes self-registration. Backup = tar ./data. Upgrade = pull + up -d
+# (the trunk self-migrates at boot).
+#
+# Advanced services (Postgres, Caddy, Redis) are opt-in compose additions
+# per ADR 0012; the published-image tag replaces `build:` once release
+# engineering lands.
+services:
+  app:
+    build: .
+    ports:
+      - "${EDITORZERO_PORT:-3000}:3000"
+    volumes:
+      - ${EDITORZERO_DATA_DIR:-./data}:/data
+    environment:
+      DATABASE_URL: /data/editorzero.db
+      EDITORZERO_PUBLIC_ORIGIN: ${EDITORZERO_PUBLIC_ORIGIN:-http://localhost:${EDITORZERO_PORT:-3000}}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET, e.g. $(openssl rand -hex 32)}
+      # EDITORZERO_REGISTRATION_MODE: first-user   # the default; `open` for dev boxes
+    restart: unless-stopped

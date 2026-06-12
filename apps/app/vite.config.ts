@@ -1,8 +1,13 @@
+// The SUBPATH import is load-bearing: Vite externalizes bare specifiers in
+// the config bundle, so plain node ESM loads this module at config-eval —
+// the package root's `dist/index.js` re-export chain is extensionless
+// (`module: Preserve`) and unloadable under node, while this leaf module
+// has no internal imports and loads clean. Keep `reserved-prefixes.ts`
+// import-free or this breaks again.
+import { RESERVED_API_PREFIXES } from "@editorzero/constants/reserved-prefixes";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react-swc";
 import { defineConfig } from "vite";
-
-import { RESERVED_API_PREFIXES } from "./src/lib/reserved-prefixes";
 
 /**
  * Dev loop (ADR 0035 §2): the browser only ever talks to the Vite origin, and
@@ -10,8 +15,11 @@ import { RESERVED_API_PREFIXES } from "./src/lib/reserved-prefixes";
  * browser sees a single origin, ADR 0030's `SameSite=Lax` / no-CORS cookie
  * model holds in dev exactly as in production — no dev-only CSRF special-casing.
  *
- * The proxy targets are derived from `RESERVED_API_PREFIXES`, the same list the
- * client-route guard uses, so the two can never drift.
+ * The proxy targets are derived from `RESERVED_API_PREFIXES` in
+ * `@editorzero/constants` — the same SSOT the client-route guard and the
+ * production trunk's SPA fallback read, so the three can never drift.
+ * (Resolves through the package's built `dist/`; `pnpm build` first on a
+ * fresh tree, same as every workspace import.)
  */
 // Overridable so the e2e harness (packages/e2e) can point the proxy at its
 // own trunk on a non-default port. Build-tool config, not a secret — the

@@ -72,6 +72,14 @@ export const runtimeConfigSchema = z.object({
   registration_mode: z.enum(["first-user", "open"]).default("first-user"),
   /** Hocuspocus per-process Y.Doc RAM cap in bytes (F38 — §10.5). */
   hocuspocus_max_ram_bytes: z.coerce.number().int().positive().optional(),
+  /**
+   * Directory holding the built SPA bundle (`apps/app/dist`) for the
+   * trunk to serve (ADR 0027/0035 static attach). Unset → the trunk
+   * serves no static assets (dev: Vite owns the SPA origin and proxies
+   * the API; tests: the harness talks JSON only). The docker image sets
+   * it to the baked-in bundle path.
+   */
+  spa_dist: z.string().min(1).optional(),
   /** Disaster-recovery mode — raises ACME re-issuance cap for 24h (F59). */
   dr_mode: z.coerce.boolean().default(false),
 });
@@ -99,6 +107,7 @@ const ENV_MAP = {
   registration_mode: "EDITORZERO_REGISTRATION_MODE",
   hocuspocus_max_ram_bytes: "EDITORZERO_HOCUSPOCUS_MAX_RAM_BYTES",
   dr_mode: "EDITORZERO_DR_MODE",
+  spa_dist: "EDITORZERO_SPA_DIST",
 } as const satisfies Record<keyof RuntimeConfig, string>;
 
 /**

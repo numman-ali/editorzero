@@ -14,6 +14,7 @@
   "dependencies": {
     "@base-ui/react": "1.5.0",
     "@editorzero/api-client": "workspace:*",
+    "@editorzero/constants": "workspace:*",
     "@editorzero/ids": "workspace:*",
     "@fontsource-variable/archivo": "5.2.8",
     "@fontsource-variable/jetbrains-mono": "5.2.8",

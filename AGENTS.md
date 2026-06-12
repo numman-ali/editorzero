@@ -94,7 +94,7 @@ Every change passes the full stack locally via pre-commit / pre-push hooks — n
 5. **Integration tests** — capabilities against real SQLite **and** real Postgres.
 6. **Contract tests** — API/CLI/MCP/UI parity matrix, generated from the capability registry.
 7. **E2E tests** — Playwright + `@axe-core/playwright` for WCAG 2.1 AA.
-8. **Smoke deploy** — ephemeral `docker compose` env; hit `/health`, create a doc, tear down.
+8. **Smoke deploy** — `pnpm smoke:deploy`: ephemeral `docker compose` env; `/infra/health`, SPA shell + asset policy, genesis sign-up, create + list a doc, reserved-prefix honesty, tear down. Manual lane (image build is minutes-heavy), not pre-push.
 9. **Observability check** — traces export, no unexpected error spans.
 
 Fast lane at pre-commit; slow lane at pre-push. Concrete wiring in `lefthook.yml`. "Fix it in the next commit" is not acceptable — the hook doesn't let it land.

@@ -61,3 +61,6 @@ tmp/
 # Playwright (packages/e2e)
 test-results/
 playwright-report/
+
+# apps/server esbuild artifact (scripts/bundle.mjs)
+bundle/
