@@ -248,7 +248,7 @@ describe("workspace.update", () => {
     expect(workspaceUpdate.id).toBe("workspace.update");
     expect(workspaceUpdate.category).toBe("mutation");
     expect(workspaceUpdate.requires).toEqual(["workspace:admin"]);
-    expect(workspaceUpdate.surfaces).toEqual(["api", "cli", "mcp"]);
+    expect(workspaceUpdate.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     expect(workspaceUpdate.agentAllowed).toEqual({});
   });
 

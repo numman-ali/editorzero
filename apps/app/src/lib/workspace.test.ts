@@ -3,10 +3,14 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyWorkspaceUpdateError,
+  diffWorkspacePatch,
   fetchWorkspaceGet,
+  updateWorkspace,
   WORKSPACE_GET_QUERY_KEY,
   workspaceGetQueryOptions,
   workspaceMonogram,
+  workspaceUpdateFailureMessage,
 } from "./workspace";
 
 /** Same fake-client pattern as `docs.test.ts`/`spaces.test.ts`. */
@@ -73,5 +77,75 @@ describe("workspaceMonogram", () => {
 
   it("falls back to ? on an all-whitespace name (totality, not an expected state)", () => {
     expect(workspaceMonogram("   ")).toBe("?");
+  });
+});
+
+const CURRENT = { name: "founder's workspace", trash_retention_days: 30 };
+
+describe("diffWorkspacePatch (only changed fields travel)", () => {
+  it("returns null when nothing changed", () => {
+    expect(
+      diffWorkspacePatch(CURRENT, { name: "founder's workspace", trash_retention_days: 30 }),
+    ).toBeNull();
+  });
+
+  it("trims + diffs the name; carries a changed retention", () => {
+    expect(
+      diffWorkspacePatch(CURRENT, { name: "  Mission Control ", trash_retention_days: 14 }),
+    ).toEqual({ name: "Mission Control", trash_retention_days: 14 });
+  });
+
+  it("a blank name or NaN retention is no instruction", () => {
+    expect(
+      diffWorkspacePatch(CURRENT, { name: "  ", trash_retention_days: Number.NaN }),
+    ).toBeNull();
+    expect(
+      diffWorkspacePatch(CURRENT, {
+        name: "founder's workspace",
+        trash_retention_days: Number.NaN,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("updateWorkspace", () => {
+  it("resolves the patched echo on 200", async () => {
+    const updated = await updateWorkspace(
+      { name: "Mission Control" },
+      jsonClient(200, {
+        workspace_id: "018f0000-0000-7000-8000-0000000000aa",
+        slug: "founder-1a2b",
+        name: "Mission Control",
+        trash_retention_days: 30,
+      }),
+    );
+    expect(updated.name).toBe("Mission Control");
+  });
+
+  it("throws ApiError with the typed envelope code on a 403 (role-gated)", async () => {
+    await expect(
+      updateWorkspace({ name: "X" }, jsonClient(403, { error: "permission_denied" })),
+    ).rejects.toMatchObject({ status: 403, code: "permission_denied" });
+  });
+
+  it("throws an ApiError instance on a 400 (retention out of bounds)", async () => {
+    await expect(
+      updateWorkspace({ trash_retention_days: 3 }, jsonClient(400, { error: "validation_failed" })),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("classifyWorkspaceUpdateError + workspaceUpdateFailureMessage", () => {
+  it("maps a 403 to not_allowed with the role-honest line (no false retry)", () => {
+    expect(classifyWorkspaceUpdateError(new ApiError(403, "permission_denied"))).toBe(
+      "not_allowed",
+    );
+    expect(workspaceUpdateFailureMessage("not_allowed")).toContain("owners and admins");
+  });
+
+  it("maps everything else to the generic retry arm", () => {
+    expect(classifyWorkspaceUpdateError(new ApiError(500, "internal"))).toBe("update_failed");
+    expect(classifyWorkspaceUpdateError(new TypeError("fetch failed"))).toBe("update_failed");
+    expect(workspaceUpdateFailureMessage("update_failed")).toContain("Try again");
   });
 });

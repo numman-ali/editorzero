@@ -5,6 +5,7 @@ import { CREDENTIALS } from "./credentials";
 
 /**
  * proves-capability-cell: workspace.get
+ * proves-capability-cell: workspace.update
  *
  * The `workspace.get × Web UI` parity cell (invariant 4, ADR 0033 §3 /
  * 0040 H11): the sidebar workspace IDENTITY block, rendered on every
@@ -53,4 +54,39 @@ test("mobile: the drawer carries the same identity block (shared SideContent)", 
   const drawer = page.getByRole("dialog", { name: "Navigation" });
   await expect(drawer.locator(".ws .nm")).toHaveText("founder's workspace");
   await expectNoAxeViolations(page);
+});
+
+test("workspace.update: the identity block links to /workspace; the Edit form patches name + retention and the sidebar re-renders", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/");
+
+  // The identity block's one interaction: into the settings screen.
+  await page.locator("aside.side .ws").click();
+  await expect(page).toHaveURL(/\/workspace$/u);
+  await expect(page.locator("h2.t")).toHaveText("founder's workspace");
+  await expect(page.getByText(/^\d+ days$/u)).toBeVisible();
+
+  await page.getByRole("button", { name: "Edit workspace" }).click();
+  const nameInput = page.getByRole("textbox", { name: "Workspace name" });
+  await expect(nameInput).toBeFocused();
+  await nameInput.fill("Mission Control");
+  await page.getByRole("spinbutton", { name: "Trash retention days" }).fill("14");
+  await expectNoAxeViolations(page); // the open form is part of the audited surface
+  await page.getByRole("button", { name: "Save" }).click();
+
+  // One PATCH, three visible effects: the screen header, the facts row,
+  // and the SIDEBAR identity block — the layout reads workspace.get
+  // reactively, so the invalidation re-renders chrome this screen does
+  // not own.
+  await expect(page.locator("h2.t")).toHaveText("Mission Control");
+  await expect(page.getByText("14 days")).toBeVisible();
+  await expect(page.locator("aside.side .ws .nm")).toHaveText("Mission Control");
+  await expect(page.locator("aside.side .ws .av")).toHaveText("M");
+
+  // Server-state proof: a full reload renders the patched row.
+  await page.reload();
+  await expect(page.locator("h2.t")).toHaveText("Mission Control");
+  await expect(page.getByText("14 days")).toBeVisible();
 });

@@ -93,7 +93,11 @@ export const workspaceUpdate: Capability<WorkspaceUpdateInput, WorkspaceUpdateOu
   output: WorkspaceUpdateOutputSchema,
   requires: ["workspace:admin"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the /workspace settings screen's Edit disclosure
+  // (the workspace.update × Web UI cell) — proven end-to-end by the
+  // marked Playwright spec in packages/e2e (proves-capability-cell:
+  // workspace.update).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     // Subject is the workspace itself; `id` omitted because the audit
     // row's `workspace_id` column already carries the tenant.

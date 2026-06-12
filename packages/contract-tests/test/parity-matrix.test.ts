@@ -78,7 +78,6 @@ const UI_PENDING: readonly string[] = [
   "workspace.member_list",
   "workspace.member_remove",
   "workspace.member_update_role",
-  "workspace.update",
 ];
 
 const here = path.dirname(fileURLToPath(import.meta.url));

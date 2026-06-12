@@ -22,7 +22,8 @@ import { NewCollection } from "./new-collection";
  * The workspace block under the lockup is the `workspace.get` cell — an
  * IDENTITY block, not the mock's switcher: the deployment IS one
  * workspace (ADR 0040 Model B — `workspaces` is the tenant root), so
- * there is nothing to switch to and the block is non-interactive.
+ * there is nothing to switch to. Its ONE interaction is the link into
+ * `/workspace` (the settings screen — the `workspace.update` cell).
  *
  * The Collections tree under the nav is the `collection.list` cell:
  * READ-ONLY rows at the bare-cell stage — there is no collection screen
@@ -61,7 +62,7 @@ export function SideContent({
             editor<b>zero</b>
           </span>
         </div>
-        <div className="ws">
+        <Link className="ws" to="/workspace" onClick={onNavigate}>
           <span className="av av--u" aria-hidden="true">
             {workspaceMonogram(workspace.name)}
           </span>
@@ -69,7 +70,7 @@ export function SideContent({
             <div className="nm">{workspace.name}</div>
             <div className="sub">{workspace.slug}</div>
           </div>
-        </div>
+        </Link>
       </div>
       <nav className="nav" aria-label="Primary">
         <Link
