@@ -31,7 +31,9 @@
  *      guest-revoke refusal, placement standing for collection.create
  *      (space-bucket reach on root-into-space; parent-bucket reach +
  *      anomaly fail-closed on child creates; the mutual-exclusion
- *      schema rail). Oracle says unauthorized ⇒ the dispatch
+ *      schema rail), and the collection.move same-bucket rail
+ *      (cross-bucket + anomalous-end refusals; same-space re-parents
+ *      need reach). Oracle says unauthorized ⇒ the dispatch
  *      must not allow. (The converse is deliberately NOT asserted —
  *      handlers carry non-authority preconditions (slug collisions,
  *      lifecycle conflicts, roster refusals) the oracle does not
@@ -684,6 +686,22 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
     });
   }
 
+  // Pinned legacy→root collection.move (slice-1 fix-forward): the
+  // rail's ALLOW arm otherwise needs a live legacy collection drawn
+  // together with a legacy target and a doc:write principal — too
+  // statistics-dependent for the anti-vacuity floor. A root-target
+  // move of a live legacy collection by a plain member is a
+  // deterministic allow (same-parent re-seat counts).
+  const liveLegacyCol = world.collections.find((c) => c.space_id === null && c.deleted_at === null);
+  if (liveLegacyCol !== undefined) {
+    ops.push({
+      capability: "collection.move",
+      principal: { kind: "user", user_index: memberIdx, agent_index: 0 },
+      input: { collection_id: liveLegacyCol.id, new_parent_id: null },
+      polluted: false,
+    });
+  }
+
   // Pollution: swap an in-tenant resource id for a foreign-tenant id
   // (or never-seeded garbage) — the op must then never allow.
   const maybePollute = (
@@ -791,8 +809,9 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
         input: { doc_id: t.id },
         polluted: t.polluted,
       });
-    } else if (die < 0.43) {
-      // collection.create (space-collection slice 1) — three arms:
+    } else if (die < 0.45) {
+      // collection.create [0.36, 0.42) + collection.move [0.42, 0.45)
+      // (space-collection slice 1). Create's three arms:
       // legacy root (always-placeable control; the gate still refuses
       // guests/non-members), root INTO a space (existence-404 →
       // `assertCanPlaceInSpace` standing), child under a seeded
@@ -802,7 +821,33 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
       // together → 400, never reaches authority). Per-op index keeps
       // slugs collision-free against `c-<hex>` seeds and each other.
       const title = `fz col ${i}`;
-      if (chance(rnd, 0.1)) {
+      if (die >= 0.42) {
+        // collection.move — same-bucket rail (slice-1 fix-forward):
+        // legacy↔legacy allows on the gate alone, same-space
+        // re-parents need reach, cross-bucket / anomalous ends hit
+        // the typed-refusal lane. Moved skews legacy (the allow arm);
+        // targets 30% workspace root, standard pollution arms.
+        const legacyCols = world.collections.filter(
+          (c) => c.space_id === null && c.deleted_at === null,
+        );
+        const movedPick =
+          legacyCols.length > 0 && chance(rnd, 0.6)
+            ? pick(rnd, legacyCols)
+            : pick(rnd, world.collections);
+        const m = maybePollute(movedPick.id, foreignCollectionIds);
+        const t = chance(rnd, 0.3)
+          ? { id: null, polluted: false }
+          : ((): { id: string | null; polluted: boolean } => {
+              const x = maybePollute(pick(rnd, world.collections).id, foreignCollectionIds);
+              return { id: x.id, polluted: x.polluted };
+            })();
+        ops.push({
+          capability: "collection.move",
+          principal: principalSpec(),
+          input: { collection_id: m.id, new_parent_id: t.id },
+          polluted: m.polluted || t.polluted,
+        });
+      } else if (chance(rnd, 0.1)) {
         ops.push({
           capability: "collection.create",
           principal: principalSpec(),
@@ -1139,6 +1184,28 @@ function oracleForbids(world: World, op: Op): boolean {
       // guest scope, non-member — but allows are legitimate).
       return false;
     }
+    case "collection.move": {
+      // Same-bucket rail (slice-1 fix-forward): 404 surfaces on either
+      // end, cross-bucket / anomalous ends must refuse, same-space
+      // re-parents need baseline reach. Cycles/slug collisions are
+      // non-authority preconditions the oracle stays silent on.
+      const moved = world.collections.find((c) => c.id === op.input["collection_id"]);
+      if (moved === undefined || moved.deleted_at !== null) return true;
+      const targetRaw = op.input["new_parent_id"];
+      const target = targetRaw === null ? null : CollectionId(String(targetRaw));
+      if (target !== null) {
+        const col = world.collections.find((c) => c.id === target);
+        if (col === undefined || col.deleted_at !== null) return true;
+      }
+      const src = placementOf(world, moved.id);
+      const dst = placementOf(world, target);
+      const sameBucket =
+        (src.kind === "legacy" && dst.kind === "legacy") ||
+        (src.kind === "space" && dst.kind === "space" && src.space_id === dst.space_id);
+      if (!sameBucket) return true; // cross_bucket_move_unsupported
+      if (dst.kind === "space") return !baselineReach(world, s, dst.space_id);
+      return false;
+    }
     case "permission.grant": {
       if (op.input["resource_kind"] === "doc") {
         const d = docById(op.input["resource_id"]);
@@ -1334,7 +1401,10 @@ function applyAllowed(world: World, op: Op, output: unknown, mintModelId: () => 
       return;
     }
     default:
-      return; // reads + publish/unpublish: no ACL-relevant model change
+      // Reads + publish/unpublish + collection.move: no ACL-relevant
+      // model change (a same-bucket move never rewrites the binding,
+      // and the model doesn't track parent linkage).
+      return;
   }
 }
 
@@ -1834,6 +1904,7 @@ const MATRIX_CAPABILITIES = [
   "doc.restore",
   "doc.move",
   "collection.create",
+  "collection.move",
   "permission.grant",
   "permission.revoke",
   "doc.add_guest",

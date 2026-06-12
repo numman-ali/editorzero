@@ -21,6 +21,15 @@
  *      the moved collection's id appears anywhere in the chain. This
  *      includes `new_parent_id === collection_id` (direct self-parent)
  *      — caught on the walk's first iteration.
+ *   3b. **Same-bucket rail + placement standing (ADR 0040
+ *      space-collection slice).** The moved row and the target parent
+ *      must live in the SAME space bucket — both legacy, or both the
+ *      same live space (`placementOf` both ends; anomalies fail
+ *      closed). Cross-bucket → typed `ValidationError`
+ *      (`cross_bucket_move_unsupported`) until the crossing branch
+ *      (bulk ACL transition) lands. Same-space re-parents require
+ *      baseline reach over the bucket (`assertCanPlaceIn` on the
+ *      target); legacy↔legacy stays reach-free.
  *   4. **Subtree-height preservation.** Compute the max descendant
  *      depth of the moved subtree (BFS level-by-level); the deepest
  *      descendant's new absolute depth is
@@ -66,7 +75,7 @@ import type {
 } from "@editorzero/audit";
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
 import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
-import { CapabilityId, type CollectionId, uuidV7 } from "@editorzero/ids";
+import { CapabilityId, type CollectionId, type SpaceId, uuidV7 } from "@editorzero/ids";
 import {
   type CollectionMoveInput,
   CollectionMoveInputSchema,
@@ -74,6 +83,7 @@ import {
   CollectionMoveOutputSchema,
 } from "@editorzero/schemas/collection/move";
 
+import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
 import type { Capability } from "../kernel";
 
@@ -129,9 +139,10 @@ export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutpu
     // `slug` is needed for the target-scope sibling-slug pre-check;
     // `parent_id` is needed to detect the "no-op same-parent" case for
     // the slug skip.
-    // `space_id` rides along so the output + audit effect can echo the
-    // post-move binding (the handler never rewrites it — ADR 0040
-    // Step 7; the Step-8 placement slice owns cross-space rebinds).
+    // `space_id` feeds the step-2b same-bucket rail and is echoed on
+    // the output + audit effect (the handler never rewrites it — a
+    // same-bucket move cannot change the binding; rebinds belong to
+    // the future crossing branch).
     const moved = await ctx.db
       .selectFrom("collections")
       .select(["id", "parent_id", "slug", "space_id"])
@@ -144,17 +155,20 @@ export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutpu
     }
 
     // Step 2 — cycle detection + target existence + target_parent_depth.
-    // Single walk from new_parent_id up to the root. Three outputs:
+    // Single walk from new_parent_id up to the root. Four outputs:
     //
     //   (a) first-iteration 404 if the target row itself is missing
     //   (b) cycle refusal if collection_id appears anywhere in the chain
     //   (c) depth-of-new-parent = (iterations - 1)
     //       because iteration 1 is the parent itself (root has depth 0
     //       in our convention, matching collection.create).
+    //   (d) the target parent's STORED space ref (first iteration) —
+    //       feeds the same-bucket rail in step 2b.
     //
     // When `new_parent_id === null` we skip the walk; target_parent_depth
     // stays 0 (the caller is moving to the workspace root).
     let target_parent_depth = 0;
+    let targetParentSpaceRef: SpaceId | null = null;
     if (new_parent_id !== null) {
       let cursor: CollectionId | null = new_parent_id;
       let iterations = 0;
@@ -189,18 +203,69 @@ export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutpu
             ],
           });
         }
-        const row: { parent_id: CollectionId | null } | undefined = await ctx.db
-          .selectFrom("collections")
-          .select(["parent_id"])
-          .where("id", "=", cursor)
-          .where("deleted_at", "is", null)
-          .executeTakeFirst();
+        const row: { parent_id: CollectionId | null; space_id: SpaceId | null } | undefined =
+          await ctx.db
+            .selectFrom("collections")
+            .select(["parent_id", "space_id"])
+            .where("id", "=", cursor)
+            .where("deleted_at", "is", null)
+            .executeTakeFirst();
         if (row === undefined) {
           throw new NotFoundError({ subject_kind: "collection", subject_id: cursor });
         }
+        if (cursor === new_parent_id) targetParentSpaceRef = row.space_id;
         cursor = row.parent_id;
       }
       target_parent_depth = iterations - 1;
+    }
+
+    // Step 2b — same-bucket rail + placement standing (ADR 0040
+    // space-collection slice 1 fix-forward; before this, the handler
+    // was bucket-BLIND — re-parenting across buckets without rebinding,
+    // which after slice 1 could mint parent/child binding mismatches
+    // through capabilities alone). `collection.move` is SAME-BUCKET-ONLY
+    // until the crossing branch lands: the moved row's STORED binding
+    // vs the target parent's (root = legacy), both resolved through the
+    // resolver's `placementOf`, so trashed/dangling refs collapse to
+    // `anomaly` and fail closed instead of comparing equal. Same-space
+    // re-parents additionally require baseline reach over the bucket
+    // (`assertCanPlaceIn` on the target — the `collection.create`
+    // child-arm term, covering both grafting INTO and restructuring
+    // WITHIN the space); legacy↔legacy stays reach-free and an
+    // all-legacy move never loads the resolver (hot path unchanged).
+    // The crossing branch — N-doc bulk ACL transition over the
+    // subtree, plus an input shape for "space root" (`new_parent_id:
+    // null` means LEGACY root and cannot express it) — is its own
+    // future slice.
+    if (moved.space_id !== null || targetParentSpaceRef !== null) {
+      const acl = await loadDocReadResolver(ctx.db, ctx.principal);
+      const src = acl.placementOf(collection_id);
+      const dst = acl.placementOf(new_parent_id);
+      const sameBucket =
+        (src.kind === "legacy" && dst.kind === "legacy") ||
+        (src.kind === "space" && dst.kind === "space" && src.space_id === dst.space_id);
+      if (!sameBucket) {
+        throw new ValidationError({
+          message:
+            "collection.move: moving a collection across space buckets is not supported yet — " +
+            "the cross-bucket branch (bulk ACL transition over the subtree's docs) is a future slice",
+          issues: [
+            {
+              code: "cross_bucket_move_unsupported",
+              message:
+                "the moved collection and the target parent must live in the same bucket " +
+                "(both legacy, or both the same live space)",
+              path: ["new_parent_id"],
+            },
+          ],
+        });
+      }
+      // `dst.kind === "space"` implies a non-null parent
+      // (`placementOf(null)` is legacy by definition); the explicit
+      // null guard is the type-level narrowing of that invariant.
+      if (new_parent_id !== null && dst.kind === "space") {
+        acl.assertCanPlaceIn(new_parent_id);
+      }
     }
 
     // Step 3 — subtree-height walk (max descendant depth relative to the

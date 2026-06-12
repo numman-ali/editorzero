@@ -16,12 +16,25 @@
  */
 
 import { COLLECTION_MAX_DEPTH } from "@editorzero/constants";
-import { COLLECTIONS_DDL, createSqliteDriver, type SqliteDriver } from "@editorzero/db";
-import { NotFoundError, SlugCollisionError, ValidationError } from "@editorzero/errors";
-import { CollectionId, UserId, WorkspaceId } from "@editorzero/ids";
+import {
+  COLLECTIONS_DDL,
+  createSqliteDriver,
+  GRANTS_DDL,
+  SPACE_MEMBERS_DDL,
+  SPACES_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
+import {
+  NotFoundError,
+  PermissionDeniedError,
+  SlugCollisionError,
+  ValidationError,
+} from "@editorzero/errors";
+import { CollectionId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { Principal, UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import type { CapabilityContext } from "../kernel";
 import { collectionMove } from "./move";
@@ -63,6 +76,12 @@ let driver: SqliteDriver;
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(COLLECTIONS_DDL);
+  // The step-2b same-bucket rail loads the ACL resolver (spaces /
+  // space_members / grants) whenever either end carries a stored
+  // space ref; all-legacy moves never touch these tables.
+  driver.exec(SPACES_DDL);
+  driver.exec(SPACE_MEMBERS_DDL);
+  driver.exec(GRANTS_DDL);
 });
 
 afterEach(async () => {
@@ -625,5 +644,300 @@ describe("collection.move", () => {
     it("is not collapsible (mutation)", () => {
       expect(collectionMove.audit.collapsePolicy.collapsible).toBe(false);
     });
+  });
+});
+
+// ── Same-bucket rail + placement standing (ADR 0040 space-collection) ────
+//
+// `collection.move` is same-bucket-only until the crossing branch
+// lands: cross-bucket → typed 400 `cross_bucket_move_unsupported`;
+// same-space re-parents require baseline reach over the bucket;
+// anomalous refs (dangling/trashed space) fail closed on either end;
+// all-legacy moves never load the resolver (pinned structurally).
+
+describe("collection.move — same-bucket rail", () => {
+  const BOB = UserId("018f0000-0000-7000-8000-0000000000a2");
+  const S_TEAM = SpaceId("018f0000-0000-7000-8000-0000000000e1");
+  const S_OTHER = SpaceId("018f0000-0000-7000-8000-0000000000e2");
+  const S_TRASHED = SpaceId("018f0000-0000-7000-8000-0000000000e3");
+  const S_GONE = SpaceId("018f0000-0000-7000-8000-0000000000e4"); // never inserted
+  const C_S_ROOT = CollectionId("018f0000-0000-7000-8000-0000000000b1");
+  const C_S_ROOT2 = CollectionId("018f0000-0000-7000-8000-0000000000b2");
+  const C_S_MID = CollectionId("018f0000-0000-7000-8000-0000000000b3");
+  const C_S_OTHER = CollectionId("018f0000-0000-7000-8000-0000000000b4");
+  const C_DANGLE = CollectionId("018f0000-0000-7000-8000-0000000000b5");
+  const C_TRASH_A = CollectionId("018f0000-0000-7000-8000-0000000000b6");
+  const C_TRASH_B = CollectionId("018f0000-0000-7000-8000-0000000000b7");
+
+  function bobPrincipal(): UserPrincipal {
+    return { ...userPrincipal(), id: BOB };
+  }
+
+  async function seedSpaceRow(id: SpaceId, opts: { deleted_at?: number | null } = {}) {
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("spaces")
+      .values({
+        id,
+        workspace_id: WORKSPACE_A,
+        kind: "team",
+        type: "closed",
+        owner_user_id: null,
+        name: `space-${id.slice(-2)}`,
+        slug: `space-${id.slice(-2)}`,
+        baseline_access: "view",
+        created_by: ALICE,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: opts.deleted_at ?? null,
+      })
+      .execute();
+  }
+
+  async function seedBoundCollection(
+    id: CollectionId,
+    space_id: SpaceId,
+    parent_id: CollectionId | null = null,
+  ) {
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("collections")
+      .values({
+        id,
+        workspace_id: WORKSPACE_A,
+        parent_id,
+        space_id,
+        title: `col-${id.slice(-2)}`,
+        slug: `col-${id.slice(-2)}`,
+        order_key: id,
+        created_by: ALICE,
+        created_at: 1,
+        updated_at: 1,
+        deleted_at: null,
+      })
+      .execute();
+  }
+
+  async function seedAliceMembership(space_id: SpaceId) {
+    await driver
+      .scoped(WORKSPACE_A)
+      .insertInto("space_members")
+      .values({
+        workspace_id: WORKSPACE_A,
+        space_id,
+        user_id: ALICE,
+        role: "edit",
+        created_at: 1,
+        updated_at: 1,
+      })
+      .execute();
+  }
+
+  async function seedSpaceWorld() {
+    await seedSpaceRow(S_TEAM);
+    await seedSpaceRow(S_OTHER);
+    await seedSpaceRow(S_TRASHED, { deleted_at: 99 });
+    await seedBoundCollection(C_S_ROOT, S_TEAM);
+    await seedBoundCollection(C_S_ROOT2, S_TEAM);
+    await seedBoundCollection(C_S_MID, S_TEAM, C_S_ROOT);
+    await seedBoundCollection(C_S_OTHER, S_OTHER);
+    await seedBoundCollection(C_DANGLE, S_GONE);
+    await seedBoundCollection(C_TRASH_A, S_TRASHED);
+    await seedBoundCollection(C_TRASH_B, S_TRASHED);
+  }
+
+  // `ValidationError.issues` is `unknown` by design — narrow through a
+  // parse (house rule: no casting) before asserting the typed code.
+  const IssuesSchema = z.array(z.object({ code: z.string(), path: z.array(z.string()) }).loose());
+
+  function expectCrossBucketRefusal(err: unknown) {
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(err.httpStatus).toBe(400);
+      const issues = IssuesSchema.parse(err.issues);
+      expect(issues[0]?.code).toBe("cross_bucket_move_unsupported");
+      expect(issues[0]?.path).toEqual(["new_parent_id"]);
+    }
+  }
+
+  it("same-space re-parent with reach succeeds; binding rides unchanged on row + output + effect", async () => {
+    await seedSpaceWorld();
+    await seedAliceMembership(S_TEAM);
+    const ctx = buildCtx(userPrincipal());
+    const out = await collectionMove.handler(ctx, {
+      collection_id: C_S_MID,
+      new_parent_id: C_S_ROOT2,
+    });
+    expect(out.new_parent_id).toBe(C_S_ROOT2);
+    expect(out.new_space_id).toBe(S_TEAM);
+
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("collections")
+      .select(["parent_id", "space_id"])
+      .where("id", "=", C_S_MID)
+      .executeTakeFirstOrThrow();
+    expect(row.parent_id).toBe(C_S_ROOT2);
+    expect(row.space_id).toBe(S_TEAM);
+
+    const effect = collectionMove.audit.effectOnAllow(
+      { collection_id: C_S_MID, new_parent_id: C_S_ROOT2 },
+      out,
+    );
+    expect(effect.kind).toBe("collection.move");
+    if (effect.kind === "collection.move") {
+      expect(effect.new_space_id).toBe(S_TEAM);
+    }
+  });
+
+  it("same-space re-parent WITHOUT reach → acl_deny scoped to the target collection", async () => {
+    await seedSpaceWorld();
+    const ctx = buildCtx(bobPrincipal()); // no membership, no grant
+    const err = await collectionMove
+      .handler(ctx, { collection_id: C_S_MID, new_parent_id: C_S_ROOT2 })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { collection_id: C_S_ROOT2 } });
+    }
+  });
+
+  it("legacy → space is refused (typed 400, the crossing branch is a future slice)", async () => {
+    await seed();
+    await seedSpaceWorld();
+    await seedAliceMembership(S_TEAM); // reach doesn't help — the rail fires first
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), { collection_id: MID_B, new_parent_id: C_S_ROOT })
+      .catch((e: unknown) => e);
+    expectCrossBucketRefusal(err);
+  });
+
+  it("space → legacy root is refused (`new_parent_id: null` means LEGACY root — space root is inexpressible)", async () => {
+    await seedSpaceWorld();
+    await seedAliceMembership(S_TEAM);
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), { collection_id: C_S_MID, new_parent_id: null })
+      .catch((e: unknown) => e);
+    expectCrossBucketRefusal(err);
+  });
+
+  it("space → legacy nested parent is refused", async () => {
+    await seed();
+    await seedSpaceWorld();
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), { collection_id: C_S_MID, new_parent_id: ROOT_B })
+      .catch((e: unknown) => e);
+    expectCrossBucketRefusal(err);
+  });
+
+  it("spaceA → spaceB is refused even with reach into both", async () => {
+    await seedSpaceWorld();
+    await seedAliceMembership(S_TEAM);
+    await seedAliceMembership(S_OTHER);
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), { collection_id: C_S_MID, new_parent_id: C_S_OTHER })
+      .catch((e: unknown) => e);
+    expectCrossBucketRefusal(err);
+  });
+
+  it("a DANGLING source binding fails closed against every target (anomaly has no bucket)", async () => {
+    await seed();
+    await seedSpaceWorld();
+    const toRoot = await collectionMove
+      .handler(buildCtx(userPrincipal()), { collection_id: C_DANGLE, new_parent_id: null })
+      .catch((e: unknown) => e);
+    expectCrossBucketRefusal(toRoot);
+    const toSpace = await collectionMove
+      .handler(buildCtx(userPrincipal()), { collection_id: C_DANGLE, new_parent_id: C_S_ROOT })
+      .catch((e: unknown) => e);
+    expectCrossBucketRefusal(toSpace);
+  });
+
+  it("both ends inside a TRASHED space fail closed (no restructuring a dead space's tree)", async () => {
+    await seedSpaceWorld();
+    const err = await collectionMove
+      .handler(buildCtx(userPrincipal()), { collection_id: C_TRASH_B, new_parent_id: C_TRASH_A })
+      .catch((e: unknown) => e);
+    expectCrossBucketRefusal(err);
+  });
+
+  it("refused moves leave the row untouched (rail before UPDATE)", async () => {
+    await seedSpaceWorld();
+    await expect(
+      collectionMove.handler(buildCtx(userPrincipal()), {
+        collection_id: C_S_MID,
+        new_parent_id: null,
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    const row = await driver
+      .scoped(WORKSPACE_A)
+      .selectFrom("collections")
+      .select(["parent_id", "space_id"])
+      .where("id", "=", C_S_MID)
+      .executeTakeFirstOrThrow();
+    expect(row.parent_id).toBe(C_S_ROOT);
+    expect(row.space_id).toBe(S_TEAM);
+  });
+
+  it("all-legacy moves NEVER load the resolver (structural pin: no space tables exist at all)", async () => {
+    // A dedicated driver with ONLY the collections DDL — if the rail
+    // loaded the resolver on a legacy↔legacy move, the preload would
+    // throw `no such table: spaces` and this test would fail.
+    const bare = createSqliteDriver({ path: ":memory:" });
+    bare.exec(COLLECTIONS_DDL);
+    try {
+      await bare
+        .scoped(WORKSPACE_A)
+        .insertInto("collections")
+        .values([
+          {
+            id: ROOT_A,
+            workspace_id: WORKSPACE_A,
+            parent_id: null,
+            title: "RootA",
+            slug: "root-a",
+            order_key: "a0",
+            created_by: ALICE,
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: null,
+          },
+          {
+            id: MID_A,
+            workspace_id: WORKSPACE_A,
+            parent_id: ROOT_A,
+            title: "MidA",
+            slug: "mid-a",
+            order_key: "a1",
+            created_by: ALICE,
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: null,
+          },
+        ])
+        .execute();
+      const ctx: CapabilityContext = {
+        principal: userPrincipal(),
+        tenant: { workspace_id: WORKSPACE_A },
+        db: bare.scoped(WORKSPACE_A),
+        transact: () => {
+          throw new Error("metadata-only");
+        },
+        outbox: () => {
+          /* none */
+        },
+        logger: noopLogger,
+        tracer: noopTracer,
+        now: () => 42,
+      };
+      const out = await collectionMove.handler(ctx, {
+        collection_id: MID_A,
+        new_parent_id: null,
+      });
+      expect(out.new_parent_id).toBeNull();
+      expect(out.new_space_id).toBeNull();
+    } finally {
+      await bare.close();
+    }
   });
 });

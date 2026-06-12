@@ -790,6 +790,16 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
     });
     await step(docMove.id, { doc_id: d1, new_collection_id: c4, acl_policy: "adopt_baseline" });
     await step(docMove.id, { doc_id: d1, new_collection_id: c1, acl_policy: "keep_grants" });
+    // Same-bucket space re-parent (the collection.move rail's ALLOW
+    // arm): c4 moves from c3 to a fresh sibling root in the SAME
+    // space — binding rides unchanged through the effect and replay.
+    const c5 = CollectionId(
+      readIdField(
+        await step(collectionCreate.id, { title: "Space Root Two", space_id: s1 }),
+        "collection_id",
+      ),
+    );
+    await step(collectionMove.id, { collection_id: c4, new_parent_id: c5 });
 
     await step(workspaceMemberRemove.id, { user_id: SECOND_USER });
 
