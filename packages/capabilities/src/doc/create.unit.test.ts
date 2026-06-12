@@ -129,14 +129,13 @@ describe("doc.create handler", () => {
     expect(row.updated_at).toBe(42);
     expect(row.deleted_at).toBeNull();
 
-    // Y.Doc was seeded with the canonical BlockNote shape:
-    // heading/1 carrying the title, followed by an empty paragraph.
+    // Y.Doc was seeded with the canonical shape: heading/1 carrying
+    // the title, followed by an empty paragraph.
     const blocks = await sync.transact(out.doc_id, (ydoc) => readBlocks(ydoc));
     expect(blocks.map((b) => b.type)).toEqual(["heading", "paragraph"]);
     const [heading] = blocks;
     if (heading === undefined) throw new Error("expected seeded heading block");
-    const content = heading.content as Array<{ type: string; text: string }>;
-    expect(content[0]?.text).toBe("Hello, World!");
+    expect(heading.content[0]?.text).toBe("Hello, World!");
   });
 
   it("lands new docs at workspace root with visibility `workspace` (v1 scope)", async () => {

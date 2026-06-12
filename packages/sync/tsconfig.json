@@ -7,10 +7,23 @@
   },
   "include": ["src/**/*"],
   "references": [
-    { "path": "../audit" },
-    { "path": "../constants" },
-    { "path": "../db" },
-    { "path": "../ids" },
-    { "path": "../principal" }
+    {
+      "path": "../audit"
+    },
+    {
+      "path": "../blocks"
+    },
+    {
+      "path": "../constants"
+    },
+    {
+      "path": "../db"
+    },
+    {
+      "path": "../ids"
+    },
+    {
+      "path": "../principal"
+    }
   ]
 }

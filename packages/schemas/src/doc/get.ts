@@ -22,12 +22,13 @@
  *
  * **Branded-ID fields come from `../shared/ids`; `visibility` from
  * `../shared/visibility`.** `blocks` is intentionally `z.array(z.unknown())`,
- * NOT the BlockNote `LooseBlock` union: expressing that polymorphic
- * shape in zod would mirror the entire block-type registry here, and a
- * schemas leaf must stay light. The capability handler returns
- * `LooseBlock[]` (which is assignable to `unknown[]`); `@editorzero/sync`'s
- * `readBlocks` owns the runtime block contract, so the dispatcher's
- * output-parse is a structural pass-through for this field.
+ * NOT the owned `Block` shape: expressing that polymorphic shape in
+ * zod would mirror the block-type registry here, and a schemas leaf
+ * must stay light. The capability handler returns the canonical
+ * `Block[]` from `@editorzero/blocks` (assignable to `unknown[]`);
+ * `@editorzero/sync`'s `readBlocks` owns the runtime block contract,
+ * so the dispatcher's output-parse is a structural pass-through for
+ * this field.
  */
 
 import { z } from "zod";

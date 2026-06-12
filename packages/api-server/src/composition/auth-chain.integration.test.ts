@@ -1857,8 +1857,8 @@ describe("api-server auth chain (trunk + Better Auth + middleware)", () => {
 describe("POST /docs/update/:doc_id — full stack", () => {
   // `doc.update` is F12 canonical batched content-mutation. Same lane
   // as `doc.create` and `doc.rename`: dispatcher runs the handler inside
-  // a write-path tx, handler opens `ctx.transact` → `withLiveEditor` →
-  // `editor.transact` to apply all ops as one y-prosemirror step.
+  // a write-path tx; the handler opens `ctx.transact` and applies all
+  // ops via `applyOpsToBlocks` → `writeBlocks` (one Yjs transaction).
   // Scopes: `doc:write` + `block:write` (both held by member / admin /
   // owner; guest holds neither).
 
@@ -2049,20 +2049,19 @@ describe("POST /docs/update/:doc_id — full stack", () => {
     expect(updates.map((u) => u.seq)).toEqual([1, 2]);
 
     // `GET /docs/get/:doc_id` hydrates from doc_updates and projects
-    // the inserted block. `withLiveEditor` mount adds BlockNote's
-    // normalisation-tail paragraph, so post-insert block list is:
-    // [heading-1 title, paragraph-seed, paragraph-inserted, trailing-
-    // paragraph-from-mount]. Test asserts the inserted id is present
-    // and the count is 4 — the mount tail is stable BlockNote
-    // behaviour, not noise.
+    // the inserted block: [heading-1 title, paragraph-seed,
+    // paragraph-inserted]. Exactly 3 — the owned write path (ADR 0038)
+    // writes the applier's post-state verbatim; the pre-0038 BlockNote
+    // mount used to append a fourth "normalisation-tail" paragraph
+    // here, which was an editor artifact, not authored content.
     const getRes = await trunk.request(`/docs/get/${doc_id}`, { headers: { cookie } });
     expect(getRes.status).toBe(200);
     const getBody = (await getRes.json()) as {
       blocks: ReadonlyArray<{ id: string; type: string; content?: unknown }>;
     };
-    expect(getBody.blocks).toHaveLength(4);
+    expect(getBody.blocks).toHaveLength(3);
     const insertedIdx = getBody.blocks.findIndex((b) => b.id === insertedId);
-    expect(insertedIdx).toBeGreaterThanOrEqual(0);
+    expect(insertedIdx).toBe(2);
     expect(getBody.blocks[insertedIdx]?.type).toBe("paragraph");
 
     // Audit trail: create + update + get, all allows.
@@ -2118,8 +2117,8 @@ describe("POST /docs/update/:doc_id — full stack", () => {
 
   it("update op with a stale expect_prior_content_hash → 409 + error audit", async () => {
     // Full-stack StalePreconditionError path: create a doc, then issue
-    // an update op with a deliberately wrong hash. The handler reads
-    // the current block inside `withLiveEditor`, compares the hash,
+    // an update op with a deliberately wrong hash. The op applier reads
+    // the current block inside `ctx.transact`, compares the hash,
     // throws StalePreconditionError (maps to 409). No block mutation
     // lands (the write-path tx rolls back on throw; doc_updates still
     // has only the seed row).

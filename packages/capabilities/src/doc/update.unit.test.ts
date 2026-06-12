@@ -1,14 +1,10 @@
-// @vitest-environment happy-dom
-/// <reference lib="dom" />
-
 /**
  * `doc.update` — capability-level integration test.
  *
  * Same fixture shape as `doc.rename`: in-memory SQLite + a real
- * `MemorySyncService` so `ctx.transact` + `withLiveEditor` flow through
- * the full editor-mount lifecycle. DOM runs under happy-dom because
- * `withLiveEditor` needs `document.createElement` for the
- * y-prosemirror collab plugin's `view.dispatch` path.
+ * `MemorySyncService` so `ctx.transact` flows through the owned
+ * DOM-free read → applier → `writeBlocks` path (ADR 0038 — plain
+ * node environment, no happy-dom).
  *
  * Coverage split: dispatcher wiring (parse → gate → audit row) is the
  * dispatcher's test; cross-tenant scoping is owned by
@@ -28,12 +24,7 @@ import {
 } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
-import {
-  type LoosePartialBlock,
-  MemorySyncService,
-  readBlocks,
-  seedBlocks,
-} from "@editorzero/sync";
+import { MemorySyncService, readBlocks, type SeedBlock, seedBlocks } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { CapabilityContext } from "../kernel";
@@ -130,33 +121,18 @@ async function seedDocRow(params: {
 
 /**
  * Seed three canonical blocks: a title heading-1, a body paragraph, and
- * a trailing empty paragraph. Matches what `doc.create` would seed in
- * production — the trailing paragraph is BlockNote's normalisation
- * tail, which `withLiveEditor` would otherwise auto-mint on mount
- * (adding an extra block with a BlockNote-minted id to every test).
- * Providing one with a known id keeps every assertion on the block
- * list stable.
+ * a trailing empty paragraph — the shape `doc.create` seeds in
+ * production plus a known-id tail so every assertion on the block
+ * list stays stable.
  */
 async function seedBasicDoc(doc_id: DocId, titleText: string): Promise<void> {
+  const seeds: SeedBlock[] = [
+    { id: BLOCK_TITLE, type: "heading", props: { level: 1 }, content: titleText },
+    { id: BLOCK_BODY, type: "paragraph", content: "Body text" },
+    { id: BLOCK_TAIL, type: "paragraph", content: "" },
+  ];
   await sync.transact(doc_id, (ydoc) => {
-    seedBlocks(ydoc, [
-      {
-        id: BLOCK_TITLE,
-        type: "heading",
-        props: { level: 1 },
-        content: titleText,
-      } as unknown as LoosePartialBlock,
-      {
-        id: BLOCK_BODY,
-        type: "paragraph",
-        content: "Body text",
-      } as unknown as LoosePartialBlock,
-      {
-        id: BLOCK_TAIL,
-        type: "paragraph",
-        content: "",
-      } as unknown as LoosePartialBlock,
-    ]);
+    seedBlocks(ydoc, seeds);
   });
 }
 
@@ -757,13 +733,13 @@ describe("doc.update", () => {
 
   // ── Hash helper — direct assertion on canonical JSON shape ──────────────
 
-  it("hashBlockContent produces the same digest regardless of key order in props", () => {
-    const a = __internal.hashBlockContent({
+  it("hashBlockContent produces the same digest regardless of key order in props", async () => {
+    const a = await __internal.hashBlockContent({
       type: "paragraph",
       props: { a: 1, b: 2 },
       content: "x",
     });
-    const b = __internal.hashBlockContent({
+    const b = await __internal.hashBlockContent({
       type: "paragraph",
       props: { b: 2, a: 1 },
       content: "x",
@@ -771,9 +747,9 @@ describe("doc.update", () => {
     expect(a).toBe(b);
   });
 
-  it("hashBlockContent differs when content changes", () => {
-    const a = __internal.hashBlockContent({ type: "paragraph", content: "x" });
-    const b = __internal.hashBlockContent({ type: "paragraph", content: "y" });
+  it("hashBlockContent differs when content changes", async () => {
+    const a = await __internal.hashBlockContent({ type: "paragraph", content: "x" });
+    const b = await __internal.hashBlockContent({ type: "paragraph", content: "y" });
     expect(a).not.toBe(b);
   });
 });

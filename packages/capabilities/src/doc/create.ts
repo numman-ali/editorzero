@@ -118,7 +118,7 @@ import {
   type DocCreateOutput,
   DocCreateOutputSchema,
 } from "@editorzero/schemas/doc/create";
-import { type LoosePartialBlock, seedBlocks } from "@editorzero/sync";
+import { seedBlocks } from "@editorzero/sync";
 import type * as Y from "yjs";
 
 import { projectErrorAudit } from "../audit-helpers";
@@ -333,26 +333,18 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
     // registry's `TEditor` sharpens. `seedBlocks` itself polices the
     // Y.Doc; this file never imports `Y.XmlFragment`.
     //
-    // The `as unknown as LoosePartialBlock[]` follows the pattern
-    // `packages/sync/src/blocks.unit.test.ts` uses: BlockNote's
-    // concrete per-type block configs don't match the wide-generic
-    // `LoosePartialBlock` literal-for-literal, so the sync boundary
-    // is by convention cast at the call site.
-    //
     // **Pre-minted block IDs (closes Codex F104 P1 / gap (b)).** We mint
-    // `BlockId`s here, set them on the `PartialBlock.id` field BlockNote
-    // honours (verified: `@blocknote/core/src/api/nodeConversions/
-    // blockToNode.ts` uses the provided id when present, only calling
-    // its own `UniqueID.options.generateID()` when `id === undefined`),
-    // and thread the same list into the `doc.create` audit effect via
-    // the output's `seed_blocks` field. Invariant 3a (audit replay
-    // reconstructs final state) becomes true for the initial block
-    // layout: a replay reducer seeing `{ kind: "doc.create",
-    // seed_blocks: [...] }` can call `seedBlocks(ydoc, seed_blocks)`
-    // and land on the same Y.XmlFragment the original write produced.
-    // A later `doc.rename` / `doc.update` that references these IDs has
-    // a stable audit-recorded target, not a BlockNote-internal id the
-    // trail never saw.
+    // `BlockId`s here, pass them straight through `seedBlocks` (the
+    // owned write path persists the caller's id verbatim — ADR 0038's
+    // `SeedBlock` makes the id mandatory), and thread the same list
+    // into the `doc.create` audit effect via the output's
+    // `seed_blocks` field. Invariant 3a (audit replay reconstructs
+    // final state) holds for the initial block layout: a replay
+    // reducer seeing `{ kind: "doc.create", seed_blocks: [...] }` can
+    // call `seedBlocks(ydoc, seed_blocks)` and land on the same
+    // Y.XmlFragment the original write produced. A later `doc.rename`
+    // / `doc.update` that references these IDs has a stable
+    // audit-recorded target.
     await ctx.db
       .insertInto("docs")
       .values({
@@ -375,14 +367,8 @@ export const docCreate: Capability<DocCreateInput, DocCreateOutput> = {
       { id: generateBlockId(), type: "heading", props: { level: 1 }, content: title },
       { id: generateBlockId(), type: "paragraph", content: "" },
     ];
-    const seed = seed_blocks.map((b) => ({
-      id: b.id,
-      type: b.type,
-      props: b.props,
-      content: b.content,
-    })) as unknown as LoosePartialBlock[];
     await ctx.transact(doc_id, (editor) => {
-      seedBlocks(editor as Y.Doc, seed);
+      seedBlocks(editor as Y.Doc, seed_blocks);
     });
     // The `DocUpdatesWriter` auto-bootstraps `doc_counters(doc_id,
     // next_seq=1)` inside the write-path tx on the first write (closes

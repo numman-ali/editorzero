@@ -34,7 +34,7 @@ import { DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import type { UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { BLOCKNOTE_FRAGMENT, type LoosePartialBlock, seedBlocks } from "./blocks";
+import { DOC_FRAGMENT, seedBlocks } from "./blocks";
 import { HocuspocusSync, type HocuspocusTxContext } from "./hocuspocus";
 
 const WORKSPACE_ID = WorkspaceId("018f0000-0000-7000-8000-000000000001");
@@ -130,7 +130,9 @@ describe("HocuspocusSync.bind().transact", () => {
       };
       const bound = sync.bind(ctx);
       await bound.transact(DOC_ID_A, (ydoc) => {
-        seedBlocks(ydoc, [{ type: "paragraph", content: "hello" } as LoosePartialBlock]);
+        seedBlocks(ydoc, [
+          { id: "018f0000-0000-7000-8000-0000000000a1", type: "paragraph", content: "hello" },
+        ]);
       });
     });
 
@@ -159,7 +161,9 @@ describe("HocuspocusSync.bind().transact", () => {
         };
         const bound = sync.bind(ctx);
         await bound.transact(DOC_ID_A, (ydoc) => {
-          seedBlocks(ydoc, [{ type: "paragraph", content: "hello" } as LoosePartialBlock]);
+          seedBlocks(ydoc, [
+            { id: "018f0000-0000-7000-8000-0000000000a2", type: "paragraph", content: "hello" },
+          ]);
         });
         throw new Error("caller rolls back");
       }),
@@ -406,7 +410,9 @@ describe("HocuspocusSync.bind().transact", () => {
       };
       const bound = sync.bind(ctx);
       await bound.transact(DOC_ID_A, (ydoc) => {
-        seedBlocks(ydoc, [{ type: "paragraph", content: "first" } as LoosePartialBlock]);
+        seedBlocks(ydoc, [
+          { id: "018f0000-0000-7000-8000-0000000000a3", type: "paragraph", content: "first" },
+        ]);
       });
     });
 
@@ -418,7 +424,7 @@ describe("HocuspocusSync.bind().transact", () => {
       };
       const bound = sync.bind(ctx);
       return bound.transact(DOC_ID_A, (ydoc) => {
-        const fragment = ydoc.getXmlFragment(BLOCKNOTE_FRAGMENT);
+        const fragment = ydoc.getXmlFragment(DOC_FRAGMENT);
         return fragment.length;
       });
     });

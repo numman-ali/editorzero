@@ -5,31 +5,30 @@
  * depth mapping.
  */
 
-import type {
-  Block,
-  BlockSchema,
-  InlineContentSchema,
-  StyledText,
-  StyleSchema,
-} from "@blocknote/core";
 import { describe, expect, it } from "vitest";
+
+import type { Block, StyledText } from "../model";
 
 import { HEADING_TYPE, heading } from "./heading";
 
-type LooseBlock = Block<BlockSchema, InlineContentSchema, StyleSchema>;
-
-function textNode(text: string, styles: Record<string, boolean> = {}): StyledText<StyleSchema> {
-  return { type: "text", text, styles } as unknown as StyledText<StyleSchema>;
+function textNode(text: string, styles: Record<string, boolean> = {}): StyledText {
+  return { type: "text", text, styles };
 }
 
-function makeHeading(level: number, content: StyledText<StyleSchema>[]): LooseBlock {
+/** Narrow `fromMarkdown`'s nullable return for assertion ergonomics. */
+function mustBlock(out: Block | null): Block {
+  if (out === null) throw new Error("fromMarkdown returned null");
+  return out;
+}
+
+function makeHeading(level: number, content: StyledText[]): Block {
   return {
     id: "",
     type: "heading",
     props: { level },
     content,
     children: [],
-  } as unknown as LooseBlock;
+  };
 }
 
 describe("heading.toMarkdown", () => {
@@ -57,7 +56,7 @@ describe("heading.toMarkdown", () => {
         props: {},
         content: [],
         children: [],
-      } as unknown as LooseBlock),
+      }),
     ).toThrow(/props.level must be an integer/);
   });
 });
@@ -73,9 +72,10 @@ describe("heading.fromMarkdown", () => {
       type: "heading",
       depth,
       children: [{ type: "text", value: "T" }],
-    } as never) as LooseBlock;
-    expect((out.props as unknown as { level: number }).level).toBe(depth);
-    expect(out.content).toEqual([{ type: "text", text: "T", styles: {} }]);
+    } as never);
+    const block = mustBlock(out);
+    expect(block.props["level"]).toBe(depth);
+    expect(block.content).toEqual([{ type: "text", text: "T", styles: {} }]);
   });
 });
 
@@ -91,8 +91,8 @@ describe("heading round-trip", () => {
       depth: 3,
       children: [{ type: "text", value: "hi" }],
     } as never;
-    const roundtripped = heading.fromMarkdown(parsed) as Block;
-    expect((roundtripped.props as { level: number }).level).toBe(3);
+    const roundtripped = mustBlock(heading.fromMarkdown(parsed));
+    expect(roundtripped.props["level"]).toBe(3);
     expect(roundtripped.content).toEqual(start.content);
   });
 });

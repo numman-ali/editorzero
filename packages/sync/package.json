@@ -18,14 +18,16 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@blocknote/core": "^0.48.0",
     "@editorzero/audit": "workspace:*",
+    "@editorzero/blocks": "workspace:*",
     "@editorzero/constants": "workspace:*",
     "@editorzero/db": "workspace:*",
     "@editorzero/ids": "workspace:*",
     "@editorzero/principal": "workspace:*",
-    "@happy-dom/global-registrator": "catalog:",
     "@hocuspocus/server": "3.4.4",
+    "@tiptap/pm": "catalog:",
+    "@tiptap/y-tiptap": "catalog:",
+    "y-protocols": "^1.0.6",
     "yjs": "catalog:"
   },
   "devDependencies": {
@@ -33,7 +35,6 @@
     "@editorzero/scopes": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "better-sqlite3": "catalog:",
-    "happy-dom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

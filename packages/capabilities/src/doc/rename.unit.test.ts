@@ -1,14 +1,10 @@
-// @vitest-environment happy-dom
-/// <reference lib="dom" />
-
 /**
  * `doc.rename` — capability-level integration test.
  *
  * Exercises the handler against real in-memory SQLite + a real
  * `MemorySyncService` so the dual-write (docs.title bridge + Y.Doc
- * title-block mutation) actually lands. DOM runs under happy-dom
- * because `setDocTitle` threads through `withLiveEditor` — the
- * collab-plugin `view.dispatch` path is DOM-backed.
+ * title-block mutation) actually lands. Plain node environment —
+ * `setDocTitle` rides the owned DOM-free write path (ADR 0038).
  *
  * Dispatcher wiring (zod parse, audit row emit, write-path tx commit)
  * is the dispatcher's test. Cross-tenant scoping is separately owned
@@ -21,12 +17,7 @@ import { NotFoundError } from "@editorzero/errors";
 import { type CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
-import {
-  type LoosePartialBlock,
-  MemorySyncService,
-  readBlocks,
-  seedBlocks,
-} from "@editorzero/sync";
+import { MemorySyncService, readBlocks, type SeedBlock, seedBlocks } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { CapabilityContext } from "../kernel";
@@ -126,15 +117,17 @@ async function seedDocRow(params: {
  * what a real doc would look like under the runtime.
  */
 async function seedTitleBlock(doc_id: DocId, title: string): Promise<void> {
+  const seeds: SeedBlock[] = [
+    {
+      id: "018f0000-0000-7000-8000-00000000e001",
+      type: "heading",
+      props: { level: 1 },
+      content: title,
+    },
+    { id: "018f0000-0000-7000-8000-00000000e002", type: "paragraph", content: "" },
+  ];
   await sync.transact(doc_id, (ydoc) => {
-    seedBlocks(ydoc, [
-      {
-        type: "heading",
-        props: { level: 1 },
-        content: title,
-      } as unknown as LoosePartialBlock,
-      { type: "paragraph", content: "" } as LoosePartialBlock,
-    ]);
+    seedBlocks(ydoc, seeds);
   });
 }
 
@@ -186,9 +179,9 @@ describe("doc.rename", () => {
 
     // Block-side: the heading-1 title text reflects the rename. The
     // title-slot rule updated block 0 in place (no re-insertion) —
-    // the MemorySyncService test doesn't exercise persistence but
-    // the integration smoke (blocknote.integration.test.ts) covers
-    // the live-editor path end-to-end.
+    // the MemorySyncService test doesn't exercise persistence;
+    // `packages/sync/src/hocuspocus.integration.test.ts` covers the
+    // persisted write path end-to-end.
     expect(await readTitleBlock(DOC_A1)).toBe("New Title");
 
     // No outbox emission from the handler itself — `ctx.transact`'s

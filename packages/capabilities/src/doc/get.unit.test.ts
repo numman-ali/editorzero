@@ -18,7 +18,7 @@ import { InternalError, NotFoundError } from "@editorzero/errors";
 import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
-import { type LoosePartialBlock, MemorySyncService, seedBlocks } from "@editorzero/sync";
+import { MemorySyncService, type SeedBlock, seedBlocks } from "@editorzero/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { CapabilityContext } from "../kernel";
@@ -108,14 +108,34 @@ async function seedDocRow(params: {
     .execute();
 }
 
+const BLOCK_H1 = "018f0000-0000-7000-8000-0000000000b1";
+const BLOCK_P1 = "018f0000-0000-7000-8000-0000000000b2";
+
 async function seedDocBlocks(doc_id: DocId, title: string) {
-  const seed = [
-    { type: "heading", props: { level: 1 }, content: title },
-    { type: "paragraph", content: "body text" },
-  ] as unknown as LoosePartialBlock[];
+  const seed: SeedBlock[] = [
+    { id: BLOCK_H1, type: "heading", props: { level: 1 }, content: title },
+    { id: BLOCK_P1, type: "paragraph", content: "body text" },
+  ];
   await sync.transact(doc_id, (ydoc) => {
     seedBlocks(ydoc, seed);
   });
+}
+
+/** `DocGetOutput.blocks` is `unknown[]` at the schema (ADR 0034 keeps the
+ * block union out of the schemas leaf; `@editorzero/blocks` owns the
+ * runtime contract) — narrow structurally instead of widening it. */
+function blockShape(value: unknown): { id: string; type: string } {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    "type" in value &&
+    typeof value.id === "string" &&
+    typeof value.type === "string"
+  ) {
+    return { id: value.id, type: value.type };
+  }
+  throw new Error("block is missing id/type");
 }
 
 // ── Scenarios ────────────────────────────────────────────────────────────
@@ -141,15 +161,12 @@ describe("doc.get", () => {
       collection_id: COLLECTION_C1,
       visibility: "workspace",
     });
-    expect(out.blocks).toHaveLength(2);
-    // `DocGetOutput.blocks` is `unknown[]` (the schema keeps the BlockNote
-    // block union out of the schemas leaf — ADR 0034; `@editorzero/sync`
-    // owns the runtime block contract). The handler still returns the
-    // real `LooseBlock[]`; narrow locally to read `type` off each element
-    // without widening the schema.
-    const [first, second] = out.blocks as Array<{ type?: string }>;
-    expect(first?.type).toBe("heading");
-    expect(second?.type).toBe("paragraph");
+    // Seeded ids round-trip through the Y.Doc and back out — block
+    // identity is what `doc.update` ops address.
+    expect(out.blocks.map(blockShape)).toEqual([
+      { id: BLOCK_H1, type: "heading" },
+      { id: BLOCK_P1, type: "paragraph" },
+    ]);
   });
 
   it("fails closed (InternalError) when the docs row exists but the Y.Doc fragment is empty", async () => {

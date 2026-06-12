@@ -10,31 +10,30 @@
  * spec actually claims.
  */
 
-import type {
-  Block,
-  BlockSchema,
-  InlineContentSchema,
-  StyledText,
-  StyleSchema,
-} from "@blocknote/core";
 import { describe, expect, it } from "vitest";
+
+import type { Block, StyledText } from "../model";
 
 import { PARAGRAPH_TYPE, paragraph } from "./paragraph";
 
-type LooseBlock = Block<BlockSchema, InlineContentSchema, StyleSchema>;
-
-function textNode(text: string, styles: Record<string, boolean> = {}): StyledText<StyleSchema> {
-  return { type: "text", text, styles } as unknown as StyledText<StyleSchema>;
+function textNode(text: string, styles: Record<string, boolean> = {}): StyledText {
+  return { type: "text", text, styles };
 }
 
-function makeParagraph(content: StyledText<StyleSchema>[]): LooseBlock {
+/** Narrow `fromMarkdown`'s nullable return for assertion ergonomics. */
+function mustBlock(out: Block | null): Block {
+  if (out === null) throw new Error("fromMarkdown returned null");
+  return out;
+}
+
+function makeParagraph(content: StyledText[]): Block {
   return {
     id: "",
     type: "paragraph",
     props: {},
     content,
     children: [],
-  } as unknown as LooseBlock;
+  };
 }
 
 describe("paragraph.toMarkdown", () => {
@@ -167,9 +166,7 @@ describe("paragraph.toMarkdown", () => {
   });
 
   it("throws when an inline item is not a StyledText node (out-of-scope shape)", () => {
-    const bogus = [
-      { type: "link", href: "x", content: [] },
-    ] as unknown as StyledText<StyleSchema>[];
+    const bogus = [{ type: "link", href: "x", content: [] }] as unknown as StyledText[];
     expect(() => paragraph.toMarkdown(makeParagraph(bogus))).toThrow(
       /unsupported inline item shape; expected StyledText, got link/,
     );
@@ -181,7 +178,7 @@ describe("paragraph.toMarkdown", () => {
     // `item.type`. Real callers never hit this; the branch is the
     // defensive failure mode if an upstream change starts feeding
     // non-object inline data through.
-    const bogus = ["not-an-object"] as unknown as StyledText<StyleSchema>[];
+    const bogus = ["not-an-object"] as unknown as StyledText[];
     expect(() => paragraph.toMarkdown(makeParagraph(bogus))).toThrow(
       /unsupported inline item shape; expected StyledText, got string/,
     );
@@ -200,7 +197,7 @@ describe("paragraph.fromMarkdown", () => {
       children: [{ type: "text", value: "hi" }],
     } as never);
     expect(out).not.toBeNull();
-    const block = out as LooseBlock;
+    const block = mustBlock(out);
     expect(block.type).toBe("paragraph");
     expect(block.content).toEqual([{ type: "text", text: "hi", styles: {} }]);
   });
@@ -210,7 +207,7 @@ describe("paragraph.fromMarkdown", () => {
       type: "paragraph",
       children: [{ type: "strong", children: [{ type: "text", value: "x" }] }],
     } as never);
-    const block = out as LooseBlock;
+    const block = mustBlock(out);
     expect(block.content).toEqual([{ type: "text", text: "x", styles: { bold: true } }]);
   });
 
@@ -224,7 +221,7 @@ describe("paragraph.fromMarkdown", () => {
         },
       ],
     } as never);
-    const block = out as LooseBlock;
+    const block = mustBlock(out);
     expect(block.content).toEqual([
       { type: "text", text: "y", styles: { bold: true, italic: true } },
     ]);
@@ -235,7 +232,7 @@ describe("paragraph.fromMarkdown", () => {
       type: "paragraph",
       children: [{ type: "inlineCode", value: "x" }],
     } as never);
-    const block = out as LooseBlock;
+    const block = mustBlock(out);
     expect(block.content).toEqual([{ type: "text", text: "x", styles: { code: true } }]);
   });
 });
@@ -247,8 +244,8 @@ describe("paragraph round-trip (fromMarkdown(toMarkdown) is the fixed point)", (
     const roundtripped = paragraph.fromMarkdown({
       type: "paragraph",
       children: [{ type: "text", value: md }],
-    } as never) as LooseBlock;
-    expect(roundtripped.content).toEqual(start.content);
+    } as never);
+    expect(mustBlock(roundtripped).content).toEqual(start.content);
   });
 
   it("text starting with a blockquote character", () => {
@@ -259,8 +256,8 @@ describe("paragraph round-trip (fromMarkdown(toMarkdown) is the fixed point)", (
     const roundtripped = paragraph.fromMarkdown({
       type: "paragraph",
       children: [{ type: "text", value: "> quoted" }],
-    } as never) as LooseBlock;
-    expect(roundtripped.content).toEqual(start.content);
+    } as never);
+    expect(mustBlock(roundtripped).content).toEqual(start.content);
   });
 
   it("text starting with an ordered-list marker", () => {
@@ -269,8 +266,8 @@ describe("paragraph round-trip (fromMarkdown(toMarkdown) is the fixed point)", (
     const roundtripped = paragraph.fromMarkdown({
       type: "paragraph",
       children: [{ type: "text", value: "1. install" }],
-    } as never) as LooseBlock;
-    expect(roundtripped.content).toEqual(start.content);
+    } as never);
+    expect(mustBlock(roundtripped).content).toEqual(start.content);
   });
 });
 

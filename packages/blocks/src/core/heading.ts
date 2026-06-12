@@ -23,21 +23,25 @@
  * BlockNote's defaults.
  */
 
-import type { Block, BlockSchema, InlineContentSchema, StyleSchema } from "@blocknote/core";
 import { z } from "zod";
 
 import { type BlockTypeSpec, createBlockTypeSpec } from "../kernel";
-import { inlineContentToMarkdown, mdastInlineToBlockNote } from "./inline";
+import type { Block } from "../model";
+import { inlineContentToMarkdown, mdastInlineToStyledText } from "./inline";
 
 export const HEADING_TYPE = "editorzero:core/heading" as const;
 
-const headingAttributes = z.object({
-  level: z.number().int().min(1).max(6),
+/**
+ * `level` defaults to 1 so a retype (`doc.update` patching a paragraph
+ * to `type: "heading"` without props) lands on the same level the
+ * owned Tiptap node defaults to — applier and editor agree by
+ * construction.
+ */
+export const headingAttributes = z.object({
+  level: z.number().int().min(1).max(6).default(1),
 });
 
 export type HeadingAttributes = z.infer<typeof headingAttributes>;
-
-type LooseBlock = Block<BlockSchema, InlineContentSchema, StyleSchema>;
 
 export const heading: BlockTypeSpec<HeadingAttributes> = createBlockTypeSpec({
   type: HEADING_TYPE,
@@ -55,19 +59,18 @@ export const heading: BlockTypeSpec<HeadingAttributes> = createBlockTypeSpec({
       id: "",
       type: "heading",
       props: { level: node.depth },
-      content: mdastInlineToBlockNote(node.children),
+      content: mdastInlineToStyledText(node.children),
       children: [],
-    } as unknown as LooseBlock;
+    };
   },
 });
 
-function extractHeadingLevel(block: LooseBlock): 1 | 2 | 3 | 4 | 5 | 6 {
-  const props = block.props as { level?: unknown };
-  const raw = props.level;
-  if (typeof raw !== "number" || raw < 1 || raw > 6 || !Number.isInteger(raw)) {
-    throw new Error(
-      `heading.toMarkdown: block.props.level must be an integer in [1, 6]; got ${String(raw)}`,
-    );
+function extractHeadingLevel(block: Block): 1 | 2 | 3 | 4 | 5 | 6 {
+  const raw = block.props["level"];
+  if (raw === 1 || raw === 2 || raw === 3 || raw === 4 || raw === 5 || raw === 6) {
+    return raw;
   }
-  return raw as 1 | 2 | 3 | 4 | 5 | 6;
+  throw new Error(
+    `heading.toMarkdown: block.props.level must be an integer in [1, 6]; got ${String(raw)}`,
+  );
 }

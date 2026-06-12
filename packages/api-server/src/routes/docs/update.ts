@@ -3,9 +3,10 @@
  *
  * The canonical F12 batch-mutation route. Code-first (ADR 0029 / 0034);
  * mirrors the golden `doc.create` / `doc.rename` shape. Delegates to
- * `doc.update`, which threads through `ctx.transact` + `withLiveEditor`
- * to apply all ops in one `editor.transact` → one `doc_updates` blob
- * (single-tx atomicity per §6.5). Route-side is a thin dispatcher-call.
+ * `doc.update`, which applies all ops inside `ctx.transact` via the
+ * owned block layer (ADR 0038) → one Yjs transaction → one
+ * `doc_updates` blob (single-tx atomicity per §6.5). Route-side is a
+ * thin dispatcher-call.
  *
  * **Pattern P3 — path param + JSON body merged into one capability
  * input.** The route reuses the *single* `DocUpdateInputSchema` (ADR

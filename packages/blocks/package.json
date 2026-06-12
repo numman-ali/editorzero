@@ -18,8 +18,12 @@
     "test": "vitest run --coverage --passWithNoTests"
   },
   "dependencies": {
+    "@editorzero/errors": "workspace:*",
+    "@editorzero/ids": "workspace:*",
+    "@editorzero/schemas": "workspace:*",
     "@editorzero/scopes": "workspace:*",
-    "@blocknote/core": "^0.48.0",
+    "@tiptap/core": "catalog:",
+    "@tiptap/pm": "catalog:",
     "@types/mdast": "^4.0.4",
     "zod": "catalog:"
   },

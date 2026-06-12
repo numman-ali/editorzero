@@ -37,17 +37,14 @@
  * original content without the backslash, restoring the fixed point.
  */
 
-import type { Block, BlockSchema, InlineContentSchema, StyleSchema } from "@blocknote/core";
 import { z } from "zod";
 
 import { type BlockTypeSpec, createBlockTypeSpec } from "../kernel";
-import { inlineContentToMarkdown, mdastInlineToBlockNote } from "./inline";
+import { inlineContentToMarkdown, mdastInlineToStyledText } from "./inline";
 
 export const PARAGRAPH_TYPE = "editorzero:core/paragraph" as const;
 
-const paragraphAttributes = z.object({});
-
-type LooseBlock = Block<BlockSchema, InlineContentSchema, StyleSchema>;
+export const paragraphAttributes = z.object({});
 
 export const paragraph: BlockTypeSpec<Record<string, never>> = createBlockTypeSpec({
   type: PARAGRAPH_TYPE,
@@ -64,9 +61,9 @@ export const paragraph: BlockTypeSpec<Record<string, never>> = createBlockTypeSp
       id: "",
       type: "paragraph",
       props: {},
-      content: mdastInlineToBlockNote(node.children),
+      content: mdastInlineToStyledText(node.children),
       children: [],
-    } as unknown as LooseBlock;
+    };
   },
 });
 
@@ -91,7 +88,7 @@ export const paragraph: BlockTypeSpec<Record<string, never>> = createBlockTypeSp
  *
  * Backslash-escape consumes the first character as a literal on
  * parse; the resulting mdast text node carries the original content
- * (no backslash), so `mdastInlineToBlockNote` produces the original
+ * (no backslash), so `mdastInlineToStyledText` produces the original
  * BlockNote content array without any extra handling.
  *
  * Leading-whitespace cases with 4+ spaces (indented code) and tabs

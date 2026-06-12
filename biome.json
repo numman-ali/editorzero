@@ -42,7 +42,7 @@
       "recommended": true,
       "complexity": {
         "noUselessTypeConstraint": "error",
-        "useLiteralKeys": "error"
+        "useLiteralKeys": "off"
       },
       "correctness": {
         "noUnusedImports": "error",

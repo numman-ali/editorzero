@@ -1,7 +1,7 @@
 /**
  * Shared inline serialisation for `editorzero:core/*` block specs.
  *
- * Walks BlockNote's `InlineContent[]` ⇄ a subset of mdast's inline
+ * Walks the owned `StyledText[]` ⇄ a subset of mdast's inline
  * nodes. The subset matches what we can round-trip losslessly today
  * (architecture.md §16.5):
  *   - text (plain or styled)
@@ -19,17 +19,17 @@
  * Unsupported shapes throw rather than silently drop — the property
  * harness (Phase 3) depends on "didn't round-trip" being loud.
  *
- * The "lossless" claim is at the *canonical-BlockNote-form* level:
+ * The "lossless" claim is at the *canonical-form* level:
  * adjacent text nodes with identical style bags are merged by
- * `mdastInlineToBlockNote` on import, because some emitter paths
+ * `mdastInlineToStyledText` on import, because some emitter paths
  * (emphasis with boundary whitespace, see below) legitimately split
  * a single styled run to produce valid CommonMark. A round-trip
  * against an already-canonical input is a fixed point.
  */
 
-import type { StyledText, StyleSchema } from "@blocknote/core";
+import type { StyledText } from "../model";
 
-// ── BlockNote → Markdown ─────────────────────────────────────────────────
+// ── StyledText → Markdown ────────────────────────────────────────────────
 
 export function inlineContentToMarkdown(content: unknown): string {
   if (!Array.isArray(content)) return "";
@@ -74,10 +74,10 @@ function inlineItemToMarkdown(item: unknown): string {
  * Markdown serializer move (prettier, remark-stringify). It costs
  * content-node-structure fidelity on the round-trip (a single
  * bolded ` word ` run comes back as three nodes: space, bold word,
- * space) — `mdastInlineToBlockNote` merges adjacent same-style nodes
- * on import, so the canonical form (BlockNote text editors don't
- * normally produce runs with leading/trailing whitespace carrying
- * style) is still a fixed point.
+ * space) — `mdastInlineToStyledText` merges adjacent same-style nodes
+ * on import, so the canonical form (text editors don't normally
+ * produce runs with leading/trailing whitespace carrying style) is
+ * still a fixed point.
  */
 function wrapEmphasis(escaped: string, styles: KnownStyles): string {
   const leadingMatch = /^\s+/.exec(escaped);
@@ -143,7 +143,7 @@ type KnownStyles = {
   code?: boolean;
 };
 
-export function isStyledText(x: unknown): x is StyledText<StyleSchema> {
+export function isStyledText(x: unknown): x is StyledText {
   return (
     typeof x === "object" &&
     x !== null &&
@@ -159,7 +159,7 @@ export function isStyledText(x: unknown): x is StyledText<StyleSchema> {
  * markdown syntax inside a plain text node. `<` and `>` are included
  * because `<foo>` / `<https://...>` would otherwise trigger raw-HTML
  * or autolink parsing — neither of which the v1 lossless inline tier
- * supports (`mdastInlineToBlockNote` only recognizes `text` / `strong`
+ * supports (`mdastInlineToStyledText` only recognizes `text` / `strong`
  * / `emphasis` / `inlineCode`). Escaping both flips the CommonMark
  * interpretation back to literal text, which the import path handles.
  * Anything heavier (HTML-escape, link-dest escape) is handled by the
@@ -170,7 +170,7 @@ function escapeMarkdownText(text: string): string {
   return text.replace(/([\\`*_[\]<>])/g, "\\$1");
 }
 
-// ── Markdown → BlockNote ─────────────────────────────────────────────────
+// ── Markdown → StyledText ────────────────────────────────────────────────
 
 interface MdastText {
   readonly type: "text";
@@ -190,30 +190,25 @@ interface MdastInlineCode {
 }
 type MdastInline = MdastText | MdastStrong | MdastEmphasis | MdastInlineCode;
 
-// The concrete runtime shape walk builds: plain object with text +
-// a free-form `styles` bag. BlockNote's generic `Styles<StyleSchema>`
-// evaluates to an all-undefined index signature when `StyleSchema`
-// has no concrete keys (the default), which is structurally
-// incompatible with our `{ bold: true, italic: true, ... }` runtime
-// values. We produce that shape here and cast to `StyledText<StyleSchema>`
-// at the boundary — the cast is safe because the block schema assigned
-// to a live editor supplies the concrete StyleSchema whose keys match.
+// The concrete runtime shape the walk builds: plain object with text +
+// a free-form `styles` bag, directly assignable to the owned
+// `StyledText` (its style keys are optional booleans).
 type RawStyledText = { type: "text"; text: string; styles: Record<string, boolean> };
 
-export function mdastInlineToBlockNote(children: readonly unknown[]): StyledText<StyleSchema>[] {
+export function mdastInlineToStyledText(children: readonly unknown[]): StyledText[] {
   const out: RawStyledText[] = [];
   for (const child of children) {
     walkInline(child as MdastInline, {}, out);
   }
-  return mergeAdjacentSameStyle(out) as unknown as StyledText<StyleSchema>[];
+  return mergeAdjacentSameStyle(out);
 }
 
 /**
  * Emphasis splitting (`wrapEmphasis`), boundary-whitespace handling,
  * and CommonMark's own tokenization all produce cases where a single
  * styled run arrives as multiple adjacent text nodes with identical
- * style bags. Merging them here recovers the canonical BlockNote
- * shape (one node per styled run) so the round-trip is a fixed point
+ * style bags. Merging them here recovers the canonical shape (one
+ * node per styled run) so the round-trip is a fixed point
  * on canonical inputs.
  */
 function mergeAdjacentSameStyle(items: RawStyledText[]): RawStyledText[] {
@@ -262,7 +257,7 @@ function walkInline(
        not cover, so we throw loud instead of silently corrupting content. */
     default: {
       const unknownNode = node as { type: string };
-      throw new Error(`mdastInlineToBlockNote: unsupported inline node type: ${unknownNode.type}`);
+      throw new Error(`mdastInlineToStyledText: unsupported inline node type: ${unknownNode.type}`);
     }
     /* v8 ignore stop */
   }

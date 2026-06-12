@@ -17,8 +17,8 @@
  *      directly today (no title-projection job yet), so the row-side
  *      value has to match the block-side value or list views go stale.
  *   2. The Y.Doc's title block — via `setDocTitle` through
- *      `ctx.transact`. The `editor.transact(updateBlock | insertBlocks)`
- *      inside `setDocTitle` emits one `doc_updates` row + one
+ *      `ctx.transact`. The single `writeBlocks` Yjs transaction inside
+ *      `setDocTitle` (ADR 0038) emits one `doc_updates` row + one
  *      `outbox(doc.updated)` — no additional `ctx.outbox(...)` call is
  *      needed from the handler; the CRDT-mutation seam already emits
  *      that event.
@@ -29,11 +29,10 @@
  * that lands, this double-write is what keeps row-side reads coherent.
  *
  * **Atomicity.** Both writes land inside the dispatcher's single SQL
- * tx (P3.6b write-path). If `setDocTitle` throws (e.g., BlockNote
- * misconfiguration, unmountable EditorView), the docs UPDATE rolls
- * back too — the in-memory Y.Doc mutation is reverted via
- * `BoundSyncService.rollback` eviction (the next read rehydrates from
- * committed `doc_updates`).
+ * tx (P3.6b write-path). If `setDocTitle` throws (corrupted fragment,
+ * schema mismatch), the docs UPDATE rolls back too — the in-memory
+ * Y.Doc mutation is reverted via `BoundSyncService.rollback` eviction
+ * (the next read rehydrates from committed `doc_updates`).
  *
  * **Order-of-writes.** UPDATE first, `ctx.transact` second — same
  * reasoning as `doc.create` (Codex P3.6c adversarial P3). A missing
@@ -52,7 +51,7 @@
  *
  * **Title-slot rule.** Encapsulated in `@editorzero/sync`'s
  * `setDocTitle`: block 0 heading-1 → update in place; otherwise insert
- * heading-1 at 0. Keeps BlockNote specifics inside sync (invariant 7's
+ * heading-1 at 0. Keeps Y.Doc specifics inside sync (invariant 7's
  * `no-raw-ydoc-access` coherence rule policies capability-side).
  *
  * **Scope.** `doc:write` — the same gate as `doc.create` and the future

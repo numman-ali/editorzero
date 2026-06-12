@@ -54,14 +54,15 @@ export const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/, {
   message: "expect_prior_content_hash must be a 64-char lowercase hex sha256 digest",
 });
 
-// For `insert`: block is a `PartialBlock` shape. BlockNote accepts
-// minimum `{ type }` + optional `props` + optional `content`. We don't
-// constrain the inner shape tightly (BlockNote's own type tree is the
-// runtime validator); keeping `content` + `props` as `unknown` keeps the
-// zod layer honest rather than half-validating a type system we don't
-// own. `id` is deliberately not accepted on input — the handler mints
-// the `BlockId` via `generateBlockId()` so invariant 3a (audit replay
-// records every block id) holds regardless of caller behaviour.
+// For `insert`: the block is a partial shape — minimum `{ type }` +
+// optional `props` + optional `content` (string shorthand or styled
+// runs). `content` + `props` stay `unknown` here: the owned block
+// layer (`@editorzero/blocks` — attribute schemas + content
+// normalization) is the runtime validator, and the schemas leaf does
+// not mirror the block-type registry. `id` is deliberately not
+// accepted on input — the handler mints the `BlockId` via
+// `generateBlockId()` so invariant 3a (audit replay records every
+// block id) holds regardless of caller behaviour.
 export const InsertBlockInputSchema = z
   .object({
     type: z.string().min(1, "block.type is required"),
@@ -72,13 +73,11 @@ export const InsertBlockInputSchema = z
 
 // `UpdatePatchInputSchema` must carry at least one of `type` / `props` /
 // `content` — an empty patch is a semantic no-op that we don't want to
-// accept as a mutation. BlockNote's `updateBlock` does not early-return
-// on an empty patch: the call flows through `updateBlockTr` into
-// ProseMirror's `setNodeMarkup`, which always emits a `ReplaceAroundStep`
-// on success. That would produce a `doc_updates` write + bump
-// `docs.updated_at` for a change that expresses nothing, which pollutes
-// the audit log and the rate-limit budget. Reject at the schema level
-// so the dispatcher's pre-validation audit row carries the reason.
+// accept as a mutation: it would still produce a `doc_updates` write +
+// bump `docs.updated_at` for a change that expresses nothing, which
+// pollutes the audit log and the rate-limit budget. Reject at the
+// schema level so the dispatcher's pre-validation audit row carries
+// the reason.
 export const UpdatePatchInputSchema = z
   .object({
     type: z.string().min(1).optional(),

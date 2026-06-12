@@ -1,112 +1,115 @@
 /**
- * BlockNote ⇄ Y.Doc conversion helpers (architecture.md §16.1 / ADR 0018).
+ * Owned block layer ⇄ Y.Doc bridge (ADR 0038, architecture.md §16.1 / ADR 0018).
  *
- * These are the minimal BlockNote bindings `@editorzero/sync` exports
- * today: two *pure* functions that write / read BlockNote blocks onto a
- * Y.XmlFragment inside a given Y.Doc. They construct an ephemeral
- * BlockNoteEditor purely for its ProseMirror/Yjs conversion machinery
- * (no `mount()`, no ProseMirror view), so they run in plain Node with
- * no DOM dependency.
+ * DOM-free in BOTH directions — this file is where ADR 0038's
+ * load-bearing pay-off lands. Reads go `Y.XmlFragment →
+ * yXmlFragmentToProseMirrorRootNode(fragment, schema) → toJSON() →
+ * pmDocToBlocks`; writes go `blocksToPmDoc → Node.fromJSON(schema) →
+ * updateYFragment`. No live editor, no `view.dispatch`, no happy-dom:
+ * the pre-0038 BlockNote path needed a mounted editor (and a DOM shim
+ * in the production trunk) for every mutation; `updateYFragment` is
+ * the y-prosemirror primitive that diffs a ProseMirror doc against
+ * the fragment in place.
  *
- * What they deliberately do NOT do:
- *   - Provide a live `editor.transact` surface for ongoing mutations.
- *     That path needs a mounted `EditorView` so y-prosemirror's
- *     `view.dispatch` can flush edits back into the `Y.XmlFragment` —
- *     `withLiveEditor` (in `./live-editor`) owns that lifecycle.
- *     Content-mutation capabilities (`doc.rename`, future `doc.update`)
- *     call it inside `ctx.transact`; this file's pure converters stay
- *     DOM-free and serve first-time seeds + read projections.
- *   - Preserve history on `seedBlocks`. BlockNote's `blocksToYXmlFragment`
- *     is explicitly documented as "for importing existing content for
- *     the first time" — running it against a non-empty fragment would
- *     drop history (AGENTS.md gotcha). We enforce the first-time
- *     contract with a runtime assertion.
+ * `updateYFragment` semantics that this design leans on (verified
+ * against `@tiptap/y-tiptap@3.0.4` source):
  *
- * `BLOCKNOTE_FRAGMENT` is the Y.XmlFragment name we bind to; reads
- * and writes must agree on it. `"document-store"` is a project
- * convention — BlockNote accepts any string.
+ *   - It wraps all child reconciliation in ONE `ydoc.transact` (the
+ *     recursive calls join the outer transaction), so a `writeBlocks`
+ *     inside the dispatcher's write-path tx produces exactly one
+ *     Yjs update event → one `doc_updates` row (§6.5's contract).
+ *   - Children that compare equal (node name + attrs + content) are
+ *     matched, not rewritten — untouched blocks keep their Yjs
+ *     history/identity, so a one-block edit doesn't churn the doc.
+ *   - Its postcondition is Y-state ≡ the given PM doc; within a
+ *     changed region it may morph a same-named element rather than
+ *     splice (granularity affects update size, never the result).
+ *
+ * The doc schema requires ≥ 1 block (`block+`): `writeBlocks` rejects
+ * an empty post-state with a clear error instead of letting
+ * ProseMirror's `check()` throw a cryptic one. Read-side, an empty
+ * fragment (doc never seeded) returns `[]` — `doc.get` fails closed
+ * on that upstream.
+ *
+ * `DOC_FRAGMENT` is the Y.XmlFragment name reads and writes must
+ * agree on. The string predates ADR 0038 (it was the BlockNote
+ * binding's fragment name) and is part of the durable format — do not
+ * rename the VALUE without a content migration.
  */
 
 import {
   type Block,
-  BlockNoteEditor,
-  type BlockSchema,
-  type InlineContentSchema,
-  type PartialBlock,
-  type StyleSchema,
-} from "@blocknote/core";
-import { blocksToYXmlFragment, yXmlFragmentToBlocks } from "@blocknote/core/yjs";
+  blocksToPmDoc,
+  getEditorSchema,
+  materializeBlock,
+  type PartialBlockInput,
+  pmDocToBlocks,
+} from "@editorzero/blocks";
+import { Node as PmNode } from "@tiptap/pm/model";
+import { updateYFragment, yXmlFragmentToProseMirrorRootNode } from "@tiptap/y-tiptap";
 import type * as Y from "yjs";
 
-export const BLOCKNOTE_FRAGMENT = "document-store";
+export const DOC_FRAGMENT = "document-store";
+
+/** A seed block: caller-supplied (pre-minted) id is mandatory — audit
+ * invariant 3a records every seeded block id. */
+export type SeedBlock = PartialBlockInput & { readonly id: string };
 
 /**
- * The base `BlockSchema` index signature (`Record<string, BlockConfig>`)
- * is not satisfied by BlockNote's concrete `DefaultBlockSchema` under
- * `exactOptionalPropertyTypes: true`. The blocks package works around
- * this with a `LooseBlock` alias (`Block<BlockSchema, InlineContentSchema,
- * StyleSchema>`) — same workaround here. The helpers accept / return
- * the loose shape; the `blocksToYXmlFragment` / `yXmlFragmentToBlocks`
- * calls internally take the default-typed editor via a cast that stays
- * local to this file.
+ * Read the canonical block list from the Y.Doc's fragment. Pure
+ * projection from CRDT state. Persisted blocks always carry minted
+ * ids; an id-less block here means the store was written outside the
+ * owned write path — fail loud rather than hand the caller a block
+ * that can't be addressed by `doc.update`.
  */
-export type LooseBlock = Block<BlockSchema, InlineContentSchema, StyleSchema>;
-export type LoosePartialBlock = PartialBlock<BlockSchema, InlineContentSchema, StyleSchema>;
-
-type LooseEditor = BlockNoteEditor<BlockSchema, InlineContentSchema, StyleSchema>;
+export function readBlocks(ydoc: Y.Doc): Block[] {
+  const fragment = ydoc.getXmlFragment(DOC_FRAGMENT);
+  if (fragment.length === 0) return [];
+  const node = yXmlFragmentToProseMirrorRootNode(fragment, getEditorSchema());
+  const blocks = pmDocToBlocks(node.toJSON());
+  for (const block of blocks) {
+    if (block.id.length === 0) {
+      throw new Error(
+        "readBlocks: persisted block without an id — the fragment was written outside the owned write path.",
+      );
+    }
+  }
+  return blocks;
+}
 
 /**
- * Write `blocks` onto the Y.Doc's BlockNote fragment. Intended for
- * first-time seeding (e.g., `doc.create` writing the title + trailing
- * paragraph). Throws if the fragment already has content — running
- * this on an existing doc would drop history (BlockNote's own warning
- * on `blocksToYXmlFragment`). Use the live-editor path for updates.
+ * Make the Y.Doc's fragment equal `blocks`. One Yjs transaction, one
+ * update event. Callers hand the FULL post-state (the op applier's
+ * output) — this is a state write, not a patch.
  */
-export function seedBlocks(ydoc: Y.Doc, blocks: LoosePartialBlock[]): void {
-  const fragment = ydoc.getXmlFragment(BLOCKNOTE_FRAGMENT);
-  if (fragment.length > 0) {
+export function writeBlocks(ydoc: Y.Doc, blocks: readonly Block[]): void {
+  if (blocks.length === 0) {
     throw new Error(
-      "seedBlocks: refusing to seed a non-empty Y.XmlFragment — " +
-        "blocksToYXmlFragment is documented as import-for-first-time only " +
-        "and drops history. Use the live-editor path for updates.",
+      "writeBlocks: post-state must contain at least one block — the doc schema is `block+`.",
     );
   }
-  const editor = ephemeralEditor();
-  try {
-    // `blocksToYXmlFragment`'s public type is `Block[]` (fully
-    // materialised), but it's documented + implemented to accept
-    // `PartialBlock[]` for first-time imports. The loose/partial cast
-    // bridges both: BlockNote's runtime discriminates on block `type`,
-    // so providing a partial of the right type is safe.
-    blocksToYXmlFragment(editor, blocks as unknown as LooseBlock[], fragment);
-  } finally {
-    editor._tiptapEditor.destroy();
-  }
+  const schema = getEditorSchema();
+  const node = PmNode.fromJSON(schema, blocksToPmDoc(blocks));
+  node.check();
+  const fragment = ydoc.getXmlFragment(DOC_FRAGMENT);
+  updateYFragment(ydoc, fragment, node, { mapping: new Map(), isOMark: new Map() });
 }
 
 /**
- * Read the BlockNote blocks stored in the Y.Doc's fragment. Pure
- * projection from the CRDT state — produces the same structure
- * `editor.document` would expose if a live editor were bound to the
- * same fragment.
+ * First-time seed (e.g. `doc.create` writing title + trailing
+ * paragraph). Refuses a non-empty fragment: seeding is import-for-
+ * first-time-only; updates flow through `readBlocks` → op applier →
+ * `writeBlocks`.
  */
-export function readBlocks(ydoc: Y.Doc): LooseBlock[] {
-  const fragment = ydoc.getXmlFragment(BLOCKNOTE_FRAGMENT);
-  const editor = ephemeralEditor();
-  try {
-    return yXmlFragmentToBlocks(editor, fragment);
-  } finally {
-    editor._tiptapEditor.destroy();
+export function seedBlocks(ydoc: Y.Doc, seeds: readonly SeedBlock[]): void {
+  const fragment = ydoc.getXmlFragment(DOC_FRAGMENT);
+  if (fragment.length > 0) {
+    throw new Error(
+      "seedBlocks: refusing to seed a non-empty Y.XmlFragment — seeding is first-time-only; use the op applier + writeBlocks for updates.",
+    );
   }
-}
-
-/**
- * Construct a headless BlockNoteEditor for its schema + conversion
- * machinery. `BlockNoteEditor.create()` returns an editor typed over
- * the default schema; we widen to the loose `BlockSchema` base so the
- * conversion helpers accept it. Not suitable for mutation dispatch
- * (collab plugin needs a mounted view); fine for pure converters.
- */
-function ephemeralEditor(): LooseEditor {
-  return BlockNoteEditor.create() as unknown as LooseEditor;
+  writeBlocks(
+    ydoc,
+    seeds.map((seed) => materializeBlock(seed, seed.id)),
+  );
 }

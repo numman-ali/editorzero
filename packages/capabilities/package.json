@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@editorzero/audit": "workspace:*",
+    "@editorzero/blocks": "workspace:*",
     "@editorzero/constants": "workspace:*",
     "@editorzero/db": "workspace:*",
     "@editorzero/errors": "workspace:*",

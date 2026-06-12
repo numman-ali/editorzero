@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { inlineContentToMarkdown, mdastInlineToBlockNote } from "./inline";
+import { inlineContentToMarkdown, mdastInlineToStyledText } from "./inline";
 
 describe("inlineContentToMarkdown — emphasis boundary whitespace", () => {
   it("moves trailing whitespace outside bold delimiters", () => {
@@ -79,9 +79,9 @@ describe("inlineContentToMarkdown — angle-bracket escape", () => {
   });
 });
 
-describe("mdastInlineToBlockNote — canonicalization (merge adjacent same-style)", () => {
+describe("mdastInlineToStyledText — canonicalization (merge adjacent same-style)", () => {
   it("merges two adjacent plain text nodes into one", () => {
-    const out = mdastInlineToBlockNote([
+    const out = mdastInlineToStyledText([
       { type: "text", value: "foo" },
       { type: "text", value: "bar" },
     ]);
@@ -89,7 +89,7 @@ describe("mdastInlineToBlockNote — canonicalization (merge adjacent same-style
   });
 
   it("keeps runs separate when their style bags differ", () => {
-    const out = mdastInlineToBlockNote([
+    const out = mdastInlineToStyledText([
       { type: "text", value: " " },
       { type: "strong", children: [{ type: "text", value: "bold" }] },
       { type: "text", value: " " },
@@ -103,7 +103,7 @@ describe("mdastInlineToBlockNote — canonicalization (merge adjacent same-style
   });
 
   it("flattens a nested strong(emphasis) into a single style bag", () => {
-    const out = mdastInlineToBlockNote([
+    const out = mdastInlineToStyledText([
       {
         type: "strong",
         children: [{ type: "emphasis", children: [{ type: "text", value: "x" }] }],
@@ -113,7 +113,7 @@ describe("mdastInlineToBlockNote — canonicalization (merge adjacent same-style
   });
 
   it("merges adjacent styled runs that share the same styles after walk", () => {
-    const out = mdastInlineToBlockNote([
+    const out = mdastInlineToStyledText([
       { type: "strong", children: [{ type: "text", value: "hi " }] },
       { type: "strong", children: [{ type: "text", value: "there" }] },
     ]);
@@ -121,7 +121,7 @@ describe("mdastInlineToBlockNote — canonicalization (merge adjacent same-style
   });
 
   it("maps inlineCode to a code-styled text node", () => {
-    const out = mdastInlineToBlockNote([{ type: "inlineCode", value: "x" }]);
+    const out = mdastInlineToStyledText([{ type: "inlineCode", value: "x" }]);
     expect(out).toEqual([{ type: "text", text: "x", styles: { code: true } }]);
   });
 });
@@ -130,7 +130,7 @@ describe("mdastInlineToBlockNote — canonicalization (merge adjacent same-style
 //
 // These tests call `inlineContentToMarkdown` to emit Markdown, then
 // hand-construct the mdast shape a real CommonMark parser would
-// produce for that Markdown, and confirm `mdastInlineToBlockNote`
+// produce for that Markdown, and confirm `mdastInlineToStyledText`
 // recovers the canonical input. The hand-constructed mdast exercises
 // the escape-consumption behaviour (`\<` → text value `<`, etc.)
 // that a real parser owns; the expected shapes are what
@@ -145,7 +145,7 @@ describe("inline simulated round-trip", () => {
     expect(md).toBe("\\<b\\>");
     // After CommonMark consumes the escapes, mdast text value has
     // the raw angle brackets back.
-    const roundtripped = mdastInlineToBlockNote([{ type: "text", value: "<b>" }]);
+    const roundtripped = mdastInlineToStyledText([{ type: "text", value: "<b>" }]);
     expect(roundtripped).toEqual(start);
   });
 
@@ -156,7 +156,7 @@ describe("inline simulated round-trip", () => {
     const md = inlineContentToMarkdown(start);
     expect(md).toBe("``a`b``");
     // CommonMark parses ``a`b`` as inlineCode with value `a\`b`.
-    const roundtripped = mdastInlineToBlockNote([{ type: "inlineCode", value: "a`b" }]);
+    const roundtripped = mdastInlineToStyledText([{ type: "inlineCode", value: "a`b" }]);
     expect(roundtripped).toEqual(start);
   });
 });

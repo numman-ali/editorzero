@@ -25,3 +25,12 @@ catalog:
   yjs: ^13.6.20
   happy-dom: ^15.11.0
   "@happy-dom/global-registrator": ^15.2.0
+  # Owned editor (ADR 0038): EXACT pins, all @tiptap/* in lockstep — tiptap's
+  # own packages peer-pin each other exactly, so a mixed set fails install.
+  # 3.24.0 / 3.0.4 are the ADR-research-verified pair (live npm 2026-05-31);
+  # 3.26.1 / 3.0.5 (published 2026-06-11) sit inside the release-age cooldown.
+  # Bump the whole line together, never one package.
+  "@tiptap/core": 3.24.0
+  "@tiptap/pm": 3.24.0
+  "@tiptap/react": 3.24.0
+  "@tiptap/y-tiptap": 3.0.4

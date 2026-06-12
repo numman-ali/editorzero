@@ -15,7 +15,7 @@
  *      guarantee for the block-array projection; going through
  *      `ctx.transact` keeps us on the sole-path contract (invariant 7
  *      + ADR 0018) — the same helper that mutations use. The callback
- *      returns a `LooseBlock[]` from `readBlocks` and does not mutate
+ *      returns the owned `Block[]` from `readBlocks` and does not mutate
  *      the Y.Doc; the `ctx.transact` at-most-once backstop (F92) is
  *      satisfied by the single call site.
  *
@@ -84,9 +84,9 @@ const DOC_GET_ID = CapabilityId("doc.get");
 // `doc_id` UUIDv7 rail runs BEFORE the `DocId` brand applies (so a
 // malformed value is a clean zod 400, never an uncaught `DocId()`
 // throw); the `blocks` field is `z.array(z.unknown())` because the
-// BlockNote block union is owned by `@editorzero/sync`'s `readBlocks`,
-// not mirrored into the schemas leaf — the dispatcher's output-parse
-// is a structural pass-through for that field.
+// canonical block shape is owned by `@editorzero/blocks` (`readBlocks`
+// returns it), not mirrored into the schemas leaf — the dispatcher's
+// output-parse is a structural pass-through for that field.
 
 // ── Capability ───────────────────────────────────────────────────────────
 
