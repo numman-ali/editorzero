@@ -196,6 +196,22 @@ export interface DocReadResolver {
   /** F88 projection of `canAdministerSpace` — `acl_deny` scoped to the space. */
   assertCanAdministerSpace(space_id: SpaceId): void;
   /**
+   * Restore authority on a space — the ONE sanctioned dead-row
+   * evaluation of the administer ladder (`space.restore`'s authority
+   * predicate; ADR 0040 slice-1 deliberately refused to bypass
+   * `canAdministerSpace`'s liveness gate for revoke, and that stands —
+   * this predicate exists so restore itself never has to). Same ladder
+   * body as `canAdministerSpace` minus the liveness gate: personal →
+   * `owner_user_id`; team → owner-role membership (normally gone — a
+   * compliant archive refused while members existed) / non-guest
+   * owner-role space grant (grants RIDE through archive, H1) / the
+   * admin backstop. Missing spaces are still false; intent-named so it
+   * cannot be mistaken for a general trashed-space authority hatch.
+   */
+  canRestoreSpace(space_id: SpaceId): boolean;
+  /** F88 projection of `canRestoreSpace` — `acl_deny` scoped to the space. */
+  assertCanRestoreSpace(space_id: SpaceId): void;
+  /**
    * Baseline-reach probe on a live space (membership / space grant /
    * open-space user baseline) — the same term `canRead`'s space mode
    * and `canPlaceIn` use, exposed for `permission.list`'s space-side
@@ -332,18 +348,28 @@ export async function loadDocReadResolver(
     return false;
   };
 
-  // Space owner-tier (the authority ladder's space term — see header).
-  // Personal: `owner_user_id` only. Team: owner-role membership /
-  // non-guest owner-role space grant / the workspace admin backstop.
-  const spaceOwnerTier = (space_id: SpaceId): boolean => {
+  // Space owner-tier ladder BODY (the authority ladder's space term —
+  // see header). Personal: `owner_user_id` only. Team: owner-role
+  // membership / non-guest owner-role space grant / the workspace
+  // admin backstop. Liveness is deliberately NOT evaluated here: the
+  // live predicate (`spaceOwnerTier`) adds the gate, and
+  // `canRestoreSpace` is the one consumer that evaluates the ladder on
+  // a dead row — ONE ladder body, so the two predicates cannot drift.
+  const spaceOwnerTierIgnoringTrash = (space_id: SpaceId): boolean => {
     const space = spaces.get(space_id);
-    if (space === undefined || space.deleted_at !== null) return false;
+    if (space === undefined) return false;
     if (space.kind === "personal") {
       return subject.kind === "user" && space.owner_user_id === subject.user_id;
     }
     if (memberSpaceRole.get(space_id) === "owner") return true;
     if (spaceOwnerGrantIds.has(space_id)) return true;
     return adminTier;
+  };
+
+  const spaceOwnerTier = (space_id: SpaceId): boolean => {
+    const space = spaces.get(space_id);
+    if (space === undefined || space.deleted_at !== null) return false;
+    return spaceOwnerTierIgnoringTrash(space_id);
   };
 
   const canAdministerDoc = (doc: CeilingDocRow): boolean => {
@@ -412,6 +438,14 @@ export async function loadDocReadResolver(
     canAdministerSpace,
     assertCanAdministerSpace: (space_id) => {
       if (!canAdministerSpace(space_id)) {
+        throw new PermissionDeniedError({
+          reason: { kind: "acl_deny", scope: { space_id } },
+        });
+      }
+    },
+    canRestoreSpace: spaceOwnerTierIgnoringTrash,
+    assertCanRestoreSpace: (space_id) => {
+      if (!spaceOwnerTierIgnoringTrash(space_id)) {
         throw new PermissionDeniedError({
           reason: { kind: "acl_deny", scope: { space_id } },
         });

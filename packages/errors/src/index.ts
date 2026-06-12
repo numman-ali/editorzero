@@ -19,6 +19,7 @@ import type {
   CapabilityId,
   CollectionId,
   DocId,
+  SpaceId,
   UserId,
   WorkspaceId,
 } from "@editorzero/ids";
@@ -270,6 +271,52 @@ export class HasLiveDescendantsError extends EditorZeroError {
           `${params.descendant_counts.docs} live docs still here`,
     );
     this.collection_id = params.collection_id;
+    this.descendant_counts = params.descendant_counts;
+  }
+
+  toHandlerError(): HandlerError {
+    return { kind: "conflict" };
+  }
+}
+
+/**
+ * Space-flavored sibling of `HasLiveDescendantsError` (ADR 0040
+ * invariant-6 bullet): `space.archive` refuses while the Space still
+ * has live collections, live docs (reachable through those
+ * collections), or `space_members` rows — the caller empties first, so
+ * `space.restore` stays a 1:1 inverse with one audit row each way.
+ * Same wire code as the collection refusal (one concept, one
+ * vocabulary); the payload is space-shaped, with `members` joining the
+ * counts because memberships are space children the collection refusal
+ * has no analogue for. Projects to `{ kind: "conflict" }`.
+ */
+export class SpaceHasLiveDescendantsError extends EditorZeroError {
+  readonly code = "has_live_descendants";
+  readonly httpStatus = 409;
+  readonly space_id: SpaceId;
+  readonly descendant_counts: {
+    readonly collections: number;
+    readonly docs: number;
+    readonly members: number;
+  };
+
+  constructor(params: {
+    message?: string;
+    space_id: SpaceId;
+    descendant_counts: {
+      readonly collections: number;
+      readonly docs: number;
+      readonly members: number;
+    };
+  }) {
+    super(
+      params.message ??
+        `cannot archive space ${params.space_id}: ` +
+          `${params.descendant_counts.collections} live collections + ` +
+          `${params.descendant_counts.docs} live docs + ` +
+          `${params.descendant_counts.members} members still here`,
+    );
+    this.space_id = params.space_id;
     this.descendant_counts = params.descendant_counts;
   }
 

@@ -863,3 +863,58 @@ describe("granting authority — canAdministerSpace", () => {
     expect(() => creatorAcl.assertCanAdministerDoc(row)).not.toThrow();
   });
 });
+
+describe("restore authority — canRestoreSpace (the ONE dead-row ladder)", () => {
+  const S_TRASHED_PERSONAL = SpaceId("018f0000-0000-7000-8000-0000000000e6");
+
+  it("trashed TEAM space: admin backstop + surviving owner grant restore; members/outsiders don't", async () => {
+    // Grants RIDE through archive (H1) — seed a non-guest owner grant
+    // on the already-trashed space to model the surviving edge.
+    await seedGrant({
+      resource_kind: "space",
+      resource_id: S_TRASHED,
+      subject_kind: "user",
+      subject_id: SPACE_OWNER_GRANTEE,
+      role: "owner",
+    });
+    for (const [principal, expected] of [
+      [user(ADMIN_USER, ["admin"]), true],
+      [user(ADMIN_USER, ["owner"]), true],
+      [user(SPACE_OWNER_GRANTEE), true], // the surviving owner edge
+      [user(MEMBER_CLOSED), false],
+      [user(OUTSIDER), false],
+      [bot(ADMIN_USER), false], // no admin backstop through delegation
+    ] as const) {
+      const acl = await loadDocReadResolver(db, principal);
+      expect(acl.canRestoreSpace(S_TRASHED)).toBe(expected);
+    }
+  });
+
+  it("trashed PERSONAL space: owner_user_id only — the privacy pin holds on dead rows", async () => {
+    await seedSpace(S_TRASHED_PERSONAL, "private", 99, PERSONAL_OWNER);
+    const owner = await loadDocReadResolver(db, user(PERSONAL_OWNER));
+    expect(owner.canRestoreSpace(S_TRASHED_PERSONAL)).toBe(true);
+    const admin = await loadDocReadResolver(db, user(ADMIN_USER, ["admin"]));
+    expect(admin.canRestoreSpace(S_TRASHED_PERSONAL)).toBe(false);
+  });
+
+  it("missing spaces are false; live spaces evaluate the same ladder (the 404 is the handler's job)", async () => {
+    const acl = await loadDocReadResolver(db, user(ADMIN_USER, ["admin"]));
+    expect(acl.canRestoreSpace(S_MISSING)).toBe(false);
+    expect(acl.canRestoreSpace(S_CLOSED)).toBe(true);
+  });
+
+  it("assertCanRestoreSpace throws acl_deny scoped to the space", async () => {
+    const acl = await loadDocReadResolver(db, user(OUTSIDER));
+    let err: unknown;
+    try {
+      acl.assertCanRestoreSpace(S_TRASHED);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { space_id: S_TRASHED } });
+    }
+  });
+});

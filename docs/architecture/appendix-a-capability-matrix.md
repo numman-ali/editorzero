@@ -23,6 +23,8 @@ This matrix incorporates red-team fixes F12, F13, F15, F19, F22.
 | `workspace.member_update_role` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 60 | `member.update_role` |
 | `space.create` (ADR 0040 Step 8: mints TEAM spaces only — personal spaces are signup-seeded, never minted by capability) | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `space.create` |
 | `space.update` (ADR 0040: administer-tier on the space at L2; personal spaces pin `space_type`/`baseline_access`) | space:manage | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `space.update` |
+| `space.archive` (ADR 0040: soft-delete; refuses while live collections/docs/members remain — empty first) | space:manage | H | A | ✓ | ✓ | ✓ | ✓ | 10 | `space.archive` |
+| `space.restore` (ADR 0040: the ONE dead-row ladder evaluation — `canRestoreSpace`; slug + personal-twin preconditions) | space:manage | H | A | ✓ | ✓ | ✓ | ✓ | 10 | `space.restore` |
 | `collection.create` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 120 | `collection.create` |
 | `collection.update` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 120 | `collection.update` |
 | `collection.move` | doc:write | H | A | ✓ | ✓ | ✓ | ✓ | 120 | `collection.move` |

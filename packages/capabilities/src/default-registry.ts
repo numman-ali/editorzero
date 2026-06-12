@@ -45,7 +45,9 @@ import { permissionGrant } from "./permission/grant";
 import { permissionList } from "./permission/list";
 import { permissionRevoke } from "./permission/revoke";
 import { createRegistry, type Registry, registerCapability } from "./registry";
+import { spaceArchive } from "./space/archive";
 import { spaceCreate } from "./space/create";
+import { spaceRestore } from "./space/restore";
 import { spaceUpdate } from "./space/update";
 import { workspaceGet } from "./workspace/get";
 import { workspaceMemberAdd } from "./workspace/member_add";
@@ -82,7 +84,9 @@ export function createDefaultRegistry(): Registry {
     registerCapability(permissionGrant),
     registerCapability(permissionList),
     registerCapability(permissionRevoke),
+    registerCapability(spaceArchive),
     registerCapability(spaceCreate),
+    registerCapability(spaceRestore),
     registerCapability(spaceUpdate),
     registerCapability(workspaceGet),
     registerCapability(workspaceMemberAdd),

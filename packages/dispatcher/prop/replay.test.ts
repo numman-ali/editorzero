@@ -92,7 +92,9 @@ import {
   permissionGrant,
   permissionRevoke,
   registerCapability,
+  spaceArchive,
   spaceCreate,
+  spaceRestore,
   spaceUpdate,
   workspaceMemberAdd,
   workspaceMemberRemove,
@@ -471,7 +473,9 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       registerCapability(docRestore),
       registerCapability(permissionGrant),
       registerCapability(permissionRevoke),
+      registerCapability(spaceArchive),
       registerCapability(spaceCreate),
+      registerCapability(spaceRestore),
       registerCapability(spaceUpdate),
     ]);
 
@@ -664,6 +668,13 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       name: "Walk Space v2",
       space_type: "open",
     });
+    // Archive → restore round-trip (slice 2b): the walk space is empty
+    // (no collections/docs/members), so the refusal counts pass; the
+    // restore authority is the admin backstop on the dead row. Replay
+    // must track deleted_at through BOTH flips (handler clock on
+    // archive, null on restore — state-as-of-delete rides through).
+    await step(spaceArchive.id, { space_id: s1 });
+    await step(spaceRestore.id, { space_id: s1 });
 
     await step(workspaceMemberRemove.id, { user_id: SECOND_USER });
 
@@ -700,6 +711,8 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       "acl.revoke",
       "space.create",
       "space.update",
+      "space.archive",
+      "space.restore",
     ];
     for (const kind of EXPECTED_STATE_KINDS) {
       expect(emittedKinds.has(kind)).toBe(true);

@@ -13,7 +13,13 @@
 import { Hono } from "hono";
 
 import type { ApiEnv } from "../../env";
+import { archive } from "./archive";
 import { create } from "./create";
+import { restore } from "./restore";
 import { update } from "./update";
 
-export const spaces = new Hono<ApiEnv>().route("/", create).route("/", update);
+export const spaces = new Hono<ApiEnv>()
+  .route("/", archive)
+  .route("/", create)
+  .route("/", restore)
+  .route("/", update);
