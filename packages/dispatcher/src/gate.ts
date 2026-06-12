@@ -130,7 +130,20 @@ function roleScopeUnion(roles: readonly Role[]): Set<Scope> {
   return union;
 }
 
-function effectiveScopes(principal: Principal): ReadonlySet<Scope> {
+/**
+ * The principal's effective scope set — the gate's check-3 term, also
+ * consumed by the collab WebSocket attach policy (ADR 0030): the WS
+ * surface must run the same scope arithmetic as the dispatcher gate,
+ * not re-implement it (invariant 5, "one role source, two consumers").
+ *
+ * CAUTION for non-gate callers: this is the STATIC table. For agent
+ * principals it takes the token's scope claim verbatim — the live H8
+ * `acting_as ∩ delegator` intersection happens in `workspaceAwareGate`
+ * with a delegator role lookup, NOT here. The WS attach policy is
+ * user-principals-only for exactly this reason; an agent-capable WS
+ * path must come back for the H8-aware term.
+ */
+export function effectiveScopes(principal: Principal): ReadonlySet<Scope> {
   if (principal.kind === "agent") return new Set(principal.scopes);
   return roleScopeUnion(principal.roles);
 }

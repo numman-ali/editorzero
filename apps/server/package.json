@@ -27,10 +27,12 @@
     "@editorzero/constants": "workspace:*",
     "@editorzero/observability": "workspace:*",
     "@hono/node-server": "^1.19.14",
-    "better-sqlite3": "catalog:"
+    "better-sqlite3": "catalog:",
+    "ws": "8.20.0"
   },
   "devDependencies": {
     "@editorzero/ids": "workspace:*",
+    "@editorzero/sync": "workspace:*",
     "@hocuspocus/common": "3.4.4",
     "@hocuspocus/server": "3.4.4",
     "@types/node": "catalog:",
@@ -40,6 +42,6 @@
     "lib0": "0.2.117",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "ws": "8.20.0"
+    "yjs": "catalog:"
   }
 }

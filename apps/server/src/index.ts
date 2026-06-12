@@ -11,16 +11,18 @@
  * `vitest.config.ts`, mirroring apps/cli's bin entry).
  *
  * **SQLite single-box floor today** (ADR 0027): one process — the API
- * trunk, SQLite, embedded sync, and (when `EDITORZERO_SPA_DIST` points at
- * a built `apps/app/dist`) the SPA bundle via `attachSpa`. The `/collab`
- * WebSocket upgrade stays unmounted — production WS attach is gated on
- * the ADR 0030 red-team blockers (task #15).
+ * trunk, SQLite, embedded sync, the `/collab` WebSocket upgrade via
+ * `attachCollab` (ADR 0030 hardening: Origin allow-list, cookie authN at
+ * upgrade, per-document authZ + forced readOnly per Auth frame inside the
+ * shared Hocuspocus), and (when `EDITORZERO_SPA_DIST` points at a built
+ * `apps/app/dist`) the SPA bundle via `attachSpa`.
  */
 
 import { getApiApp } from "@editorzero/api-server";
 import { loadEnvConfig } from "@editorzero/config";
 import { consoleLogger } from "@editorzero/observability";
 
+import { attachCollab } from "./collab";
 import { startServer } from "./runtime";
 import { attachSpa } from "./spa";
 
@@ -31,11 +33,13 @@ function describeError(error: unknown): string {
 async function main(): Promise<void> {
   const log = consoleLogger();
   const config = loadEnvConfig();
-  const booted = await getApiApp({ config });
+  const booted = await getApiApp({ config, logger: log });
   if (config.spa_dist !== undefined) {
     attachSpa(booted.app, config.spa_dist);
   }
-  const running = await startServer(booted, config.port);
+  const running = await startServer(booted, config.port, [
+    (server) => attachCollab(server, booted, { publicOrigin: config.public_origin, logger: log }),
+  ]);
   log.info("server listening", {
     event: "server.listening",
     "server.port": running.port,

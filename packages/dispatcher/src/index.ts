@@ -25,4 +25,4 @@ export type {
   PermissionGate,
   WorkspaceAwareGateDeps,
 } from "./gate";
-export { AGENT_SCOPE_TIERS, scopeOnlyGate, workspaceAwareGate } from "./gate";
+export { AGENT_SCOPE_TIERS, effectiveScopes, scopeOnlyGate, workspaceAwareGate } from "./gate";

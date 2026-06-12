@@ -18,7 +18,12 @@
  */
 
 export { DOC_FRAGMENT, readBlocks, type SeedBlock, seedBlocks, writeBlocks } from "./blocks";
-export { HocuspocusSync, type HocuspocusSyncDeps, type HocuspocusTxContext } from "./hocuspocus";
+export {
+  type CollabAuthorizePayload,
+  HocuspocusSync,
+  type HocuspocusSyncDeps,
+  type HocuspocusTxContext,
+} from "./hocuspocus";
 export { MemorySyncService } from "./memory";
 export type { BoundSyncService, SyncService } from "./service";
 export { setDocTitle } from "./set-title";

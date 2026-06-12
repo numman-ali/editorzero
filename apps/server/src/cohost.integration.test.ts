@@ -1,70 +1,88 @@
 /**
- * Co-hosting + auth smoke (ADR 0027 / 0030, deliverable #2).
+ * Production co-hosting + WS-attach hardening (ADR 0027 / 0030, task #15).
  *
- * Proves the single-box topology AND its security edge on one `http.Server`,
- * end-to-end through the real surfaces:
+ * This suite exercises the REAL production path end-to-end: `getApiApp`
+ * (which registers `collabAuthorize` on the embedded Hocuspocus) →
+ * `startServer` + `attachCollab` (the exact wiring `apps/server`'s
+ * entrypoint mounts) → hand-rolled Hocuspocus protocol clients. The
+ * earlier smoke's private bare-Hocuspocus build is gone — WS clients now
+ * attach to the SAME instance the dispatcher writes through, which is
+ * what the convergence scenario proves.
  *
- *   1. HTTP trunk (health) + static SPA assets (`serveStatic`) on one port.
- *   2. Collab WebSocket upgrade co-hosted via raw `ws`
- *      (`WebSocketServer({ noServer })` + `server.on("upgrade")`) — the same
- *      mechanism `@hocuspocus/server`'s own `Server.ts` uses in-tree, so
- *      `@hono/node-server` **v1** suffices (ADR 0027's "v2 prerequisite"
- *      framing is retired).
- *   3. **authN at the upgrade** — the session cookie is resolved to a
- *      principal through the *shared* Better Auth resolver (`booted.resolver`,
- *      invariant 5); no principal → the socket is destroyed before the WS
- *      establishes.
- *   4. **authZ at `onAuthenticate`** — Hocuspocus multiplexes documents per
- *      socket, so per-document authorization runs where the doc name is known.
- *      The injected principal (`handleConnection(ws, req, { principal })`,
- *      surfaced as `payload.context`) is checked against the multiplexed
- *      `documentName` by reusing the tenant-scoping floor; a throw denies.
+ * The ADR 0030 red-team blockers, each pinned here:
  *
- * Security note (verified in @hocuspocus/server 3.4.4 `ClientConnection.ts`):
- * the gate is fail-closed — non-Auth frames are queued, never applied, and a
- * document is established (and the queue flushed) only after a *successful*
- * Auth frame. But the gate keys on the Auth frame, not on hook presence: with
- * **no** `onAuthenticate`, any Auth frame establishes full read/write. So
- * "`onAuthenticate` is registered and throws on deny" is the only backstop —
- * the production WS attach enforces it by *construction* (a single
- * `createAuthenticatedCollabHocuspocus` factory that always installs the hook,
- * with a negative test that a hook-less instance is never on the production
- * path), not by a runtime boot-time assertion.
+ *   1. **Forced readOnly** — the Authenticated frame carries scope
+ *      `"readonly"`, and a real Yjs update frame from an attached client
+ *      is nacked (`SyncStatus false`) with NO durable `doc_updates` row
+ *      and NO server-side state change (Codex review: assert state, not
+ *      just the denial frame). Invariant 3 is why: WS writes bypass the
+ *      audited dispatcher lane, so no principal may write until that
+ *      lane exists (slice B).
+ *   2. **Origin allow-list at upgrade** — wrong AND absent Origin are
+ *      refused even with a valid session cookie (the raw upgrade never
+ *      passes Better Auth's CORS handling; absent-Origin tolerance only
+ *      shields non-browser clients that could fake the header anyway).
+ *   3. **Revocation freshness** — the principal is re-resolved per Auth
+ *      frame from the upgrade request's headers: after sign-out, a NEW
+ *      document attach on the SAME open socket is denied.
+ *   4. **authZ by construction** — per-document authorization runs in
+ *      `HocuspocusSync`'s constructor-registered `onAuthenticate`; the
+ *      tenant-scoped lookup + ACL ceiling deny a cross-workspace doc on
+ *      a multiplexed socket whose other document authenticated fine.
+ *      (A within-workspace ceiling deny needs a second member in one
+ *      workspace — no invite surface exists yet; the ceiling term
+ *      itself is fuzz-covered by ADR 0040 §8.1a.)
  *
- * Scope: this proves co-hosting + cookie authN + per-doc authZ *feasibility*,
- * not the final production sync topology (one shared Hocuspocus instance + a
- * WS attach hook exposed from the booted app + broadcast-after-commit) — that
- * is the ADR 0027 production pass. The client speaks only the Hocuspocus auth
- * handshake (not full y-sync), which is all the auth edge requires.
+ * Convergence + hydration (the one-instance dividend): a WS client that
+ * attaches and syncs receives the doc's COMMITTED state (the `__ws`
+ * hydration marker replaying `doc_updates`), and a subsequent HTTP
+ * `doc.update` broadcast reaches it live.
+ *
+ * The suite's teardown is itself an assertion: `running.close()` must
+ * settle with a still-attached WS client (the `ServerAttachment` drain
+ * terminates upgraded sockets BEFORE `server.close()` waits on them).
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { type BootedApp, getApiApp } from "@editorzero/api-server";
 import { parseRuntimeConfig } from "@editorzero/config";
-import { DocId, WorkspaceId } from "@editorzero/ids";
+import { DocId } from "@editorzero/ids";
+import { DOC_FRAGMENT } from "@editorzero/sync";
 import { readAuthMessage, writeAuthentication } from "@hocuspocus/common";
-import { Hocuspocus, MessageType } from "@hocuspocus/server";
-import { getRequestListener } from "@hono/node-server";
+import { MessageType } from "@hocuspocus/server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { createDecoder, readVarString, readVarUint } from "lib0/decoding";
-import { createEncoder, toUint8Array, writeVarString, writeVarUint } from "lib0/encoding";
+import { createDecoder, readVarString, readVarUint, readVarUint8Array } from "lib0/decoding";
+import {
+  createEncoder,
+  toUint8Array,
+  writeVarString,
+  writeVarUint,
+  writeVarUint8Array,
+} from "lib0/encoding";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type RawData, WebSocket, WebSocketServer } from "ws";
+import { type RawData, WebSocket } from "ws";
+import * as Y from "yjs";
 
-import { portOf } from "./runtime";
+import { attachCollab } from "./collab";
+import { type RunningServer, startServer } from "./runtime";
 
 const TEST_SECRET = "test-secret-do-not-use-in-production-cohost";
 const PASSWORD = "smoke-password-123";
+const PUBLIC_ORIGIN = "http://localhost:3000";
 const WS_TIMEOUT_MS = 3000;
+
+/** y-protocols sync sub-message tags (stable wire constants). */
+const SYNC_STEP1 = 0;
+const SYNC_STEP2 = 1;
+const SYNC_UPDATE = 2;
 
 function boot(): Promise<BootedApp> {
   return getApiApp({
     config: parseRuntimeConfig({
-      EDITORZERO_PUBLIC_ORIGIN: "http://localhost:3000",
+      EDITORZERO_PUBLIC_ORIGIN: PUBLIC_ORIGIN,
       DATABASE_URL: ":memory:",
       // The smoke signs up multiple principals; the first-user gate
       // has its own coverage in packages/auth.
@@ -72,109 +90,6 @@ function boot(): Promise<BootedApp> {
     }),
     secret: TEST_SECRET,
   });
-}
-
-/**
- * Pull a `WorkspaceId` out of the (Hocuspocus-typed `any`) connection
- * context. Treated as `unknown` and validated structurally — no cast — so a
- * malformed context fails closed (returns null → `onAuthenticate` throws).
- */
-function principalWorkspaceId(context: unknown): WorkspaceId | null {
-  if (typeof context !== "object" || context === null || !("principal" in context)) {
-    return null;
-  }
-  const principal = context.principal;
-  if (typeof principal !== "object" || principal === null || !("workspace_id" in principal)) {
-    return null;
-  }
-  const workspaceId = principal.workspace_id;
-  if (typeof workspaceId !== "string" || workspaceId.length === 0) return null;
-  return WorkspaceId(workspaceId);
-}
-
-/**
- * Bare Hocuspocus core (no storage extension) whose only job here is the
- * per-document authZ gate. authN already ran at the upgrade, so
- * `context.principal` is present; we authorize `documentName` against the
- * principal's workspace via a tenant-scoped lookup (the doc row is visible
- * only inside its own workspace), and throw to deny.
- */
-function buildHocuspocus(booted: BootedApp): Hocuspocus {
-  return new Hocuspocus({
-    onAuthenticate: async ({ context, documentName }) => {
-      const workspaceId = principalWorkspaceId(context);
-      if (workspaceId === null) {
-        throw new Error("forbidden: no resolved principal on the connection");
-      }
-      const row = await booted.driver
-        .scoped(workspaceId)
-        .selectFrom("docs")
-        .where("id", "=", DocId(documentName))
-        .where("deleted_at", "is", null)
-        .select("id")
-        .executeTakeFirst();
-      if (row === undefined) {
-        throw new Error("forbidden: document is not in the principal's workspace");
-      }
-    },
-  });
-}
-
-interface CoHost {
-  readonly port: number;
-  readonly close: () => Promise<void>;
-}
-
-async function coHost(
-  booted: BootedApp,
-  staticRoot: string,
-  hocuspocus: Hocuspocus,
-): Promise<CoHost> {
-  booted.app.use("/assets/*", serveStatic({ root: staticRoot }));
-
-  const server = createServer(getRequestListener(booted.app.fetch));
-  const wss = new WebSocketServer({ noServer: true });
-
-  server.on("upgrade", (req, socket, head) => {
-    void (async () => {
-      try {
-        const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
-        if (pathname !== "/collab") {
-          socket.destroy();
-          return;
-        }
-        // authN: resolve the session cookie through the shared resolver.
-        const headers = new Headers();
-        if (typeof req.headers.cookie === "string") headers.set("cookie", req.headers.cookie);
-        const principal = await booted.resolver(headers);
-        if (principal === null) {
-          socket.destroy();
-          return;
-        }
-        wss.handleUpgrade(req, socket, head, (client) => {
-          hocuspocus.handleConnection(client, req, { principal });
-        });
-      } catch {
-        // Fail closed: any resolution error refuses the upgrade.
-        socket.destroy();
-      }
-    })();
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, () => resolve());
-  });
-
-  const close = async (): Promise<void> => {
-    wss.close();
-    hocuspocus.closeConnections();
-    server.closeIdleConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await booted.close();
-  };
-
-  return { port: portOf(server.address(), 0), close };
 }
 
 async function signUp(port: number, email: string): Promise<string> {
@@ -223,130 +138,212 @@ function buildAuthFrame(documentName: string, token: string): Uint8Array {
   return toUint8Array(encoder);
 }
 
-/** Decode a server frame; returns the terminal auth outcome, else null. */
-function decodeAuthResponse(data: Uint8Array): "authenticated" | "denied" | null {
-  const decoder = createDecoder(data);
-  readVarString(decoder); // documentName
-  if (readVarUint(decoder) !== MessageType.Auth) return null;
-  let result: "authenticated" | "denied" | null = null;
-  readAuthMessage(
-    decoder,
-    () => {
-      /* TokenSyncRequest — server prompting; non-terminal (we already sent). */
-    },
-    () => {
-      result = "denied";
-    },
-    () => {
-      result = "authenticated";
-    },
-  );
-  return result;
+/** SyncStep1 with an EMPTY state vector — asks the server for full state. */
+function buildSyncStep1Frame(documentName: string): Uint8Array {
+  const encoder = createEncoder();
+  writeVarString(encoder, documentName);
+  writeVarUint(encoder, MessageType.Sync);
+  writeVarUint(encoder, SYNC_STEP1);
+  // An empty Yjs state vector encodes as a single varuint 0.
+  writeVarUint8Array(encoder, new Uint8Array([0]));
+  return toUint8Array(encoder);
+}
+
+/** A raw Yjs Update frame carrying `update` — what a WRITING client sends. */
+function buildUpdateFrame(documentName: string, update: Uint8Array): Uint8Array {
+  const encoder = createEncoder();
+  writeVarString(encoder, documentName);
+  writeVarUint(encoder, MessageType.Sync);
+  writeVarUint(encoder, SYNC_UPDATE);
+  writeVarUint8Array(encoder, update);
+  return toUint8Array(encoder);
 }
 
 type AuthOutcome = "authenticated" | "denied" | "rejected";
 
-/**
- * Open a collab WS (optionally with a session cookie on the upgrade), send the
- * Auth frame for `documentName`, and resolve with the outcome: "rejected" if
- * the upgrade itself is refused (authN), "authenticated" / "denied" from the
- * Hocuspocus auth response (authZ).
- */
-function wsAuth(port: number, documentName: string, cookie: string | null): Promise<AuthOutcome> {
-  return new Promise((resolve, reject) => {
-    const client =
-      cookie === null
-        ? new WebSocket(`ws://127.0.0.1:${port}/collab`)
-        : new WebSocket(`ws://127.0.0.1:${port}/collab`, { headers: { cookie } });
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      client.terminate();
-      reject(new Error("ws auth handshake timed out"));
-    }, WS_TIMEOUT_MS);
-    const finish = (outcome: AuthOutcome): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      client.close();
-      resolve(outcome);
-    };
-    client.on("open", () => client.send(buildAuthFrame(documentName, "smoke-session-token")));
-    client.on("message", (data) => {
-      const outcome = decodeAuthResponse(rawToUint8(data));
-      if (outcome !== null) finish(outcome);
-    });
-    client.on("error", () => finish("rejected"));
-    client.on("close", () => finish("rejected"));
-  });
+interface AuthResult {
+  readonly outcome: AuthOutcome;
+  /** `"readonly"` / `"read-write"` from the Authenticated frame; null otherwise. */
+  readonly scope: string | null;
 }
 
 /**
- * Open one collab WS with a session cookie, then run the Auth handshake for
- * `docFirst` then `docSecond` *on the same socket*, returning both outcomes in
- * order. This pins the multiplex concern that forced authZ into
- * `onAuthenticate`: Hocuspocus gates each `documentName` independently over a
- * shared socket, so authenticating one document must not establish another — a
- * cross-workspace doc sent over an already-authenticated socket must still be
- * denied. The second frame is sent only after the first terminal response, so
- * the outcomes map to send order (interleaved sync frames decode to null and
- * are skipped by `decodeAuthResponse`).
+ * Minimal hand-rolled Hocuspocus client over one socket — enough
+ * protocol to (a) run Auth handshakes for any number of documents,
+ * (b) pull full document state via SyncStep1→SyncStep2 and follow live
+ * Update broadcasts into a local `Y.Doc`, (c) send raw update frames,
+ * and (d) observe `SyncStatus` acks. No reconnect, no awareness — the
+ * auth/convergence edges are all this suite needs.
  */
-function wsAuthSameSocket(
-  port: number,
-  cookie: string,
-  docFirst: string,
-  docSecond: string,
-): Promise<readonly [AuthOutcome, AuthOutcome]> {
-  return new Promise((resolve, reject) => {
-    const client = new WebSocket(`ws://127.0.0.1:${port}/collab`, { headers: { cookie } });
-    let first: AuthOutcome | null = null;
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      client.terminate();
-      reject(new Error("ws same-socket auth handshake timed out"));
-    }, WS_TIMEOUT_MS);
-    const fail = (): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`ws closed mid same-socket handshake (first outcome: ${first ?? "none"})`));
-    };
-    client.on("open", () => client.send(buildAuthFrame(docFirst, "smoke-session-token")));
-    client.on("message", (data) => {
-      if (settled) return;
-      const outcome = decodeAuthResponse(rawToUint8(data));
-      if (outcome === null) return;
-      if (first === null) {
-        first = outcome;
-        client.send(buildAuthFrame(docSecond, "smoke-session-token"));
-        return;
+class CollabClient {
+  readonly #ws: WebSocket;
+  readonly #open: Promise<void>;
+  /** Local replicas, keyed by documentName, fed by SyncStep2/Update frames. */
+  readonly docs = new Map<string, Y.Doc>();
+  #pendingAuth: ((result: AuthResult) => void) | null = null;
+  #pendingSyncStatus: ((saved: boolean) => void) | null = null;
+  #closed = false;
+
+  constructor(port: number, headers: Record<string, string>) {
+    this.#ws = new WebSocket(`ws://127.0.0.1:${port}/collab`, { headers });
+    this.#open = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("ws open timed out")), WS_TIMEOUT_MS);
+      this.#ws.on("open", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      this.#ws.on("error", () => {
+        clearTimeout(timer);
+        reject(new Error("ws upgrade rejected"));
+      });
+    });
+    this.#ws.on("close", () => {
+      this.#closed = true;
+      this.#pendingAuth?.({ outcome: "rejected", scope: null });
+      this.#pendingAuth = null;
+    });
+    this.#ws.on("message", (data) => this.#onMessage(rawToUint8(data)));
+  }
+
+  #onMessage(frame: Uint8Array): void {
+    const decoder = createDecoder(frame);
+    const documentName = readVarString(decoder);
+    const type = readVarUint(decoder);
+    if (type === MessageType.Auth) {
+      let result: AuthResult | null = null;
+      readAuthMessage(
+        decoder,
+        () => {
+          /* TokenSyncRequest — non-terminal (we already sent the token). */
+        },
+        () => {
+          result = { outcome: "denied", scope: null };
+        },
+        (scope) => {
+          result = { outcome: "authenticated", scope };
+        },
+      );
+      if (result !== null && this.#pendingAuth !== null) {
+        const settle = this.#pendingAuth;
+        this.#pendingAuth = null;
+        settle(result);
       }
-      settled = true;
-      clearTimeout(timer);
-      client.close();
-      resolve([first, outcome]);
+      return;
+    }
+    if (type === MessageType.Sync || type === MessageType.SyncReply) {
+      const sub = readVarUint(decoder);
+      if (sub === SYNC_STEP2 || sub === SYNC_UPDATE) {
+        const update = readVarUint8Array(decoder);
+        const doc = this.docs.get(documentName);
+        if (doc !== undefined) Y.applyUpdate(doc, update);
+      }
+      // SyncStep1 from the server (asking for OUR state) is ignored —
+      // these clients never volunteer state.
+      return;
+    }
+    if (type === MessageType.SyncStatus) {
+      const saved = readVarUint(decoder) === 1;
+      if (this.#pendingSyncStatus !== null) {
+        const settle = this.#pendingSyncStatus;
+        this.#pendingSyncStatus = null;
+        settle(saved);
+      }
+    }
+  }
+
+  /** Run the Auth handshake for `documentName` on this socket. */
+  async attach(documentName: string): Promise<AuthResult> {
+    await this.#open.catch(() => {
+      /* fall through — rejected upgrades settle below */
     });
-    client.on("error", fail);
-    client.on("close", fail);
-  });
+    if (this.#closed || this.#ws.readyState !== WebSocket.OPEN) {
+      return { outcome: "rejected", scope: null };
+    }
+    return new Promise<AuthResult>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("auth handshake timed out")), WS_TIMEOUT_MS);
+      this.#pendingAuth = (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      };
+      this.#ws.send(buildAuthFrame(documentName, "smoke-session-token"));
+    });
+  }
+
+  /** Ask for full state; SyncStep2 + later broadcasts feed `this.docs`. */
+  startSync(documentName: string): void {
+    this.docs.set(documentName, new Y.Doc());
+    this.#ws.send(buildSyncStep1Frame(documentName));
+  }
+
+  /** Send a raw Yjs update; resolve with the server's SyncStatus ack. */
+  sendUpdate(documentName: string, update: Uint8Array): Promise<boolean> {
+    return new Promise<boolean>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("sync status timed out")), WS_TIMEOUT_MS);
+      this.#pendingSyncStatus = (saved) => {
+        clearTimeout(timer);
+        resolve(saved);
+      };
+      this.#ws.send(buildUpdateFrame(documentName, update));
+    });
+  }
+
+  /** Poll the local replica until its fragment text contains `needle`. */
+  async waitForText(documentName: string, needle: string): Promise<string> {
+    const deadline = Date.now() + WS_TIMEOUT_MS;
+    for (;;) {
+      const doc = this.docs.get(documentName);
+      const text = doc?.getXmlFragment(DOC_FRAGMENT).toString() ?? "";
+      if (text.includes(needle)) return text;
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for "${needle}" in: ${text}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  close(): void {
+    this.#ws.close();
+  }
 }
 
-describe("co-hosting + auth (deliverable #2)", () => {
-  let host: CoHost | undefined;
+describe("production WS attach (ADR 0030 hardening)", () => {
   let booted: BootedApp | undefined;
+  let running: RunningServer | undefined;
   let staticRoot: string | undefined;
+  /** Left deliberately attached so teardown proves the drain (see header). */
+  let lingering: CollabClient | undefined;
   let cookieA = "";
   let cookieB = "";
   let docInA = "";
   let docInB = "";
+  let docInB2 = "";
 
   function activePort(): number {
-    if (host === undefined) throw new Error("coHost not started");
-    return host.port;
+    if (running === undefined) throw new Error("server not started");
+    return running.port;
+  }
+
+  function openClient(headers: Record<string, string>): CollabClient {
+    return new CollabClient(activePort(), headers);
+  }
+
+  async function docUpdatesCount(docId: string): Promise<number> {
+    if (booted === undefined) throw new Error("not booted");
+    const rows = await booted.driver
+      .system()
+      .selectFrom("doc_updates")
+      .where("doc_id", "=", DocId(docId))
+      .select("id")
+      .execute();
+    return rows.length;
+  }
+
+  async function docGetBody(docId: string, cookie: string): Promise<string> {
+    const res = await fetch(`http://127.0.0.1:${activePort()}/docs/get/${docId}`, {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    return res.text();
   }
 
   beforeAll(async () => {
@@ -355,17 +352,27 @@ describe("co-hosting + auth (deliverable #2)", () => {
     await writeFile(join(staticRoot, "assets", "app.js"), "globalThis.__ez_spa = true;\n");
 
     booted = await boot();
-    host = await coHost(booted, staticRoot, buildHocuspocus(booted));
+    booted.app.use("/assets/*", serveStatic({ root: staticRoot }));
+    // The production wiring, verbatim: attachCollab mounted through
+    // startServer's attachment seam (what apps/server's entrypoint does).
+    const bootedNow = booted;
+    running = await startServer(bootedNow, 0, [
+      (server) => attachCollab(server, bootedNow, { publicOrigin: PUBLIC_ORIGIN }),
+    ]);
 
-    cookieA = await signUp(host.port, "alice@example.com");
-    cookieB = await signUp(host.port, "bob@example.com");
-    docInA = await createDoc(host.port, cookieA, "Alice's smoke doc");
-    docInB = await createDoc(host.port, cookieB, "Bob's smoke doc");
+    cookieA = await signUp(running.port, "alice@example.com");
+    cookieB = await signUp(running.port, "bob@example.com");
+    docInA = await createDoc(running.port, cookieA, "Alice's smoke doc");
+    docInB = await createDoc(running.port, cookieB, "Bob's smoke doc");
+    docInB2 = await createDoc(running.port, cookieB, "Bob's second doc");
   });
 
   afterAll(async () => {
-    await host?.close();
-    await booted?.close();
+    // `lingering` is still attached: close() must settle anyway — the
+    // ServerAttachment drain terminates upgraded sockets before
+    // `server.close()` waits on connections. A hang here IS the failure.
+    await running?.close();
+    lingering?.close();
     if (staticRoot) await rm(staticRoot, { recursive: true, force: true });
   });
 
@@ -380,23 +387,122 @@ describe("co-hosting + auth (deliverable #2)", () => {
   });
 
   it("rejects a collab upgrade with no session cookie (authN at upgrade)", async () => {
-    expect(await wsAuth(activePort(), docInA, null)).toBe("rejected");
+    const client = openClient({ origin: PUBLIC_ORIGIN });
+    expect((await client.attach(docInA)).outcome).toBe("rejected");
+    client.close();
   });
 
-  it("authenticates a collab connection for a doc in the principal's workspace", async () => {
-    expect(await wsAuth(activePort(), docInA, cookieA)).toBe("authenticated");
+  it("rejects a valid-cookie upgrade from a foreign Origin", async () => {
+    const client = openClient({ origin: "http://evil.example", cookie: cookieA });
+    expect((await client.attach(docInA)).outcome).toBe("rejected");
+    client.close();
   });
 
-  it("denies a collab connection for a doc in another workspace (authZ at onAuthenticate)", async () => {
-    expect(await wsAuth(activePort(), docInA, cookieB)).toBe("denied");
+  it("rejects a valid-cookie upgrade with NO Origin header", async () => {
+    const client = openClient({ cookie: cookieA });
+    expect((await client.attach(docInA)).outcome).toBe("rejected");
+    client.close();
   });
 
-  it("gates each document independently on one socket (same-socket multiplex authZ)", async () => {
-    // Alice authenticates her own doc, then sends an Auth frame for Bob's doc
-    // over the *same* socket: the first establishes, the second is denied —
-    // proving per-document authZ holds across a multiplexed connection.
-    const [first, second] = await wsAuthSameSocket(activePort(), cookieA, docInA, docInB);
-    expect(first).toBe("authenticated");
-    expect(second).toBe("denied");
+  it("authenticates an in-workspace doc — and the grant is readonly", async () => {
+    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
+    const result = await client.attach(docInA);
+    expect(result.outcome).toBe("authenticated");
+    // Invariant 3: no audited WS write lane yet ⇒ the sync layer forces
+    // readOnly for EVERY principal; the Authenticated frame carries it.
+    expect(result.scope).toBe("readonly");
+    client.close();
+  });
+
+  it("denies a collab attach for a doc in another workspace (authZ per Auth frame)", async () => {
+    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieB });
+    expect((await client.attach(docInA)).outcome).toBe("denied");
+    client.close();
+  });
+
+  it("gates each document independently on one socket (multiplex authZ)", async () => {
+    // Alice authenticates her own doc, then sends an Auth frame for
+    // Bob's doc over the SAME socket: the first establishes, the second
+    // is denied — per-document authZ holds across multiplexing.
+    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
+    expect((await client.attach(docInA)).outcome).toBe("authenticated");
+    expect((await client.attach(docInB)).outcome).toBe("denied");
+    client.close();
+  });
+
+  it("nacks a WS write and leaves durable + in-memory state untouched (readOnly enforced)", async () => {
+    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
+    expect((await client.attach(docInA)).outcome).toBe("authenticated");
+
+    const rowsBefore = await docUpdatesCount(docInA);
+    const bodyBefore = await docGetBody(docInA, cookieA);
+
+    // A REAL Yjs update (not a malformed frame): a paragraph minted in a
+    // scratch doc — exactly what a writing client would push.
+    const scratch = new Y.Doc();
+    const para = new Y.XmlElement("paragraph");
+    para.insert(0, [new Y.XmlText("rogue WS write")]);
+    scratch.getXmlFragment(DOC_FRAGMENT).insert(0, [para]);
+    const saved = await client.sendUpdate(docInA, Y.encodeStateAsUpdate(scratch));
+
+    // Codex review SHOULD-FIX: assert STATE, not just the denial frame.
+    expect(saved).toBe(false);
+    expect(await docUpdatesCount(docInA)).toBe(rowsBefore);
+    expect(await docGetBody(docInA, cookieA)).toBe(bodyBefore);
+    client.close();
+  });
+
+  it("hydrates committed state on attach and converges live HTTP writes (one instance)", async () => {
+    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
+    expect((await client.attach(docInA)).outcome).toBe("authenticated");
+    client.startSync(docInA);
+
+    // Hydration: the SyncStep2 reply must carry the doc.create-committed
+    // state (the `__ws` onLoadDocument branch replaying doc_updates).
+    await client.waitForText(docInA, "Alice's smoke doc");
+
+    // Convergence: an HTTP doc.update lands in the SAME embedded
+    // Hocuspocus and broadcasts to the attached readOnly client.
+    const res = await fetch(`http://127.0.0.1:${activePort()}/docs/update/${docInA}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: cookieA },
+      body: JSON.stringify({
+        ops: [
+          {
+            op: "insert",
+            block: { type: "paragraph", content: "Converged over HTTP" },
+            after_block_id: null,
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    await client.waitForText(docInA, "Converged over HTTP");
+    client.close();
+  });
+
+  it("denies a NEW document attach after sign-out on a still-open socket (freshness)", async () => {
+    const client = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieB });
+    expect((await client.attach(docInB)).outcome).toBe("authenticated");
+
+    const signOut = await fetch(`http://127.0.0.1:${activePort()}/auth/sign-out`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: cookieB },
+      body: "{}",
+    });
+    expect(signOut.ok).toBe(true);
+
+    // The socket is still open; the principal is re-resolved from the
+    // upgrade headers PER Auth frame — the revoked session must deny
+    // the next document, not ride the upgrade-time snapshot.
+    expect((await client.attach(docInB2)).outcome).toBe("denied");
+    client.close();
+  });
+
+  it("keeps one client attached for the teardown drain proof", async () => {
+    lingering = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
+    expect((await lingering.attach(docInA)).outcome).toBe("authenticated");
+    // Deliberately NOT closed — afterAll's running.close() must settle
+    // while this socket is live (ServerAttachment terminates it).
   });
 });

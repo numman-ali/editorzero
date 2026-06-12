@@ -521,68 +521,78 @@ describe("HocuspocusSync.bind().transact", () => {
     expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(iterations);
   });
 
-  it("rollback leaves the doc resident when a concurrent connection holds it (WS-client limit regression guard)", async () => {
-    // P3.6e class docstring "In-memory rollback scope" claim:
-    // `bound.rollback()` disconnects our per-doc singleton, but
-    // Hocuspocus's `shouldUnloadDocument` gates unload on
-    // `getConnectionsCount() === 0` — including WebSocket client
-    // connections. In production with live browser editors attached,
-    // rolling back a server-side `ctx.transact` cannot evict the
-    // Document, so the rolled-back delta stays resident and a
-    // subsequent `ctx.transact` reads the polluted state. This test
-    // pins that as a *known* limit, not accidental: if someone "fixes"
-    // this by force-closing WebSocket connections on rollback, this
-    // test fails and forces them to justify the UX tradeoff (dropping
-    // live editor sessions mid-edit). The real closure is Phase 4's
-    // broadcast-suppression work.
+  it("fails closed when rollback cannot evict a held doc, and recovers on release (poisoned path)", async () => {
+    // The P3.6e-era version of this test pinned the OPPOSITE: with a
+    // concurrent holder keeping `getConnectionsCount() > 0`, rollback
+    // could not evict and the next `ctx.transact` silently read the
+    // rolled-back delta — recorded then as a known Phase-4 limit, with
+    // this test demanding a justification from whoever "fixed" it. The
+    // ADR 0030 WS-hardening review (task #15) supplied the
+    // justification: once real WS clients attach, persisting deltas
+    // computed on aborted state is a silent invariant-3/7 violation,
+    // strictly worse than refusing loudly. Rollback now closes the
+    // doc's WS subscriptions and awaits the unload drain; a holder it
+    // CANNOT kill (this direct-connection squatter — `closeConnections`
+    // only reaches WS connections) marks the doc poisoned, and both
+    // open paths refuse until eviction succeeds. The full WS lifecycle
+    // (real sockets, hydration, Close frames) lives in
+    // `ws-attach.integration.test.ts`.
     await seedDocMetadata(DOC_ID_A);
 
-    // Simulate a WebSocket client by opening a second direct
-    // connection from outside our bind. This holds the Document
-    // resident independently of our bind's singleton.
     const squatter = await sync._server_testOnly().openDirectConnection(DOC_ID_A, {});
-    try {
-      await expect(
-        driver.withSystemTx(async (tx) => {
-          const ctx: HocuspocusTxContext = {
-            sqlTx: asAuditTx(tx),
-            principal: testPrincipal(),
-            workspace_id: WORKSPACE_ID,
-          };
-          const bound = sync.bind(ctx);
-          try {
-            await bound.transact(DOC_ID_A, (ydoc) => {
-              ydoc.getText("body").insert(0, "rolled-back");
-            });
-            throw new Error("post-transact throw");
-          } catch (err) {
-            await bound.rollback();
-            throw err;
-          }
-        }),
-      ).rejects.toThrow("post-transact throw");
-
-      // Durable state clean (SQL tx rolled back).
-      expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(0);
-
-      // BUT the Y.Doc is still resident (squatter keeps the count
-      // above 0). A subsequent ctx.transact sees the polluted state.
-      let observed = "";
-      await driver.withSystemTx(async (tx) => {
+    await expect(
+      driver.withSystemTx(async (tx) => {
         const ctx: HocuspocusTxContext = {
           sqlTx: asAuditTx(tx),
           principal: testPrincipal(),
           workspace_id: WORKSPACE_ID,
         };
         const bound = sync.bind(ctx);
-        await bound.transact(DOC_ID_A, (ydoc) => {
-          observed = ydoc.getText("body").toString();
-        });
+        try {
+          await bound.transact(DOC_ID_A, (ydoc) => {
+            ydoc.getText("body").insert(0, "rolled-back");
+          });
+          throw new Error("post-transact throw");
+        } catch (err) {
+          await bound.rollback();
+          throw err;
+        }
+      }),
+    ).rejects.toThrow("post-transact throw");
+
+    // Durable state clean (SQL tx rolled back).
+    expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(0);
+
+    // Poisoned: the squatter pinned the Document, so the aborted
+    // mutation is still resident — both open paths refuse loudly
+    // rather than serve or build on it.
+    await expect(
+      driver.withSystemTx(async (tx) => {
+        const ctx: HocuspocusTxContext = {
+          sqlTx: asAuditTx(tx),
+          principal: testPrincipal(),
+          workspace_id: WORKSPACE_ID,
+        };
+        await sync.bind(ctx).transact(DOC_ID_A, () => undefined);
+      }),
+    ).rejects.toThrow(/could not be evicted/u);
+    await expect(sync.read(DOC_ID_A, () => undefined)).rejects.toThrow(/could not be evicted/u);
+
+    // Holder gone → the next open's eviction retry clears the poison
+    // and rehydrates from committed `doc_updates` (here: empty doc).
+    await squatter.disconnect();
+    let observed = "";
+    await driver.withSystemTx(async (tx) => {
+      const ctx: HocuspocusTxContext = {
+        sqlTx: asAuditTx(tx),
+        principal: testPrincipal(),
+        workspace_id: WORKSPACE_ID,
+      };
+      await sync.bind(ctx).transact(DOC_ID_A, (ydoc) => {
+        observed = ydoc.getText("body").toString();
       });
-      expect(observed).toBe("rolled-back");
-    } finally {
-      await squatter.disconnect();
-    }
+    });
+    expect(observed).toBe("");
   });
 
   it("isolates writes across doc_ids", async () => {

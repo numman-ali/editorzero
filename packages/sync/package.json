@@ -33,9 +33,13 @@
   "devDependencies": {
     "@editorzero/errors": "workspace:*",
     "@editorzero/scopes": "workspace:*",
+    "@hocuspocus/common": "3.4.4",
     "@types/better-sqlite3": "catalog:",
+    "@types/ws": "^8.5.0",
     "better-sqlite3": "catalog:",
+    "lib0": "0.2.117",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "ws": "8.20.0"
   }
 }

@@ -35,9 +35,9 @@
  * by the integration test, since the doc comment upstream is ambiguous
  * about absolute roots.
  *
- * The `/collab` WebSocket upgrade is deliberately NOT mounted here —
- * production WS attach is gated on the ADR 0030 red-team blockers
- * (task #15: role-aware readOnly, Origin check, revocation freshness).
+ * The `/collab` WebSocket upgrade lives in `./collab` (`attachCollab`) —
+ * it mounts on the raw `http.Server` (upgrades never reach the Hono
+ * trunk), not on the app like this static attach.
  */
 
 import type { ApiEnv, BootedApp } from "@editorzero/api-server";

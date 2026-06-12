@@ -47,20 +47,26 @@
  * holds for a mutated doc. Hocuspocus's `shouldUnloadDocument` gates
  * the actual Y.Doc unload on `getConnectionsCount() === 0`, and that
  * count includes WebSocket client connections, not just our direct
- * ones. In a deployment with live browser editors attached to the
- * same doc, rolling back a server-side `ctx.transact` does not evict
- * the Document from memory — the rolled-back mutation stays resident
- * and a subsequent `ctx.transact` reads the polluted state.
+ * ones — so with live WS clients attached, the direct disconnect alone
+ * would leave the Document resident with the rolled-back mutation
+ * applied, and the next `ctx.transact` would persist deltas computed
+ * on aborted state (the ADR 0030 WS-hardening review's server-side
+ * correctness hole). Rollback therefore also force-closes that doc's
+ * WS subscriptions (Hocuspocus per-doc `Connection.close` — the
+ * multiplexed socket survives; affected clients get a Close frame for
+ * the evicted doc) and awaits the unload drain (`#evictResident`); if
+ * eviction cannot be proven inside the bounded window (e.g. a racing
+ * re-attach keeps the count positive), the doc is marked poisoned and
+ * BOTH open paths (`bind().transact` + `read`) refuse to serve it
+ * until a retried eviction succeeds — fail closed, never
+ * mutate-or-read poisoned state.
  *
- * A stronger fix would buffer the update broadcast until the SQL tx
- * commits and only then replay to clients; the rolled-back case would
- * drop the buffer instead of broadcasting. Broadcasting first + trying
- * to unbroadcast after rollback is fundamentally incorrect — clients
- * applying the aborted delta locally would re-send it on reconnect
- * and the CRDT would re-merge it. That design change is Phase 4 scope
- * (production hardening); P3.6e's rollback handles the single-writer
- * path the dispatcher exercises in tests, and the integration test
- * assumes no parallel WebSocket session on the mutated doc.
+ * Residual (recorded, slice B): the pre-commit broadcast already
+ * reached attached clients, and Yjs merges are additive — a client
+ * that applied the phantom delta keeps it locally until it reconnects
+ * and resyncs. Connections are force-readOnly (see `collabAuthorize`),
+ * so the phantom cannot be pushed back; the deep fix is
+ * broadcast-after-commit, which lands with the audited WS write lane.
  *
  * **Why capture updates via `Y.Doc#on("update", …)` rather than via
  * Hocuspocus's `onChange` hook.** `onChange` is fire-and-forget in
@@ -91,8 +97,11 @@
  *
  * **Test-shape composition.** `new Hocuspocus(...)` without `listen()`
  * works headless — the research pass and the `Hocuspocus.d.ts`
- * surface both confirm. No WebSocket, no HTTP server. We set
- * `debounce: 0` + `unloadImmediately: false` so `onStoreDocument`
+ * surface both confirm. No WebSocket, no HTTP server attaches here;
+ * production WS clients enter through `handleWsConnection`, fed by
+ * the `apps/server` upgrade handler (`attachCollab`). We set
+ * `unloadImmediately: false` (and inherit the `debounce: 2000`
+ * default — see the constructor comment) so `onStoreDocument`
  * doesn't fire on its own (we're not using it), and docs don't unload
  * between invocations unless `bound.rollback()` explicitly drops them.
  */
@@ -101,7 +110,7 @@ import type { AuditTx } from "@editorzero/audit";
 import type { DocUpdatesReader, DocUpdatesWriter, SystemDb } from "@editorzero/db";
 import type { DocId, WorkspaceId } from "@editorzero/ids";
 import type { Principal } from "@editorzero/principal";
-import { Hocuspocus } from "@hocuspocus/server";
+import { Hocuspocus, type onAuthenticatePayload } from "@hocuspocus/server";
 import * as Y from "yjs";
 
 import type { BoundSyncService } from "./service";
@@ -122,6 +131,19 @@ export interface HocuspocusTxContext {
   readonly principal: Principal;
   readonly workspace_id: WorkspaceId;
 }
+
+/**
+ * What the per-document WebSocket authorization policy sees — the
+ * subset of Hocuspocus's `onAuthenticatePayload` that identity +
+ * authority can be derived from. `requestHeaders` are the ORIGINAL
+ * upgrade request's headers, which Hocuspocus re-presents on every
+ * Auth frame: the policy re-resolves the principal from them each
+ * time (cookie → session → roles), so a session revoked after the
+ * socket was established is denied on the next document attach —
+ * nothing identity-shaped is trusted from connection context (the
+ * stale-snapshot trap the ADR 0030 hardening review flagged).
+ */
+export type CollabAuthorizePayload = Pick<onAuthenticatePayload, "documentName" | "requestHeaders">;
 
 export interface HocuspocusSyncDeps {
   readonly docUpdatesWriter: DocUpdatesWriter;
@@ -145,15 +167,45 @@ export interface HocuspocusSyncDeps {
    */
   readonly systemDb: SystemDb;
   /**
-   * Optional hocuspocus tuning. Defaults are test-safe: `debounce: 0`
-   * + `unloadImmediately: false` keep `onStoreDocument` from firing
-   * and docs resident across invocations. Production wiring will
-   * override with real values + a compaction hook.
+   * Per-document WebSocket authorization policy (ADR 0030 blockers
+   * 1/3/4). Fires once per (socket, documentName) Auth frame — the
+   * client must authenticate each document it attaches to on a
+   * multiplexed socket. Throw to deny: Hocuspocus answers
+   * `permission-denied` for that document only; other documents on
+   * the socket are unaffected. After the policy passes, the class
+   * FORCES `connectionConfig.readOnly = true` — invariant 3 (every
+   * mutation = exactly one audit row) is unsatisfiable over the WS
+   * write lane until updates route through the audited dispatcher
+   * path, so no policy can grant WS write access today. The audited
+   * write lane (and with it role-aware write standing) is its own
+   * slice.
+   *
+   * OPTIONAL with a deny-all default, which is by-construction
+   * fail-closed: Hocuspocus treats a *hook-less* server as requiring
+   * no authentication (full read/write for any socket — the original
+   * red-team finding). This class therefore ALWAYS registers
+   * `onAuthenticate`; a `HocuspocusSync` built without an explicit
+   * policy refuses every WS attach rather than admitting them. The
+   * dispatcher's `DirectConnection` lane never fires `onAuthenticate`
+   * (verified in the 3.4.4 source — `openDirectConnection` constructs
+   * its connection config directly), so registering the hook cannot
+   * affect HTTP-path writes.
+   */
+  readonly collabAuthorize?: (payload: CollabAuthorizePayload) => Promise<void>;
+  /**
+   * Optional hocuspocus tuning. Defaults are test-safe: the inherited
+   * `debounce` + `unloadImmediately: false` keep `onStoreDocument`
+   * from firing and docs resident across invocations. Production
+   * wiring will override with real values + a compaction hook.
+   * `evictDrainMs` bounds how long `#evictResident` waits for closed
+   * WS connections to drain before declaring the doc poisoned
+   * (default 500ms; tests pass 0 to exercise the poisoned path).
    */
   readonly hocuspocus?: {
     readonly debounce?: number;
     readonly unloadImmediately?: boolean;
     readonly name?: string;
+    readonly evictDrainMs?: number;
   };
 }
 
@@ -174,7 +226,22 @@ interface HocuspocusReadMarker {
   readonly __read: true;
 }
 
+/**
+ * Connection context for WebSocket clients — `handleWsConnection`
+ * passes this (and nothing else) as Hocuspocus's `defaultContext`.
+ * The `onLoadDocument` hook hydrates `__ws` opens from committed
+ * `doc_updates` via the untransacted reader, exactly like `__read`
+ * opens (the "Phase 4 WebSocket path will open with its own hydration
+ * marker" this dispatch always anticipated). Deliberately carries NO
+ * principal: identity is re-resolved per Auth frame inside
+ * `collabAuthorize`, never snapshotted onto the connection.
+ */
+interface HocuspocusWsMarker {
+  readonly __ws: true;
+}
+
 type DirectConnection = Awaited<ReturnType<Hocuspocus["openDirectConnection"]>>;
+type WsConnectionArgs = Parameters<Hocuspocus["handleConnection"]>;
 
 export class HocuspocusSync {
   readonly #server: Hocuspocus;
@@ -231,10 +298,27 @@ export class HocuspocusSync {
    * connections, the mutex is load-bearing.
    */
   readonly #docLocks: Map<DocId, Promise<void>> = new Map();
+  /**
+   * Docs whose rolled-back in-memory state could not be proven
+   * evicted (`#evictResident` timed out — e.g. a WS client re-attached
+   * mid-drain and kept the connection count positive). Both open
+   * paths check this set first and retry eviction under the doc lock;
+   * if it still cannot be cleared they throw rather than serve or
+   * mutate state that includes an aborted SQL transaction's deltas.
+   */
+  readonly #poisoned: Set<DocId> = new Set();
+  readonly #evictDrainMs: number;
   #closed = false;
 
   constructor(deps: HocuspocusSyncDeps) {
     this.#docUpdatesWriter = deps.docUpdatesWriter;
+    this.#evictDrainMs = deps.hocuspocus?.evictDrainMs ?? 500;
+    // Deny-all unless the composition root supplies a policy — see
+    // the `collabAuthorize` deps docstring for why optional-with-
+    // deny-default is the by-construction posture here.
+    const collabAuthorize =
+      deps.collabAuthorize ??
+      (() => Promise.reject(new Error("collab: no authorization policy configured")));
     const reader = deps.docUpdatesReader;
     const systemDb = deps.systemDb;
     // `unloadImmediately: false` keeps Y.Docs resident across the
@@ -252,6 +336,21 @@ export class HocuspocusSync {
       unloadImmediately: deps.hocuspocus?.unloadImmediately ?? false,
       quiet: true,
       extensions: [],
+      // Per-document WS authorization (ADR 0030). Registered HERE so
+      // the gate exists by construction — a Hocuspocus with no
+      // `onAuthenticate` treats sockets as requiring no auth at all.
+      // Fires per (socket, documentName) Auth frame; never fires for
+      // the dispatcher's DirectConnections (3.4.4 source:
+      // `openDirectConnection` builds its connectionConfig directly).
+      onAuthenticate: async ({ documentName, requestHeaders, connectionConfig }) => {
+        await collabAuthorize({ documentName, requestHeaders });
+        // Invariant 3: WS-applied updates would bypass the audited
+        // dispatcher write lane, so no policy outcome can grant write.
+        // Hocuspocus enforces this server-side — Update/SyncStep2
+        // frames from a readOnly connection are nacked, not applied.
+        // The audited WS write lane (slice B) lifts this deliberately.
+        connectionConfig.readOnly = true;
+      },
       // Hydration: the Document passed in is the server's canonical
       // Y.Doc instance for this documentName. Applying updates
       // directly to it is what Hocuspocus itself would do if we
@@ -260,7 +359,7 @@ export class HocuspocusSync {
       // (verified at `Hocuspocus.esm.js:2458-2466`). Writing to the
       // canonical instance skips the extra encode/decode.
       //
-      // **Three-way dispatch on `context`.**
+      // **Four-way dispatch on `context`.**
       //
       //   1. Write-path bind — `context.sqlTx` set (+ `principal` +
       //      `workspace_id`). Read through that tx's handle via
@@ -276,12 +375,15 @@ export class HocuspocusSync {
       //      `reader.readByDocUntransacted(systemDb, …)` on the captured
       //      untransacted handle. SQLite's WAL + Postgres's pool both
       //      tolerate this running concurrently with live writers.
-      //   3. Non-bind, non-read opens (today: test fixtures simulating
-      //      a concurrent connection holder; Phase 4: WebSocket client
-      //      loads). Skip hydration. The Phase 4 WebSocket path will
-      //      open with its own hydration marker; for Phase 3 the two
-      //      sanctioned openers (`bind().transact` + `read`) are the
-      //      only paths that need it.
+      //   3. WebSocket attach — `context.__ws === true` (set by
+      //      `handleWsConnection`, the only WS entry point). Same
+      //      untransacted hydration as the read path: the first WS
+      //      client to open a cold doc replays committed `doc_updates`
+      //      before Hocuspocus starts the sync protocol, so attached
+      //      readers see durable state, not an empty fragment.
+      //   4. Bare opens (test fixtures simulating a concurrent
+      //      connection holder). Skip hydration — the three sanctioned
+      //      openers above are the only paths that need it.
       //
       // Throwing out of the hook causes Hocuspocus to
       // `unloadDocument` + `closeConnections` + rethrow — the
@@ -290,7 +392,9 @@ export class HocuspocusSync {
       // partially-hydrated Y.Doc.
       onLoadDocument: async ({ document, documentName, context }) => {
         const maybeCtx = context as
-          | (Partial<HocuspocusTxContext> & Partial<HocuspocusReadMarker>)
+          | (Partial<HocuspocusTxContext> &
+              Partial<HocuspocusReadMarker> &
+              Partial<HocuspocusWsMarker>)
           | null
           | undefined;
         const sqlTx = maybeCtx?.sqlTx;
@@ -301,7 +405,7 @@ export class HocuspocusSync {
           }
           return;
         }
-        if (maybeCtx?.__read === true) {
+        if (maybeCtx?.__read === true || maybeCtx?.__ws === true) {
           const blobs = await reader.readByDocUntransacted(systemDb, documentName as DocId);
           for (const blob of blobs) {
             Y.applyUpdate(document, blob);
@@ -413,10 +517,36 @@ export class HocuspocusSync {
     return this.#withDocLock(doc_id, () => this.#runRead(doc_id, fn));
   }
 
+  /**
+   * Hand an upgraded WebSocket to the embedded Hocuspocus — the ONE
+   * production WS entry point (ADR 0030). Routing clients into the
+   * same instance the dispatcher writes through is what makes live
+   * convergence real: an HTTP `ctx.transact` mutates the resident
+   * Y.Doc and Hocuspocus broadcasts the delta to attached clients.
+   *
+   * The caller (`attachCollab` in apps/server) has already enforced
+   * the upgrade-time boundary: path, Origin allow-list, and an
+   * authenticated session cookie. Per-document authorization happens
+   * here-after, per Auth frame, via the constructor-registered
+   * `onAuthenticate` → `collabAuthorize` — which re-resolves the
+   * principal from the request headers each time, so nothing
+   * identity-shaped rides the connection context. The context carries
+   * only the `__ws` hydration marker.
+   */
+  handleWsConnection(websocket: WsConnectionArgs[0], request: WsConnectionArgs[1]): void {
+    if (this.#closed) {
+      websocket.close();
+      return;
+    }
+    const wsMarker: HocuspocusWsMarker = { __ws: true };
+    this.#server.handleConnection(websocket, request, wsMarker);
+  }
+
   async #runRead<T>(doc_id: DocId, fn: (ydoc: Y.Doc) => T | Promise<T>): Promise<T> {
     if (this.#closed) {
       throw new Error("HocuspocusSync: read called after close()");
     }
+    await this.#refuseIfPoisoned(doc_id);
     // Mirrors the open-replace pattern in `#runTransactLocked` — open
     // a fresh DirectConnection carrying *this invocation's* read marker,
     // register it as the per-doc singleton, disconnect the previous
@@ -522,6 +652,7 @@ export class HocuspocusSync {
     if (this.#closed) {
       throw new Error("HocuspocusSync: transact called after close()");
     }
+    await this.#refuseIfPoisoned(doc_id);
 
     // **Open-replace pattern for per-doc singleton retention.** Each
     // invocation opens a fresh `DirectConnection` carrying *this
@@ -639,26 +770,88 @@ export class HocuspocusSync {
   }
 
   /**
-   * Drop the in-memory Y.Doc for `doc_id` by disconnecting the current
-   * per-doc singleton. When no WebSocket clients are attached,
-   * Hocuspocus's `shouldUnloadDocument` fires on the disconnect and
-   * the Document clears from memory — the next `ctx.transact` reopens
-   * through `onLoadDocument`, replaying only committed `doc_updates`.
-   *
-   * When WebSocket clients ARE attached, `getConnectionsCount()`
-   * stays positive after our direct connection disconnects and the
-   * Document stays resident. See the class docstring's "In-memory
-   * rollback scope" section — this is the Phase 4 gap that
-   * broadcast-suppression closes; P3.6e's scope is the single-writer
-   * path.
+   * Drop the in-memory Y.Doc for `doc_id`. Disconnecting the per-doc
+   * direct singleton handles the no-WS case end-to-end:
+   * `DirectConnection.disconnect` drains the store debouncer
+   * (`storeDocumentHooks(…, immediately)`) and unloads the Document
+   * when it was the last holder. With WebSocket clients attached the
+   * Document survives the direct disconnect, so `#evictResident`
+   * force-closes them and awaits the unload drain — see the class
+   * docstring's "In-memory rollback scope" section.
    *
    * Called only via `BoundSyncService.rollback()` — not part of the
    * transact path, not called on commit.
    */
   async #dropInMemory(doc_id: DocId): Promise<void> {
     const direct = this.#liveConnections.get(doc_id);
-    if (direct === undefined) return;
-    this.#liveConnections.delete(doc_id);
-    await direct.disconnect();
+    if (direct !== undefined) {
+      this.#liveConnections.delete(doc_id);
+      await direct.disconnect();
+    }
+    await this.#evictResident(doc_id);
+  }
+
+  /**
+   * Prove the Document for `doc_id` is out of memory, or mark it
+   * poisoned. Force-closes any WebSocket holders, then drives the
+   * unload to completion: Hocuspocus's close-callback path can skip
+   * `unloadDocument` (our `unloadImmediately: false` config takes the
+   * pending-debounce branch in `ClientConnection.onClose`, and
+   * `DirectConnection.disconnect` skips it while `saveMutex` is
+   * held), so the drain loop actively calls the public
+   * `unloadDocument` whenever the connection count reaches zero —
+   * it's internally guarded by `shouldUnloadDocument`, so calling it
+   * repeatedly is safe. WebSocket closes are in-process event-loop
+   * work; the normal case drains in a few ticks. If the bound expires
+   * with the doc still resident (e.g. a client re-attached mid-drain
+   * and the count never reached zero), the doc stays poisoned and
+   * `#refuseIfPoisoned` fails the next open closed.
+   */
+  async #evictResident(doc_id: DocId): Promise<void> {
+    if (!this.#server.documents.has(doc_id)) {
+      this.#poisoned.delete(doc_id);
+      return;
+    }
+    this.#server.closeConnections(doc_id);
+    const deadline = Date.now() + this.#evictDrainMs;
+    while (Date.now() < deadline) {
+      const document = this.#server.documents.get(doc_id);
+      if (document === undefined) {
+        this.#poisoned.delete(doc_id);
+        return;
+      }
+      if (document.getConnectionsCount() === 0) {
+        await this.#server.unloadDocument(document);
+      }
+      if (!this.#server.documents.has(doc_id)) {
+        this.#poisoned.delete(doc_id);
+        return;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    if (this.#server.documents.has(doc_id)) {
+      this.#poisoned.add(doc_id);
+    } else {
+      this.#poisoned.delete(doc_id);
+    }
+  }
+
+  /**
+   * Open-path gate for rolled-back state that out-survived its
+   * eviction window: retry the eviction (we're under `#withDocLock`,
+   * so nothing else is mid-open on this doc), and if the Document
+   * STILL cannot be cleared, refuse — persisting deltas computed on
+   * top of an aborted transaction's state, or serving reads of it,
+   * breaks invariants 3 and 7 silently. Loud refusal is recoverable;
+   * silent divergence is not.
+   */
+  async #refuseIfPoisoned(doc_id: DocId): Promise<void> {
+    if (!this.#poisoned.has(doc_id)) return;
+    await this.#evictResident(doc_id);
+    if (this.#poisoned.has(doc_id)) {
+      throw new Error(
+        `HocuspocusSync: doc ${doc_id} holds rolled-back in-memory state that could not be evicted`,
+      );
+    }
   }
 }

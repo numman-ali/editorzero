@@ -257,10 +257,16 @@ importers:
       better-sqlite3:
         specifier: 'catalog:'
         version: 12.9.0
+      ws:
+        specifier: 8.20.0
+        version: 8.20.0
     devDependencies:
       '@editorzero/ids':
         specifier: workspace:*
         version: link:../../packages/ids
+      '@editorzero/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@hocuspocus/common':
         specifier: 3.4.4
         version: 3.4.4
@@ -288,9 +294,9 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.3)
-      ws:
-        specifier: 8.20.0
-        version: 8.20.0
+      yjs:
+        specifier: 'catalog:'
+        version: 13.6.30
 
   packages/api-client:
     dependencies:
@@ -852,18 +858,30 @@ importers:
       '@editorzero/scopes':
         specifier: workspace:*
         version: link:../scopes
+      '@hocuspocus/common':
+        specifier: 3.4.4
+        version: 3.4.4
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 7.6.13
+      '@types/ws':
+        specifier: ^8.5.0
+        version: 8.18.1
       better-sqlite3:
         specifier: 'catalog:'
         version: 12.9.0
+      lib0:
+        specifier: 0.2.117
+        version: 0.2.117
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
         version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.17)(happy-dom@15.11.7)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.3)
+      ws:
+        specifier: 8.20.0
+        version: 8.20.0
 
 packages:
 
