@@ -63,7 +63,7 @@ export const grant = new Hono<ApiEnv>().post(
         },
         400: {
           description:
-            "Validation error — malformed body, or the subject rules: user subject not a live workspace member / without standing in the doc's Space (use doc.add_guest).",
+            "Validation error — malformed body; the subject rules (user subject not a live workspace member / without standing in the doc's Space — use doc.add_guest); or the doc's placement is anomalous (repair-first: space.restore or doc.move, then grant).",
           content: jsonContent(errEnvelope("validation_failed")),
         },
         401: {

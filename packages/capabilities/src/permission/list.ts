@@ -3,19 +3,24 @@
  * (ADR 0040 Step 8; Appendix A row). Read; `workspace:read` scope —
  * the resource-level visibility rule below is the real bound.
  *
- * **Visibility — who may see a resource's access panel.**
- *   - doc — `assertCanRead`: anyone who can READ the doc can see who
- *     else can (the transparency posture of every mainstream sharing
- *     panel; the list includes guest edges — surfacing the audited
- *     escape hatches is what the `is_guest` marker is FOR).
- *   - space — baseline reach (`hasBaselineReach`: membership / space
- *     grant / open baseline / personal owner) OR granting authority
- *     (`canAdministerSpace` — covers the workspace owner/admin
- *     backstop on team spaces they have no reach into). Personal
- *     spaces therefore stay owner-only against admins reading by
- *     reach, but note the audit plane is see-all-by-design (the
- *     Step-8 side-channel decision) — this rule governs the LIVE
- *     panel, not forensics.
+ * **Visibility — administer-tier on the resource** (tightened from
+ * read-tier by the Codex slice-1 review SHOULD-FIX). The full panel is
+ * the sharing GRAPH — subject ids, roles, grantor attribution, guest
+ * markers, timestamps — not "who is in this document":
+ * `workspace.member_list` went admin-only on exactly this reasoning,
+ * and it applies harder here (a cross-space guest reading one doc must
+ * not harvest every internal subject and grantor on it).
+ *   - doc — `assertCanAdministerDoc` (creator / non-guest owner-role
+ *     doc grant / placement authority — the same ladder that bounds
+ *     `permission.grant`; whoever can edit the panel can read it).
+ *   - space — `assertCanAdministerSpace` (space owner-tier; workspace
+ *     owner/admin backstop on team spaces; personal spaces stay
+ *     owner-only against admins on the LIVE panel — the audit plane
+ *     is separately see-all-by-design per the Step-8 side-channel
+ *     decision).
+ * Reader-level transparency ("who has access" avatars), if the product
+ * wants it, is a deliberate FUTURE redacted capability (no grant ids,
+ * no grantors, no markers) — never a widening of this one.
  *
  * **404 first (trash-invisible, the `doc.get` read posture).** Missing
  * OR soft-deleted resources are `not_found` before authority — a
@@ -52,7 +57,7 @@ const PERMISSION_LIST_ID = CapabilityId("permission.list");
 export const permissionList: Capability<PermissionListInput, PermissionListOutput> = {
   id: PERMISSION_LIST_ID,
   category: "read",
-  summary: "List the ACL edges on a doc or space; paginated, visibility-gated.",
+  summary: "List the ACL edges on a doc or space; paginated, administer-gated.",
   input: PermissionListInputSchema,
   output: PermissionListOutputSchema,
   requires: ["workspace:read"],
@@ -92,7 +97,7 @@ export const permissionList: Capability<PermissionListInput, PermissionListOutpu
       if (doc === undefined || doc.deleted_at !== null) {
         throw new NotFoundError({ subject_kind: "doc", subject_id: input.resource_id });
       }
-      acl.assertCanRead(doc);
+      acl.assertCanAdministerDoc(doc);
     } else {
       const space_id = SpaceId(input.resource_id);
       const space = await ctx.db
@@ -103,11 +108,7 @@ export const permissionList: Capability<PermissionListInput, PermissionListOutpu
       if (space === undefined || space.deleted_at !== null) {
         throw new NotFoundError({ subject_kind: "space", subject_id: input.resource_id });
       }
-      // Reach OR authority; the assert throws the properly-shaped
-      // acl_deny for callers with neither.
-      if (!acl.hasBaselineReach(space_id)) {
-        acl.assertCanAdministerSpace(space_id);
-      }
+      acl.assertCanAdministerSpace(space_id);
     }
 
     // Step 2 — page through the edges.

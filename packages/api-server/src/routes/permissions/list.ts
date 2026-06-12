@@ -42,7 +42,7 @@ export const list = new Hono<ApiEnv>().get(
   ...factory.createHandlers(
     describeRoute({
       tags: ["permissions"],
-      summary: "List the ACL edges on a doc or space; paginated, visibility-gated.",
+      summary: "List the ACL edges on a doc or space; paginated, administer-gated.",
       responses: {
         200: {
           description:
@@ -60,7 +60,7 @@ export const list = new Hono<ApiEnv>().get(
         },
         403: {
           description:
-            "Permission denied — missing `workspace:read`, or the visibility rule denied (doc: cannot read; space: neither reach nor authority).",
+            "Permission denied — missing `workspace:read`, or the caller lacks administer-tier on the resource (the panel is the sharing graph, not content).",
           content: jsonContent(errEnvelope("permission_denied")),
         },
         404: {

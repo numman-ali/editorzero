@@ -84,12 +84,18 @@ const S_MISSING = SpaceId("018f0000-0000-7000-8000-0000000000e9");
 const C_CLOSED = CollectionId("018f0000-0000-7000-8000-0000000000c1");
 const C_OPEN = CollectionId("018f0000-0000-7000-8000-0000000000c2");
 const C_PERSONAL = CollectionId("018f0000-0000-7000-8000-0000000000c3");
+// Anomaly placements (Codex slice-1 MUST-FIX regression): a collection
+// bound to the soft-deleted space, and one whose space ref dangles.
+const C_ANOMALY = CollectionId("018f0000-0000-7000-8000-0000000000c4");
+const C_DANGLING = CollectionId("018f0000-0000-7000-8000-0000000000c5");
 
 const D_LEGACY = DocId("018f0000-0000-7000-8000-0000000000d1");
 const D_CLOSED = DocId("018f0000-0000-7000-8000-0000000000d2");
 const D_OPEN = DocId("018f0000-0000-7000-8000-0000000000d3");
 const D_PERSONAL = DocId("018f0000-0000-7000-8000-0000000000d4");
 const D_TRASHED = DocId("018f0000-0000-7000-8000-0000000000d5");
+const D_ANOMALY = DocId("018f0000-0000-7000-8000-0000000000d6");
+const D_DANGLING = DocId("018f0000-0000-7000-8000-0000000000d7");
 const D_MISSING = DocId("018f0000-0000-7000-8000-0000000000d9");
 const D_FOREIGN = DocId("018f0000-0000-7000-8000-0000000000da");
 
@@ -133,12 +139,16 @@ beforeEach(async () => {
 
   await seedSpace(S_CLOSED, "closed");
   await seedSpace(S_OPEN, "open");
-  await seedSpace(S_TRASHED, "open", 99);
+  // CLOSED so the restore-flow regression can prove the standing rule
+  // still blocks a reach-less subject AFTER the space comes back.
+  await seedSpace(S_TRASHED, "closed", 99);
   await seedSpace(S_PERSONAL, "private", null, PERSONAL_OWNER);
 
   await seedCollection(C_CLOSED, S_CLOSED);
   await seedCollection(C_OPEN, S_OPEN);
   await seedCollection(C_PERSONAL, S_PERSONAL);
+  await seedCollection(C_ANOMALY, S_TRASHED);
+  await seedCollection(C_DANGLING, S_MISSING);
 
   await db
     .insertInto("space_members")
@@ -157,6 +167,8 @@ beforeEach(async () => {
   await seedDoc(D_OPEN, C_OPEN);
   await seedDoc(D_PERSONAL, C_PERSONAL, { created_by: PERSONAL_OWNER });
   await seedDoc(D_TRASHED, null, { deleted_at: 42 });
+  await seedDoc(D_ANOMALY, C_ANOMALY);
+  await seedDoc(D_DANGLING, C_DANGLING);
 
   // A pre-existing GUEST edge on the closed doc (the kind doc.add_guest
   // will mint) — permission.grant must refuse to converge it.
@@ -544,6 +556,90 @@ describe("permission.grant — user-subject rules", () => {
       parsedInput({ resource_kind: "space", resource_id: S_CLOSED, subject_id: PLAIN_MEMBER }),
     );
     expect(out.subject_id).toBe(PLAIN_MEMBER);
+  });
+});
+
+describe("permission.grant — anomaly placement refuses (repair-first)", () => {
+  // Codex slice-1 review MUST-FIX: a non-guest edge minted while the
+  // doc's Space binding is anomalous would, on space.restore, become an
+  // unmarked ceiling crossing. The refusal is total — uniform across
+  // subject kinds, ahead of the edge lookup — so no write path exists.
+
+  async function anomalyRows() {
+    return (await grantRows()).filter((r) => r.resource_id === D_ANOMALY);
+  }
+
+  it("trashed-space placement: owner-tier grant mints NO row; after restore, standing still blocks", async () => {
+    const duringAnomaly = await permissionGrant
+      .handler(buildCtx(user(CREATOR)), parsedInput({ resource_id: D_ANOMALY }))
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(duringAnomaly).toBeInstanceOf(ValidationError);
+    if (duringAnomaly instanceof ValidationError) {
+      expect(JSON.stringify(duringAnomaly.issues)).toContain("anomalous_placement_requires_repair");
+    }
+    expect(await anomalyRows()).toEqual([]);
+
+    // space.restore analogue (the capability lands in slice 2): the
+    // binding revives CLOSED, so the reach-less subject is routed to
+    // the guest flow — at no point does an unmarked cross-ceiling edge
+    // exist (the exact regression Codex asked for).
+    await db.updateTable("spaces").set({ deleted_at: null }).where("id", "=", S_TRASHED).execute();
+
+    const afterRestore = await permissionGrant
+      .handler(buildCtx(user(CREATOR)), parsedInput({ resource_id: D_ANOMALY }))
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(afterRestore).toBeInstanceOf(ValidationError);
+    if (afterRestore instanceof ValidationError) {
+      expect(JSON.stringify(afterRestore.issues)).toContain("subject_lacks_space_standing");
+    }
+    expect(await anomalyRows()).toEqual([]);
+  });
+
+  it("post-restore positive control: an agent subject lands — the refusal was the anomaly, not the doc", async () => {
+    await db.updateTable("spaces").set({ deleted_at: null }).where("id", "=", S_TRASHED).execute();
+    const out = await permissionGrant.handler(
+      buildCtx(user(CREATOR)),
+      parsedInput({ resource_id: D_ANOMALY, subject_kind: "agent", subject_id: BOT }),
+    );
+    expect(out.resource_id).toBe(D_ANOMALY);
+    expect(out.is_guest).toBe(0);
+  });
+
+  it("agent subjects are refused during the anomaly too (uniform rule, no carve-out)", async () => {
+    const err = await permissionGrant
+      .handler(
+        buildCtx(user(CREATOR)),
+        parsedInput({ resource_id: D_ANOMALY, subject_kind: "agent", subject_id: BOT }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(JSON.stringify(err.issues)).toContain("anomalous_placement_requires_repair");
+    }
+  });
+
+  it("dangling space ref is the same anomaly", async () => {
+    await expect(
+      permissionGrant.handler(buildCtx(user(CREATOR)), parsedInput({ resource_id: D_DANGLING })),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect((await grantRows()).filter((r) => r.resource_id === D_DANGLING)).toEqual([]);
+  });
+
+  it("authority still gates first: a plain member gets acl_deny, not the repair rail", async () => {
+    const err = await permissionGrant
+      .handler(
+        buildCtx(user(PLAIN_MEMBER)),
+        parsedInput({ resource_id: D_ANOMALY, subject_id: SPACE_MEMBER }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { doc_id: D_ANOMALY } });
+    }
   });
 });
 

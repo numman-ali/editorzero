@@ -34,10 +34,15 @@
  *     which mints the explicit `is_guest = 1` escape hatch. Legacy
  *     placements (root / unspaced collection) need membership only —
  *     the pre-Spaces world's baseline is the whole Org. Anomaly
- *     placements (dangling/trashed space ref) also need membership
- *     only: there is no LIVE ceiling to cross, and the caller able to
- *     administer one (owner-tier only) shouldn't be blocked from
- *     sharing it while the placement awaits repair.
+ *     placements (dangling/trashed space ref) REFUSE every grant —
+ *     repair-first (Codex slice-1 review MUST-FIX): the ceiling is
+ *     unavailable so standing cannot be proven, and an `is_guest = 0`
+ *     edge minted in that window would become an unmarked ceiling
+ *     crossing the moment `space.restore` revives the binding.
+ *     `space.restore` or `doc.move` first, then grant; recovery
+ *     sharing, if ever needed mid-anomaly, is `doc.add_guest`'s
+ *     explicitly-marked job. `permission.revoke` still works on
+ *     anomaly docs (removal mints nothing).
  *   - `agent` subjects skip membership/standing checks: agents are not
  *     Org members and carry NO baseline — a grant is precisely how an
  *     agent acquires resource access, and `is_guest = 0` stays honest
@@ -227,6 +232,33 @@ export const permissionGrant: Capability<PermissionGrantInput, PermissionGrantOu
       // Step 2 — granting authority on the doc.
       acl.assertCanAdministerDoc(doc);
       const placement = acl.placementOf(doc.collection_id);
+      // Anomalous placement (dangling or trashed space ref) refuses ALL
+      // grant writes, uniformly across subject kinds and before the
+      // edge lookup (Codex slice-1 review MUST-FIX). The ceiling is
+      // unavailable, so standing cannot be proven — an `is_guest = 0`
+      // edge minted in this window would become an unmarked ceiling
+      // crossing the moment `space.restore` revives the binding.
+      // Authority ran first, so non-owner-tier callers got acl_deny and
+      // learn nothing of placement state; `permission.revoke` stays
+      // available on anomaly docs (access removal mints nothing).
+      if (placement.kind === "anomaly") {
+        throw new ValidationError({
+          message:
+            "permission.grant: the doc's Space binding is anomalous (missing or " +
+            "trashed space); repair first — `space.restore` the space or " +
+            "`doc.move` the doc — then grant.",
+          issues: [
+            {
+              code: "anomalous_placement_requires_repair",
+              message:
+                "no grant can be minted while the doc's placement is anomalous: " +
+                "standing cannot be evaluated against an unavailable Space, and a " +
+                "non-guest edge minted now would cross the restored ceiling unmarked",
+              path: ["resource_id"],
+            },
+          ],
+        });
+      }
       if (placement.kind === "space") docPlacementSpaceId = placement.space_id;
     } else {
       const space = await ctx.db

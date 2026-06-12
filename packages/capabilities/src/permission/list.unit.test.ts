@@ -277,54 +277,97 @@ describe("permission.list — visibility", () => {
     expect(out.next_cursor).toBeNull();
   });
 
-  it("any reader sees the panel: open/legacy-baseline member lists a legacy doc", async () => {
+  it("read-tier is NOT enough: legacy-baseline member denies; workspace admin (backstop) lists", async () => {
+    // PLAIN_MEMBER can READ D_LEGACY (org-wide legacy baseline) but
+    // holds no administer rung — the panel is the sharing graph, not
+    // doc content (Codex slice-1 SHOULD-FIX).
     await seedGrant({ resource_kind: "doc", resource_id: D_LEGACY, subject_id: SPACE_MEMBER });
-    const out = await permissionList.handler(buildCtx(user(PLAIN_MEMBER)), listInput());
-    expect(out.grants).toHaveLength(1);
+
+    const err = await permissionList
+      .handler(buildCtx(user(PLAIN_MEMBER)), listInput())
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { doc_id: D_LEGACY } });
+    }
+
+    const byAdmin = await permissionList.handler(buildCtx(user(ADMIN, ["admin"])), listInput());
+    expect(byAdmin.grants).toHaveLength(1);
   });
 
-  it("doc-grantee (guest) reads the closed doc's panel; reach-less member does not", async () => {
+  it("guest grantee cannot enumerate the closed doc's panel; non-guest OWNER-role grantee can", async () => {
+    // The guest READS the doc but must not harvest subject ids /
+    // grantor attribution off it — guest edges confer zero authority.
+    // A non-guest owner-role grantee is owner-tier (owner-by-grant):
+    // whoever can edit the panel can read it.
     await seedGrant({
       resource_kind: "doc",
       resource_id: D_CLOSED,
       subject_id: DOC_GUEST,
       is_guest: 1,
     });
-
-    const ok = await permissionList.handler(
-      buildCtx(user(DOC_GUEST, ["guest"])),
-      listInput({ resource_id: D_CLOSED }),
-    );
-    expect(ok.grants).toHaveLength(1);
+    await seedGrant({
+      resource_kind: "doc",
+      resource_id: D_CLOSED,
+      subject_id: SPACE_MEMBER,
+      role: "owner",
+    });
 
     const err = await permissionList
-      .handler(buildCtx(user(PLAIN_MEMBER)), listInput({ resource_id: D_CLOSED }))
+      .handler(buildCtx(user(DOC_GUEST, ["guest"])), listInput({ resource_id: D_CLOSED }))
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PermissionDeniedError);
     if (err instanceof PermissionDeniedError) {
       expect(err.reason).toEqual({ kind: "acl_deny", scope: { doc_id: D_CLOSED } });
     }
+
+    const byOwnerGrantee = await permissionList.handler(
+      buildCtx(user(SPACE_MEMBER)),
+      listInput({ resource_id: D_CLOSED }),
+    );
+    expect(byOwnerGrantee.grants).toHaveLength(2);
   });
 
-  it("space panel: space member (reach) and workspace admin (authority) list; reach-less member denies", async () => {
+  it("space panel: plain space member (reach only) denies; owner-role member and workspace admin list", async () => {
     await seedGrant({ resource_kind: "space", resource_id: S_CLOSED, subject_id: SPACE_MEMBER });
 
     const input = listInput({ resource_kind: "space", resource_id: S_CLOSED });
-    const byMember = await permissionList.handler(buildCtx(user(SPACE_MEMBER)), input);
-    expect(byMember.grants).toHaveLength(1);
-
-    const byAdmin = await permissionList.handler(buildCtx(user(ADMIN, ["admin"])), input);
-    expect(byAdmin.grants).toHaveLength(1);
-
+    // SPACE_MEMBER holds a 'view' membership — reach, not authority.
     const err = await permissionList
-      .handler(buildCtx(user(PLAIN_MEMBER)), input)
+      .handler(buildCtx(user(SPACE_MEMBER)), input)
       .then(() => null)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PermissionDeniedError);
     if (err instanceof PermissionDeniedError) {
       expect(err.reason).toEqual({ kind: "acl_deny", scope: { space_id: S_CLOSED } });
     }
+
+    // Owner-role space MEMBERSHIP is the space owner-tier rung.
+    await db
+      .insertInto("space_members")
+      .values({
+        workspace_id: WORKSPACE_A,
+        space_id: S_CLOSED,
+        user_id: CREATOR,
+        role: "owner",
+        created_at: 2,
+        updated_at: 2,
+      })
+      .execute();
+    const bySpaceOwner = await permissionList.handler(buildCtx(user(CREATOR)), input);
+    expect(bySpaceOwner.grants).toHaveLength(1);
+
+    // Workspace admin backstop on a TEAM space.
+    const byAdmin = await permissionList.handler(buildCtx(user(ADMIN, ["admin"])), input);
+    expect(byAdmin.grants).toHaveLength(1);
+
+    const reachless = await permissionList
+      .handler(buildCtx(user(PLAIN_MEMBER)), input)
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(reachless).toBeInstanceOf(PermissionDeniedError);
   });
 
   it("personal space panel: owner lists; workspace admin denies (scenario-3 privacy pin)", async () => {
