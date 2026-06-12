@@ -8,11 +8,13 @@
  * bypass it for revoke) — restore is the ONE verb whose authority must
  * evaluate on the trashed row, so it uses the intent-named
  * `assertCanRestoreSpace`: the same ladder body minus the liveness
- * gate. Personal → `owner_user_id`; team → non-guest owner-role space
- * grant (grants RIDE through archive — H1, state-as-of-delete) ∨ the
- * workspace owner/admin backstop (owner-role membership normally
- * cannot exist here — a compliant archive refused while members
- * remained).
+ * gate AND minus the membership rung. Personal → `owner_user_id`;
+ * team → non-guest owner-role space grant (grants RIDE through
+ * archive — H1, state-as-of-delete) ∨ the workspace owner/admin
+ * backstop. Owner-role membership confers NOTHING here (Step-8
+ * slice-2 Codex review NOTE): a compliant archive refused while
+ * members remained, so a roster row on a dead team space is corrupt
+ * state — and corrupt state must not confer restore authority.
  *
  * **Preconditions (typed 409s), in order:**
  *  1. Slug — another LIVE space claimed the slug while this one was

@@ -34,10 +34,12 @@ const WORKSPACE_A = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const CREATOR = UserId("018f0000-0000-7000-8000-0000000000a1");
 const ADMIN = UserId("018f0000-0000-7000-8000-0000000000a2");
 const PLAIN_MEMBER = UserId("018f0000-0000-7000-8000-0000000000a3");
+const PERSONAL_OWNER = UserId("018f0000-0000-7000-8000-0000000000a7");
 const TARGET = UserId("018f0000-0000-7000-8000-0000000000b1");
 
 const S_TEAM = SpaceId("018f0000-0000-7000-8000-0000000000e1");
 const S_TRASHED = SpaceId("018f0000-0000-7000-8000-0000000000e3");
+const S_PERSONAL = SpaceId("018f0000-0000-7000-8000-0000000000e4");
 const S_MISSING = SpaceId("018f0000-0000-7000-8000-0000000000e9");
 
 let driver: SqliteDriver;
@@ -54,6 +56,7 @@ beforeEach(async () => {
 
   await seedSpace(S_TEAM, "closed");
   await seedSpace(S_TRASHED, "open", 99);
+  await seedSpace(S_PERSONAL, "private", null, PERSONAL_OWNER);
   await db
     .insertInto("space_members")
     .values({
@@ -75,15 +78,16 @@ async function seedSpace(
   id: SpaceId,
   type: "open" | "closed" | "private",
   deleted_at: number | null = null,
+  personalOwner: UserId | null = null,
 ) {
   await db
     .insertInto("spaces")
     .values({
       id,
       workspace_id: WORKSPACE_A,
-      kind: "team",
+      kind: personalOwner === null ? "team" : "personal",
       type,
-      owner_user_id: null,
+      owner_user_id: personalOwner,
       name: `space-${id.slice(-2)}`,
       slug: `space-${id.slice(-2)}`,
       baseline_access: "view",
@@ -178,6 +182,56 @@ describe("space.member_update_role — authority (ladder wiring)", () => {
       role: "edit",
       updated_at: 9000,
     });
+  });
+});
+
+describe("space.member_update_role — personal refusal (Step-8 slice-2 Codex review SHOULD-FIX)", () => {
+  it("a corrupt personal roster row is NOT editable — refuse after authority; remove stays the repair verb", async () => {
+    // Constructible only out-of-band (member_add refuses personal);
+    // mutating its role would treat corruption as steady state.
+    await db
+      .insertInto("space_members")
+      .values({
+        workspace_id: WORKSPACE_A,
+        space_id: S_PERSONAL,
+        user_id: PLAIN_MEMBER,
+        role: "view",
+        created_at: 1,
+        updated_at: 1,
+      })
+      .execute();
+    const err = await spaceMemberUpdateRole
+      .handler(
+        buildCtx(user(PERSONAL_OWNER)),
+        updateInput({ space_id: S_PERSONAL, user_id: PLAIN_MEMBER }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(JSON.stringify(err.issues)).toContain("personal_space_membership_pinned");
+    }
+    const row = await db
+      .selectFrom("space_members")
+      .select(["role"])
+      .where("space_id", "=", S_PERSONAL)
+      .where("user_id", "=", PLAIN_MEMBER)
+      .executeTakeFirstOrThrow();
+    expect(row.role).toBe("view");
+  });
+
+  it("the refusal sits AFTER authority — an outsider still sees acl_deny, not the kind", async () => {
+    const err = await spaceMemberUpdateRole
+      .handler(
+        buildCtx(user(PLAIN_MEMBER)),
+        updateInput({ space_id: S_PERSONAL, user_id: PLAIN_MEMBER }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { space_id: S_PERSONAL } });
+    }
   });
 });
 

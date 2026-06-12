@@ -185,6 +185,32 @@ describe("space.restore — authority (dead-row ladder wiring)", () => {
     );
     expect(out.space_id).toBe(S_TRASHED_PERSONAL);
   });
+
+  it("a corrupt owner-role roster row on the dead space does NOT restore (membership rung dropped)", async () => {
+    // `space.archive` refuses while ANY roster row exists, so an
+    // owner-role membership on a trashed space is constructible only
+    // out-of-band — corrupt state must not confer restore authority
+    // (Step-8 slice-2 Codex review NOTE).
+    await db
+      .insertInto("space_members")
+      .values({
+        workspace_id: WORKSPACE_A,
+        space_id: S_TRASHED,
+        user_id: PLAIN_MEMBER,
+        role: "owner",
+        created_at: 1,
+        updated_at: 1,
+      })
+      .execute();
+    const err = await spaceRestore
+      .handler(buildCtx(user(PLAIN_MEMBER)), restoreInput())
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermissionDeniedError);
+    if (err instanceof PermissionDeniedError) {
+      expect(err.reason).toEqual({ kind: "acl_deny", scope: { space_id: S_TRASHED } });
+    }
+  });
 });
 
 describe("space.restore — preconditions (typed 409s)", () => {

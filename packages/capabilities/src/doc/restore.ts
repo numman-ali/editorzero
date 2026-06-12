@@ -27,6 +27,15 @@
  * has no DB-level FK yet (temporary integrity debt, tracked in slice
  * 4 notes); the query-based check works regardless.
  *
+ * **Parent-SPACE precondition (ADR 0040 Step 8 slice 2, Codex review
+ * MUST-FIX).** If the live parent collection is bound to a space
+ * (`collections.space_id IS NOT NULL`), that space must be LIVE too —
+ * otherwise restore would mint a live doc under an archived space,
+ * breaking `space.archive`'s no-live-descendants invariant through
+ * the inverse path. Same `ParentDeletedError` wire code
+ * (`parent_deleted`), `parent_kind: "space"`. Mirrors
+ * `collection.restore`'s symmetric check.
+ *
  * **Not-deleted handling.** A `deleted_at IS NULL` doc returns 404.
  * Restoring a doc that isn't trashed has no defined meaning — the
  * caller already has the state they wanted; silently returning 200
@@ -82,7 +91,7 @@ import type {
   HandlerError,
 } from "@editorzero/audit";
 import { NotFoundError, ParentDeletedError, SlugCollisionError } from "@editorzero/errors";
-import { CapabilityId, type CollectionId, type DocId } from "@editorzero/ids";
+import { CapabilityId, type CollectionId, type DocId, type SpaceId } from "@editorzero/ids";
 import {
   type DocRestoreInput,
   DocRestoreInputSchema,
@@ -171,7 +180,7 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
       const parent_id: CollectionId = current.collection_id;
       const parent = await ctx.db
         .selectFrom("collections")
-        .select(["id", "deleted_at"])
+        .select(["id", "deleted_at", "space_id"])
         .where("id", "=", parent_id)
         .executeTakeFirst();
 
@@ -180,6 +189,32 @@ export const docRestore: Capability<DocRestoreInput, DocRestoreOutput> = {
           parent_kind: "collection",
           parent_id,
         });
+      }
+
+      // Step 2a — parent-SPACE precondition (Step-8 slice-2 Codex
+      // review MUST-FIX, mirror of `collection.restore`'s). The live
+      // parent collection may be bound to an ARCHIVED space: trash the
+      // doc, archive the space (`space.archive` counts live docs
+      // through LIVE collections only — but also refuses on live
+      // collections, so reaching here means corrupt state or a
+      // restore raced an archive). Either way, restoring would mint a
+      // live doc under a dead space — refuse until `space.restore`
+      // runs. Same wire code (`parent_deleted`), space-flavored
+      // payload.
+      if (parent.space_id !== null) {
+        const parentSpaceId: SpaceId = parent.space_id;
+        const space = await ctx.db
+          .selectFrom("spaces")
+          .select(["id"])
+          .where("id", "=", parentSpaceId)
+          .where("deleted_at", "is", null)
+          .executeTakeFirst();
+        if (space === undefined) {
+          throw new ParentDeletedError({
+            parent_kind: "space",
+            parent_id: parentSpaceId,
+          });
+        }
       }
     }
 

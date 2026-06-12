@@ -222,10 +222,22 @@ export class StalePreconditionError extends EditorZeroError {
 export class ParentDeletedError extends EditorZeroError {
   readonly code = "parent_deleted";
   readonly httpStatus = 409;
-  readonly parent_kind: "collection";
-  readonly parent_id: CollectionId;
+  /**
+   * `"space"` joined the union in the Step-8 slice-2 Codex review:
+   * restoring a collection/doc whose Space is archived would mint a
+   * live descendant under a dead space — the inverse-restore hole in
+   * `space.archive`'s refuse-on-live-descendants invariant. Same wire
+   * code; the caller's remedy is the same shape ("restore the parent
+   * first"), one level up.
+   */
+  readonly parent_kind: "collection" | "space";
+  readonly parent_id: CollectionId | SpaceId;
 
-  constructor(params: { message?: string; parent_kind: "collection"; parent_id: CollectionId }) {
+  constructor(params: {
+    message?: string;
+    parent_kind: "collection" | "space";
+    parent_id: CollectionId | SpaceId;
+  }) {
     super(
       params.message ??
         `cannot restore: parent ${params.parent_kind} ${params.parent_id} is soft-deleted; restore it first`,

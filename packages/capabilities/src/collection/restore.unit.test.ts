@@ -6,14 +6,20 @@
  * the happy-path restore.
  */
 
-import { COLLECTIONS_DDL, createSqliteDriver, DOCS_DDL, type SqliteDriver } from "@editorzero/db";
+import {
+  COLLECTIONS_DDL,
+  createSqliteDriver,
+  DOCS_DDL,
+  SPACES_DDL,
+  type SqliteDriver,
+} from "@editorzero/db";
 import {
   NotFoundError,
   ParentDeletedError,
   SlugCollisionError,
   ValidationError,
 } from "@editorzero/errors";
-import { CollectionId, UserId, WorkspaceId } from "@editorzero/ids";
+import { CollectionId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { Principal, UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -38,6 +44,7 @@ let driver: SqliteDriver;
 beforeEach(() => {
   driver = createSqliteDriver({ path: ":memory:" });
   driver.exec(COLLECTIONS_DDL);
+  driver.exec(SPACES_DDL);
   driver.exec(DOCS_DDL);
 });
 
@@ -247,6 +254,109 @@ describe("collection.restore", () => {
         .executeTakeFirst();
       expect(row?.deleted_at).not.toBeNull();
     });
+  });
+
+  describe("parent-SPACE precondition (Step-8 slice-2 Codex review MUST-FIX)", () => {
+    const S_ARCHIVED = SpaceId("018f0000-0000-7000-8000-0000000000e1");
+    const S_DANGLING = SpaceId("018f0000-0000-7000-8000-0000000000e9");
+    const TRASHED_IN_SPACE = CollectionId("018f0000-0000-7000-8000-0000000000ca");
+
+    async function seedSpaceBound(space_id: SpaceId, spaceDeletedAt: number | null) {
+      const a = driver.scoped(WORKSPACE_A);
+      if (space_id === S_ARCHIVED) {
+        await a
+          .insertInto("spaces")
+          .values({
+            id: space_id,
+            workspace_id: WORKSPACE_A,
+            kind: "team",
+            type: "closed",
+            owner_user_id: null,
+            name: "Archived Space",
+            slug: "archived-space",
+            baseline_access: "view",
+            created_by: ALICE,
+            created_at: 1,
+            updated_at: 1,
+            deleted_at: spaceDeletedAt,
+          })
+          .execute();
+      }
+      await a
+        .insertInto("collections")
+        .values({
+          id: TRASHED_IN_SPACE,
+          workspace_id: WORKSPACE_A,
+          parent_id: null,
+          space_id,
+          title: "Trashed in space",
+          slug: "trashed-in-space",
+          order_key: "b0",
+          created_by: ALICE,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at: 500,
+        })
+        .execute();
+    }
+
+    it("trashed collection bound to an ARCHIVED space → typed 409 (space arm), nothing mutated", async () => {
+      // The invariant-breaking sequence Codex flagged: trash the
+      // collection, archive its (now-descendant-free) space, then try
+      // the restore — without the check this mints a live collection
+      // under a dead space.
+      await seedSpaceBound(S_ARCHIVED, 600);
+      const ctx = buildCtx(userPrincipal());
+      try {
+        await collectionRestore.handler(ctx, { collection_id: TRASHED_IN_SPACE });
+        throw new Error("expected ParentDeletedError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ParentDeletedError);
+        if (err instanceof ParentDeletedError) {
+          expect(err.parent_kind).toBe("space");
+          expect(err.parent_id).toBe(S_ARCHIVED);
+        }
+      }
+      const row = await driver
+        .scoped(WORKSPACE_A)
+        .selectFrom("collections")
+        .select(["deleted_at"])
+        .where("id", "=", TRASHED_IN_SPACE)
+        .executeTakeFirst();
+      expect(row?.deleted_at).toBe(500);
+    });
+
+    it("space.restore-first unblocks: the same collection restores once its space is live", async () => {
+      await seedSpaceBound(S_ARCHIVED, 600);
+      await driver
+        .scoped(WORKSPACE_A)
+        .updateTable("spaces")
+        .set({ deleted_at: null })
+        .where("id", "=", S_ARCHIVED)
+        .execute();
+      const ctx = buildCtx(userPrincipal());
+      const out = await collectionRestore.handler(ctx, { collection_id: TRASHED_IN_SPACE });
+      expect(out.collection_id).toBe(TRASHED_IN_SPACE);
+    });
+
+    it("a DANGLING space binding (no spaces row) refuses too — bindings don't resurrect", async () => {
+      await seedSpaceBound(S_DANGLING, null);
+      const ctx = buildCtx(userPrincipal());
+      try {
+        await collectionRestore.handler(ctx, { collection_id: TRASHED_IN_SPACE });
+        throw new Error("expected ParentDeletedError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ParentDeletedError);
+        if (err instanceof ParentDeletedError) {
+          expect(err.parent_kind).toBe("space");
+          expect(err.parent_id).toBe(S_DANGLING);
+        }
+      }
+    });
+
+    // Legacy collections (space_id NULL) skip the check — every seed
+    // in the suites above is space-less, so the happy-path tests pin
+    // that arm continuously.
   });
 
   describe("sibling-slug precondition (Step-8 slice-2b fix-forward)", () => {

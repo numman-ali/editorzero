@@ -15,7 +15,7 @@ import {
   type SqliteDriver,
 } from "@editorzero/db";
 import { NotFoundError, ParentDeletedError, SlugCollisionError } from "@editorzero/errors";
-import { CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
+import { CollectionId, DocId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -53,6 +53,7 @@ async function seedCollection(params: {
   id: CollectionId;
   workspace_id: WorkspaceId;
   deleted_at?: number | null;
+  space_id?: SpaceId | null;
 }) {
   await driver
     .scoped(params.workspace_id)
@@ -61,6 +62,7 @@ async function seedCollection(params: {
       id: params.id,
       workspace_id: params.workspace_id,
       parent_id: null,
+      space_id: params.space_id ?? null,
       title: "Collection",
       slug: params.id,
       order_key: params.id,
@@ -378,6 +380,96 @@ describe("doc.restore", () => {
       const out = await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });
       expect(out.doc_id).toBe(DOC_A2_DELETED);
     });
+  });
+
+  describe("parent-SPACE precondition (Step-8 slice-2 Codex review MUST-FIX)", () => {
+    const S_ARCHIVED = SpaceId("018f0000-0000-7000-8000-0000000000e1");
+
+    async function seedArchivedSpace(deleted_at: number | null) {
+      await driver
+        .scoped(WORKSPACE_A)
+        .insertInto("spaces")
+        .values({
+          id: S_ARCHIVED,
+          workspace_id: WORKSPACE_A,
+          kind: "team",
+          type: "closed",
+          owner_user_id: null,
+          name: "Archived Space",
+          slug: "archived-space",
+          baseline_access: "view",
+          created_by: ALICE,
+          created_at: 1,
+          updated_at: 1,
+          deleted_at,
+        })
+        .execute();
+    }
+
+    it("trashed doc under a LIVE collection bound to an ARCHIVED space → typed 409 (space arm)", async () => {
+      // Corrupt-state guard: `space.archive` refuses on live
+      // collections, so this shape arises only out-of-band or from a
+      // restore racing an archive — either way the doc must not come
+      // back live under a dead space. ALICE is the creator, so the
+      // ceiling's read assert passes and the typed 409 is what the
+      // caller sees.
+      await seedArchivedSpace(600);
+      await seedCollection({
+        id: LIVE_COLLECTION,
+        workspace_id: WORKSPACE_A,
+        space_id: S_ARCHIVED,
+      });
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Trashed",
+        collection_id: LIVE_COLLECTION,
+        render_version: 7,
+        deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A);
+      try {
+        await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });
+        throw new Error("expected ParentDeletedError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ParentDeletedError);
+        if (err instanceof ParentDeletedError) {
+          expect(err.parent_kind).toBe("space");
+          expect(err.parent_id).toBe(S_ARCHIVED);
+        }
+      }
+      const row = await driver
+        .scoped(WORKSPACE_A)
+        .selectFrom("docs")
+        .select(["deleted_at", "render_version"])
+        .where("id", "=", DOC_A2_DELETED)
+        .executeTakeFirstOrThrow();
+      expect(row.deleted_at).toBe(999);
+      expect(row.render_version).toBe(7);
+    });
+
+    it("space.restore-first unblocks: the same doc restores once its space is live", async () => {
+      await seedArchivedSpace(null);
+      await seedCollection({
+        id: LIVE_COLLECTION,
+        workspace_id: WORKSPACE_A,
+        space_id: S_ARCHIVED,
+      });
+      await seedDocRow({
+        id: DOC_A2_DELETED,
+        workspace_id: WORKSPACE_A,
+        title: "Trashed",
+        collection_id: LIVE_COLLECTION,
+        deleted_at: 999,
+      });
+      const ctx = buildCtx(WORKSPACE_A);
+      const out = await docRestore.handler(ctx, { doc_id: DOC_A2_DELETED });
+      expect(out.doc_id).toBe(DOC_A2_DELETED);
+    });
+
+    // Legacy parents (`collections.space_id IS NULL`) skip the space
+    // check — the parent-collection describe above seeds exactly that
+    // shape, so the arm is pinned continuously.
   });
 
   describe("sibling-slug precondition (Step-8 slice-2b fix-forward)", () => {

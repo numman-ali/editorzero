@@ -15,7 +15,11 @@
  * would mint a meaningless audit row.
  *
  * **Handler order.** 404-first on the space (live-only) →
- * `assertCanAdministerSpace` → SELECT the membership row (404 missing)
+ * `assertCanAdministerSpace` → personal refusal
+ * (`personal_space_membership_pinned`, mirror of `member_add`'s —
+ * Step-8 slice-2 Codex review SHOULD-FIX: without it this verb would
+ * mutate corrupt personal roster rows; `member_remove` stays the one
+ * kind-blind repair path) → SELECT the membership row (404 missing)
  * → `role_unchanged` rejection → UPDATE with RETURNING. The UPDATE
  * re-predicates on the CURRENT role so a concurrent role change
  * between SELECT and UPDATE zero-rows → 409 `ConflictError` (the
@@ -85,9 +89,10 @@ export const spaceMemberUpdateRole: Capability<
     const target_user_id = UserId(input.user_id);
 
     // Step 1 — existence + trash posture (404 FIRST, before authority).
+    // `kind` feeds the personal refusal below.
     const space = await ctx.db
       .selectFrom("spaces")
-      .select(["id"])
+      .select(["id", "kind"])
       .where("id", "=", space_id)
       .where("deleted_at", "is", null)
       .executeTakeFirst();
@@ -98,6 +103,28 @@ export const spaceMemberUpdateRole: Capability<
     // Step 2 — authority (the live administer ladder).
     const acl = await loadDocReadResolver(ctx.db, ctx.principal);
     acl.assertCanAdministerSpace(space_id);
+
+    // Step 2a — personal refusal (Step-8 slice-2 Codex review
+    // SHOULD-FIX; AFTER authority so `kind` isn't leaked to outsiders).
+    // A personal space has no editable roster — `member_add` already
+    // refuses, so a roster row here is corrupt state; mutating its
+    // role would treat corruption as steady state. `member_remove`
+    // stays the ONE kind-blind repair verb.
+    if (space.kind === "personal") {
+      throw new ValidationError({
+        message:
+          "space.member_update_role: a personal space has no membership roster — share individual docs via permission.grant or doc.add_guest.",
+        issues: [
+          {
+            code: "personal_space_membership_pinned",
+            message:
+              "personal spaces hold exactly their structural owner; " +
+              "membership roles are not editable",
+            path: ["space_id"],
+          },
+        ],
+      });
+    }
 
     // Step 3 — current row (404 missing; role for the no-op rejection
     // and the optimistic UPDATE predicate).

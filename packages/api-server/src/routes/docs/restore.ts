@@ -92,9 +92,11 @@ export const restore = new Hono<ApiEnv>().post(
         409: {
           description:
             "Restore precondition failed. `parent_deleted` = the doc's parent collection " +
-            "is soft-deleted or missing (restore it first). `slug_collision` = a live " +
-            "sibling claimed this doc's slug while it was trashed (rename or delete the " +
-            "holder first). The `error` code discriminates.",
+            "is soft-deleted or missing, or the space that collection is bound to is " +
+            "archived — restore the parent first (`collection.restore` / " +
+            "`space.restore`). `slug_collision` = a live sibling claimed this doc's slug " +
+            "while it was trashed (rename or delete the holder first). The `error` code " +
+            "discriminates.",
           content: jsonContent(z.object({ error: z.enum(["parent_deleted", "slug_collision"]) })),
         },
       },

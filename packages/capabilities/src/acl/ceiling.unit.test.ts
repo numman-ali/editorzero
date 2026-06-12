@@ -898,6 +898,17 @@ describe("restore authority — canRestoreSpace (the ONE dead-row ladder)", () =
     expect(admin.canRestoreSpace(S_TRASHED_PERSONAL)).toBe(false);
   });
 
+  it("a corrupt owner-role roster row on the DEAD space confers nothing (membership rung dropped)", async () => {
+    // `space.archive` refuses while ANY roster row exists, so this row
+    // is constructible only out-of-band — corrupt state must not
+    // confer restore authority (Step-8 slice-2 Codex review NOTE). The
+    // LIVE ladder keeps the rung: the same membership shape on a live
+    // space administers (pinned in the administer matrix above).
+    await seedMember(S_TRASHED, MEMBER_CLOSED, "owner");
+    const acl = await loadDocReadResolver(db, user(MEMBER_CLOSED));
+    expect(acl.canRestoreSpace(S_TRASHED)).toBe(false);
+  });
+
   it("missing spaces are false; live spaces evaluate the same ladder (the 404 is the handler's job)", async () => {
     const acl = await loadDocReadResolver(db, user(ADMIN_USER, ["admin"]));
     expect(acl.canRestoreSpace(S_MISSING)).toBe(false);

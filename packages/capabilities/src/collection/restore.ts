@@ -24,6 +24,17 @@
  * `ParentDeletedError` using the stored `parent_id`. Honest failure
  * over dangling restores.
  *
+ * **Parent-SPACE precondition (ADR 0040 Step 8 slice 2, Codex review
+ * MUST-FIX).** A space-bound collection (`space_id IS NOT NULL`)
+ * additionally requires its space LIVE. `space.archive` refuses on
+ * live collections but ignores trashed ones — so without this check,
+ * "trash collection → archive its space → restore collection" would
+ * mint a live collection under a dead space, breaking the archive
+ * invariant through the inverse path. Same wire code
+ * (`parent_deleted`), `parent_kind: "space"`; run `space.restore`
+ * first. `doc.restore` carries the mirror check through its parent
+ * collection's binding.
+ *
  * **Depth-cap check.** Restore is the third op (alongside
  * `collection.create` and `collection.move`) that can make a
  * collection live again, so it has to enforce the same
@@ -82,7 +93,7 @@ import {
   SlugCollisionError,
   ValidationError,
 } from "@editorzero/errors";
-import { CapabilityId, type CollectionId } from "@editorzero/ids";
+import { CapabilityId, type CollectionId, type SpaceId } from "@editorzero/ids";
 import {
   type CollectionRestoreInput,
   CollectionRestoreInputSchema,
@@ -132,7 +143,7 @@ export const collectionRestore: Capability<CollectionRestoreInput, CollectionRes
     // UPDATE fires.
     const current = await ctx.db
       .selectFrom("collections")
-      .select(["id", "parent_id", "slug"])
+      .select(["id", "parent_id", "slug", "space_id"])
       .where("id", "=", input.collection_id)
       .where("deleted_at", "is not", null)
       .executeTakeFirst();
@@ -142,6 +153,32 @@ export const collectionRestore: Capability<CollectionRestoreInput, CollectionRes
         subject_kind: "collection",
         subject_id: input.collection_id,
       });
+    }
+
+    // Step 2a — parent-SPACE precondition (Step-8 slice-2 Codex review
+    // MUST-FIX). The trashed row keeps its space binding, and
+    // `space.archive` refuses only LIVE collections — so a trashed
+    // collection doesn't block the archive (correctly), but restoring
+    // it afterwards would mint a live collection under a dead space,
+    // breaking the archive invariant through the inverse path. A
+    // space-bound restore therefore requires its space LIVE (a missing
+    // space row refuses too — dangling bindings don't resurrect); the
+    // caller runs `space.restore` first. Legacy collections
+    // (`space_id IS NULL`) have no space to check.
+    if (current.space_id !== null) {
+      const parentSpaceId: SpaceId = current.space_id;
+      const space = await ctx.db
+        .selectFrom("spaces")
+        .select(["id"])
+        .where("id", "=", parentSpaceId)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst();
+      if (space === undefined) {
+        throw new ParentDeletedError({
+          parent_kind: "space",
+          parent_id: parentSpaceId,
+        });
+      }
     }
 
     // Step 2 — parent-deleted precondition. Only fires when

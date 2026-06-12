@@ -201,9 +201,12 @@ export interface DocReadResolver {
    * predicate; ADR 0040 slice-1 deliberately refused to bypass
    * `canAdministerSpace`'s liveness gate for revoke, and that stands —
    * this predicate exists so restore itself never has to). Same ladder
-   * body as `canAdministerSpace` minus the liveness gate: personal →
-   * `owner_user_id`; team → owner-role membership (normally gone — a
-   * compliant archive refused while members existed) / non-guest
+   * body as `canAdministerSpace` minus the liveness gate AND minus the
+   * membership rung (Step-8 slice-2 Codex review NOTE: `space.archive`
+   * refuses while ANY roster row exists, so owner-role membership
+   * cannot legitimately survive onto a dead team space — a row found
+   * there is corrupt, and corrupt state must not confer restore
+   * authority): personal → `owner_user_id`; team → non-guest
    * owner-role space grant (grants RIDE through archive, H1) / the
    * admin backstop. Missing spaces are still false; intent-named so it
    * cannot be mistaken for a general trashed-space authority hatch.
@@ -353,15 +356,23 @@ export async function loadDocReadResolver(
   // membership / non-guest owner-role space grant / the workspace
   // admin backstop. Liveness is deliberately NOT evaluated here: the
   // live predicate (`spaceOwnerTier`) adds the gate, and
-  // `canRestoreSpace` is the one consumer that evaluates the ladder on
-  // a dead row — ONE ladder body, so the two predicates cannot drift.
-  const spaceOwnerTierIgnoringTrash = (space_id: SpaceId): boolean => {
+  // `restoreSpaceTier` is the one consumer that evaluates the ladder
+  // on a dead row — ONE ladder body, so the two predicates cannot
+  // drift.
+  //
+  // `membershipRung` parameterizes the owner-role `space_members` term
+  // (Step-8 slice-2 Codex review NOTE): `space.archive` refuses while
+  // ANY roster row exists, so membership cannot legitimately survive
+  // onto a dead team space — a roster row found there is corrupt, and
+  // corrupt state must not confer restore authority. The live ladder
+  // keeps the rung; the dead-row ladder drops it.
+  const spaceOwnerTierBody = (space_id: SpaceId, membershipRung: boolean): boolean => {
     const space = spaces.get(space_id);
     if (space === undefined) return false;
     if (space.kind === "personal") {
       return subject.kind === "user" && space.owner_user_id === subject.user_id;
     }
-    if (memberSpaceRole.get(space_id) === "owner") return true;
+    if (membershipRung && memberSpaceRole.get(space_id) === "owner") return true;
     if (spaceOwnerGrantIds.has(space_id)) return true;
     return adminTier;
   };
@@ -369,8 +380,10 @@ export async function loadDocReadResolver(
   const spaceOwnerTier = (space_id: SpaceId): boolean => {
     const space = spaces.get(space_id);
     if (space === undefined || space.deleted_at !== null) return false;
-    return spaceOwnerTierIgnoringTrash(space_id);
+    return spaceOwnerTierBody(space_id, true);
   };
+
+  const restoreSpaceTier = (space_id: SpaceId): boolean => spaceOwnerTierBody(space_id, false);
 
   const canAdministerDoc = (doc: CeilingDocRow): boolean => {
     // Doc owner-tier: implicit permanent owner, or a non-guest
@@ -443,9 +456,9 @@ export async function loadDocReadResolver(
         });
       }
     },
-    canRestoreSpace: spaceOwnerTierIgnoringTrash,
+    canRestoreSpace: restoreSpaceTier,
     assertCanRestoreSpace: (space_id) => {
-      if (!spaceOwnerTierIgnoringTrash(space_id)) {
+      if (!restoreSpaceTier(space_id)) {
         throw new PermissionDeniedError({
           reason: { kind: "acl_deny", scope: { space_id } },
         });
