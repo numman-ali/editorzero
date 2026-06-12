@@ -45,17 +45,23 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      // Fresh artifact + fresh DB every run: wipe tmp/, rebundle, boot.
+      // Fresh artifact + fresh DB every run: wipe tmp/, rebundle, build the
+      // SPA (PWA on — `vite build` is the only mode that emits the service
+      // worker + manifest), attach it, boot. The trunk thereby serves the
+      // production posture (ADR 0027/0035 static attach), which is what
+      // `pwa.spec.ts` runs against — SW registration is a build-only
+      // behavior, so it CANNOT be proven on the Vite dev origin below.
       command:
-        "rm -rf tmp && node ../../apps/server/scripts/bundle.mjs --out tmp/server.mjs && node tmp/server.mjs",
+        "rm -rf tmp && node ../../apps/server/scripts/bundle.mjs --out tmp/server.mjs && pnpm -C ../../apps/app exec vite build --outDir ../../packages/e2e/tmp/spa-dist --emptyOutDir && node tmp/server.mjs",
       url: `${TRUNK_ORIGIN}/infra/health`,
       reuseExistingServer: false,
-      timeout: 60_000,
+      timeout: 120_000,
       env: {
         DATABASE_URL: path.join(here, "tmp/e2e.sqlite"),
         PORT: String(TRUNK_PORT),
         EDITORZERO_PUBLIC_ORIGIN: WEB_ORIGIN,
         BETTER_AUTH_SECRET: E2E_BETTER_AUTH_SECRET,
+        EDITORZERO_SPA_DIST: path.join(here, "tmp/spa-dist"),
       },
     },
     {

@@ -8,6 +8,7 @@ import { RESERVED_API_PREFIXES } from "@editorzero/constants/reserved-prefixes";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react-swc";
 import { defineConfig } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 
 /**
  * Dev loop (ADR 0035 §2): the browser only ever talks to the Vite origin, and
@@ -31,7 +32,66 @@ export default defineConfig({
   // `tanstackRouter` MUST precede `react()` (load-bearing per the plugin docs,
   // ADR 0035 §4): it codegens `src/routeTree.gen.ts` from `src/routes/**` and
   // applies the auto-code-splitting transform before React Fast Refresh runs.
-  plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react()],
+  // `VitePWA` comes LAST (ADR 0039 §1) so the precache manifest sees the
+  // final emitted assets.
+  plugins: [
+    tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    react(),
+    // The PWA layer (ADR 0039 §1). `injectManifest` — the hand-authored
+    // `src/sw.ts` IS the caching policy, reviewable in one file; never
+    // `generateSW`. `registerType: 'prompt'` — never autoUpdate over a
+    // live editor. `injectRegister: false` — registration happens in
+    // exactly one place (`components/pwa-prompt.tsx`), not an injected
+    // script. Dev SW is OFF (`devOptions` default): the dev loop and the
+    // dev-origin e2e specs run SW-less; the production posture is proven
+    // by `packages/e2e/test/pwa.spec.ts` against the trunk-served build.
+    VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      registerType: "prompt",
+      injectRegister: false,
+      injectManifest: {
+        // The app shell ONLY (ADR 0039): html + every hashed js/css chunk
+        // + the three runtime-loaded latin variable fonts + icons. The
+        // other @fontsource unicode-range subsets (latin-ext, cyrillic…)
+        // stay network-loaded — precaching ~1 MB of subsets nobody
+        // renders would bloat install for nothing.
+        globPatterns: [
+          "**/*.{js,css,html}",
+          "**/*latin-wght-normal*.woff2",
+          "icons/*.png",
+          "manifest.webmanifest",
+        ],
+      },
+      // Meridian Zero (ADR 0036): paper-white field, ink text — the
+      // canonical light theme drives the OS-level surfaces. Values
+      // mirror `--paper` in styles/meridian-zero.css (the SSOT copy).
+      manifest: {
+        id: "/",
+        name: "editorzero",
+        short_name: "editorzero",
+        description:
+          "Open-source, self-hostable docs and collaboration platform where humans and AI agents are peer co-editors.",
+        start_url: "/?source=pwa",
+        scope: "/",
+        display: "standalone",
+        display_override: ["standalone", "minimal-ui"],
+        theme_color: "#f4f6f8",
+        background_color: "#f4f6f8",
+        icons: [
+          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+          {
+            src: "/icons/icon-512-maskable.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
+      },
+    }),
+  ],
   server: {
     proxy: Object.fromEntries(
       RESERVED_API_PREFIXES.map((prefix) => [

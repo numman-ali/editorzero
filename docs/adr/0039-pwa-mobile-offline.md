@@ -76,6 +76,14 @@ A same-origin **`SameSite=Lax` HttpOnly Secure** session cookie **persists insid
 - **Vite/Rolldown breaks `vite-plugin-pwa`** manifest/precache → pin + cooldown response (ADR 0035).
 - **iOS lifts standalone-partition isolation or the web-push restriction** → revisit the install / push posture.
 
+## Amendments
+
+- **2026-06-12 — §1 implementation landed** (apps/app `src/sw.ts` + `vite-plugin-pwa@1.3.0`; proven by `packages/e2e/test/pwa.spec.ts` against the trunk-served production build). Empirical refinements to the letter of §1, none to its substance:
+  - **Denylist boundary regex is `^<prefix>(?:[/?]|$)`** — workbox's `NavigationRoute` tests each RegExp against the concatenated `pathname + search`, so the boundary after the prefix must also accept `?` (the prefix root with a query), not just `/` and end-of-string. Derived in `src/lib/sw-denylist.ts` from the ADR 0035 §2 SSOT; the unit test pins the matching semantics.
+  - **The Rolldown smoke is green**: under Vite 8 (Rolldown), manifest injection + precache hashing emit the expected shell precache (index.html + every hashed js/css + the three runtime-loaded latin `@fontsource` subsets + icons; the other unicode-range font subsets stay network-loaded by glob choice, not accident). The e2e spec asserts the precache contents, so a future bundler regression fails the lane, not production.
+  - **`virtual:pwa-register/react` is a verified no-op in dev** (read from the shipped `client/dev/react.js`: state stays false, no registration attempt) — the dev loop and the dev-origin e2e specs run SW-less with `devOptions` unset; only the production build registers. The PWA e2e project therefore runs on the TRUNK origin with the built SPA statically attached (`EDITORZERO_SPA_DIST`), which doubles as continuous proof of the ADR 0027/0035 attach path.
+  - **`registerType: 'prompt'` flow as decided**: `injectRegister: false`, the single registration site is `components/pwa-prompt.tsx` (`useRegisterSW`), SKIP_WAITING only from the update toast's Reload. SW lifecycle is surfaced as UI state, not console/OTel (ADR 0019 stance). `navigator.storage.persist()` requested best-effort post-registration. Both install paths shipped (`beforeinstallprompt` capture verified firing on Chromium against the built app; iOS one-time Share hint gated on the `lib/pwa.ts` policy, dismissal persisted under `ez-pwa-ios-hint-dismissed`).
+
 ## Cross-references
 
 - **Layers on** ADR 0027 (same-origin trunk), ADR 0028 (`beforeLoad → /login`), ADR 0030 (Lax cookie — holds inside the installed app), ADR 0035 (SPA scaffold; reserved-prefix SSOT; supply-chain posture extends to PWA pins).

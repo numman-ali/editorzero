@@ -34,6 +34,17 @@ catalog:
   "@tiptap/pm": 3.24.0
   "@tiptap/react": 3.24.0
   "@tiptap/y-tiptap": 3.0.4
+  # PWA layer (ADR 0039): vite-plugin-pwa EXACT (1.3.0 published 2026-05-05,
+  # past the cooldown; vite ^8 peer matches ADR 0035). workbox-build/-window
+  # are its REQUIRED peers; the other workbox-* are sw.ts's own imports —
+  # pin the whole family to one version so the plugin's bundler and the
+  # hand-authored service worker can never skew.
+  vite-plugin-pwa: 1.3.0
+  workbox-build: 7.4.1
+  workbox-core: 7.4.1
+  workbox-precaching: 7.4.1
+  workbox-routing: 7.4.1
+  workbox-window: 7.4.1
 
 # @tiptap/react declares its menu extensions as RANGED (^3.24.0) optional deps,
 # so plain resolution drifts them to a newer minor that then peer-wants a newer

@@ -2,8 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>editorzero</title>
+    <!-- PWA surface (ADR 0039): theme-color mirrors --paper (ADR 0036
+         canonical light); the manifest <link> is injected by vite-plugin-pwa
+         at build. The apple-* set covers iOS, where the manifest alone
+         doesn't drive installed appearance; viewport-fit=cover lets the
+         hand-owned safe-area insets (env()) take effect on notched phones. -->
+    <meta name="theme-color" content="#f4f6f8" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="editorzero" />
     <script>
       // Pre-paint theme guard (mirrors src/lib/theme.ts): apply the persisted
       // theme before first paint to avoid a flash of the default light theme.

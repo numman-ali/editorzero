@@ -6,7 +6,7 @@
     "tsBuildInfoFile": "./.tsbuildinfo",
     "jsx": "react-jsx",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": []
+    "types": ["vite-plugin-pwa/react"]
   },
   "include": ["src/**/*"]
 }

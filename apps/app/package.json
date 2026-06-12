@@ -38,6 +38,12 @@
     "happy-dom": "catalog:",
     "typescript": "catalog:",
     "vite": "8.0.14",
-    "vitest": "catalog:"
+    "vite-plugin-pwa": "catalog:",
+    "vitest": "catalog:",
+    "workbox-build": "catalog:",
+    "workbox-core": "catalog:",
+    "workbox-precaching": "catalog:",
+    "workbox-routing": "catalog:",
+    "workbox-window": "catalog:"
   }
 }

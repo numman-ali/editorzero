@@ -1,6 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, Outlet } from "@tanstack/react-router";
 
+import { PwaPrompt } from "../components/pwa-prompt";
+
 /**
  * Root route — the shell every page renders inside. It carries the router
  * *context* type: the `queryClient` singleton is threaded in at `createRouter`
@@ -12,7 +14,10 @@ import { createRootRouteWithContext, Outlet } from "@tanstack/react-router";
  *
  * Otherwise intentionally minimal: the authed chrome lives in `_authed.tsx`;
  * the root is just the routing `<Outlet />`, the parent of `/login` (signed-out)
- * and the `_authed` layout (everything protected).
+ * and the `_authed` layout (everything protected) — plus the PWA chrome
+ * (ADR 0039: SW registration, update toast, install affordances), mounted
+ * HERE so `/login` is covered too (in `vite dev` its registration hook is
+ * the plugin's no-op stub; it only registers from a production build).
  */
 export interface RouterContext {
   readonly queryClient: QueryClient;
@@ -23,5 +28,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function RootLayout() {
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <PwaPrompt />
+    </>
+  );
 }
