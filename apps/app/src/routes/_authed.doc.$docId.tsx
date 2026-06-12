@@ -2,6 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { DocEditor } from "../components/doc-editor";
+import { PublishDoc } from "../components/publish-doc";
 import { docQueryOptions } from "../lib/doc-editor";
 
 /**
@@ -46,6 +47,12 @@ function DocScreen() {
           {data.doc.title}
         </h2>
         <span className="pth">{data.doc.slug}</span>
+        <div className="r">
+          {/* Publish is doc-level state (orthogonal to content, ADR 0040
+              Step 5) — it lives here with title + slug, not in the
+              editor toolbar with the content verbs. */}
+          <PublishDoc docId={docId} publishedSlug={data.doc.published_slug} />
+        </div>
       </div>
       <DocEditor key={docId} docId={docId} docTitle={data.doc.title} initialBlocks={data.blocks} />
     </section>

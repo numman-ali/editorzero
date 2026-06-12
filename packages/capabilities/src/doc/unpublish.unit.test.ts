@@ -311,7 +311,9 @@ describe("doc.unpublish", () => {
     expect(docUnpublish.id).toBe("doc.unpublish");
     expect(docUnpublish.category).toBe("mutation");
     expect(docUnpublish.requires).toEqual(["doc:publish"]);
-    expect(docUnpublish.surfaces).toEqual(["api", "cli", "mcp"]);
+    // "ui" since the doc header's Publish toggle landed (proven by the
+    // marked Playwright spec in packages/e2e — ADR 0040 H11).
+    expect(docUnpublish.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     expect(docUnpublish.agentAllowed).toBeDefined();
   });
 

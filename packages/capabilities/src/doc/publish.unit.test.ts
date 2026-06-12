@@ -409,7 +409,9 @@ describe("doc.publish", () => {
     expect(docPublish.id).toBe("doc.publish");
     expect(docPublish.category).toBe("mutation");
     expect(docPublish.requires).toEqual(["doc:publish"]);
-    expect(docPublish.surfaces).toEqual(["api", "cli", "mcp"]);
+    // "ui" since the doc header's Publish toggle landed (proven by the
+    // marked Playwright spec in packages/e2e — ADR 0040 H11).
+    expect(docPublish.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     // Present so agents with `doc:publish` in their tier can dispatch.
     expect(docPublish.agentAllowed).toBeDefined();
   });

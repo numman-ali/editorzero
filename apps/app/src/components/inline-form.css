@@ -45,3 +45,15 @@
   font-size: 12px;
   color: var(--warn-ink);
 }
+
+/* Status text beside a control (the editor toolbar's status idiom,
+   restated here so headers hosting an inline form don't depend on
+   doc-editor.css being loaded). */
+.inlineform-status {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}

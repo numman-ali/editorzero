@@ -8,9 +8,11 @@ import { CREDENTIALS } from "./credentials";
  * proves-capability-cell: doc.update
  * proves-capability-cell: doc.rename
  * proves-capability-cell: doc.delete
+ * proves-capability-cell: doc.publish
+ * proves-capability-cell: doc.unpublish
  *
  * The HTTP-first editor cells (ADR 0038; invariant 4, ADR 0033 §3 / 0040
- * H11). Four markers, one screen: `/doc/$docId` loads a doc through
+ * H11). Six markers, one screen: `/doc/$docId` loads a doc through
  * `doc.get` (loader + owned-model parse + Tiptap render), persists
  * edits through `doc.update` (browser diff → ops batch with per-block
  * hash preconditions → explicit Save), renames through the toolbar's
@@ -194,4 +196,36 @@ test("doc.delete: the toolbar Trash control soft-deletes, returns to the list, a
   expect(restored.ok()).toBe(true);
   await page.goto("/");
   await expect(page.getByRole("cell").filter({ hasText: RENAMED_TITLE })).toBeVisible();
+});
+
+test("doc.publish/doc.unpublish: the header toggle mints + clears the publish pair (publish cells)", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/");
+  // Publish is orthogonal to access_mode: every chip starts unpublished.
+  await expect(page.locator(".st-pub")).toHaveCount(0);
+
+  await page.getByRole("link", { name: RENAMED_TITLE }).click();
+  await page.waitForURL(/\/doc\/[0-9a-f-]{36}$/u);
+
+  // Publish: the minted slug appears as header status (the public
+  // reader route is a later slice — state + slug are the effects).
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  const status = page.getByText(/^published · /u);
+  await expect(status).toBeVisible();
+  await expect(status).toContainText("editor-proving-ground-renamed");
+  await expectNoAxeViolations(page);
+
+  // Cross-screen server state: the list chip goes published-green.
+  await page.goto("/");
+  await expect(page.locator(".st-pub")).toHaveCount(1);
+
+  // Unpublish clears the pair; the chip drops back to the base outline.
+  await page.getByRole("link", { name: RENAMED_TITLE }).click();
+  await page.getByRole("button", { name: "Unpublish", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeVisible();
+  await expect(page.getByText(/^published · /u)).toHaveCount(0);
+  await page.goto("/");
+  await expect(page.locator(".st-pub")).toHaveCount(0);
 });

@@ -15,8 +15,11 @@ import {
   docTagClass,
   fetchDocList,
   formatUpdated,
+  publishDoc,
+  publishFailureMessage,
   renameDoc,
   renameFailureMessage,
+  unpublishDoc,
 } from "./docs";
 
 /**
@@ -221,6 +224,48 @@ describe("deleteDoc", () => {
 
   it("DELETE_FAILED_MESSAGE offers a retry", () => {
     expect(DELETE_FAILED_MESSAGE).toContain("Try again");
+  });
+});
+
+describe("publishDoc / unpublishDoc", () => {
+  it("publish resolves the 200 echo with the minted slug + timestamp", async () => {
+    const body = {
+      doc_id: "018f0000-0000-7000-8000-0000000000d2",
+      published_slug: "drafted-2",
+      published_at: 7,
+      render_version: 3,
+    };
+    const published = await publishDoc(body.doc_id, jsonClient(200, body));
+    expect(published.published_slug).toBe("drafted-2");
+    expect(published.published_at).toBe(7);
+  });
+
+  it("unpublish resolves the cleared pair", async () => {
+    const body = {
+      doc_id: "018f0000-0000-7000-8000-0000000000d2",
+      published_slug: null,
+      published_at: null,
+      render_version: 4,
+    };
+    const unpublished = await unpublishDoc(body.doc_id, jsonClient(200, body));
+    expect(unpublished.published_slug).toBeNull();
+  });
+
+  it("both throw typed ApiErrors on the envelope arms", async () => {
+    await expect(
+      publishDoc("018f0000-0000-7000-8000-0000000000d2", jsonClient(404, { error: "not_found" })),
+    ).rejects.toMatchObject({ status: 404, code: "not_found" });
+    await expect(
+      unpublishDoc(
+        "018f0000-0000-7000-8000-0000000000d2",
+        jsonClient(403, { error: "permission_denied" }),
+      ),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("publishFailureMessage names the failed direction", () => {
+    expect(publishFailureMessage("publish")).toContain("Publish failed");
+    expect(publishFailureMessage("unpublish")).toContain("Unpublish failed");
   });
 });
 

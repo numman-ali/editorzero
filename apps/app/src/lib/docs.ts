@@ -156,6 +156,50 @@ export async function deleteDoc(docId: string, client: ApiClient = apiClient): P
 /** No typed arms beyond the generic — delete has no collision-class failure. */
 export const DELETE_FAILED_MESSAGE = "Trash failed. Try again.";
 
+type DocPublishResponse = Awaited<ReturnType<ApiClient["docs"]["publish"][":doc_id"]["$post"]>>;
+type DocPublishSuccess = Extract<DocPublishResponse, { status: 200 }>;
+export type DocPublished = Awaited<ReturnType<DocPublishSuccess["json"]>>;
+
+/**
+ * Publish a doc — the publish dimension is ORTHOGONAL to `access_mode`
+ * (ADR 0040 Step 5): it mints `published_slug` (collision-suffixed,
+ * not necessarily the doc slug) + stamps `published_at`. Idempotent:
+ * re-publishing keeps the URL and the original timestamp. The public
+ * reader route is a later slice — publishing today flips the state the
+ * list's green chip renders.
+ */
+export async function publishDoc(
+  docId: string,
+  client: ApiClient = apiClient,
+): Promise<DocPublished> {
+  const res = await client.docs.publish[":doc_id"].$post({ param: { doc_id: docId } });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+type DocUnpublishResponse = Awaited<ReturnType<ApiClient["docs"]["unpublish"][":doc_id"]["$post"]>>;
+type DocUnpublishSuccess = Extract<DocUnpublishResponse, { status: 200 }>;
+export type DocUnpublished = Awaited<ReturnType<DocUnpublishSuccess["json"]>>;
+
+/** Unpublish — clears the pair; a later re-publish mints a FRESH slug. */
+export async function unpublishDoc(
+  docId: string,
+  client: ApiClient = apiClient,
+): Promise<DocUnpublished> {
+  const res = await client.docs.unpublish[":doc_id"].$post({ param: { doc_id: docId } });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+/** Generic-only failure arms — neither direction has a collision class. */
+export function publishFailureMessage(direction: "publish" | "unpublish"): string {
+  return direction === "publish" ? "Publish failed. Try again." : "Unpublish failed. Try again.";
+}
+
 /**
  * Vocabulary lock (ADR 0040): the UI says "Space" for the read-scope
  * value the wire calls `space` (the Step-5 `access_mode` split retired
