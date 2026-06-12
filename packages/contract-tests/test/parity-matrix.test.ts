@@ -57,7 +57,6 @@ const capabilities = registry.list();
  * spec land, its entry leaves this list in the same commit.
  */
 const UI_PENDING: readonly string[] = [
-  "collection.move",
   "collection.restore",
   "doc.add_guest",
   "doc.remove_guest",

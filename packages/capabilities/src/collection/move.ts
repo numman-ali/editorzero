@@ -159,7 +159,12 @@ export const collectionMove: Capability<CollectionMoveInput, CollectionMoveOutpu
   output: CollectionMoveOutputSchema,
   requires: ["doc:write"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  // "ui" landed with the /collection/$collectionId header's Move
+  // disclosure (the collection.move × Web UI cell — destination select
+  // excludes the moved subtree, realizing the cycle rail in chrome) —
+  // proven end-to-end by the marked Playwright spec in packages/e2e
+  // (proves-capability-cell: collection.move).
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "collection", id: input.collection_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

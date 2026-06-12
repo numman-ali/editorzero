@@ -3,6 +3,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 
 import { DeleteCollection } from "../components/delete-collection";
 import { EditCollection } from "../components/edit-collection";
+import { MoveCollection } from "../components/move-collection";
 import {
   collectionListQueryOptions,
   collectionSpaceLabel,
@@ -84,6 +85,11 @@ function CollectionScreen() {
           {collection.title}
         </h2>
         <span className="pth">{collection.slug}</span>
+        <div className="r">
+          {/* Placement is collection-level state — the header owns the
+              Move disclosure (the doc.move precedent). */}
+          <MoveCollection collection={collection} />
+        </div>
       </div>
       <div style={{ padding: "15px" }}>
         <div className="kv">

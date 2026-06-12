@@ -8,6 +8,7 @@ import { CREDENTIALS } from "./credentials";
  * proves-capability-cell: collection.create
  * proves-capability-cell: collection.update
  * proves-capability-cell: collection.delete
+ * proves-capability-cell: collection.move
  *
  * The collection × Web UI parity cells (invariant 4, ADR 0033 §3 /
  * 0040 H11): the sidebar Collections tree (`collection.list`), the
@@ -236,4 +237,69 @@ test("collection.delete: no cascade — a parent refuses; the empty Archive tras
   await expect(page.getByRole("heading", { name: "No such collection" })).toBeVisible();
   await page.getByRole("link", { name: "Back to the docs." }).click();
   await expect(page).toHaveURL(/\/$/);
+});
+
+test("collection.move: the select excludes the moved subtree; same-bucket re-parents free; a space crossing demands a pole", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/");
+  const tree = page.getByRole("navigation", { name: "Collections" });
+  const destination = page.getByRole("combobox", { name: "Destination" });
+  const facts = page.locator(".kv");
+
+  // Cycle rail BY CONSTRUCTION: on Field Guides (parent of Sub Guides)
+  // the destination select offers neither itself nor its descendant —
+  // the wire's cycle 400 is unreachable from this chrome.
+  await tree.getByRole("link", { name: "Field Guides" }).click();
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await expect(destination.locator("option", { hasText: "Field Guides" })).toHaveCount(0);
+  await expect(destination.locator("option", { hasText: "Sub Guides" })).toHaveCount(0);
+  await expect(destination.locator("option", { hasText: "Receipt Ledger" })).toHaveCount(1);
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  // Same-bucket re-parent: Receipt Ledger → under Field Guides (both
+  // the legacy bucket). No sharing select renders; the tree re-nests
+  // and the parent fact updates from the same one invalidation.
+  await tree.getByRole("link", { name: "Receipt Ledger" }).click();
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await destination.selectOption({ label: "Field Guides" });
+  await expect(page.getByRole("combobox", { name: "Sharing policy" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Move collection" }).click();
+  await expect(facts.filter({ hasText: "parent" }).locator(".v")).toHaveText("Field Guides");
+  await expect(tree.locator(".row")).toHaveText([/Field Guides/, /Sub Guides/, /Receipt Ledger/]);
+  await expect(tree.locator(".row").nth(2)).toHaveClass(/\bind\b/);
+
+  // A crossing into a space root demands a pole: scratch space over the
+  // API (the editor.spec pattern), reload so the loaders pick it up.
+  // OPEN on purpose: baseline reach into a closed space needs
+  // membership — even the founder doesn't ride an admin backstop into
+  // content placement (the 403 no_access arm, unit-tested).
+  const spaceRes = await page.request.post("/spaces/create", {
+    data: { name: "Transit", space_type: "open" },
+  });
+  expect(spaceRes.ok()).toBe(true);
+  const space: { space_id?: string } = await spaceRes.json();
+  await page.reload();
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await destination.selectOption({ label: "Space: Transit" });
+  const sharing = page.getByRole("combobox", { name: "Sharing policy" });
+  await expect(sharing).toBeVisible();
+  await expect(page.getByRole("button", { name: "Move collection" })).toBeDisabled();
+  await expectNoAxeViolations(page); // the demanded-pole state is part of the audited surface
+  await sharing.selectOption({ label: "Keep current sharing" });
+  await page.getByRole("button", { name: "Move collection" }).click();
+  await expect(facts.filter({ hasText: "binding" }).locator(".v")).toHaveText("Transit");
+  await expect(facts.filter({ hasText: "parent" }).locator(".v")).toHaveText("root");
+
+  // Cross back to the workspace root via the other pole, then archive
+  // the scratch space over the API — suite hygiene: spaces.spec pins
+  // exact card arrays.
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await destination.selectOption({ label: "Workspace root" });
+  await sharing.selectOption({ label: "Adopt destination sharing" });
+  await page.getByRole("button", { name: "Move collection" }).click();
+  await expect(facts.filter({ hasText: "binding" }).locator(".v")).toHaveText("workspace");
+  const archived = await page.request.post(`/spaces/archive/${space.space_id}`);
+  expect(archived.ok()).toBe(true);
 });

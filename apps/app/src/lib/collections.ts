@@ -300,3 +300,146 @@ export function collectionSpaceLabel(
   if (spaceId === null) return "workspace";
   return spaces.find((s) => s.space_id === spaceId)?.name ?? "unknown space";
 }
+
+/**
+ * Every id in the subtree rooted at `collectionId` (the root included).
+ * The Move destination select excludes this set — `collection.move`
+ * refuses a cycle (moving a collection under itself or a descendant),
+ * and excluding the options realizes that rail in chrome BY
+ * CONSTRUCTION; the server stays authoritative. Children resolve by
+ * `parent_id` edges over the live list; the walk visits each row at
+ * most once, so even corrupt cycles terminate.
+ */
+export function collectionDescendantIds(
+  collectionId: string,
+  collections: readonly CollectionSummary[],
+): ReadonlySet<string> {
+  const subtree = new Set<string>([collectionId]);
+  // Wire order is parent-before-child for live trees, but a single pass
+  // does not depend on it: keep sweeping until no row joins the set.
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const collection of collections) {
+      if (
+        collection.parent_id !== null &&
+        subtree.has(collection.parent_id) &&
+        !subtree.has(collection.id)
+      ) {
+        subtree.add(collection.id);
+        grew = true;
+      }
+    }
+  }
+  return subtree;
+}
+
+type CollectionMoveArgs = Parameters<
+  ApiClient["collections"]["move"][":collection_id"]["$post"]
+>[0];
+export type CollectionMoveDestination = CollectionMoveArgs["json"]["destination"];
+
+/**
+ * The Move select's value encoding: `""` is the workspace (legacy)
+ * root, `space:<id>` a space root, anything else a collection id.
+ * UUIDs can never collide with the prefix or the empty string.
+ */
+export const SPACE_DESTINATION_PREFIX = "space:";
+
+export function parseMoveDestination(value: string): CollectionMoveDestination {
+  if (value === "") return { kind: "legacy_root" };
+  if (value.startsWith(SPACE_DESTINATION_PREFIX)) {
+    return { kind: "space_root", space_id: value.slice(SPACE_DESTINATION_PREFIX.length) };
+  }
+  return { kind: "collection", collection_id: value };
+}
+
+/**
+ * The placement bucket a DESTINATION resolves to (null = the legacy
+ * bucket) — the crossing side of `collection.move`'s policy rail; the
+ * source side is the moved collection's own `space_id`. Same authority
+ * posture as `placementBinding`.
+ */
+export function destinationBinding(
+  destination: CollectionMoveDestination,
+  collections: readonly CollectionSummary[],
+): string | null {
+  switch (destination.kind) {
+    case "legacy_root":
+      return null;
+    case "space_root":
+      return destination.space_id;
+    case "collection":
+      return placementBinding(destination.collection_id, collections);
+  }
+}
+
+type CollectionMoveResponse = Awaited<
+  ReturnType<ApiClient["collections"]["move"][":collection_id"]["$post"]>
+>;
+type CollectionMoveSuccess = Extract<CollectionMoveResponse, { status: 200 }>;
+export type CollectionMoved = Awaited<ReturnType<CollectionMoveSuccess["json"]>>;
+
+/** Wire-derived policy vocabulary (shared with doc.move via the schemas SSOT). */
+export type CollectionMovePolicy = CollectionMoveArgs["json"]["acl_policy"];
+
+/**
+ * Move a collection (re-parent and/or re-bind). `aclPolicy` travels
+ * ONLY on a bucket crossing — the handler refuses it same-bucket and
+ * demands it on a crossing (ADR 0040 §7; the doc.move contract over a
+ * whole subtree). The conditional spread omits the key entirely.
+ */
+export async function moveCollection(
+  collectionId: string,
+  destination: CollectionMoveDestination,
+  aclPolicy: CollectionMovePolicy,
+  client: ApiClient = apiClient,
+): Promise<CollectionMoved> {
+  const res = await client.collections.move[":collection_id"].$post({
+    param: { collection_id: collectionId },
+    json: { destination, ...(aclPolicy !== undefined && { acl_policy: aclPolicy }) },
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await readErrorCode(res));
+  }
+  return res.json();
+}
+
+export type CollectionMoveFailure =
+  | "destination_clash"
+  | "target_missing"
+  | "no_access"
+  | "move_failed";
+
+/**
+ * 409 = the moved collection's slug collides with a live sibling at
+ * the destination; 404 = the destination (or the collection itself)
+ * vanished under the form. 403 = placement standing: the select offers
+ * every space root, but baseline reach into a closed/private space
+ * needs membership or a grant — even the workspace owner does not ride
+ * an admin backstop into content placement (ADR 0040's privacy
+ * posture), and no capability yet projects per-space reach for the
+ * client to pre-filter the options (punch list). A retry line would
+ * lie about a standing refusal. The cycle 400 is unreachable from this
+ * UI — the select excludes the subtree by construction — so it falls
+ * to the generic retry arm with the rest.
+ */
+export function classifyCollectionMoveError(error: unknown): CollectionMoveFailure {
+  if (isApiError(error) && error.status === 409) return "destination_clash";
+  if (isApiError(error) && error.status === 404) return "target_missing";
+  if (isApiError(error) && error.status === 403) return "no_access";
+  return "move_failed";
+}
+
+export function collectionMoveFailureMessage(kind: CollectionMoveFailure): string {
+  switch (kind) {
+    case "destination_clash":
+      return "A collection with this title already exists at the destination. Rename one first.";
+    case "target_missing":
+      return "The destination no longer exists. Pick another.";
+    case "no_access":
+      return "You don't have access to place into that destination.";
+    case "move_failed":
+      return "Move failed. Try again.";
+  }
+}

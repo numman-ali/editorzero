@@ -7,17 +7,23 @@ import {
   type CollectionSummary,
   classifyCollectionCreateError,
   classifyCollectionDeleteError,
+  classifyCollectionMoveError,
   classifyCollectionUpdateError,
   collectionCreateFailureMessage,
   collectionDeleteFailureMessage,
+  collectionDescendantIds,
   collectionListQueryOptions,
+  collectionMoveFailureMessage,
   collectionSpaceLabel,
   collectionUpdateFailureMessage,
   createCollection,
   deleteCollection,
+  destinationBinding,
   docPlacementLabel,
   fetchCollectionList,
   flattenCollectionTree,
+  moveCollection,
+  parseMoveDestination,
   placementBinding,
   treeRowIndent,
   updateCollection,
@@ -332,5 +338,100 @@ describe("collectionSpaceLabel", () => {
     expect(collectionSpaceLabel("018f0000-0000-7000-8000-00000000dead", spaces)).toBe(
       "unknown space",
     );
+  });
+});
+
+describe("collectionDescendantIds (the cycle rail's exclusion set)", () => {
+  it("includes the root and every transitive descendant, nothing else", () => {
+    const cols = [
+      row(C1, "Root", null),
+      row(C2, "Child", C1),
+      row(C3, "Grandchild", C2),
+      row(C4, "Unrelated", null),
+    ];
+    const subtree = collectionDescendantIds(C1, cols);
+    expect([...subtree].sort()).toEqual([C1, C2, C3].sort());
+    expect(subtree.has(C4)).toBe(false);
+  });
+
+  it("a leaf's subtree is itself; resolution survives child-before-parent wire order", () => {
+    expect([...collectionDescendantIds(C3, [row(C3, "Leaf", null)])]).toEqual([C3]);
+    // Child rows listed BEFORE their parents still resolve (the sweep loops).
+    const shuffled = [row(C3, "Grandchild", C2), row(C2, "Child", C1), row(C1, "Root", null)];
+    expect(collectionDescendantIds(C1, shuffled).size).toBe(3);
+  });
+
+  it("terminates on a corrupt parent cycle", () => {
+    const cycle = [row(C1, "A", C2), row(C2, "B", C1)];
+    expect(collectionDescendantIds(C1, cycle).size).toBe(2);
+  });
+});
+
+describe("parseMoveDestination / destinationBinding", () => {
+  const SPACE = "018f0000-0000-7000-8000-00000000aaaa";
+  const bound: CollectionSummary = { ...row(C1, "Bound", null), space_id: SPACE };
+  const legacy = row(C2, "Legacy", null);
+
+  it("decodes the three select encodings", () => {
+    expect(parseMoveDestination("")).toEqual({ kind: "legacy_root" });
+    expect(parseMoveDestination(`space:${SPACE}`)).toEqual({
+      kind: "space_root",
+      space_id: SPACE,
+    });
+    expect(parseMoveDestination(C1)).toEqual({ kind: "collection", collection_id: C1 });
+  });
+
+  it("resolves each destination kind to its bucket", () => {
+    const cols = [bound, legacy];
+    expect(destinationBinding({ kind: "legacy_root" }, cols)).toBeNull();
+    expect(destinationBinding({ kind: "space_root", space_id: SPACE }, cols)).toBe(SPACE);
+    expect(destinationBinding({ kind: "collection", collection_id: C1 }, cols)).toBe(SPACE);
+    expect(destinationBinding({ kind: "collection", collection_id: C2 }, cols)).toBeNull();
+  });
+});
+
+describe("moveCollection", () => {
+  const MOVED = { collection_id: C1, new_parent_id: null, space_id: null, updated_at: 7 };
+
+  it("returns the move echo on 200", async () => {
+    const result = await moveCollection(
+      C1,
+      { kind: "legacy_root" },
+      undefined,
+      jsonClient(200, MOVED),
+    );
+    expect(result.collection_id).toBe(C1);
+  });
+
+  it("throws a typed ApiError on the destination slug 409", async () => {
+    await expect(
+      moveCollection(
+        C1,
+        { kind: "collection", collection_id: C2 },
+        "adopt_baseline",
+        jsonClient(409, { error: "slug_collision" }),
+      ),
+    ).rejects.toThrow(new ApiError(409, "slug_collision"));
+  });
+});
+
+describe("classifyCollectionMoveError", () => {
+  it("maps 409/404/403 to their typed arms, the rest to move_failed", () => {
+    expect(classifyCollectionMoveError(new ApiError(409, "slug_collision"))).toBe(
+      "destination_clash",
+    );
+    expect(classifyCollectionMoveError(new ApiError(404, "not_found"))).toBe("target_missing");
+    expect(classifyCollectionMoveError(new ApiError(403, "permission_denied"))).toBe("no_access");
+    expect(classifyCollectionMoveError(new ApiError(500, "internal"))).toBe("move_failed");
+    expect(classifyCollectionMoveError(new TypeError("fetch failed"))).toBe("move_failed");
+  });
+});
+
+describe("collectionMoveFailureMessage", () => {
+  it("speaks each arm — no_access never offers a retry (standing, not luck)", () => {
+    expect(collectionMoveFailureMessage("destination_clash")).toContain("already exists");
+    expect(collectionMoveFailureMessage("target_missing")).toContain("no longer exists");
+    expect(collectionMoveFailureMessage("no_access")).toContain("access");
+    expect(collectionMoveFailureMessage("move_failed")).toContain("Try again");
   });
 });
