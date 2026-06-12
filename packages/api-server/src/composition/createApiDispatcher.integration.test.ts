@@ -528,13 +528,16 @@ describe("createApiDispatcher", () => {
     }
   });
 
-  it("write path: with `sync` passed, handler throw rolls back `doc_updates` and evicts the Y.Doc", async () => {
+  it("write path: with `sync` passed, handler throw rolls back `doc_updates` and discards the staged update", async () => {
     // Handler-throw after a `ctx.transact` call must leave no durable
     // trace: the SQL tx rolls back, and `bound.rollback()` in the
-    // composition root drops the in-memory Y.Doc so a subsequent
-    // `ctx.transact` re-hydrates from committed state (P3.6e). The
-    // zero `doc_updates` rows + `outcome = error` audit row proves
-    // both halves hold across the composition boundary.
+    // composition root discards the staged update — the resident
+    // Y.Doc was never touched pre-commit (ADR 0043), so durable and
+    // in-memory state agree with no eviction step. The zero
+    // `doc_updates` rows + `outcome = error` audit row proves both
+    // halves hold across the composition boundary. (The resident-
+    // level no-leak property is pinned with sockets attached in
+    // `packages/sync/src/ws-attach.integration.test.ts`.)
     const sync = new HocuspocusSync({
       docUpdatesWriter: createDocUpdatesWriter(),
       docUpdatesReader: createDocUpdatesReader(),
@@ -671,12 +674,15 @@ describe("createApiDispatcher", () => {
         })
         .execute();
       // Seed the Y.Doc with "committed" text via a real write-path
-      // transact — asAuditTx imported via the local helper below to
-      // keep this test hermetic from the wider api-server bind-tx
-      // scaffolding.
+      // transact, dispatcher-shaped: `commit()` after the SQL tx so
+      // the staged update applies to the resident (ADR 0043 — the
+      // read below snapshots the resident). asAuditTx imported via
+      // the local helper to keep this test hermetic from the wider
+      // api-server bind-tx scaffolding.
       const { asAuditTx } = await import("@editorzero/db");
+      let bound: ReturnType<HocuspocusSync["bind"]> | undefined;
       await driver.withSystemTx(async (tx) => {
-        const bound = sync.bind({
+        bound = sync.bind({
           sqlTx: asAuditTx(tx),
           principal: testUser(),
           workspace_id: WORKSPACE_ID,
@@ -685,6 +691,7 @@ describe("createApiDispatcher", () => {
           ydoc.getText("body").insert(0, "committed");
         });
       });
+      await bound?.commit();
 
       // A read fixture whose handler projects the Y.Doc clone's text.
       // If the wiring is broken, either `ctx.transact` throws (old

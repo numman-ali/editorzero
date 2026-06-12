@@ -1,9 +1,9 @@
 /**
  * `HocuspocusSync` WebSocket attach — the sync-layer half of the ADR
- * 0030 hardening (task #15), against real SQLite + real WebSockets.
- * The production upgrade boundary (path / Origin / cookie) lives in
- * apps/server and is tested there; HERE the contract is the class
- * itself:
+ * 0030 hardening (task #15) + the ADR 0043 broadcast-after-commit
+ * property pins, against real SQLite + real WebSockets. The production
+ * upgrade boundary (path / Origin / cookie) lives in apps/server and
+ * is tested there; HERE the contract is the class itself:
  *
  *   1. **Deny-all by construction** — a `HocuspocusSync` built without
  *      a `collabAuthorize` policy refuses every WS attach. This is the
@@ -20,16 +20,16 @@
  *      multiplexed `documentName` and the ORIGINAL upgrade request
  *      headers (what the composition root re-resolves the principal
  *      from, per Auth frame).
- *   5. **Rollback eviction with live WS clients** — the Codex-review
- *      MUST-FIX: `closeConnections` alone is not eviction. Rollback
- *      force-closes the doc's WS clients AND awaits the unload drain,
- *      so the next transact/read rehydrates committed state — never
- *      the aborted in-memory mutation.
- *   6. **Poisoned fail-closed + recovery** — if eviction cannot be
- *      proven (here: an extra DirectConnection holder that
- *      `closeConnections` cannot kill), both open paths refuse loudly;
- *      once the holder releases, the retry path clears and serves
- *      committed state.
+ *   5. **No broadcast without a commit (ADR 0043 / Codex M1)** — a
+ *      handler that throws after a staged Y mutation, with WS clients
+ *      attached, broadcasts NOTHING: the client's subscription
+ *      survives (no eviction Close frame — the pre-0043 machinery is
+ *      gone), the resident bit-equals a cold replay of committed
+ *      `doc_updates`, and the next read/transact sees committed-only
+ *      state.
+ *   6. **Broadcast arrives at `commit()`** — a committed-but-not-yet-
+ *      applied delta is invisible to attached AND freshly-syncing
+ *      clients; `bound.commit()` is the exact moment it fans out.
  */
 
 import { createServer, type Server } from "node:http";
@@ -66,6 +66,7 @@ import {
   type HocuspocusSyncDeps,
   type HocuspocusTxContext,
 } from "./hocuspocus";
+import type { BoundSyncService } from "./service";
 
 const WORKSPACE_ID = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const USER_ID = UserId("018f0000-0000-7000-8000-000000000002");
@@ -139,6 +140,14 @@ function testPrincipal(): UserPrincipal {
   };
 }
 
+function bindCtx(tx: Parameters<typeof asAuditTx>[0]): HocuspocusTxContext {
+  return {
+    sqlTx: asAuditTx(tx),
+    principal: testPrincipal(),
+    workspace_id: WORKSPACE_ID,
+  };
+}
+
 async function seedDocMetadata(doc_id: DocId): Promise<void> {
   const now = Date.now();
   await driver
@@ -163,18 +172,44 @@ async function seedDocMetadata(doc_id: DocId): Promise<void> {
     .execute();
 }
 
-/** Commit one block of `content` to `doc_id` through the audited lane. */
+/** Append one `<paragraph>text</paragraph>` to the owned fragment. */
+function appendParagraph(ydoc: Y.Doc, text: string): void {
+  const para = new Y.XmlElement("paragraph");
+  para.insert(0, [new Y.XmlText(text)]);
+  const fragment = ydoc.getXmlFragment(DOC_FRAGMENT);
+  fragment.insert(fragment.length, [para]);
+}
+
+/**
+ * Dispatcher-shaped committed write: SQL tx + bind + transact, then
+ * `bound.commit()` after the tx resolves — the broadcast moment. The
+ * first write on a doc seeds a block; later writes append paragraphs
+ * (`seedBlocks` is first-time-only by contract).
+ */
 async function commitContent(sync: HocuspocusSync, doc_id: DocId, content: string): Promise<void> {
+  let bound: BoundSyncService | undefined;
   await driver.withSystemTx(async (tx) => {
-    const ctx: HocuspocusTxContext = {
-      sqlTx: asAuditTx(tx),
-      principal: testPrincipal(),
-      workspace_id: WORKSPACE_ID,
-    };
-    await sync.bind(ctx).transact(doc_id, (ydoc) => {
-      seedBlocks(ydoc, [{ id: BLOCK_ID, type: "paragraph", content }]);
+    bound = sync.bind(bindCtx(tx));
+    await bound.transact(doc_id, (ydoc) => {
+      if (ydoc.getXmlFragment(DOC_FRAGMENT).length === 0) {
+        seedBlocks(ydoc, [{ id: BLOCK_ID, type: "paragraph", content }]);
+      } else {
+        appendParagraph(ydoc, content);
+      }
     });
   });
+  await bound?.commit();
+}
+
+async function fetchDocUpdates(doc_id: DocId): Promise<Uint8Array[]> {
+  const rows = await driver
+    .system()
+    .selectFrom("doc_updates")
+    .select(["seq", "update_blob"])
+    .where("doc_id", "=", doc_id)
+    .orderBy("seq", "asc")
+    .execute();
+  return rows.map((r) => r.update_blob);
 }
 
 function rawToUint8(data: RawData): Uint8Array {
@@ -202,11 +237,13 @@ class WsClient {
    * Resolves when the server sends a per-document Close frame
    * (`MessageType.CLOSE`) — what Hocuspocus's `Connection.close`
    * actually emits on a multiplexed socket: the doc subscription dies,
-   * the raw WebSocket survives for other documents. Eviction tests
-   * await THIS, not a socket close.
+   * the raw WebSocket survives for other documents. The ADR 0043
+   * tests use this NEGATIVELY: rollback must NOT close the doc
+   * subscription (there is no eviction any more).
    */
   readonly docClosed: Promise<void>;
   #settleDocClosed: (() => void) | undefined;
+  docClosedSeen = false;
   readonly local = new Y.Doc();
   #pendingAuth: ((result: AuthResult) => void) | null = null;
 
@@ -227,7 +264,10 @@ class WsClient {
       });
     });
     this.docClosed = new Promise((resolve) => {
-      this.#settleDocClosed = resolve;
+      this.#settleDocClosed = () => {
+        this.docClosedSeen = true;
+        resolve();
+      };
     });
     this.#ws.on("close", () => {
       this.#pendingAuth?.({ outcome: "rejected", scope: null });
@@ -303,14 +343,16 @@ class WsClient {
     this.#ws.send(toUint8Array(encoder));
   }
 
+  fragmentText(): string {
+    return this.local.getXmlFragment(DOC_FRAGMENT).toString();
+  }
+
   async waitForText(needle: string): Promise<void> {
     const deadline = Date.now() + WS_TIMEOUT_MS;
     for (;;) {
-      if (this.local.getXmlFragment(DOC_FRAGMENT).toString().includes(needle)) return;
+      if (this.fragmentText().includes(needle)) return;
       if (Date.now() > deadline) {
-        throw new Error(
-          `timed out waiting for "${needle}" in: ${this.local.getXmlFragment(DOC_FRAGMENT).toString()}`,
-        );
+        throw new Error(`timed out waiting for "${needle}" in: ${this.fragmentText()}`);
       }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -398,8 +440,8 @@ describe("__ws hydration", () => {
   });
 });
 
-describe("rollback eviction with WS clients attached", () => {
-  it("evicts the aborted in-memory state and rehydrates committed state (Codex MUST-FIX)", async () => {
+describe("broadcast-after-commit (ADR 0043)", () => {
+  it("rollback after a staged mutation broadcasts nothing; the client's subscription survives; resident equals cold replay (Codex M1)", async () => {
     await seedDocMetadata(DOC_ID);
     const sync = buildSync({ collabAuthorize: () => Promise.resolve() });
     await commitContent(sync, DOC_ID, "committed");
@@ -407,23 +449,20 @@ describe("rollback eviction with WS clients attached", () => {
     const port = await listenFor(sync);
     const client = new WsClient(port, DOC_ID);
     expect((await client.attach()).outcome).toBe("authenticated");
+    client.requestSync();
+    await client.waitForText("committed");
 
     // A dispatcher-shaped failing write: mutate inside the bound
     // transact, abort the SQL tx, then rollback() — exactly what
-    // runInWriteTx's catch path does.
-    let bound: ReturnType<HocuspocusSync["bind"]> | undefined;
+    // runInWriteTx's catch path does. The mutation only ever existed
+    // on the throwaway clone; the resident was never touched, so
+    // there is nothing to broadcast and nothing to evict.
+    let bound: BoundSyncService | undefined;
     await expect(
       driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        bound = sync.bind(ctx);
+        bound = sync.bind(bindCtx(tx));
         await bound.transact(DOC_ID, (ydoc) => {
-          const para = new Y.XmlElement("paragraph");
-          para.insert(0, [new Y.XmlText("phantom")]);
-          ydoc.getXmlFragment(DOC_FRAGMENT).insert(0, [para]);
+          appendParagraph(ydoc, "phantom");
         });
         throw new Error("dispatcher aborts");
       }),
@@ -431,31 +470,87 @@ describe("rollback eviction with WS clients attached", () => {
     if (bound === undefined) throw new Error("bind never ran");
     await bound.rollback();
 
-    // The WS client held the doc resident — eviction must have closed
-    // its per-doc subscription (the Close frame) so the unload could
-    // complete. The raw socket survives; a real provider would resync.
-    await client.docClosed;
+    // Positive control that doubles as the determinism bound: a real
+    // committed write must reach the SAME subscription. Receiving it
+    // proves (a) the doc subscription survived the rollback — no
+    // eviction Close frame — and (b) any phantom broadcast would have
+    // arrived first on this ordered socket, so its absence after this
+    // point is conclusive, not a timing artifact.
+    await commitContent(sync, DOC_ID, "after-rollback");
+    await client.waitForText("after-rollback");
+    expect(client.fragmentText()).not.toContain("phantom");
+    expect(client.docClosedSeen).toBe(false);
 
-    // The proof: the next read AND the next transact see committed
-    // state only. Pre-fix, both would have reused the resident Y.Doc
-    // with "phantom" applied.
-    const text = await sync.read(DOC_ID, (ydoc) => ydoc.getXmlFragment(DOC_FRAGMENT).toString());
-    expect(text).toContain("committed");
-    expect(text).not.toContain("phantom");
+    // The resident equals a cold replay of committed `doc_updates` —
+    // same fragment text AND same state vector (a leaked phantom op
+    // would register an extra client/clock entry even if the text
+    // were later edited away).
+    const blobs = await fetchDocUpdates(DOC_ID);
+    expect(blobs).toHaveLength(2);
+    const replay = new Y.Doc();
+    for (const blob of blobs) Y.applyUpdate(replay, blob);
+    const resident = await sync.read(DOC_ID, (ydoc) => ({
+      text: ydoc.getXmlFragment(DOC_FRAGMENT).toString(),
+      sv: Y.encodeStateVector(ydoc),
+    }));
+    expect(resident.text).toBe(replay.getXmlFragment(DOC_FRAGMENT).toString());
+    expect(Array.from(resident.sv)).toEqual(Array.from(Y.encodeStateVector(replay)));
+    expect(resident.text).not.toContain("phantom");
 
+    // And the next transact's clone builds on committed-only state.
     await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      await sync.bind(ctx).transact(DOC_ID, (ydoc) => {
+      const fresh = sync.bind(bindCtx(tx));
+      await fresh.transact(DOC_ID, (ydoc) => {
         expect(ydoc.getXmlFragment(DOC_FRAGMENT).toString()).not.toContain("phantom");
       });
     });
+    client.close();
   });
 
-  // The unevictable-holder / poisoned fail-closed path is pinned in
-  // `hocuspocus.integration.test.ts` (the rollback-contract file) —
-  // it needs no WebSocket, only a direct-connection squatter.
+  it("a committed-but-unapplied delta is invisible until commit(), then broadcasts to every attached client", async () => {
+    await seedDocMetadata(DOC_ID);
+    const sync = buildSync({ collabAuthorize: () => Promise.resolve() });
+    await commitContent(sync, DOC_ID, "base");
+
+    const port = await listenFor(sync);
+    const client1 = new WsClient(port, DOC_ID);
+    expect((await client1.attach()).outcome).toBe("authenticated");
+    client1.requestSync();
+    await client1.waitForText("base");
+
+    // Stage + SQL-commit a delta WITHOUT calling bound.commit() yet —
+    // the window between `withSystemTx` resolving and the broadcast
+    // moment, frozen open.
+    let bound: BoundSyncService | undefined;
+    await driver.withSystemTx(async (tx) => {
+      bound = sync.bind(bindCtx(tx));
+      await bound.transact(DOC_ID, (ydoc) => {
+        appendParagraph(ydoc, "staged-delta");
+      });
+    });
+    if (bound === undefined) throw new Error("bind never ran");
+
+    // A SECOND client attaches and full-syncs inside the window. Its
+    // SyncStep2 reply reflects the resident — which must still be
+    // committed-only-as-applied: "base" arrives, "staged-delta" does
+    // not. The completed round-trip is the deterministic barrier; at
+    // this point client1 cannot hold the delta either (the resident
+    // never applied it, so no frame carrying it exists anywhere).
+    const client2 = new WsClient(port, DOC_ID);
+    expect((await client2.attach()).outcome).toBe("authenticated");
+    client2.requestSync();
+    await client2.waitForText("base");
+    expect(client2.fragmentText()).not.toContain("staged-delta");
+    expect(client1.fragmentText()).not.toContain("staged-delta");
+
+    // The broadcast moment: commit() applies the staged blob to the
+    // resident, and Hocuspocus fans it out to BOTH attached clients
+    // live — no resync, no reconnect.
+    await bound.commit();
+    await client1.waitForText("staged-delta");
+    await client2.waitForText("staged-delta");
+
+    client1.close();
+    client2.close();
+  });
 });

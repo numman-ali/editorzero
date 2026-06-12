@@ -13,7 +13,11 @@
 export { asAuditTx, createAuditWriter } from "./audit-writer";
 export { onConflictPersonalSpaceDoNothing } from "./conflict-targets";
 export { countTableRows } from "./count-rows";
-export { createDocUpdatesReader, type DocUpdatesReader } from "./doc-updates-reader";
+export {
+  createDocUpdatesReader,
+  type DocUpdateRow,
+  type DocUpdatesReader,
+} from "./doc-updates-reader";
 export {
   createDocUpdatesWriter,
   type DocUpdatesWriter,

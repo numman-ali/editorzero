@@ -45,7 +45,8 @@
  * the Web UI stamps the same hash it verifies). Mismatch throws
  * `StalePreconditionError` (409) from inside the applier — the
  * transact closure has not committed; the dispatcher rolls back the
- * full tx and `BoundSyncService.rollback` evicts the resident Y.Doc.
+ * full tx and `BoundSyncService.rollback` discards the staged update
+ * (the mutation only ever lived on the throwaway clone, ADR 0043).
  *
  * **`updated_at` bridge**. The handler UPDATE-first-reads `docs` with
  * `.set({ updated_at: now })` + `.returning(...)` so:

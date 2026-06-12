@@ -30,11 +30,12 @@ import type * as Y from "yjs";
 export interface SyncService {
   /**
    * Run `fn` against the Y.Doc for `doc_id`, inside a Yjs transaction.
-   * The Y.Doc is created on first access. Errors thrown by `fn` propagate
-   * to the caller; the Y.Doc's in-memory state after an error is
-   * intentionally not rolled back — durable persistence (via
-   * `doc_updates`) only lands after successful handler completion, so
-   * any mid-mutation error is ephemeral.
+   * The Y.Doc is created on first access. Errors thrown by `fn`
+   * propagate to the caller. Under the Hocuspocus-backed impl `fn`
+   * receives a throwaway CLONE (ADR 0043): a throwing handler's
+   * in-memory work is discarded with the clone, and the resident
+   * Y.Doc — the state WebSocket clients sync against — never holds
+   * anything a SQL transaction has not committed.
    */
   transact<T>(doc_id: DocId, fn: (ydoc: Y.Doc) => T | Promise<T>): Promise<T>;
 
@@ -43,41 +44,44 @@ export interface SyncService {
 }
 
 /**
- * A write-path-bound `SyncService` (ADR 0018 §6.4 / F31). Returned by
- * backend-specific `bind()` methods — `HocuspocusSync.bind(context)`
- * is the primary producer. The handle tracks which `doc_id`s the
- * handler mutated via `transact` so the dispatcher's `runInWriteTx`
- * can drop their in-memory Y.Doc state when the enclosing SQL tx
- * rolls back.
+ * A write-path-bound `SyncService` (ADR 0018 §6.4 / F31; reshaped by
+ * ADR 0043). Returned by backend-specific `bind()` methods —
+ * `HocuspocusSync.bind(context)` is the primary producer. The handle
+ * STAGES every update its `transact` persisted, keyed by `doc_id`,
+ * for post-commit application to the resident Y.Doc.
  *
- * **Why `rollback()` and not `finalize("commit"|"rollback")`.** The
- * commit path is a no-op — the in-memory Y.Doc is the source of
- * truth post-commit until the next server restart re-hydrates it
- * from `doc_updates`. A two-branch finalize would add a required
- * call on the happy path for symmetry only; the dispatcher forgetting
- * to fire it would silently leak nothing. `rollback()` keeps the
- * failure-only coupling explicit.
+ * **Why two-branch finalize now (`commit()` + `rollback()`).** Under
+ * the broadcast-after-commit substrate the commit path is no longer
+ * a no-op: staged updates must apply to the resident Y.Doc AFTER the
+ * SQL tx commits — that application is the moment attached WebSocket
+ * clients receive the delta. A dispatcher that forgot `commit()`
+ * would leave live clients stale until the doc rehydrates (liveness,
+ * not correctness — the rows are durable); the integration suite
+ * pins the broadcast arrival so the wiring can't silently drop.
  *
  * **Lifecycle.** One `BoundSyncService` per `runInWriteTx` invocation.
  * Handlers receive `bound.transact` via `ctx.transact`; the
- * dispatcher calls `bound.rollback()` in its catch path. The bound
- * service is discarded at the end of the invocation.
+ * dispatcher calls `bound.commit()` after `withSystemTx` resolves and
+ * `bound.rollback()` in its catch path. The bound service is
+ * discarded at the end of the invocation.
  */
 export interface BoundSyncService extends SyncService {
   /**
-   * Drop the in-memory Y.Doc state for every `doc_id` mutated via
-   * this binding's `transact`. Called by `runInWriteTx` when its
-   * closure threw — the SQL tx rolls back, and so the Y.Doc in
-   * memory must re-hydrate from `doc_updates` next time it is
-   * opened. Idempotent; safe to call on a binding whose handler
+   * Apply every staged update to its resident Y.Doc (the broadcast
+   * moment) and advance the resident freshness watermark. Called by
+   * `runInWriteTx` exactly once, after the SQL tx COMMITS. Never
+   * throws — the mutation is already durable; apply failures are
+   * logged loud and healed by the next cold hydration. Idempotent
+   * on an empty binding.
+   */
+  commit(): Promise<void>;
+  /**
+   * Discard the staged updates. Called by `runInWriteTx` when its
+   * closure threw — the SQL tx rolled back, the staged rows never
+   * committed, and the resident Y.Doc was never touched (ADR 0043:
+   * there is nothing to evict; the pre-0043 eviction/poisoning
+   * machinery is gone). Idempotent; safe on a binding whose handler
    * never issued `ctx.transact`.
-   *
-   * **Scope.** The Hocuspocus-backed impl can only evict the Document
-   * when no WebSocket client connections are attached — Hocuspocus's
-   * `shouldUnloadDocument` gates on total `getConnectionsCount() === 0`.
-   * For docs with live editor sessions, the aborted delta stays in
-   * memory and in client-local Y.Docs; full atomicity there requires
-   * buffering broadcasts until SQL commit (Phase 4 scope).
    */
   rollback(): Promise<void>;
 }

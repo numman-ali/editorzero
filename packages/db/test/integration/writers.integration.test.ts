@@ -222,8 +222,13 @@ describe.each(backends)("writers conformance — $name", ({ setup }) => {
     const rows = await backend.driver.withSystemTx(async (tx) =>
       reader.readByDoc(asAuditTx(tx), DOC),
     );
-    // Each element is the raw update_blob per row. PG returns Buffer and
-    // SQLite returns Uint8Array; both compare equal byte-wise.
-    expect(rows.map((b) => Array.from(b))).toEqual([[0x01], [0x02], [0x03]]);
+    // Each row carries {seq, update_blob} (the ADR 0043 watermark
+    // shape). PG returns Buffer and SQLite returns Uint8Array for the
+    // blob; both compare equal byte-wise.
+    expect(rows.map((r) => [r.seq, Array.from(r.update_blob)])).toEqual([
+      [1, [0x01]],
+      [2, [0x02]],
+      [3, [0x03]],
+    ]);
   });
 });

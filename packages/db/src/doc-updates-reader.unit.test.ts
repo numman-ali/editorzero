@@ -1,20 +1,25 @@
 /**
  * `createDocUpdatesReader` unit tests.
  *
- * Locks the reader contract that `@editorzero/sync`'s `onLoadDocument`
- * hook depends on: one `Uint8Array` per `doc_updates` row for the
- * requested `doc_id`, ordered by `seq` ascending. Reads run through
- * the `AuditTx` handle so they share the write-path tx's connection
- * under better-sqlite3's single-connection model (see reader
- * docstring). Reads scope to the doc — a second doc's updates in the
- * same DB are not returned.
+ * Locks the reader contract that `@editorzero/sync` depends on: one
+ * `{seq, update_blob}` row per `doc_updates` row for the requested
+ * `doc_id`, ordered by `seq` ascending, optionally restricted to
+ * `seq > afterSeq` (the ADR 0043 watermark tail read). Reads run
+ * through the `AuditTx` handle so they share the write-path tx's
+ * connection under better-sqlite3's single-connection model (see
+ * reader docstring). Reads scope to the doc — a second doc's updates
+ * in the same DB are not returned.
  */
 
 import { DocId, UserId, uuidV7, WorkspaceId } from "@editorzero/ids";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { asAuditTx } from "./audit-writer";
-import { createDocUpdatesReader, type DocUpdatesReader } from "./doc-updates-reader";
+import {
+  createDocUpdatesReader,
+  type DocUpdateRow,
+  type DocUpdatesReader,
+} from "./doc-updates-reader";
 import { createSqliteDriver, type SqliteDriver } from "./drivers/sqlite";
 import { FULL_DDL } from "./drivers/sqlite-ddl";
 
@@ -94,26 +99,33 @@ async function seedUpdate(doc_id: DocId, seq: number, blob: Uint8Array): Promise
     .execute();
 }
 
-async function readByDoc(doc_id: DocId): Promise<Uint8Array[]> {
-  return driver.withSystemTx(async (tx) => reader.readByDoc(asAuditTx(tx), doc_id));
+async function readByDoc(doc_id: DocId, afterSeq?: number): Promise<DocUpdateRow[]> {
+  return driver.withSystemTx(async (tx) => reader.readByDoc(asAuditTx(tx), doc_id, afterSeq));
 }
 
-async function readByDocUntransacted(doc_id: DocId): Promise<Uint8Array[]> {
-  return reader.readByDocUntransacted(driver.system(), doc_id);
+async function readByDocUntransacted(doc_id: DocId, afterSeq?: number): Promise<DocUpdateRow[]> {
+  return reader.readByDocUntransacted(driver.system(), doc_id, afterSeq);
+}
+
+function flat(rows: DocUpdateRow[]): Array<[number, number[]]> {
+  return rows.map((r) => [r.seq, Array.from(r.update_blob)]);
 }
 
 describe("createDocUpdatesReader.readByDoc", () => {
   it("returns an empty array when the doc has no updates", async () => {
-    const blobs = await readByDoc(DOC_A);
-    expect(blobs).toEqual([]);
+    const rows = await readByDoc(DOC_A);
+    expect(rows).toEqual([]);
   });
 
-  it("returns one Uint8Array per row, in seq order, for the requested doc", async () => {
+  it("returns one {seq, update_blob} row per update, in seq order, for the requested doc", async () => {
     await seedUpdate(DOC_A, 1, new Uint8Array([1]));
     await seedUpdate(DOC_A, 2, new Uint8Array([2]));
     await seedUpdate(DOC_A, 3, new Uint8Array([3]));
-    const blobs = await readByDoc(DOC_A);
-    expect(blobs.map((b) => Array.from(b))).toEqual([[1], [2], [3]]);
+    expect(flat(await readByDoc(DOC_A))).toEqual([
+      [1, [1]],
+      [2, [2]],
+      [3, [3]],
+    ]);
   });
 
   it("orders by seq ascending even when rows were inserted out of seq order", async () => {
@@ -124,17 +136,27 @@ describe("createDocUpdatesReader.readByDoc", () => {
     await seedUpdate(DOC_A, 3, new Uint8Array([3]));
     await seedUpdate(DOC_A, 1, new Uint8Array([1]));
     await seedUpdate(DOC_A, 2, new Uint8Array([2]));
-    const blobs = await readByDoc(DOC_A);
-    expect(blobs.map((b) => Array.from(b))).toEqual([[1], [2], [3]]);
+    expect(flat(await readByDoc(DOC_A)).map(([seq]) => seq)).toEqual([1, 2, 3]);
   });
 
   it("does not return updates for a different doc", async () => {
     await seedUpdate(DOC_A, 1, new Uint8Array([10]));
     await seedUpdate(DOC_B, 1, new Uint8Array([20]));
-    const blobsA = await readByDoc(DOC_A);
-    const blobsB = await readByDoc(DOC_B);
-    expect(blobsA.map((b) => Array.from(b))).toEqual([[10]]);
-    expect(blobsB.map((b) => Array.from(b))).toEqual([[20]]);
+    expect(flat(await readByDoc(DOC_A))).toEqual([[1, [10]]]);
+    expect(flat(await readByDoc(DOC_B))).toEqual([[1, [20]]]);
+  });
+
+  it("afterSeq returns only the tail strictly past the watermark", async () => {
+    // The ADR 0043 catch-up contract: `afterSeq` is the resident's
+    // appliedSeq watermark; the tail must EXCLUDE the watermark row
+    // itself (strict >) or every catch-up would double-apply the last
+    // update. Double-apply is a Yjs no-op, but the contract stays
+    // strict so the row count is meaningful to callers.
+    await seedUpdate(DOC_A, 1, new Uint8Array([1]));
+    await seedUpdate(DOC_A, 2, new Uint8Array([2]));
+    await seedUpdate(DOC_A, 3, new Uint8Array([3]));
+    expect(flat(await readByDoc(DOC_A, 2))).toEqual([[3, [3]]]);
+    expect(await readByDoc(DOC_A, 3)).toEqual([]);
   });
 });
 
@@ -150,23 +172,26 @@ describe("createDocUpdatesReader.readByDocUntransacted", () => {
     await seedUpdate(DOC_A, 3, new Uint8Array([3]));
     const viaTx = await readByDoc(DOC_A);
     const viaBase = await readByDocUntransacted(DOC_A);
-    expect(viaBase.map((b) => Array.from(b))).toEqual(viaTx.map((b) => Array.from(b)));
+    expect(flat(viaBase)).toEqual(flat(viaTx));
   });
 
   it("orders by seq ascending on the untransacted path", async () => {
     await seedUpdate(DOC_A, 3, new Uint8Array([3]));
     await seedUpdate(DOC_A, 1, new Uint8Array([1]));
     await seedUpdate(DOC_A, 2, new Uint8Array([2]));
-    const blobs = await readByDocUntransacted(DOC_A);
-    expect(blobs.map((b) => Array.from(b))).toEqual([[1], [2], [3]]);
+    expect(flat(await readByDocUntransacted(DOC_A)).map(([seq]) => seq)).toEqual([1, 2, 3]);
   });
 
   it("scopes to the requested doc on the untransacted path", async () => {
     await seedUpdate(DOC_A, 1, new Uint8Array([10]));
     await seedUpdate(DOC_B, 1, new Uint8Array([20]));
-    const blobsA = await readByDocUntransacted(DOC_A);
-    const blobsB = await readByDocUntransacted(DOC_B);
-    expect(blobsA.map((b) => Array.from(b))).toEqual([[10]]);
-    expect(blobsB.map((b) => Array.from(b))).toEqual([[20]]);
+    expect(flat(await readByDocUntransacted(DOC_A))).toEqual([[1, [10]]]);
+    expect(flat(await readByDocUntransacted(DOC_B))).toEqual([[1, [20]]]);
+  });
+
+  it("afterSeq returns only the tail on the untransacted path", async () => {
+    await seedUpdate(DOC_A, 1, new Uint8Array([1]));
+    await seedUpdate(DOC_A, 2, new Uint8Array([2]));
+    expect(flat(await readByDocUntransacted(DOC_A, 1))).toEqual([[2, [2]]]);
   });
 });

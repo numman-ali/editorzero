@@ -43,21 +43,24 @@
  *
  *   - **Cold-doc path** — fresh driver + fresh sync; first write
  *     exercises `onLoadDocument` hydration + `doc_counters` bootstrap.
- *     9 in-tx queries per dispatch.
+ *     10 in-tx queries per dispatch (ADR 0043 added the clone's
+ *     tail-read SELECT).
  *   - **Resident-doc path (warm)** — run a successful priming
  *     dispatch first so the Y.Doc stays in Hocuspocus's document map
  *     and the `doc_counters` row pre-exists; then fault the second
- *     dispatch. 8 in-tx queries (no hydration SELECT). Without this
+ *     dispatch. 9 in-tx queries (no hydration SELECT). Without this
  *     suite, any regression that only shows up on second+ mutations
- *     (next_seq leak across rollback, polluted resident Y.Doc from a
+ *     (next_seq leak across rollback, stale clone state from a
  *     late SQL fault, etc.) would go untested.
  *
  * Each suite iterates every ordinal in [1..MAX_ORDINAL]. Reject-arm
  * assertions confirm the surfaced error is `FaultInjectedError` at
  * the matching ordinal, check five-row SQL atomicity,
- * `doc_counters` rollback, AND in-memory residency
- * (`bound.rollback()` must evict the Y.Doc on ordinals where
- * `ctx.transact` touched the bind). The no-op arm (ordinal > last
+ * `doc_counters` rollback, AND in-memory residency (under ADR 0043
+ * a rollback discards the staged updates — the resident was never
+ * touched, so it STAYS resident with committed-only state on every
+ * ordinal where the open succeeded; the pre-0043 eviction
+ * expectation is inverted on purpose). The no-op arm (ordinal > last
  * in-tx query) asserts all five rows commit and the doc stays
  * resident. Each suite's baseline test pins four things at once:
  *
@@ -306,17 +309,17 @@ interface TrialResult {
   readonly counterNextSeq: number | null;
   /**
    * Whether the `DOC_ID` Y.Doc is still resident in the Hocuspocus
-   * server's document map at the end of the trial. Commit 1's
-   * `bound.rollback()` evicts the doc from memory on fault (dropping
-   * it from `server.documents`), so a reject-arm trial where
-   * `ctx.transact` ran and the in-memory state was dirtied should
-   * end with `docResidentAfterTrial === false`. Without this probe,
-   * the property test only verifies SQL atomicity — a regression
-   * where a late-ordinal fault leaves the resident Y.Doc polluted
-   * with the uncommitted mutation would still pass (Codex P2,
-   * bpxpmkba3). See `hocuspocus.integration.test.ts` line 511 for
-   * the documented WS-client rollback-scope limit that keeps this
-   * signal honest.
+   * server's document map at the end of the trial. Under ADR 0043
+   * handlers mutate a throwaway clone, so a faulted dispatch leaves
+   * the resident UNTOUCHED — residency after rollback is benign by
+   * construction and the probe pins the open/unload mechanics
+   * instead: the doc is resident from the first successful open
+   * onward (rollback does NOT evict — the pre-0043 expectation,
+   * inverted), not resident when the fault preceded the open or
+   * fired inside `onLoadDocument` (Hocuspocus unloads + rethrows on
+   * a hydration failure). The committed-only content of that
+   * resident is pinned in the sync suites (Codex M1 property in
+   * `ws-attach.integration.test.ts`).
    */
   readonly docResidentAfterTrial: boolean;
 }
@@ -413,31 +416,38 @@ async function runTrial(opts: TrialOpts): Promise<TrialResult> {
         // active ordinal. `disarm()` in `finally` ensures the
         // error-audit `withAuditTx` that follows a rollback never
         // triggers a second fault — it is a distinct tx and is not
-        // part of the atomicity target under test.
+        // part of the atomicity target under test. `bound` is
+        // hoisted so the post-commit `bound.commit()` (the ADR 0043
+        // broadcast moment — pure in-memory apply, no SQL) runs after
+        // `withSystemTx` resolves, mirroring `createApiDispatcher`.
+        let bound: ReturnType<HocuspocusSync["bind"]> | undefined;
         fault.arm(activeFaultOrdinal);
         try {
-          return await driver.withSystemTx(async (rawTx) => {
+          const result = await driver.withSystemTx(async (rawTx) => {
             const tx = rawTx.withPlugin(plugin);
             const auditTx = asAuditTx(tx);
-            const bound = sync.bind({
+            const txBound = sync.bind({
               sqlTx: auditTx,
               principal,
               workspace_id: principal.workspace_id,
             });
+            bound = txBound;
             const extras: CapabilityContextExtras = {
               db: createTenantScopedDb(tx, principal.workspace_id),
               outbox: () => {
                 /* handler-emitted outbox rows land in a later slice */
               },
-              transact: bound.transact.bind(bound),
+              transact: txBound.transact.bind(txBound),
             };
             try {
               return await fn(extras, auditTx);
             } catch (err) {
-              await bound.rollback();
+              await txBound.rollback();
               throw err;
             }
           });
+          if (bound !== undefined) await bound.commit();
+          return result;
         } finally {
           fault.disarm();
         }
@@ -588,10 +598,13 @@ function countOutboxInserts(tags: readonly QueryTag[], event: string): number {
 //   - the counter row is absent (cold) or pinned to prime's value
 //     (warm) — catches counter leaks across rollback
 //     (Codex P2, bpxpmkba3 finding 2);
-//   - the Y.Doc is not resident when `ctx.transact` ran in the faulted
-//     dispatch (evicted by `bound.rollback()`) — catches polluted
-//     resident state surviving the rollback
-//     (Codex P2, bpxpmkba3 finding 2).
+//   - residency matches the open/unload mechanics, NOT an eviction:
+//     under ADR 0043 a rollback discards staged updates and the
+//     resident survives untouched on every ordinal where the open
+//     succeeded (the polluted-resident regression Codex flagged
+//     against the pre-0043 substrate is structurally impossible —
+//     handlers mutate a throwaway clone; committed-only content is
+//     pinned in the sync suites).
 
 /**
  * The exact number of SQL queries a happy-path content mutation
@@ -599,10 +612,12 @@ function countOutboxInserts(tags: readonly QueryTag[], event: string): number {
  * count must update the constant, the tag-breakdown in the baseline
  * assertion, and ADR 0018 F31 in the same commit.
  *
- * Empirically observed breakdown (9 queries):
+ * Empirically observed breakdown (10 queries):
  *
  *   1 — handler `UPDATE docs`
  * + 1 — `onLoadDocument` `SELECT doc_updates` (hydration, commit 1)
+ * + 1 — clone tail `SELECT doc_updates ... seq > watermark`
+ *       (ADR 0043 — the throwaway clone tops up from the tx view)
  * + 1 — `DocUpdatesWriter` `INSERT doc_counters ... ON CONFLICT DO NOTHING`
  *       (counter bootstrap)
  * + 1 — `DocUpdatesWriter` `SELECT doc_counters.next_seq`
@@ -619,7 +634,7 @@ function countOutboxInserts(tags: readonly QueryTag[], event: string): number {
  * raises the tx size past the ceiling surfaces here rather than
  * silently leaving the tail untested.
  */
-const EXPECTED_WRITE_TX_QUERIES = 9;
+const EXPECTED_WRITE_TX_QUERIES = 10;
 const MAX_ORDINAL = 15;
 
 describe("write-path atomicity (P3.6e)", () => {
@@ -696,7 +711,7 @@ describe("write-path atomicity (P3.6e)", () => {
         expect(result.docUpdatesCount).toBe(0);
         expect(result.docUpdatedOutboxCount).toBe(0);
         expect(result.allowAuditCount).toBe(0);
-        // `doc_counters` row is absent. The bootstrap INSERT (query #3)
+        // `doc_counters` row is absent. The bootstrap INSERT (query #4)
         // mints the row mid-tx; a rollback removes it whether the fault
         // fired before, during, or after the bootstrap. If a refactor
         // moves counter allocation out of the write tx (e.g., to a
@@ -704,15 +719,17 @@ describe("write-path atomicity (P3.6e)", () => {
         // `next_seq=1` on faults that triggered after priming — a
         // visible regression.
         expect(result.counterNextSeq).toBeNull();
-        // In-memory residency: on cold path the doc either never
-        // loaded (ordinal 1 fault, handler's docs UPDATE before
-        // `ctx.transact`) or was loaded and evicted by
-        // `bound.rollback()` (ordinal 2+ faults touch `ctx.transact`
-        // which registers the doc on the bind's `mutated` set).
-        // Either way the doc is not in `server.documents` at trial
-        // end — if it were, a subsequent read would see the polluted
-        // uncommitted state (Codex P2, bpxpmkba3 finding 2).
-        expect(result.docResidentAfterTrial).toBe(false);
+        // In-memory residency under ADR 0043: rollback does NOT evict
+        // — there is nothing to evict, the aborted mutation only ever
+        // lived on the throwaway clone. Ordinal 1 faults the handler's
+        // docs UPDATE before `ctx.transact` opens the doc (never
+        // resident); ordinal 2 faults the hydration SELECT inside
+        // `onLoadDocument`, where Hocuspocus unloads + rethrows (not
+        // resident). From ordinal 3 (the clone's tail SELECT) onward
+        // the open succeeded and the doc STAYS resident, holding
+        // committed-only state — the benign-residency property the
+        // sync suites pin with sockets attached (Codex M1).
+        expect(result.docResidentAfterTrial).toBe(ordinal >= 3);
         // Error audit + its outbox land in the separate `withAuditTx`;
         // they commit independently so observability survives the
         // rollback.
@@ -744,22 +761,22 @@ describe("write-path atomicity (P3.6e)", () => {
   // Hocuspocus's document map across successive transacts and the
   // counter row pre-exists. A regression that only shows up on
   // second+ mutations (e.g., counter-row leak across rollback,
-  // hydration firing when it shouldn't, handler still-resident Y.Doc
-  // picking up a polluted uncommitted mutation) is invisible to the
-  // cold-path suite. This suite runs a successful priming dispatch
-  // first, then injects the fault on the second dispatch — covering
-  // the warm path under the same five-row atomicity claim (Codex P2,
-  // bpxpmkba3 finding 1).
+  // hydration firing when it shouldn't, a stale clone built from a
+  // wrong watermark) is invisible to the cold-path suite. This suite
+  // runs a successful priming dispatch first, then injects the fault
+  // on the second dispatch — covering the warm path under the same
+  // five-row atomicity claim (Codex P2, bpxpmkba3 finding 1).
   //
   // Query-shape difference from cold:
   //   - No `onLoadDocument` SELECT — the doc is already resident, so
   //     Hocuspocus reuses the loaded Y.Doc instead of firing the hook.
+  //     (The clone's tail SELECT still fires — it runs per transact.)
   //   - `INSERT doc_counters ... ON CONFLICT DO NOTHING` is a SQL-level
   //     no-op (row exists from prime) but the statement still executes
   //     and counts toward `callsIssued`.
-  //   Net: 8 queries instead of cold's 9.
+  //   Net: 9 queries instead of cold's 10.
   describe("resident-doc path (warm write after prime)", () => {
-    const EXPECTED_WARM_TX_QUERIES = 8;
+    const EXPECTED_WARM_TX_QUERIES = 9;
 
     it("warm baseline: resident-doc write tx issues the expected shape of queries", async () => {
       const result = await runTrial({ faultOrdinal: 10_000, prime: true });
@@ -815,23 +832,15 @@ describe("write-path atomicity (P3.6e)", () => {
           // `withAuditTx`), so the counter is 2.
           expect(result.errorAuditCount).toBe(1);
           expect(result.auditAppendedOutboxCount).toBe(2);
-          // In-memory residency on warm path:
-          //   - ordinal 1 fault fires during the handler's `UPDATE docs`
-          //     — `ctx.transact` has not been called on the bind yet,
-          //     so `bound.rollback()` has nothing to evict. The doc
-          //     stays resident from prime.
-          //   - ordinal 2+ faults fire after `ctx.transact` has
-          //     touched the bind's `mutated` set, so rollback evicts
-          //     the doc. This is the exact "late fault leaves hot doc
-          //     polluted" regression Codex flagged (finding 2): if
-          //     rollback is broken, `server.documents.has(DOC_ID)`
-          //     stays `true` with the uncommitted mutation resident,
-          //     and a subsequent read picks up rolled-back content.
-          if (ordinal === 1) {
-            expect(result.docResidentAfterTrial).toBe(true);
-          } else {
-            expect(result.docResidentAfterTrial).toBe(false);
-          }
+          // In-memory residency on warm path under ADR 0043: the doc
+          // is resident from the prime and STAYS resident on every
+          // fault ordinal — rollback discards staged updates, never
+          // the resident. The "late fault leaves hot doc polluted"
+          // regression Codex flagged against the pre-0043 substrate
+          // is structurally impossible now (the faulted dispatch
+          // mutated a throwaway clone); the committed-only content
+          // of the surviving resident is pinned in the sync suites.
+          expect(result.docResidentAfterTrial).toBe(true);
         } else {
           // Fault past the tail — second dispatch committed on top of prime.
           expect(result.faultTriggered).toBe(false);

@@ -452,14 +452,19 @@ function mountContentDispatcher<I, O>(capability: Capability<I, O>): ContentMoun
     },
     runInWriteTx: async (principal, fn) => {
       runners.writeTx += 1;
-      return driver.withSystemTx(async (tx) => {
+      // Mirrors `createApiDispatcher`: `bound` hoisted so the post-
+      // commit `bound.commit()` runs AFTER `withSystemTx` resolves —
+      // the ADR 0043 broadcast moment (staged updates apply to the
+      // resident Y.Doc only once the SQL tx is durable).
+      let bound: ReturnType<HocuspocusSync["bind"]> | undefined;
+      const result = await driver.withSystemTx(async (tx) => {
         const auditTx = asAuditTx(tx);
         // `hocuspocus.bind(ctx)` hands back a tx-bound
         // `BoundSyncService` whose `transact` closes over `auditTx`
         // so the `DocUpdatesWriter.write` call commits inside the
         // same SQL tx as the handler's `ctx.db` writes and the allow
         // audit row. One `bind` per dispatcher invocation.
-        const bound = sync.bind({
+        bound = sync.bind({
           sqlTx: auditTx,
           principal,
           workspace_id: principal.workspace_id,
@@ -474,17 +479,16 @@ function mountContentDispatcher<I, O>(capability: Capability<I, O>): ContentMoun
         try {
           return await fn(extras, auditTx);
         } catch (err) {
-          // The SQL tx is about to roll back. Drop the in-memory
-          // Y.Doc state for every `doc_id` the handler mutated via
-          // `ctx.transact` so the next open re-hydrates from
-          // committed `doc_updates`. Without this step the live
-          // Hocuspocus `Document` would retain the rolled-back
-          // mutation — Codex P3.6c adversarial P2 (the "durable
-          // state is correct but the hot CRDT drifts" bug).
+          // The SQL tx is about to roll back. Discard the staged
+          // updates — the resident Y.Doc was never touched (handlers
+          // mutate a throwaway clone, ADR 0043), so durable and in-
+          // memory state agree without any eviction step.
           await bound.rollback();
           throw err;
         }
       });
+      if (bound !== undefined) await bound.commit();
+      return result;
     },
     runRead: async (principal, fn) => {
       runners.read += 1;
@@ -889,29 +893,29 @@ describe("write-path tx + content mutation (P3.6c)", () => {
     expect(audit[0]?.deny_reason).toBe("acl_deny");
   });
 
-  it("rollback drops in-memory Y.Doc drift: post-rollback read returns pre-transact state (P3.6e)", async () => {
+  it("rollback leaves no in-memory Y.Doc drift: post-rollback read returns committed state (P3.6e, reshaped by ADR 0043)", async () => {
     // The atomicity invariant (§7) is defined over durable state —
-    // the SQL tuple — but the in-memory Y.Doc a handler mutated via
-    // `ctx.transact` must not leak past a tx rollback either. If it
-    // did, a read issued on the same sync instance before a server
-    // restart would observe content with no matching `doc_updates`
-    // row, and the next durable write would fork.
+    // the SQL tuple — but the state a handler observes via
+    // `ctx.transact` must not include rolled-back mutations either.
+    // If it did, a read issued on the same sync instance before a
+    // server restart would observe content with no matching
+    // `doc_updates` row, and the next durable write would fork.
     //
-    // This test pins the rollback-drops-memory contract:
+    // This test pins the end-to-end property through the dispatcher:
     //   1. Invocation A commits a mutation. `doc_updates` has seq 1
-    //      with blob "first"; the in-memory Y.Doc holds "first".
+    //      with blob "first"; `bound.commit()` applies it to the
+    //      resident Y.Doc.
     //   2. Invocation B mutates the same doc, then throws — tx rolls
-    //      back, `bound.rollback()` fires, the in-memory Y.Doc is
-    //      dropped.
-    //   3. Invocation C reads the Y.Doc via a no-op `ctx.transact`.
-    //      `openDirectConnection` re-fires `onLoadDocument`, which
-    //      replays `doc_updates` from SQLite — only seq 1 exists, so
-    //      the observed text is "first", NOT "firstrolled-back".
+    //      back, `bound.rollback()` discards the staged update. The
+    //      resident was never touched (B mutated a throwaway clone).
+    //   3. Invocation C reads via a no-op `ctx.transact`. Its clone =
+    //      resident snapshot + committed tail — only seq 1 exists, so
+    //      the observed text is "first", NOT "rolled-backfirst".
     //
-    // Without the `bound.rollback()` call in `runInWriteTx`, step 3
-    // would see "firstrolled-back" (the aborted in-memory state) —
-    // durable state and observable state drift apart, invariant 7
-    // breaks. The test would fail here.
+    // Pre-ADR-0043 this same property needed an eviction step in
+    // `runInWriteTx`'s catch path (the resident HAD been mutated
+    // in-place); under broadcast-after-commit it holds by
+    // construction, and the test guards the composition end-to-end.
     const observed: string[] = [];
     const { dispatcher } = mountContentDispatcher({
       id: DOC_MUTATE_ID,
@@ -978,7 +982,7 @@ describe("write-path tx + content mutation (P3.6c)", () => {
     });
 
     // Invocation B — mutate then throw; tx rolls back, bound.rollback()
-    // drops the in-memory Y.Doc.
+    // discards the staged update (the resident was never touched).
     await expect(
       dispatcher.dispatch({
         capability_id: DOC_MUTATE_ID,
@@ -994,10 +998,10 @@ describe("write-path tx + content mutation (P3.6c)", () => {
     expect(updates).toHaveLength(1);
     expect(updates[0]?.seq).toBe(1);
 
-    // Invocation C — read. onLoadDocument replays the one
-    // committed row, so the observed text is invocation A's "first",
-    // NOT invocation B's "rolled-backfirst" (insert-at-0 would have
-    // prepended the aborted text had the in-memory Y.Doc survived).
+    // Invocation C — read. The clone reflects committed state only
+    // (resident + tail), so the observed text is invocation A's
+    // "first", NOT invocation B's "rolled-backfirst" (insert-at-0
+    // would have prepended the aborted text had it leaked).
     await dispatcher.dispatch({
       capability_id: DOC_MUTATE_ID,
       input: { doc_id: DOC_ID_A, text: "", mode: "read" },

@@ -28,12 +28,16 @@
  * **`sync` is optional.** When a `HocuspocusSync` is passed, the
  * write-path `ctx.transact` routes through `sync.bind({ sqlTx,
  * principal, workspace_id })` — same pattern proven in
- * `packages/dispatcher/src/writepath.integration.test.ts`. Handler
- * throw triggers `bound.rollback()` so the in-memory Y.Doc is dropped
- * and the next `ctx.transact` re-hydrates from committed
- * `doc_updates` (P3.6e). When `sync` is absent, `ctx.transact` throws
- * a descriptive error — tests and smokes that don't exercise content
- * mutations don't need to boot Hocuspocus.
+ * `packages/dispatcher/src/writepath.integration.test.ts`. The
+ * binding STAGES what it persisted; after `withSystemTx` commits,
+ * this factory calls `bound.commit()` — the staged updates apply to
+ * the resident Y.Doc and broadcast to attached WS clients (ADR 0043
+ * broadcast-after-commit). Handler throw triggers `bound.rollback()`,
+ * which just discards the staged updates — the resident was never
+ * touched pre-commit, so there is nothing to evict. When `sync` is
+ * absent, `ctx.transact` throws a descriptive error — tests and
+ * smokes that don't exercise content mutations don't need to boot
+ * Hocuspocus.
  *
  * **Read-path `ctx.transact` routes through `HocuspocusSync.read`.**
  * `doc.get` calls `ctx.transact(doc_id, fn)` in `category: "read"`
@@ -86,7 +90,7 @@ import {
   scopeOnlyGate,
 } from "@editorzero/dispatcher";
 import { type Logger, noopLogger, noopTracer, type Tracer } from "@editorzero/observability";
-import type { HocuspocusSync } from "@editorzero/sync";
+import type { BoundSyncService, HocuspocusSync } from "@editorzero/sync";
 
 /**
  * Structural driver surface the factory consumes — the subset
@@ -151,18 +155,23 @@ export function createApiDispatcher(options: CreateApiDispatcherOptions): Dispat
     tracer,
     logger,
     now,
-    runInWriteTx: async (principal, fn) =>
-      driver.withSystemTx(async (tx) => {
+    runInWriteTx: async (principal, fn) => {
+      // Hoisted so the post-commit `bound.commit()` below can reach
+      // the binding the closure created. `withSystemTx` may retry its
+      // closure; each attempt re-binds and a failed attempt's binding
+      // was rolled back, so the surviving value is the committed one.
+      let bound: BoundSyncService | undefined;
+      const result = await driver.withSystemTx(async (tx) => {
         const auditTx = asAuditTx(tx);
         // When `sync` is provided, bind it to the current tx so
         // `ctx.transact` → `DocUpdatesWriter.write(auditTx, …)` commits
         // inside the same `BEGIN IMMEDIATE` region as the handler's
         // `ctx.db` writes and the audit row. Pattern proven in
         // `packages/dispatcher/src/writepath.integration.test.ts`:
-        // one `bind` per dispatcher invocation, `bound.rollback()` on
-        // handler throw to drop the in-memory Y.Doc so subsequent
-        // `ctx.transact` re-hydrates from committed state (P3.6e).
-        const bound =
+        // one `bind` per dispatcher invocation; `bound.rollback()` on
+        // handler throw discards the staged updates (the resident
+        // Y.Doc was never touched pre-commit — ADR 0043).
+        bound =
           sync === undefined
             ? undefined
             : sync.bind({
@@ -218,15 +227,21 @@ export function createApiDispatcher(options: CreateApiDispatcherOptions): Dispat
           }
           return result;
         } catch (err) {
-          // The SQL tx is about to roll back. Drop the in-memory Y.Doc
-          // for every `doc_id` the handler mutated so the next open
-          // re-hydrates from committed `doc_updates`. Closes Codex
-          // P3.6c adversarial P2 (durable rollback succeeds but the
-          // hot Y.Doc retains the aborted mutation).
+          // The SQL tx is about to roll back. Discard the binding's
+          // staged updates — the resident Y.Doc was never touched
+          // pre-commit, so dropping the staging map IS the in-memory
+          // rollback (ADR 0043; supersedes the P3.6c eviction shape).
           if (bound !== undefined) await bound.rollback();
           throw err;
         }
-      }),
+      });
+      // SQL has committed. Apply the staged updates to the resident
+      // Y.Docs — the moment attached WS clients receive the deltas
+      // (broadcast-after-commit, ADR 0043 Decision 1). Never throws:
+      // the mutation is durable; apply failure is logged liveness.
+      if (bound !== undefined) await bound.commit();
+      return result;
+    },
     runRead: async (principal, fn) => {
       const extras: CapabilityContextExtras = {
         db: driver.scoped(principal.workspace_id),

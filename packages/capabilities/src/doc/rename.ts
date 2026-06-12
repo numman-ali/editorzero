@@ -30,9 +30,10 @@
  *
  * **Atomicity.** Both writes land inside the dispatcher's single SQL
  * tx (P3.6b write-path). If `setDocTitle` throws (corrupted fragment,
- * schema mismatch), the docs UPDATE rolls back too — the in-memory
- * Y.Doc mutation is reverted via `BoundSyncService.rollback` eviction
- * (the next read rehydrates from committed `doc_updates`).
+ * schema mismatch), the docs UPDATE rolls back too — the Y.Doc
+ * mutation is discarded with the staged update + throwaway clone
+ * (`BoundSyncService.rollback`, ADR 0043); the resident was never
+ * touched.
  *
  * **Order-of-writes.** UPDATE first, `ctx.transact` second — same
  * reasoning as `doc.create` (Codex P3.6c adversarial P3). A missing

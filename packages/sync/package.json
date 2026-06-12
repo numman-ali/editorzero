@@ -23,6 +23,7 @@
     "@editorzero/constants": "workspace:*",
     "@editorzero/db": "workspace:*",
     "@editorzero/ids": "workspace:*",
+    "@editorzero/observability": "workspace:*",
     "@editorzero/principal": "workspace:*",
     "@hocuspocus/server": "3.4.4",
     "@tiptap/pm": "catalog:",

@@ -1,11 +1,14 @@
 /**
  * `HocuspocusSync` — integration tests against real in-memory SQLite +
  * a real `Hocuspocus` instance (no WebSocket). Proves the write-path-tx
- * participation contract:
+ * participation contract on the ADR 0043 broadcast-after-commit
+ * substrate:
  *
- *   1. `bind(ctx).transact(doc, fn)` runs `fn` against a live Y.Doc.
+ *   1. `bind(ctx).transact(doc, fn)` runs `fn` against a throwaway
+ *      CLONE (resident snapshot + tx-view tail), never the resident.
  *   2. The Y.Doc update from `fn` lands in `doc_updates` under the
- *      caller's `AuditTx` — commits with it, rolls back with it.
+ *      caller's `AuditTx` — commits with it, rolls back with it — and
+ *      is STAGED on the binding.
  *   3. `outbox(doc.updated)` is emitted in the same tx.
  *   4. Seq advances gaplessly across successive transacts.
  *   5. First-write bootstrap — the writer auto-creates `doc_counters`
@@ -13,12 +16,21 @@
  *      `docs`-INSERT path (as of 2026-04-18) works against the real
  *      backend without a separate priming step.
  *   6. Same-doc concurrent `transact` calls serialize through a per-doc
- *      mutex so update listeners never cross-contaminate.
+ *      mutex (clone construction + persist + commit-apply are atomic
+ *      per doc).
+ *   7. `commit()` is the broadcast moment: staged updates apply to the
+ *      resident Y.Doc only AFTER the SQL tx commits; `rollback()`
+ *      discards staged updates and the resident is never touched — the
+ *      pre-0043 eviction/poisoning machinery is gone.
  *
  * These tests do not exercise the dispatcher — that integration lives
  * in `packages/dispatcher/src/writepath.integration.test.ts`. Here we
  * wire `HocuspocusSync` against a `driver.withSystemTx(asAuditTx(tx))`
- * directly, so the sync contract is proven in isolation.
+ * directly (via the dispatcher-shaped `runTx` helper below), so the
+ * sync contract is proven in isolation. The WS-visible half of the
+ * substrate (no broadcast on rollback; broadcast arrives after
+ * `commit()`) is pinned with real sockets in
+ * `ws-attach.integration.test.ts`.
  */
 
 import {
@@ -36,6 +48,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { DOC_FRAGMENT, seedBlocks } from "./blocks";
 import { HocuspocusSync, type HocuspocusTxContext } from "./hocuspocus";
+import type { BoundSyncService } from "./service";
 
 const WORKSPACE_ID = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const USER_ID = UserId("018f0000-0000-7000-8000-000000000002");
@@ -69,6 +82,37 @@ function testPrincipal(): UserPrincipal {
     session_id: null,
     token_id: null,
   };
+}
+
+function bindCtx(tx: Parameters<typeof asAuditTx>[0]): HocuspocusTxContext {
+  return {
+    sqlTx: asAuditTx(tx),
+    principal: testPrincipal(),
+    workspace_id: WORKSPACE_ID,
+  };
+}
+
+/**
+ * Dispatcher-shaped write invocation — mirrors `runInWriteTx` in
+ * `createApiDispatcher`: open a SQL tx, `bind()`, run `fn` with the
+ * binding, then `commit()` AFTER the tx committed (the broadcast
+ * moment) or `rollback()` when it threw. Tests that pin the staged-
+ * but-uncommitted window (resident lag, out-of-order commits) inline
+ * these steps instead of using the helper.
+ */
+async function runTx<T>(fn: (bound: BoundSyncService) => Promise<T>): Promise<T> {
+  let bound: BoundSyncService | undefined;
+  try {
+    const result = await driver.withSystemTx(async (tx) => {
+      bound = sync.bind(bindCtx(tx));
+      return fn(bound);
+    });
+    await bound?.commit();
+    return result;
+  } catch (err) {
+    await bound?.rollback();
+    throw err;
+  }
 }
 
 async function seedDocMetadata(doc_id: DocId): Promise<void> {
@@ -120,17 +164,15 @@ async function fetchOutbox(): Promise<Array<{ event: string; payload: string }>>
   return driver.system().selectFrom("outbox").select(["event", "payload"]).execute();
 }
 
+async function readBody(doc_id: DocId): Promise<string> {
+  return sync.read(doc_id, (ydoc) => ydoc.getText("body").toString());
+}
+
 describe("HocuspocusSync.bind().transact", () => {
   it("persists a doc_updates row + outbox(doc.updated) under the caller tx", async () => {
     await seedDocMetadata(DOC_ID_A);
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         seedBlocks(ydoc, [
           { id: "018f0000-0000-7000-8000-0000000000a1", type: "paragraph", content: "hello" },
@@ -155,13 +197,7 @@ describe("HocuspocusSync.bind().transact", () => {
     await seedDocMetadata(DOC_ID_A);
 
     await expect(
-      driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
+      runTx(async (bound) => {
         await bound.transact(DOC_ID_A, (ydoc) => {
           seedBlocks(ydoc, [
             { id: "018f0000-0000-7000-8000-0000000000a2", type: "paragraph", content: "hello" },
@@ -181,13 +217,7 @@ describe("HocuspocusSync.bind().transact", () => {
     await seedDocMetadata(DOC_ID_A);
 
     await expect(
-      driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
+      runTx(async (bound) => {
         await bound.transact(DOC_ID_A, () => {
           throw new Error("handler boom");
         });
@@ -204,13 +234,7 @@ describe("HocuspocusSync.bind().transact", () => {
     await seedDocMetadata(DOC_ID_A);
 
     for (const text of ["a", "b", "c"]) {
-      await driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
+      await runTx(async (bound) => {
         await bound.transact(DOC_ID_A, (ydoc) => {
           ydoc.getText("body").insert(ydoc.getText("body").length, text);
         });
@@ -228,19 +252,16 @@ describe("HocuspocusSync.bind().transact", () => {
       .where("doc_id", "=", DOC_ID_A)
       .executeTakeFirstOrThrow();
     expect(counter.next_seq).toBe(4);
+    // Each runTx applied its staged update post-commit, so the
+    // resident accumulated all three inserts.
+    expect(await readBody(DOC_ID_A)).toBe("abc");
   });
 
   it("does not advance seq when a transact rolls back", async () => {
     await seedDocMetadata(DOC_ID_A);
 
     // First commit succeeds (seq=1).
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(0, "a");
       });
@@ -248,13 +269,7 @@ describe("HocuspocusSync.bind().transact", () => {
 
     // Second tx throws; seq should not have advanced.
     await expect(
-      driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
+      runTx(async (bound) => {
         await bound.transact(DOC_ID_A, (ydoc) => {
           ydoc.getText("body").insert(1, "b");
         });
@@ -264,13 +279,7 @@ describe("HocuspocusSync.bind().transact", () => {
 
     // Third commit succeeds; seq should be 2 (rolled-back tx left no
     // gap). §6.4 gapless property.
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(ydoc.getText("body").length, "c");
       });
@@ -278,6 +287,9 @@ describe("HocuspocusSync.bind().transact", () => {
 
     const rows = await fetchDocUpdates(DOC_ID_A);
     expect(rows.map((r) => r.seq)).toEqual([1, 2]);
+    // The rolled-back "b" never reaches the resident — staged updates
+    // from an aborted tx are discarded, not applied.
+    expect(await readBody(DOC_ID_A)).toBe("ac");
   });
 
   it("auto-bootstraps doc_counters on the first transact against a freshly-inserted docs row", async () => {
@@ -286,13 +298,7 @@ describe("HocuspocusSync.bind().transact", () => {
     // inside the same write-path tx as `doc_updates` + `outbox`.
     await seedDocMetadata(DOC_ID_A);
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(0, "first");
       });
@@ -316,13 +322,7 @@ describe("HocuspocusSync.bind().transact", () => {
     // and fails before any partial write can land. Callers must
     // INSERT `docs` before the first `ctx.transact`.
     await expect(
-      driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
+      runTx(async (bound) => {
         await bound.transact(DOC_ID_A, (ydoc) => {
           ydoc.getText("body").insert(0, "oops");
         });
@@ -340,13 +340,7 @@ describe("HocuspocusSync.bind().transact", () => {
     // to import the audit writer" drift signal.
     void createAuditWriter;
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (_ydoc) => {
         // deliberately no mutation
       });
@@ -358,7 +352,7 @@ describe("HocuspocusSync.bind().transact", () => {
     expect(outbox).toHaveLength(0);
     // No-mutation transacts skip the writer entirely, so the counter
     // isn't even bootstrapped. Empty transact is a true no-op across
-    // the whole tuple.
+    // the whole tuple (and stages nothing for `commit()` to apply).
     const counter = await driver
       .system()
       .selectFrom("doc_counters")
@@ -366,6 +360,19 @@ describe("HocuspocusSync.bind().transact", () => {
       .where("doc_id", "=", DOC_ID_A)
       .executeTakeFirst();
     expect(counter).toBeUndefined();
+  });
+
+  it("commit() on a binding that never staged anything is a no-op", async () => {
+    // The dispatcher calls `commit()` unconditionally after every
+    // committed write tx — including metadata-only dispatches whose
+    // handler never touched `ctx.transact`. Must resolve cleanly and
+    // leave no trace.
+    await seedDocMetadata(DOC_ID_A);
+    await runTx(async () => {
+      /* no transact at all */
+    });
+    expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(0);
+    expect(await readBody(DOC_ID_A)).toBe("");
   });
 
   it("captures Y.Doc updates issued after an `await` inside the handler", async () => {
@@ -377,13 +384,7 @@ describe("HocuspocusSync.bind().transact", () => {
     // `fn` Promise chain.
     await seedDocMetadata(DOC_ID_A);
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, async (ydoc) => {
         ydoc.getText("body").insert(0, "sync");
         await Promise.resolve(); // yield — detaches any naive listener
@@ -401,16 +402,10 @@ describe("HocuspocusSync.bind().transact", () => {
     expect(replay.getText("body").toString()).toBe("sync-async");
   });
 
-  it("keeps Y.Doc state resident across transacts so projections see the prior state", async () => {
+  it("a later transact's clone sees prior committed state", async () => {
     await seedDocMetadata(DOC_ID_A);
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         seedBlocks(ydoc, [
           { id: "018f0000-0000-7000-8000-0000000000a3", type: "paragraph", content: "first" },
@@ -418,33 +413,193 @@ describe("HocuspocusSync.bind().transact", () => {
       });
     });
 
-    const readBack = await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
-      return bound.transact(DOC_ID_A, (ydoc) => {
+    const readBack = await runTx(async (bound) =>
+      bound.transact(DOC_ID_A, (ydoc) => {
         const fragment = ydoc.getXmlFragment(DOC_FRAGMENT);
         return fragment.length;
-      });
-    });
+      }),
+    );
 
-    // One top-level child on the fragment; proves the fragment survived
-    // across invocations without a hydration step (`unloadImmediately:
-    // false` keeps the doc resident).
+    // One top-level child on the fragment: the second invocation's
+    // clone = resident snapshot (the first commit's `commit()` applied
+    // seq 1) + tx-view tail (empty — watermark already at 1). Proves
+    // continuity across invocations without a cold rehydration.
     expect(readBack).toBe(1);
   });
 
+  it("read-your-own-writes: a second transact in the same binding sees the first's staged update", async () => {
+    // ADR 0043's tail construction: the clone = resident snapshot
+    // (committed ≤ watermark) + `doc_updates` rows with seq > watermark
+    // read through the OPEN tx — which includes THIS binding's own
+    // uncommitted rows. A handler that calls `ctx.transact` twice in
+    // one dispatch must see its first write in the second call, even
+    // though nothing has committed or applied to the resident yet.
+    await seedDocMetadata(DOC_ID_A);
+
+    let mid = "";
+    await runTx(async (bound) => {
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "a");
+      });
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        const body = ydoc.getText("body");
+        mid = body.toString();
+        body.insert(body.length, "b");
+      });
+    });
+
+    expect(mid).toBe("a");
+    expect((await fetchDocUpdates(DOC_ID_A)).map((r) => r.seq)).toEqual([1, 2]);
+    // Both staged rows applied to the resident at commit().
+    expect(await readBody(DOC_ID_A)).toBe("ab");
+  });
+
+  it("resident stays committed-only until commit(): hot read lags, then catches up", async () => {
+    // The D1 property at the sync seam, both halves deterministic:
+    // after `withSystemTx` resolves (SQL durable) but BEFORE
+    // `bound.commit()`, the resident — and therefore a hot read —
+    // must not show the new delta (nothing was applied, so nothing
+    // could have broadcast). `commit()` is the apply/broadcast
+    // moment; the read flips immediately after.
+    await seedDocMetadata(DOC_ID_A);
+
+    let bound: BoundSyncService | undefined;
+    await driver.withSystemTx(async (tx) => {
+      bound = sync.bind(bindCtx(tx));
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "x");
+      });
+    });
+    // SQL committed; the broadcast moment has not happened yet.
+    expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(1);
+    expect(await readBody(DOC_ID_A)).toBe("");
+
+    if (bound === undefined) throw new Error("bind never ran");
+    await bound.commit();
+    expect(await readBody(DOC_ID_A)).toBe("x");
+  });
+
+  it("out-of-order commit() across two bindings converges (watermark = monotonic max)", async () => {
+    // Two dispatches commit SQL in seq order but call `commit()` in
+    // REVERSE order — the scheduling the dispatcher cannot rule out
+    // across concurrent requests. Yjs application is commutative
+    // (blob 2 parks as pending structs until blob 1 arrives), so the
+    // resident converges to the same state either way, and the
+    // watermark (monotonic max) never regresses.
+    await seedDocMetadata(DOC_ID_A);
+
+    let boundA: BoundSyncService | undefined;
+    await driver.withSystemTx(async (tx) => {
+      boundA = sync.bind(bindCtx(tx));
+      await boundA.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "1");
+      });
+    });
+    let boundB: BoundSyncService | undefined;
+    await driver.withSystemTx(async (tx) => {
+      boundB = sync.bind(bindCtx(tx));
+      await boundB.transact(DOC_ID_A, (ydoc) => {
+        // B's clone sees A's committed row via the tail read even
+        // though A has not applied to the resident yet.
+        const body = ydoc.getText("body");
+        body.insert(body.length, "2");
+      });
+    });
+    if (boundA === undefined || boundB === undefined) throw new Error("bind never ran");
+
+    await boundB.commit();
+    await boundA.commit();
+
+    expect(await readBody(DOC_ID_A)).toBe("12");
+    // A third dispatch on top of the out-of-order pair: clone = fully
+    // converged resident + empty tail (watermark 2 — the max, so the
+    // tail re-fetches neither blob).
+    await runTx(async (bound) => {
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        const body = ydoc.getText("body");
+        body.insert(body.length, "3");
+      });
+    });
+    expect(await readBody(DOC_ID_A)).toBe("123");
+    expect((await fetchDocUpdates(DOC_ID_A)).map((r) => r.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("commit() after the doc unloaded is a quiet no-op — the next hydration covers it", async () => {
+    // The not-resident arm of the post-commit apply: if the doc fell
+    // out of memory between the SQL commit and `commit()` (instance
+    // shutdown here; a debounce-driven unload in production), there
+    // is nothing to apply or broadcast — the staged rows are durable,
+    // and the next hydration replays them. `commit()` must resolve
+    // (never-throws contract) and leave no stale watermark behind.
+    await seedDocMetadata(DOC_ID_A);
+    let bound: BoundSyncService | undefined;
+    await driver.withSystemTx(async (tx) => {
+      bound = sync.bind(bindCtx(tx));
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "x");
+      });
+    });
+    if (bound === undefined) throw new Error("bind never ran");
+
+    await sync.close();
+    expect(sync._server_testOnly().documents.get(DOC_ID_A)).toBeUndefined();
+    await expect(bound.commit()).resolves.toBeUndefined();
+
+    sync = new HocuspocusSync({
+      docUpdatesWriter: createDocUpdatesWriter(),
+      docUpdatesReader: createDocUpdatesReader(),
+      systemDb: driver.system(),
+    });
+    expect(await readBody(DOC_ID_A)).toBe("x");
+  });
+
+  it("a dropped commit() lags the resident but never corrupts the write lane", async () => {
+    // Simulates the wiring bug the `BoundSyncService` docstring warns
+    // about: a composition that forgets `bound.commit()`. The failure
+    // is LIVENESS only — the resident (and live WS clients) lag — and
+    // it heals at rehydration. The write lane stays correct: the next
+    // transact's clone picks the orphaned row up via the tail read
+    // (watermark still behind), and cold replay sees everything.
+    await seedDocMetadata(DOC_ID_A);
+
+    await driver.withSystemTx(async (tx) => {
+      // commit() deliberately never called.
+      await sync.bind(bindCtx(tx)).transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "first");
+      });
+    });
+
+    let seen = "";
+    await runTx(async (bound) => {
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        const body = ydoc.getText("body");
+        seen = body.toString();
+        body.insert(body.length, "!");
+      });
+    });
+    expect(seen).toBe("first");
+    expect((await fetchDocUpdates(DOC_ID_A)).map((r) => r.seq)).toEqual([1, 2]);
+
+    // Heal path: a cold instance replays committed rows in full.
+    await sync.close();
+    sync = new HocuspocusSync({
+      docUpdatesWriter: createDocUpdatesWriter(),
+      docUpdatesReader: createDocUpdatesReader(),
+      systemDb: driver.system(),
+    });
+    expect(await readBody(DOC_ID_A)).toBe("first!");
+  });
+
   it("serialises concurrent same-doc transacts through the per-doc mutex", async () => {
-    // Closes Codex P3.6c adversarial P1. Three concurrent dispatches
-    // on the same doc each yield once mid-transact. Without a mutex,
-    // one invocation's `update` listener (still attached across the
-    // `await`) would capture another invocation's delta; with the
-    // mutex, each `open → mutate → persist` sequence completes before
-    // the next begins, so each `doc_updates` row carries exactly one
-    // invocation's inserts.
+    // Closes Codex P3.6c adversarial P1, reshaped by ADR 0043. Three
+    // concurrent dispatches on the same doc each yield once mid-
+    // transact. Clone-per-transact already prevents the original
+    // cross-capture bug structurally (each invocation's `update`
+    // listener lives on its own clone); the mutex remains load-
+    // bearing for the open→snapshot→tail→persist sequence itself —
+    // without it, two invocations could interleave their tail reads
+    // and seq allocations, and `commit()` applies could race clone
+    // construction.
     //
     // SQLite single-connection serialisation already funnels
     // `withSystemTx` calls, so this test over-verifies today; the
@@ -454,13 +609,7 @@ describe("HocuspocusSync.bind().transact", () => {
     await seedDocMetadata(DOC_ID_A);
 
     const run = (marker: string): Promise<void> =>
-      driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
+      runTx(async (bound) => {
         await bound.transact(DOC_ID_A, async (ydoc) => {
           const body = ydoc.getText("body");
           body.insert(body.length, `[${marker}`);
@@ -479,6 +628,8 @@ describe("HocuspocusSync.bind().transact", () => {
     for (const row of rows) Y.applyUpdate(replay, row.update_blob);
     // No interleaving — each `[X … X]` block stays contiguous.
     expect(replay.getText("body").toString()).toMatch(/^(\[(A|B|C)\2\]){3}$/);
+    // The resident (all three commits applied) agrees with cold replay.
+    expect(await readBody(DOC_ID_A)).toBe(replay.getText("body").toString());
   });
 
   it("per-doc retention is bounded across invocations (Codex P3.6e adversarial)", async () => {
@@ -490,19 +641,17 @@ describe("HocuspocusSync.bind().transact", () => {
     // connection per call, stores it in the singleton map, and
     // disconnects the predecessor in `finally` AFTER the new one is
     // registered (so `directConnectionsCount` never drops to 0 during
-    // the swap and the Y.Doc stays resident). Test pins the invariant
-    // by driving 10 same-doc transacts and asserting the server's
-    // `directConnectionsCount` stays at 1, not 10.
+    // the swap and the Y.Doc stays resident). Post-ADR-0043 the
+    // singleton is also a correctness term: "any doc with uncommitted
+    // `doc_updates` rows is resident" is what keeps cold WS/read
+    // hydration committed-only on SQLite's single connection. Test
+    // pins the invariant by driving 10 same-doc transacts and
+    // asserting the server's `directConnectionsCount` stays at 1,
+    // not 10.
     await seedDocMetadata(DOC_ID_A);
     const iterations = 10;
     for (let i = 0; i < iterations; i++) {
-      await driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
+      await runTx(async (bound) => {
         await bound.transact(DOC_ID_A, (ydoc) => {
           ydoc.getText("body").insert(0, `${i}`);
         });
@@ -521,102 +670,61 @@ describe("HocuspocusSync.bind().transact", () => {
     expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(iterations);
   });
 
-  it("fails closed when rollback cannot evict a held doc, and recovers on release (poisoned path)", async () => {
-    // The P3.6e-era version of this test pinned the OPPOSITE: with a
-    // concurrent holder keeping `getConnectionsCount() > 0`, rollback
-    // could not evict and the next `ctx.transact` silently read the
-    // rolled-back delta — recorded then as a known Phase-4 limit, with
-    // this test demanding a justification from whoever "fixed" it. The
-    // ADR 0030 WS-hardening review (task #15) supplied the
-    // justification: once real WS clients attach, persisting deltas
-    // computed on aborted state is a silent invariant-3/7 violation,
-    // strictly worse than refusing loudly. Rollback now closes the
-    // doc's WS subscriptions and awaits the unload drain; a holder it
-    // CANNOT kill (this direct-connection squatter — `closeConnections`
-    // only reaches WS connections) marks the doc poisoned, and both
-    // open paths refuse until eviction succeeds. The full WS lifecycle
-    // (real sockets, hydration, Close frames) lives in
-    // `ws-attach.integration.test.ts`.
+  it("rollback with a concurrent connection holder: resident untouched, no poison, no eviction needed", async () => {
+    // The pre-ADR-0043 substrate mutated the resident during
+    // `transact`, so a rollback had to EVICT the doc — and a holder
+    // it could not kill (this direct-connection squatter) forced a
+    // poisoned fail-closed state pinned by the predecessor of this
+    // test. Under broadcast-after-commit the whole dilemma dissolves:
+    // the aborted mutation only ever existed on the throwaway clone,
+    // so there is nothing to evict, nothing to poison, and the
+    // squatter is irrelevant. Same fixture, opposite (now correct)
+    // outcome.
     await seedDocMetadata(DOC_ID_A);
+
+    await runTx(async (bound) => {
+      await bound.transact(DOC_ID_A, (ydoc) => {
+        ydoc.getText("body").insert(0, "committed");
+      });
+    });
 
     const squatter = await sync._server_testOnly().openDirectConnection(DOC_ID_A, {});
     await expect(
-      driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
-        try {
-          await bound.transact(DOC_ID_A, (ydoc) => {
-            ydoc.getText("body").insert(0, "rolled-back");
-          });
-          throw new Error("post-transact throw");
-        } catch (err) {
-          await bound.rollback();
-          throw err;
-        }
+      runTx(async (bound) => {
+        await bound.transact(DOC_ID_A, (ydoc) => {
+          ydoc.getText("body").insert(0, "rolled-back");
+        });
+        throw new Error("post-transact throw");
       }),
     ).rejects.toThrow("post-transact throw");
 
     // Durable state clean (SQL tx rolled back).
-    expect(await fetchDocUpdates(DOC_ID_A)).toHaveLength(0);
+    expect((await fetchDocUpdates(DOC_ID_A)).map((r) => r.seq)).toEqual([1]);
 
-    // Poisoned: the squatter pinned the Document, so the aborted
-    // mutation is still resident — both open paths refuse loudly
-    // rather than serve or build on it.
-    await expect(
-      driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        await sync.bind(ctx).transact(DOC_ID_A, () => undefined);
-      }),
-    ).rejects.toThrow(/could not be evicted/u);
-    await expect(sync.read(DOC_ID_A, () => undefined)).rejects.toThrow(/could not be evicted/u);
-
-    // Holder gone → the next open's eviction retry clears the poison
-    // and rehydrates from committed `doc_updates` (here: empty doc).
-    await squatter.disconnect();
+    // With the squatter STILL attached: both open paths serve
+    // committed state — no refusal, no rolled-back delta.
+    expect(await readBody(DOC_ID_A)).toBe("committed");
     let observed = "";
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      await sync.bind(ctx).transact(DOC_ID_A, (ydoc) => {
+    await runTx(async (bound) => {
+      await bound.transact(DOC_ID_A, (ydoc) => {
         observed = ydoc.getText("body").toString();
       });
     });
-    expect(observed).toBe("");
+    expect(observed).toBe("committed");
+
+    await squatter.disconnect();
   });
 
   it("isolates writes across doc_ids", async () => {
     await seedDocMetadata(DOC_ID_A);
     await seedDocMetadata(DOC_ID_B);
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(0, "A");
       });
     });
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_B, (ydoc) => {
         ydoc.getText("body").insert(0, "B");
       });
@@ -624,6 +732,8 @@ describe("HocuspocusSync.bind().transact", () => {
 
     expect((await fetchDocUpdates(DOC_ID_A)).length).toBe(1);
     expect((await fetchDocUpdates(DOC_ID_B)).length).toBe(1);
+    expect(await readBody(DOC_ID_A)).toBe("A");
+    expect(await readBody(DOC_ID_B)).toBe("B");
   });
 });
 
@@ -650,13 +760,7 @@ describe("HocuspocusSync.close", () => {
     await seedDocMetadata(DOC_ID_A);
     await sync.close();
     await expect(
-      driver.withSystemTx(async (tx) => {
-        const ctx: HocuspocusTxContext = {
-          sqlTx: asAuditTx(tx),
-          principal: testPrincipal(),
-          workspace_id: WORKSPACE_ID,
-        };
-        const bound = sync.bind(ctx);
+      runTx(async (bound) => {
         await bound.transact(DOC_ID_A, (ydoc) => {
           ydoc.getText("body").insert(0, "x");
         });
@@ -680,29 +784,21 @@ describe("HocuspocusSync.read", () => {
   //   5. Concurrent same-doc read + transact serialise through the
   //      per-doc mutex — the read never observes a half-mutated Y.Doc.
   //   6. Read after close rejects.
+  //
+  // Post-ADR-0043 the read is committed-only BY CONSTRUCTION: the
+  // resident never holds pre-commit state, so neither does the
+  // snapshot clone a read hands its handler.
 
   it("hydrates via untransacted reader on a cold doc and returns committed state", async () => {
     await seedDocMetadata(DOC_ID_A);
 
     // Write two committed updates through the write-path bind.
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(0, "hello");
       });
     });
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         const body = ydoc.getText("body");
         body.insert(body.length, " world");
@@ -722,14 +818,14 @@ describe("HocuspocusSync.read", () => {
       systemDb: driver.system(),
     });
 
-    const observed = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    const observed = await readBody(DOC_ID_A);
     expect(observed).toBe("hello world");
   });
 
   it("returns an empty Y.Doc when no doc_updates rows exist", async () => {
     await seedDocMetadata(DOC_ID_A);
 
-    const observed = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    const observed = await readBody(DOC_ID_A);
     expect(observed).toBe("");
   });
 
@@ -767,13 +863,7 @@ describe("HocuspocusSync.read", () => {
     // the next test.
     await seedDocMetadata(DOC_ID_A);
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(0, "hello");
       });
@@ -784,7 +874,7 @@ describe("HocuspocusSync.read", () => {
       ydoc.getText("body").insert(0, "ghost-");
     });
 
-    const observed = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    const observed = await readBody(DOC_ID_A);
     expect(observed).toBe("hello");
   });
 
@@ -802,13 +892,7 @@ describe("HocuspocusSync.read", () => {
     // state.
     await seedDocMetadata(DOC_ID_A);
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(0, "hello");
       });
@@ -818,13 +902,7 @@ describe("HocuspocusSync.read", () => {
       ydoc.getText("body").insert(0, "ghost-");
     });
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         const body = ydoc.getText("body");
         body.insert(body.length, "!");
@@ -840,7 +918,7 @@ describe("HocuspocusSync.read", () => {
       systemDb: driver.system(),
     });
 
-    const coldRead = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    const coldRead = await readBody(DOC_ID_A);
     expect(coldRead).toBe("hello!");
   });
 
@@ -862,46 +940,36 @@ describe("HocuspocusSync.read", () => {
     await seedDocMetadata(DOC_ID_A);
 
     // read → write: read on empty doc yields "", write then persists.
-    const emptyRead = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    const emptyRead = await readBody(DOC_ID_A);
     expect(emptyRead).toBe("");
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(0, "a");
       });
     });
 
-    // write → read: read after commit sees the written state.
-    const afterWrite = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    // write → read: read after the dispatch (SQL commit + commit())
+    // sees the written state.
+    const afterWrite = await readBody(DOC_ID_A);
     expect(afterWrite).toBe("a");
   });
 
-  it("sees state from an in-process transact when it's already resident", async () => {
-    // Hot-doc path — read after transact without a restart. The Y.Doc
-    // stays resident (open-replace pattern keeps `directConnectionsCount`
-    // >= 1 across the transact→read swap), so `onLoadDocument` does not
-    // re-fire; the read sees the same Y.Doc the transact mutated.
+  it("sees state from an in-process transact once commit() has applied it", async () => {
+    // Hot-doc path — read after a full dispatcher-shaped write,
+    // without a restart. The Y.Doc stays resident (open-replace keeps
+    // `directConnectionsCount` >= 1 across the transact→read swap), so
+    // `onLoadDocument` does not re-fire; the read sees the state
+    // `commit()` applied to the resident at the broadcast moment.
     await seedDocMetadata(DOC_ID_A);
 
-    await driver.withSystemTx(async (tx) => {
-      const ctx: HocuspocusTxContext = {
-        sqlTx: asAuditTx(tx),
-        principal: testPrincipal(),
-        workspace_id: WORKSPACE_ID,
-      };
-      const bound = sync.bind(ctx);
+    await runTx(async (bound) => {
       await bound.transact(DOC_ID_A, (ydoc) => {
         ydoc.getText("body").insert(0, "hot");
       });
     });
 
-    const observed = await sync.read(DOC_ID_A, (ydoc) => ydoc.getText("body").toString());
+    const observed = await readBody(DOC_ID_A);
     expect(observed).toBe("hot");
   });
 
