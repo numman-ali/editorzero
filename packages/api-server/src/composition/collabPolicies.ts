@@ -16,13 +16,15 @@
  *     frame and the per-document connection closes (the gate logs the
  *     reason).
  *
- * Both arms resolve identity through ONE `resolveCollabPrincipal` —
- * cookie arm only today (user principals); ADR 0043 increment 4 grows
- * the `Authorization: Bearer` arm for api-key + delegated-agent
- * principals HERE, so attach-time standing and per-frame write
- * dispatch can never diverge on identity. Resolution happens from the
- * upgrade request's headers on EVERY call (revocation freshness —
- * nothing identity-shaped rides the connection).
+ * Both arms resolve identity through ONE `resolveCollabPrincipal` over
+ * the composed bearer+cookie core (ADR 0044 Decision 5 step 2): a
+ * session cookie → human, an `Authorization: Bearer ez_agent_…` →
+ * api-key agent. Attach-time standing and per-frame write dispatch can
+ * never diverge on identity (same resolve), and neither can the HTTP
+ * surface (same core). Delegated (agent-auth) agents are refused until
+ * the H8-aware arm lands — see `resolveCollabPrincipal`. Resolution
+ * happens from the upgrade request's headers on EVERY call (revocation
+ * freshness — nothing identity-shaped rides the connection).
  *
  * **`wireDispatcher` is late binding, not optional wiring.**
  * `HocuspocusSync` must exist before `createApiDispatcher` (the
@@ -33,7 +35,6 @@
  * for any path that somehow dispatches earlier.
  */
 
-import type { BetterAuthResolver } from "@editorzero/auth";
 import { loadDocReadResolver } from "@editorzero/capabilities";
 import type { SqliteDriver } from "@editorzero/db";
 import { type Dispatcher, effectiveScopes } from "@editorzero/dispatcher";
@@ -42,9 +43,17 @@ import type { Logger } from "@editorzero/observability";
 import type { Principal } from "@editorzero/principal";
 import type { CollabApplyUpdatePayload, CollabAuthorizePayload } from "@editorzero/sync";
 
+import type { ComposedPrincipalResolver } from "../middleware/agent-bearer";
+
 export interface CollabPoliciesDeps {
-  /** The shared Better Auth resolver (one identity source, ADR 0030). */
-  readonly resolver: BetterAuthResolver;
+  /**
+   * The composed bearer+cookie principal resolve (ADR 0044 Decision 5
+   * step 2 / Codex SF2) — the SAME header-shaped core the HTTP principal
+   * middleware uses, so attach standing, per-frame write authority, and
+   * the HTTP surface can never diverge on identity. Cookie → human;
+   * `Authorization: Bearer ez_agent_…` → api-key agent.
+   */
+  readonly resolvePrincipal: ComposedPrincipalResolver;
   /** The booted driver — doc lookups run tenant-scoped through it. */
   readonly driver: SqliteDriver;
   /** Structured logger for authorization denials. */
@@ -59,13 +68,24 @@ export interface CollabPolicies {
 }
 
 export function createCollabPolicies(deps: CollabPoliciesDeps): CollabPolicies {
-  const { resolver, driver, logger } = deps;
+  const { resolvePrincipal, driver, logger } = deps;
 
   /**
-   * The collab principal resolve both policies share. Cookie arm only
-   * today — `kind !== "user"` is a defensive rail for the increment-4
-   * multi-principal resolver, not a reachable branch of the current
-   * `BetterAuthResolver` type.
+   * The collab principal resolve both policies share (attach-time +
+   * per-frame), over the composed bearer+cookie core. Forwards BOTH the
+   * cookie and the `Authorization` header; the core decides the lane
+   * (bearer wins, no cookie fallback on an explicit bearer).
+   *
+   * **Admits humans and api-key agents only.** A DELEGATED (agent-auth)
+   * agent is refused: its real authority is `acting_as ∩ delegator`
+   * (H8), an intersection `effectiveScopes` does NOT compute — for any
+   * agent it returns the token's scope claim verbatim (see the gate.ts
+   * caution). `collabAuthorize` leans on `effectiveScopes`, so admitting
+   * a delegated agent here would grant it its UN-intersected token
+   * scopes. The delegated WS arm — which must bring the H8-aware term —
+   * is a later increment; until it lands, refuse rather than over-grant.
+   * This is the rail that replaced the old cookie-only `kind !== "user"`
+   * guard (ADR 0044 Decision 5 step 2).
    */
   const resolveCollabPrincipal = async (
     requestHeaders: CollabAuthorizePayload["requestHeaders"],
@@ -74,12 +94,15 @@ export function createCollabPolicies(deps: CollabPoliciesDeps): CollabPolicies {
     if (typeof requestHeaders.cookie === "string") {
       headers.set("cookie", requestHeaders.cookie);
     }
-    const principal = await resolver(headers);
-    if (principal === null) {
-      throw new Error("collab: no authenticated session");
+    if (typeof requestHeaders.authorization === "string") {
+      headers.set("authorization", requestHeaders.authorization);
     }
-    if (principal.kind !== "user") {
-      throw new Error("collab: cookie path admits user principals only");
+    const principal = await resolvePrincipal(headers);
+    if (principal === null) {
+      throw new Error("collab: no authenticated principal");
+    }
+    if (principal.kind === "agent" && principal.token_kind !== "api-key") {
+      throw new Error("collab: delegated agent tokens are not admitted on the WS surface yet");
     }
     return principal;
   };

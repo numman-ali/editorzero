@@ -33,12 +33,7 @@
  * production entrypoint next to `attachSpa`.
  */
 
-import {
-  type BetterAuthResolver,
-  createAuth,
-  createBetterAuthResolver,
-  runAuthMigrations,
-} from "@editorzero/auth";
+import { createAuth, createBetterAuthResolver, runAuthMigrations } from "@editorzero/auth";
 import { createDefaultRegistry } from "@editorzero/capabilities";
 import { loadEnvConfig, type RuntimeConfig, resolveSecretRef } from "@editorzero/config";
 import {
@@ -59,6 +54,10 @@ import { createCollabPolicies } from "./composition/collabPolicies";
 import { type CollabSocketRegistry, createCollabSocketRegistry } from "./composition/collabSockets";
 import { createApiDispatcher } from "./composition/createApiDispatcher";
 import { createRevocationTap, withRevocationTap } from "./composition/revocationTap";
+import {
+  type ComposedPrincipalResolver,
+  createComposedPrincipalResolver,
+} from "./middleware/agent-bearer";
 
 /**
  * `SecretRef` the Better Auth signing secret is read from when `secret`
@@ -112,15 +111,17 @@ export interface BootedApp {
   /** The embedded sync service (headless Hocuspocus). */
   readonly sync: HocuspocusSync;
   /**
-   * Principal resolver (`(headers) => UserPrincipal | null`) over the
-   * *same* Better Auth instance the trunk uses. Exposed so the collab
-   * WebSocket upgrade can authenticate the session cookie through one
-   * shared resolver rather than re-implementing identity (ADR 0030,
-   * invariant 5). The trunk's principal middleware builds its own from
-   * the same `auth` + `loadRoles`; production unification onto a single
-   * resolver instance is the ADR 0027 WS-attach-hook pass.
+   * The composed bearer+cookie principal resolver (`(headers) =>
+   * Principal | null`) the collab WS surface authenticates through — a
+   * session cookie → human, an `Authorization: Bearer ez_agent_…` →
+   * api-key agent (ADR 0044 Decision 5 step 2). Exposed so `attachCollab`
+   * (apps/server) resolves the upgrade with the SAME core the per-frame
+   * policy and the HTTP principal middleware use — one identity source,
+   * no accidental cookie-only collab path (Codex SF2). Renamed from the
+   * old cookie-only `resolver` to make the composed nature explicit at
+   * the seam.
    */
-  readonly resolver: BetterAuthResolver;
+  readonly collabPrincipalResolver: ComposedPrincipalResolver;
   /**
    * Collab socket registry (ADR 0043 Decision 5). `attachCollab`
    * (apps/server) registers every upgraded WS under the identity it
@@ -178,16 +179,37 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
   // production gate uses the SAME callable to resolve a delegated
   // agent's `acting_as` user at check time — the H8 intersection.
   const loadRoles = createLoadRoles(driver);
-  const resolver = createBetterAuthResolver({ auth, loadRoles });
+  const cookieResolver = createBetterAuthResolver({ auth, loadRoles });
+  // Owned agent bearer lookup (ADR 0044 Decision 4) — ONE instance shared
+  // by the HTTP principal middleware (handed to `createApiApp` below) and
+  // the collab composed resolver here (Decision 5 step 2).
+  const resolveAgentToken = createResolveAgentToken(driver);
+  /**
+   * The composed bearer+cookie principal resolver (ADR 0044 Decision 5
+   * step 2 / Codex SF2) — the SAME header-shaped core the HTTP principal
+   * middleware mounts. The collab WS surface resolves identity through
+   * THIS at both seams — `attachCollab`'s upgrade gate (via
+   * `BootedApp.collabPrincipalResolver`) and the per-frame policies — so
+   * attach standing, per-frame write authority, and the HTTP surface can
+   * never diverge on who a request is.
+   */
+  const collabPrincipalResolver = createComposedPrincipalResolver({
+    resolveAgentToken,
+    cookieResolve: cookieResolver,
+  });
 
   /**
    * Both collab WS policies — attach standing (`onAuthenticate`) and
    * the per-frame write dispatch (the `beforeHandleMessage` gate, ADR
-   * 0043 Decision 3) — built in `composition/collabPolicies.ts` on one
-   * shared principal resolve. The dispatcher is late-bound below:
+   * 0043 Decision 3) — built in `composition/collabPolicies.ts` on the
+   * one shared composed resolve. The dispatcher is late-bound below:
    * sync must exist before the dispatcher that writes through it.
    */
-  const collab = createCollabPolicies({ resolver, driver, logger });
+  const collab = createCollabPolicies({
+    resolvePrincipal: collabPrincipalResolver,
+    driver,
+    logger,
+  });
 
   const sync = new HocuspocusSync({
     docUpdatesWriter: createDocUpdatesWriter(),
@@ -227,11 +249,11 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     loadRoles,
     dispatcher,
     registry,
-    // ADR 0044 Decision 4 — the HTTP/MCP principal chain gains the owned
-    // agent bearer arm. Same `driver` + `system()` seam as `loadRoles`;
-    // deliberately NOT passed to `createCollabPolicies` above (collab
-    // stays cookie-only until the bearer-at-upgrade increment).
-    resolveAgentToken: createResolveAgentToken(driver),
+    // ADR 0044 Decision 4 — the HTTP/MCP principal chain's owned agent
+    // bearer arm. The SAME `resolveAgentToken` instance backs the collab
+    // composed resolver above (Decision 5 step 2): one lookup seam, every
+    // surface.
+    resolveAgentToken,
     ...(options.mcpServerInfo !== undefined && { mcpServerInfo: options.mcpServerInfo }),
     // Sign-out arm of the same tap: Better Auth owns session
     // destruction, so the `/auth/*` mount reports it and the registry
@@ -258,5 +280,5 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     await driver.close();
   };
 
-  return { app, driver, sync, resolver, collabSockets, close };
+  return { app, driver, sync, collabPrincipalResolver, collabSockets, close };
 }

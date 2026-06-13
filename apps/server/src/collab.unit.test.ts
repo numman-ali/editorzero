@@ -94,9 +94,11 @@ async function emitUpgrade(
 }
 
 /** A resolver-only fake; `handleWsConnection` must not be reached. */
-function refusalBooted(resolver: CollabBooted["resolver"]): CollabBooted {
+function refusalBooted(
+  collabPrincipalResolver: CollabBooted["collabPrincipalResolver"],
+): CollabBooted {
   return {
-    resolver,
+    collabPrincipalResolver,
     sync: {
       handleWsConnection: () => {
         throw new Error("handleWsConnection must not be reached on a refusal path");
@@ -160,6 +162,37 @@ describe("attachCollab refusal branches", () => {
       refusalBooted(() => Promise.reject(new Error("auth backend down"))),
       { origin: ALLOWED, cookie: "session=x" },
     );
+    expect(destroyed).toBe(true);
+  });
+});
+
+describe("attachCollab bearer lane (ADR 0044 Decision 5 step 2)", () => {
+  // CSRF defends the AMBIENT cookie lane; a `Authorization: Bearer` upgrade
+  // is not ambient (browsers can't set WS headers), so the Origin gate is
+  // skipped and the request goes straight to the resolver. Reaching the
+  // resolver (a 401 on null, a destroy on throw) is the proof the Origin
+  // gate did NOT short-circuit with a 403 — the cookie-lane refusals above
+  // (absent / wrong Origin → 403) carry no `Authorization` header.
+  const BEARER = `Bearer ez_agent_${"A".repeat(43)}`;
+
+  it("skips the Origin gate on a Bearer upgrade — absent Origin reaches the resolver (401, not 403)", async () => {
+    const { wire } = await emitUpgrade(
+      refusalBooted(() => Promise.resolve(null)),
+      { authorization: BEARER }, // no Origin, no cookie
+    );
+    expect(wire).toContain("HTTP/1.1 401");
+    expect(wire).not.toContain("403");
+  });
+
+  it("ignores a wrong Origin on a Bearer upgrade — the resolver still runs", async () => {
+    // The resolver THROWS: on the cookie lane a wrong Origin 403s BEFORE the
+    // resolver; on the bearer lane the resolver runs and fails closed
+    // (destroy, no 403 status line).
+    const { wire, destroyed } = await emitUpgrade(
+      refusalBooted(() => Promise.reject(new Error("resolver ran"))),
+      { origin: "http://evil.example", authorization: BEARER },
+    );
+    expect(wire).not.toContain("403");
     expect(destroyed).toBe(true);
   });
 });

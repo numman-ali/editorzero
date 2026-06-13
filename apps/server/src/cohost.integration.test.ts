@@ -133,6 +133,37 @@ async function createDoc(port: number, cookie: string, title: string): Promise<s
   throw new Error("doc.create response missing doc_id");
 }
 
+async function createAgent(port: number, cookie: string, name: string): Promise<string> {
+  const res = await fetch(`http://127.0.0.1:${port}/agents/create`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(`agent.create failed (${res.status}): ${await res.text()}`);
+  const body: unknown = await res.json();
+  if (typeof body === "object" && body !== null && "agent_id" in body) {
+    const agentId = body.agent_id;
+    if (typeof agentId === "string" && agentId.length > 0) return agentId;
+  }
+  throw new Error("agent.create response missing agent_id");
+}
+
+/** Mint a show-once read-only agent token (`ez_agent_…`) for `agentId`. */
+async function mintReadOnlyToken(port: number, cookie: string, agentId: string): Promise<string> {
+  const res = await fetch(`http://127.0.0.1:${port}/agents/token_mint/${agentId}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ tier: "read-only" }),
+  });
+  if (!res.ok) throw new Error(`agent.token_mint failed (${res.status}): ${await res.text()}`);
+  const body: unknown = await res.json();
+  if (typeof body === "object" && body !== null && "token" in body) {
+    const token = body.token;
+    if (typeof token === "string" && token.length > 0) return token;
+  }
+  throw new Error("agent.token_mint response missing token");
+}
+
 function rawToUint8(data: RawData): Uint8Array {
   if (Buffer.isBuffer(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   if (Array.isArray(data)) return new Uint8Array(Buffer.concat(data));
@@ -563,6 +594,44 @@ describe("production WS attach (ADR 0030 hardening)", () => {
     expect((await again.attach(docInB2)).outcome).toBe("rejected");
     again.close();
     client.close();
+  });
+
+  it("rejects a WS upgrade carrying an unminted Bearer token (bearer lane, no Origin)", async () => {
+    // A well-formed-but-never-minted agent token: the composed resolver
+    // returns null → the upgrade is refused (401) → no socket. NO Origin
+    // header — proving the refusal is the RESOLVER, not the cookie-lane
+    // Origin gate (a bearer upgrade skips it). ADR 0044 Decision 5 step 2.
+    const unminted = `Bearer ez_agent_${"0".repeat(43)}`;
+    const client = openClient({ authorization: unminted });
+    expect((await client.attach(docInA)).outcome).toBe("rejected");
+    client.close();
+  });
+
+  it("admits a minted-Bearer agent over WS with NO Origin, then closes it on agent-revoke (4401)", async () => {
+    const agentId = await createAgent(activePort(), cookieA, "ws-reader-bot");
+    const token = await mintReadOnlyToken(activePort(), cookieA, agentId);
+
+    // Bearer ONLY — no cookie, NO Origin. A browser cannot set custom
+    // headers on a WS upgrade, so a bearer upgrade is not CSRF-able and
+    // skips the Origin gate; were Origin enforced here the upgrade would
+    // be REJECTED. The agent reads Alice's workspace-root doc (read-only
+    // tier → doc:read; the no-collection placement reads for any subject).
+    const agent = openClient({ authorization: `Bearer ${token}` });
+    expect((await agent.attach(docInA)).outcome).toBe("authenticated");
+
+    // The socket was registered as an AGENT (ADR 0044 Decision 5):
+    // revoking the agent fires the tap's `agent.revoke` arm → closeByAgent
+    // → the live socket closes server-side with the app-range code.
+    const revoke = await fetch(`http://127.0.0.1:${activePort()}/agents/revoke/${agentId}`, {
+      method: "POST",
+      headers: { cookie: cookieA },
+    });
+    expect(revoke.ok).toBe(true);
+
+    const closed = await agent.waitForSocketClose();
+    expect(closed.code).toBe(COLLAB_REVOKED_CLOSE_CODE);
+    expect(closed.reason).toBe("authorization revoked");
+    agent.close();
   });
 
   it("keeps one client attached for the teardown drain proof", async () => {

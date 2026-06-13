@@ -37,6 +37,16 @@
  * throw to a 500 ("corrupted token" — see its docstring). We do NOT
  * catch it: a 401 would hide server-state corruption behind a benign
  * "not authenticated".
+ *
+ * **The composed resolve is header-shaped; HTTP and collab share it
+ * (ADR 0044 Decision 5 step 2 / Codex SF2).** The bearer-then-cookie
+ * decision operates purely on a `Headers` bag, so the reusable core is
+ * `createComposedPrincipalResolver` (`(headers) => Principal | null`).
+ * `createBearerThenCookieResolver` is the thin Hono-context adapter the
+ * HTTP principal middleware mounts; the collab WS upgrade + per-frame
+ * policy consume the SAME core directly. One bearer-then-cookie
+ * implementation, no second copy to drift — the accidental cookie-only
+ * collab path SF2 warns about cannot exist.
  */
 
 import {
@@ -45,12 +55,25 @@ import {
   parseStoredScopes,
 } from "@editorzero/capabilities";
 import type { ResolveAgentToken } from "@editorzero/db";
-import type { AgentPrincipal, UserPrincipal } from "@editorzero/principal";
+import type { AgentPrincipal, Principal, UserPrincipal } from "@editorzero/principal";
 
 import type { PrincipalResolver } from "./principal";
 
 /** RFC 6750 `Bearer` scheme, matched case-insensitively per the spec. */
 const BEARER_SCHEME = /^Bearer[ \t]+/i;
+
+/**
+ * Whether an `Authorization` header value carries the `Bearer` scheme —
+ * the lane discriminant. EXPORTED so the collab WS Origin gate
+ * (`attachCollab`, apps/server) decides "cookie lane vs bearer lane"
+ * with the EXACT predicate the resolver uses to decide "cookie vs
+ * bearer"; a divergence would let a request be treated as cookie-lane
+ * for the CSRF/Origin gate but bearer-lane for resolution (or vice
+ * versa), opening a gap. One regex, one source of truth.
+ */
+export function hasBearerScheme(authorization: string | undefined): boolean {
+  return authorization !== undefined && BEARER_SCHEME.test(authorization);
+}
 
 /**
  * The credential after a `Bearer ` scheme prefix, or `null` when no
@@ -78,12 +101,28 @@ export interface BearerThenCookieResolverOptions {
   readonly cookieResolve: (headers: Headers) => Promise<UserPrincipal | null>;
 }
 
-export function createBearerThenCookieResolver(
+/**
+ * The composed bearer-then-cookie principal resolve, header-shaped. The
+ * reusable core: the HTTP principal middleware mounts it via the
+ * `createBearerThenCookieResolver` Hono adapter; the collab WS surface
+ * (upgrade gate + per-frame policy) consumes it directly. Returns
+ * `Principal | null` — `null` is "no/invalid credential" (the HTTP
+ * middleware 401s; collab refuses the upgrade / denies the frame).
+ */
+export type ComposedPrincipalResolver = (headers: Headers) => Promise<Principal | null>;
+
+/**
+ * Build the header-shaped bearer-then-cookie resolver (the SSOT core —
+ * see the file header). The Hono adapter and the collab consumers all
+ * route through THIS, so the confused-deputy guard (explicit bearer
+ * never falls back to the cookie) and the full-shape gate hold
+ * identically on every surface.
+ */
+export function createComposedPrincipalResolver(
   options: BearerThenCookieResolverOptions,
-): PrincipalResolver {
+): ComposedPrincipalResolver {
   const { resolveAgentToken, cookieResolve } = options;
-  return async (c) => {
-    const headers = c.req.raw.headers;
+  return async (headers) => {
     const bearer = extractBearer(headers);
     if (bearer === null) {
       return cookieResolve(headers);
@@ -113,4 +152,16 @@ export function createBearerThenCookieResolver(
     };
     return principal;
   };
+}
+
+/**
+ * Hono-context adapter over {@link createComposedPrincipalResolver} for
+ * the HTTP principal middleware. Pure plumbing — `c.req.raw.headers` into
+ * the header-shaped core; all the bearer/cookie logic lives in the core.
+ */
+export function createBearerThenCookieResolver(
+  options: BearerThenCookieResolverOptions,
+): PrincipalResolver {
+  const composed = createComposedPrincipalResolver(options);
+  return (c) => composed(c.req.raw.headers);
 }

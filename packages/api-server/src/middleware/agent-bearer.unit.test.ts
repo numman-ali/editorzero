@@ -29,7 +29,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiEnv } from "../env";
-import { createBearerThenCookieResolver } from "./agent-bearer";
+import { createBearerThenCookieResolver, hasBearerScheme } from "./agent-bearer";
 import { createPrincipalMiddleware } from "./principal";
 
 const WORKSPACE = WorkspaceId("018f0000-0000-7000-8000-000000000001");
@@ -86,6 +86,19 @@ function buildProbeApp(opts: {
   });
   return app;
 }
+
+describe("hasBearerScheme (the shared lane discriminant)", () => {
+  it("is true for a Bearer header, case-insensitively (RFC 6750), and false otherwise", () => {
+    expect(hasBearerScheme("Bearer abc")).toBe(true);
+    expect(hasBearerScheme("bearer abc")).toBe(true);
+    expect(hasBearerScheme("Bearer\tabc")).toBe(true);
+    // Not the Bearer scheme — these are the cookie lane / no agent attempt.
+    expect(hasBearerScheme(undefined)).toBe(false);
+    expect(hasBearerScheme("")).toBe(false);
+    expect(hasBearerScheme("Basic dXNlcjpwYXNz")).toBe(false);
+    expect(hasBearerScheme("Bearer")).toBe(false); // scheme needs a credential
+  });
+});
 
 describe("createBearerThenCookieResolver", () => {
   it("defers to the cookie resolver when no Authorization header is present", async () => {

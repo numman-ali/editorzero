@@ -53,6 +53,10 @@ export {
 export type { ApiEnv } from "./env";
 export { openApiDocument } from "./lib/openapi";
 export {
+  type ComposedPrincipalResolver,
+  hasBearerScheme,
+} from "./middleware/agent-bearer";
+export {
   createDispatcherMiddleware,
   type DispatcherMiddlewareOptions,
 } from "./middleware/dispatcher";
