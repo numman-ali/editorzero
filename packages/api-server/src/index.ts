@@ -37,6 +37,7 @@ export {
   type CreateApiAppOptions,
   createApiApp,
 } from "./app";
+export { isCollabAdmittedPrincipal } from "./composition/collabPolicies";
 export {
   COLLAB_REVOKED_CLOSE_CODE,
   type CollabSocketEntry,

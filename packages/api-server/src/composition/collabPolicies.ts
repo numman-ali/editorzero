@@ -67,6 +67,26 @@ export interface CollabPolicies {
   readonly wireDispatcher: (dispatcher: Pick<Dispatcher, "dispatch">) => void;
 }
 
+/**
+ * The WS-surface admit rail (ADR 0044 Decision 5 step 2): humans and
+ * api-key agents only. A DELEGATED (agent-auth) agent is refused — its
+ * real authority is `acting_as ∩ delegator` (H8), an intersection
+ * `effectiveScopes` does NOT compute on the attach path (it returns an
+ * agent's token scopes verbatim). EXPORTED so the upgrade gate
+ * (`attachCollab`, apps/server) and the per-frame `resolveCollabPrincipal`
+ * apply the IDENTICAL predicate: the upgrade gate refuses BEFORE
+ * registering (no "registered then denied per-frame" registry pollution
+ * when the delegated arm eventually lands), and the per-frame policy
+ * stays the authoritative gate. Today the composed resolver can only
+ * produce users / api-key agents, so this is future-proofing, not a
+ * current bypass (Codex SF2).
+ */
+export function isCollabAdmittedPrincipal(principal: Principal): boolean {
+  return (
+    principal.kind === "user" || (principal.kind === "agent" && principal.token_kind === "api-key")
+  );
+}
+
 export function createCollabPolicies(deps: CollabPoliciesDeps): CollabPolicies {
   const { resolvePrincipal, driver, logger } = deps;
 
@@ -101,8 +121,11 @@ export function createCollabPolicies(deps: CollabPoliciesDeps): CollabPolicies {
     if (principal === null) {
       throw new Error("collab: no authenticated principal");
     }
-    if (principal.kind === "agent" && principal.token_kind !== "api-key") {
-      throw new Error("collab: delegated agent tokens are not admitted on the WS surface yet");
+    if (!isCollabAdmittedPrincipal(principal)) {
+      throw new Error(
+        "collab: only humans and api-key agents are admitted on the WS surface — " +
+          "delegated (agent-auth) tokens are a later increment",
+      );
     }
     return principal;
   };

@@ -27,7 +27,7 @@ import type { AgentPrincipal, Principal, UserPrincipal } from "@editorzero/princ
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ComposedPrincipalResolver } from "../middleware/agent-bearer";
-import { createCollabPolicies } from "./collabPolicies";
+import { createCollabPolicies, isCollabAdmittedPrincipal } from "./collabPolicies";
 
 const WORKSPACE_A = WorkspaceId("018f0000-0000-7000-8000-000000000001");
 const ALICE = UserId("018f0000-0000-7000-8000-000000000002");
@@ -233,7 +233,7 @@ describe("collabAuthorize (attach standing)", () => {
         documentName: DOC_LIVE,
         requestHeaders: { authorization: GOOD_BEARER },
       }),
-    ).rejects.toThrow(/delegated agent tokens are not admitted/);
+    ).rejects.toThrow(/only humans and api-key agents are admitted/);
   });
 });
 
@@ -319,5 +319,13 @@ describe("collabApplyUpdate (per-frame write dispatch)", () => {
     if (invocation === undefined) throw new Error("dispatch not called");
     expect(invocation.principal).toBe(principal);
     expect(invocation.access).toEqual({ workspace_id: WORKSPACE_A });
+  });
+});
+
+describe("isCollabAdmittedPrincipal (the shared WS admit rail)", () => {
+  it("admits humans and api-key agents, refuses delegated (agent-auth) agents", () => {
+    expect(isCollabAdmittedPrincipal(alice())).toBe(true);
+    expect(isCollabAdmittedPrincipal(apiKeyAgent())).toBe(true);
+    expect(isCollabAdmittedPrincipal(delegatedAgent())).toBe(false);
   });
 });

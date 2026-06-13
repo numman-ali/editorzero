@@ -56,7 +56,7 @@
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 
-import { type BootedApp, hasBearerScheme } from "@editorzero/api-server";
+import { type BootedApp, hasBearerScheme, isCollabAdmittedPrincipal } from "@editorzero/api-server";
 import { type Logger, noopLogger } from "@editorzero/observability";
 import { WebSocketServer } from "ws";
 
@@ -166,15 +166,26 @@ export function attachCollab(
       refuse(socket, 401, "Unauthorized");
       return;
     }
+    // The WS-surface admit rail, applied at the upgrade gate with the SAME
+    // predicate the per-frame policy uses (Codex SF2): humans + api-key
+    // agents only. Refusing a DELEGATED agent HERE — before registering —
+    // keeps a future agent-auth principal from becoming a "registered then
+    // denied at first frame" transport. The composed resolver can't mint a
+    // delegated principal this increment, so this is future-proofing; the
+    // per-frame `resolveCollabPrincipal` stays the authoritative gate.
+    if (!isCollabAdmittedPrincipal(principal)) {
+      log.warn("collab upgrade refused: principal not admitted on the WS surface", {
+        event: "hocuspocus.authenticate",
+      });
+      refuse(socket, 401, "Unauthorized");
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (client) => {
       // Revocation registry (ADR 0043 Decision 5 + ADR 0044 Decision 5):
       // the socket is tracked under the identity resolved at upgrade —
       // user OR api-key agent — so revoke-class commits and sign-out can
       // close it. The release rides the socket's own close event; entries
-      // never outlive transports. (The composed resolver yields only
-      // api-key agents this increment; the per-frame policy is the
-      // authoritative rail refusing a delegated agent — see
-      // `resolveCollabPrincipal`.)
+      // never outlive transports.
       const release = booted.collabSockets.register(
         principal.kind === "agent"
           ? { kind: "agent", agent_id: principal.id, token_id: principal.token_id, socket: client }

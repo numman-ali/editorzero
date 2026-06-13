@@ -634,6 +634,49 @@ describe("production WS attach (ADR 0030 hardening)", () => {
     agent.close();
   });
 
+  it("refuses a wrong-Origin upgrade with a valid cookie AND a malformed Bearer — no cookie fallback", async () => {
+    // The adversarial composite (Codex SF2): a wrong Origin (which would
+    // 403 the COOKIE lane), Alice's VALID session cookie riding along, and
+    // a malformed Bearer. Presenting ANY Bearer selects the bearer lane
+    // (Origin skipped); the malformed token resolves to null and the
+    // resolver NEVER falls back to the cookie — so this is a refusal, NOT
+    // an authenticated Alice socket. The confused-deputy guard, end-to-end.
+    const client = openClient({
+      origin: "http://evil.example",
+      cookie: cookieA,
+      authorization: "Bearer ez_agent_short",
+    });
+    expect((await client.attach(docInA)).outcome).toBe("rejected");
+    client.close();
+  });
+
+  it("admits a wrong-Origin upgrade with a valid cookie AND a valid agent Bearer AS THE AGENT (bearer wins)", async () => {
+    const agentId = await createAgent(activePort(), cookieA, "confused-deputy-bot");
+    const token = await mintReadOnlyToken(activePort(), cookieA, agentId);
+
+    // Wrong Origin + Alice's valid cookie + a valid AGENT bearer. The bearer
+    // lane wins (Origin skipped, cookie never consulted): the socket is the
+    // AGENT's, not Alice's. PROOF of identity: agent-revoke closes it —
+    // `closeByAgent` matches the agent_id; a cookie-user socket would not
+    // respond to an agent revocation.
+    const agent = openClient({
+      origin: "http://evil.example",
+      cookie: cookieA,
+      authorization: `Bearer ${token}`,
+    });
+    expect((await agent.attach(docInA)).outcome).toBe("authenticated");
+
+    const revoke = await fetch(`http://127.0.0.1:${activePort()}/agents/revoke/${agentId}`, {
+      method: "POST",
+      headers: { cookie: cookieA },
+    });
+    expect(revoke.ok).toBe(true);
+
+    const closed = await agent.waitForSocketClose();
+    expect(closed.code).toBe(COLLAB_REVOKED_CLOSE_CODE);
+    agent.close();
+  });
+
   it("keeps one client attached for the teardown drain proof", async () => {
     lingering = openClient({ origin: PUBLIC_ORIGIN, cookie: cookieA });
     expect((await lingering.attach(docInA)).outcome).toBe("authenticated");
