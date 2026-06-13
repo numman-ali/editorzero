@@ -53,6 +53,7 @@ import { createApiApp } from "./app";
 import { createCollabPolicies } from "./composition/collabPolicies";
 import { type CollabSocketRegistry, createCollabSocketRegistry } from "./composition/collabSockets";
 import { createApiDispatcher } from "./composition/createApiDispatcher";
+import { createRateLimiter, type RateLimiter, withRateLimit } from "./composition/rateLimit";
 import { createRevocationTap, withRevocationTap } from "./composition/revocationTap";
 import {
   type ComposedPrincipalResolver,
@@ -101,6 +102,15 @@ export interface GetApiAppOptions {
    * native nacked-not-applied contract.
    */
   readonly collabReadOnly?: boolean;
+  /**
+   * The pre-dispatch rate limiter (ADR 0044 Decision 6). Defaults to
+   * `createRateLimiter({ logger })` — the in-memory token-bucket limiter
+   * with agents throttled tighter than users (invariant 8). Injected by
+   * tests: a tight limiter to exercise the 429-at-the-door path, or a
+   * permissive `{ consume: () => ({ allowed: true }) }` for suites that
+   * fire many same-principal dispatches and are not testing throttling.
+   */
+  readonly rateLimiter?: RateLimiter;
 }
 
 export interface BootedApp {
@@ -226,21 +236,32 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
   // sockets after a revoke-class capability commits. The registry is
   // populated by `attachCollab` (apps/server) at upgrade time.
   const collabSockets = createCollabSocketRegistry();
-  const dispatcher = withRevocationTap(
-    createApiDispatcher({
-      driver,
-      registry,
-      sync,
-      gate: workspaceAwareGate({ loadDelegatorRoles: loadRoles }),
-    }),
-    createRevocationTap({
-      registry: collabSockets,
-      driver,
-      logger,
-      // doc.delete closes the trashed doc's ROOM (per-document
-      // connections at the sync layer), not user sockets.
-      closeDocConnections: (docId) => sync.closeDocumentConnections(docId),
-    }),
+  // Composition order, OUTSIDE-IN: `withRateLimit` is the outermost wrap
+  // — the rate gate fires at the door (ADR 0044 Decision 6), before the
+  // revocation tap, the dispatcher's gate/handler, and the audit pipeline,
+  // so a 429 mutates nothing and writes no audit row. Inside it,
+  // `withRevocationTap` closes the affected subject's collab sockets after
+  // a revoke-class capability commits (ADR 0043 Decision 5). The collab
+  // write lane dispatches through this SAME wrapped value (wired below), so
+  // an agent flooding `doc.apply_update` frames hits the agent bucket too.
+  const dispatcher = withRateLimit(
+    withRevocationTap(
+      createApiDispatcher({
+        driver,
+        registry,
+        sync,
+        gate: workspaceAwareGate({ loadDelegatorRoles: loadRoles }),
+      }),
+      createRevocationTap({
+        registry: collabSockets,
+        driver,
+        logger,
+        // doc.delete closes the trashed doc's ROOM (per-document
+        // connections at the sync layer), not user sockets.
+        closeDocConnections: (docId) => sync.closeDocumentConnections(docId),
+      }),
+    ),
+    options.rateLimiter ?? createRateLimiter({ logger }),
   );
   collab.wireDispatcher(dispatcher);
 

@@ -25,6 +25,7 @@ export type LogEvent =
   | "dispatcher.invoke"
   | "dispatcher.deny"
   | "dispatcher.error"
+  | "ratelimit.refused"
   | "write_path.tx_begin"
   | "write_path.tx_commit"
   | "write_path.seq_conflict_retry"

@@ -31,9 +31,12 @@
  *    atomically (F31).
  *  - Run the handler inside a Hocuspocus direct connection for content
  *    mutations (ADR 0018). `ctx.transact` is a caller-provided stub.
- *  - Per-principal / per-workspace rate limiting. Capability's
- *    `rateLimit` is read but not enforced until `@editorzero/ratelimit`
- *    ships.
+ *  - Per-principal / per-workspace rate limiting. The dispatcher stays
+ *    rate-limit-agnostic by design: enforcement is the `withRateLimit`
+ *    composition wrap in `@editorzero/api-server` (ADR 0044 Decision 6),
+ *    which charges a token bucket and throws `RateLimitError` BEFORE the
+ *    inner dispatch — so a 429 never enters this audit pipeline. A
+ *    capability's `rateLimit` metadata is read by that wrap, not here.
  *  - AccessPath derivation from typed `doc_id` / `block_id` input
  *    fields. Callers pass the path in explicitly until the codegen
  *    step that synthesises it from the capability's zod input lands.

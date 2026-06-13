@@ -46,8 +46,12 @@
  *     `runRead` derive tenant from `principal.workspace_id`
  *     directly, so this var is not needed until a handler needs
  *     tenant access outside a dispatch call.
- *   - `rateLimit: RateLimitBudget` — remaining-budget info for the
- *     current request; lands when `@editorzero/ratelimit` ships.
+ *   - `rateLimit: RateLimitBudget` — remaining-budget info exposed to the
+ *     current request handler. Enforcement itself lives in the
+ *     `withRateLimit` composition wrap (ADR 0044 Decision 6), which
+ *     refuses pre-dispatch and hands the retry hint back on the
+ *     `RateLimitError`; surfacing live budget on the request context is a
+ *     separate, deferred nicety — not built this slice.
  */
 
 import type { Dispatcher } from "@editorzero/dispatcher";

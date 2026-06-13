@@ -135,9 +135,15 @@ export class RateLimitError extends EditorZeroError {
   }
 
   /**
-   * Rate-limit refusals are audited as a `deny` row (reason
-   * `rate_limited`), not an `error` row. Same caveat as
-   * `PermissionDeniedError.toHandlerError`.
+   * The production rate-limit refusal is thrown PRE-DISPATCH by the
+   * `withRateLimit` wrap (ADR 0044 Decision 6) — it never reaches the
+   * dispatcher's audit pipeline, so there is NO audit row: the refusal
+   * mutates nothing (invariant 3 governs mutations) and an
+   * audit-row-per-429 under flood would aim the flood at the audit table
+   * itself. This projection is the defensive fallback for the
+   * unreachable-today path where a handler throws `RateLimitError` from
+   * INSIDE the pipeline — it degrades to a generic internal error row
+   * rather than leaking the bucket / retry hint into the audit record.
    */
   toHandlerError(): HandlerError {
     return { kind: "internal", trace_id: "" };
