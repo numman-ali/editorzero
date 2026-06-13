@@ -80,6 +80,25 @@ export function hashAgentToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/** Base62 secret body — the character class `randomBase62` draws from. */
+const AGENT_TOKEN_BODY = /^[0-9A-Za-z]+$/;
+
+/**
+ * Is `value` a well-formed agent token by SHAPE — `AGENT_TOKEN_PREFIX` +
+ * exactly `AGENT_TOKEN_SECRET_LENGTH` base62 chars? The bearer resolver
+ * (ADR 0044 Decision 4) gates on this BEFORE hashing, so a malformed
+ * prefixed string 401s without hashing arbitrary-length input or probing
+ * the GLOBAL-UNIQUE index. SHAPE only — a well-formed token still
+ * resolves to nothing unless its hash matches a live row; this is the
+ * format contract made real at the resolver boundary, not a validity
+ * check.
+ */
+export function isWellFormedAgentToken(value: string): boolean {
+  if (!value.startsWith(AGENT_TOKEN_PREFIX)) return false;
+  const body = value.slice(AGENT_TOKEN_PREFIX.length);
+  return body.length === AGENT_TOKEN_SECRET_LENGTH && AGENT_TOKEN_BODY.test(body);
+}
+
 export function mintAgentToken(): MintedAgentToken {
   const token = `${AGENT_TOKEN_PREFIX}${randomBase62(AGENT_TOKEN_SECRET_LENGTH)}`;
   return {

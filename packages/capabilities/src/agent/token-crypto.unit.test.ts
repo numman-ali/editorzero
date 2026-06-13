@@ -11,7 +11,9 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TOKEN_LENGTH,
   AGENT_TOKEN_PREFIX,
+  AGENT_TOKEN_SECRET_LENGTH,
   hashAgentToken,
+  isWellFormedAgentToken,
   mintAgentToken,
 } from "./token-crypto";
 
@@ -56,5 +58,42 @@ describe("mintAgentToken (ADR 0044)", () => {
       for (const c of mintAgentToken().token.slice(AGENT_TOKEN_PREFIX.length)) chars.add(c);
     }
     expect(chars.size).toBe(62);
+  });
+});
+
+describe("isWellFormedAgentToken — the resolver's pre-hash shape gate (ADR 0044)", () => {
+  const body43 = "A".repeat(AGENT_TOKEN_SECRET_LENGTH);
+
+  it("accepts a freshly minted token, every time", () => {
+    for (let i = 0; i < 200; i++) {
+      expect(isWellFormedAgentToken(mintAgentToken().token)).toBe(true);
+    }
+  });
+
+  it("accepts prefix + exactly 43 base62 chars", () => {
+    expect(isWellFormedAgentToken(`${AGENT_TOKEN_PREFIX}${body43}`)).toBe(true);
+  });
+
+  it("rejects a string without the prefix", () => {
+    expect(isWellFormedAgentToken(body43)).toBe(false);
+    expect(isWellFormedAgentToken(`api_key_${body43}`)).toBe(false);
+  });
+
+  it("rejects a body that is too short or too long", () => {
+    expect(isWellFormedAgentToken(`${AGENT_TOKEN_PREFIX}${"A".repeat(42)}`)).toBe(false);
+    expect(isWellFormedAgentToken(`${AGENT_TOKEN_PREFIX}${"A".repeat(44)}`)).toBe(false);
+  });
+
+  it("rejects a body with a non-base62 char (right length)", () => {
+    // 42 base62 chars + one disallowed char each — '_' '-' '+' '/' are
+    // exactly the chars a tokenish-but-foreign credential might carry.
+    for (const bad of ["_", "-", "+", "/"]) {
+      expect(isWellFormedAgentToken(`${AGENT_TOKEN_PREFIX}${"A".repeat(42)}${bad}`)).toBe(false);
+    }
+  });
+
+  it("rejects the bare prefix and the empty string", () => {
+    expect(isWellFormedAgentToken(AGENT_TOKEN_PREFIX)).toBe(false);
+    expect(isWellFormedAgentToken("")).toBe(false);
   });
 });

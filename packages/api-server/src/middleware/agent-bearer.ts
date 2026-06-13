@@ -15,19 +15,20 @@
  *   - **Bearer wins when both are present.** The header is checked first;
  *     the cookie is only consulted when no Bearer was sent.
  *
- * **Discriminator.** Only `ez_agent_`-prefixed bearers are ours (the
- * owned token format, `token-crypto.ts`). A Bearer that is not so
- * prefixed cannot be an agent token, so we 401 it WITHOUT a database
- * round-trip — it is still an explicit-bearer failure, so still no
- * cookie fallback.
+ * **Discriminator.** Only WELL-FORMED `ez_agent_` tokens are ours —
+ * `isWellFormedAgentToken` (the owned format, `token-crypto.ts`: prefix +
+ * exactly 43 base62 chars). A Bearer that fails the shape check (wrong
+ * prefix, wrong length, non-base62 body) cannot be an agent token, so we
+ * 401 it WITHOUT hashing it or hitting the unique index — still an
+ * explicit-bearer failure, so still no cookie fallback.
  *
  * **Layering.** This module is the composition seam where the three
- * pieces meet: `hashAgentToken` + `parseStoredScopes` + `AGENT_TOKEN_
- * PREFIX` (from `@editorzero/capabilities`, above db), the raw row from
- * `resolveAgentToken` (`@editorzero/db`, below capabilities), and the
- * `AgentPrincipal` shape (`@editorzero/principal`). The db resolver
- * stays capabilities-free; the assembly + scope-parse happen here, in
- * the layer that already depends on all three.
+ * pieces meet: `isWellFormedAgentToken` + `hashAgentToken` +
+ * `parseStoredScopes` (from `@editorzero/capabilities`, above db), the
+ * raw row from `resolveAgentToken` (`@editorzero/db`, below capabilities),
+ * and the `AgentPrincipal` shape (`@editorzero/principal`). The db
+ * resolver stays capabilities-free; the assembly + scope-parse happen
+ * here, in the layer that already depends on all three.
  *
  * **`parseStoredScopes` may throw — by design.** A token row whose
  * `scopes` column is not a valid `Scope[]` is structural corruption
@@ -38,7 +39,11 @@
  * "not authenticated".
  */
 
-import { AGENT_TOKEN_PREFIX, hashAgentToken, parseStoredScopes } from "@editorzero/capabilities";
+import {
+  hashAgentToken,
+  isWellFormedAgentToken,
+  parseStoredScopes,
+} from "@editorzero/capabilities";
 import type { ResolveAgentToken } from "@editorzero/db";
 import type { AgentPrincipal, UserPrincipal } from "@editorzero/principal";
 
@@ -83,8 +88,11 @@ export function createBearerThenCookieResolver(
     if (bearer === null) {
       return cookieResolve(headers);
     }
-    // An explicit Bearer was presented — from here, never the cookie.
-    if (!bearer.startsWith(AGENT_TOKEN_PREFIX)) {
+    // An explicit Bearer was presented — from here, never the cookie. Gate
+    // on the FULL token shape (prefix + exactly 43 base62 chars), not just
+    // the prefix: a malformed prefixed string 401s without hashing
+    // arbitrary-length input or probing the unique index (ADR 0044).
+    if (!isWellFormedAgentToken(bearer)) {
       return null;
     }
     const resolution = await resolveAgentToken(hashAgentToken(bearer));

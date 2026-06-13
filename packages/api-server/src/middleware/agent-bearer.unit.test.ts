@@ -46,7 +46,8 @@ const COOKIE_USER: UserPrincipal = {
   token_id: null,
 };
 
-const LIVE_TOKEN = "ez_agent_0123456789abcdefABCDEF0123456789abcdefXYZ";
+// Prefix + exactly 43 base62 chars (10 digits + A-Z + a-g) — well-formed.
+const LIVE_TOKEN = "ez_agent_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefg";
 const SCOPES_JSON = JSON.stringify(["doc:read", "workspace:read"]);
 
 const LIVE_RESOLUTION: AgentTokenResolution = {
@@ -153,6 +154,37 @@ describe("createBearerThenCookieResolver", () => {
 
     const res = await app.request("/probe", {
       headers: { authorization: "Bearer some-other-bearer-token" },
+    });
+
+    expect(res.status).toBe(401);
+    expect(resolveAgentToken).not.toHaveBeenCalled();
+    expect(cookieResolve).not.toHaveBeenCalled();
+  });
+
+  it("401s a malformed ez_agent_ Bearer (wrong length) without hashing or a DB hit", async () => {
+    const resolveAgentToken = vi.fn(async () => LIVE_RESOLUTION);
+    const cookieResolve = vi.fn(async () => COOKIE_USER);
+    const app = buildProbeApp({ resolveAgentToken, cookieResolve });
+
+    // Right prefix, far too few body chars — fails the shape gate before
+    // any hash or unique-index probe.
+    const res = await app.request("/probe", {
+      headers: { authorization: "Bearer ez_agent_short" },
+    });
+
+    expect(res.status).toBe(401);
+    expect(resolveAgentToken).not.toHaveBeenCalled();
+    expect(cookieResolve).not.toHaveBeenCalled();
+  });
+
+  it("401s a malformed ez_agent_ Bearer (non-base62 body) without hashing or a DB hit", async () => {
+    const resolveAgentToken = vi.fn(async () => LIVE_RESOLUTION);
+    const cookieResolve = vi.fn(async () => COOKIE_USER);
+    const app = buildProbeApp({ resolveAgentToken, cookieResolve });
+
+    // 43 chars but a '-' in the body (base62 excludes it).
+    const res = await app.request("/probe", {
+      headers: { authorization: `Bearer ez_agent_${"A".repeat(42)}-` },
     });
 
     expect(res.status).toBe(401);

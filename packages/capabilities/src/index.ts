@@ -48,6 +48,7 @@ export { agentTokenRevoke } from "./agent/token_revoke";
 export {
   AGENT_TOKEN_PREFIX,
   hashAgentToken,
+  isWellFormedAgentToken,
   type MintedAgentToken,
   mintAgentToken,
 } from "./agent/token-crypto";
