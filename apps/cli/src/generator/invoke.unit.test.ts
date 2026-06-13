@@ -9,8 +9,8 @@ import {
 } from "@editorzero/capabilities";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-
 import type { AuthCredentialStore, CredentialHeaders } from "../credential-store";
+import { BearerTokenStore } from "../credential-store";
 import { runCapability } from "./invoke";
 
 function makeStoreFake(initial: CredentialHeaders | null): AuthCredentialStore & {
@@ -102,6 +102,37 @@ describe("runCapability", () => {
     );
     const body = JSON.parse(read()) as { docs: { id: string }[] };
     expect(body.docs[0]?.id).toBe(DOC_ID);
+  });
+
+  it("BearerTokenStore — presents the agent token as Authorization: Bearer on the request (ADR 0044)", async () => {
+    // The real bearer store through the real invoke path: proves the
+    // CLI-side transport carries an `ez_agent_…` token as an RFC 6750
+    // Bearer header with no cookie — the other half of the loop whose
+    // server side is pinned by api-server's agent-bearer integration test.
+    const AGENT_TOKEN = "ez_agent_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefg";
+    const store = new BearerTokenStore(AGENT_TOKEN);
+    const { stream } = captured();
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(JSON.stringify({ docs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const exit = await runCapability(
+      registerCapability(docList),
+      { baseUrl: "http://localhost:3000", rawArgs: {} },
+      { store, fetch, stdout: stream },
+    );
+
+    expect(exit).toBe(0);
+    const call = fetch.mock.calls[0];
+    if (call === undefined) throw new Error("unreachable");
+    const headers = new Headers(call[1]?.headers);
+    expect(headers.get("authorization")).toBe(`Bearer ${AGENT_TOKEN}`);
+    // Bearer mode sends NO cookie — the two credential models are disjoint.
+    expect(headers.get("cookie")).toBeNull();
   });
 
   it("doc.create — POST /docs/create with JSON body", async () => {

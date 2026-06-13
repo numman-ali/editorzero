@@ -70,14 +70,16 @@ export class SessionCookieStore implements AuthCredentialStore {
     }
     if (parsed === null || typeof parsed !== "object") return null;
     const obj = parsed as Record<string, unknown>;
-    // biome-ignore lint/complexity/useLiteralKeys: TS4111 (noPropertyAccessFromIndexSignature) — `obj` is Record<string, unknown>.
+    // Bracket access: `obj` is an index signature (Record<string, unknown>)
+    // — dot access is a TS4111 error under noPropertyAccessFromIndexSignature.
     const cookie = obj["cookie"];
     if (typeof cookie !== "string" || cookie.length === 0) return null;
     return { cookie };
   }
 
   async write(headers: CredentialHeaders): Promise<void> {
-    // biome-ignore lint/complexity/useLiteralKeys: TS4111 (noPropertyAccessFromIndexSignature) — CredentialHeaders is a Readonly<Record<string, string>> index signature, so bracket access is required.
+    // Bracket access: `CredentialHeaders` is a Readonly<Record<string, string>>
+    // index signature — dot access is a TS4111 error.
     const cookie = headers["cookie"] ?? headers["Cookie"];
     if (typeof cookie !== "string" || cookie.length === 0) {
       throw new Error("SessionCookieStore.write: no `cookie` in headers");
@@ -96,4 +98,77 @@ export class SessionCookieStore implements AuthCredentialStore {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
   }
+}
+
+/**
+ * `BearerTokenStore` — the owned-agent-token credential model (ADR 0044
+ * Decision 4, CLI side). Where `SessionCookieStore` round-trips a Better
+ * Auth session cookie through a 0600 file, this store carries an owned
+ * agent token (`ez_agent_…`) sourced from the environment
+ * (`EDITORZERO_AGENT_TOKEN`, read at the binary entry — the
+ * `no-process-env` confinement boundary) and presents it as an RFC 6750
+ * `Authorization: Bearer` header. The server's bearer arm
+ * (`createBearerThenCookieResolver`) resolves that header to an
+ * `AgentPrincipal`; the existing transport (`invoke.ts` spreads the
+ * credential map onto the request headers) carries it with no change.
+ *
+ * The credential is env-sourced and immutable from the CLI's side:
+ *   - `read()` returns the bearer header, always. The token IS the
+ *     credential — there is no "logged out" state to represent, so this
+ *     never returns `null` (a missing token means a `SessionCookieStore`
+ *     was selected instead — see `createCredentialStore`).
+ *   - `write()` THROWS. `ez auth login` writes a *cookie*; there is no
+ *     cookie here, and persisting a token to disk is deliberately not a
+ *     CLI action — the token lives in the environment / a secret manager.
+ *   - `clear()` is a NO-OP. There is no local file to remove. A 401 on an
+ *     agent token means it was revoked or expired server-side; the remedy
+ *     is to rotate / re-mint the token (an owner action), not to wipe
+ *     local state. (`SessionCookieStore.clear()` deletes the cookie file
+ *     on a 401; the bearer store has nothing to delete.)
+ */
+export class BearerTokenStore implements AuthCredentialStore {
+  readonly #header: CredentialHeaders;
+
+  constructor(token: string) {
+    this.#header = { authorization: `Bearer ${token}` };
+  }
+
+  async read(): Promise<CredentialHeaders> {
+    return this.#header;
+  }
+
+  async write(_headers: CredentialHeaders): Promise<never> {
+    throw new Error(
+      "BearerTokenStore is read-only: the agent credential comes from the " +
+        "EDITORZERO_AGENT_TOKEN environment variable. To use cookie-based " +
+        "login (`ez auth login`), unset EDITORZERO_AGENT_TOKEN.",
+    );
+  }
+
+  async clear(): Promise<void> {
+    // No-op: the credential is env-sourced, not a local file. A 401 here
+    // means the token was revoked or expired server-side — rotate / re-mint
+    // the token (an owner action); there is nothing local to clear.
+  }
+}
+
+/**
+ * Selects the credential model from an optional agent token. A non-empty
+ * `EDITORZERO_AGENT_TOKEN` (read + trimmed at the binary entry) makes the
+ * CLI authenticate as that agent via a `BearerTokenStore`; otherwise it
+ * falls back to the cookie model (`SessionCookieStore`, fed by
+ * `ez auth login`).
+ *
+ * Pure — it does not read the environment itself — so the selection is
+ * unit-testable and the single `process.env` read stays confined to the
+ * entry point (the `no-process-env` rule). An env value of `undefined` or
+ * `""` (e.g. `EDITORZERO_AGENT_TOKEN=` or whitespace-only after trim)
+ * selects the cookie store rather than constructing a doomed bearer
+ * credential.
+ */
+export function createCredentialStore(agentToken: string | undefined): AuthCredentialStore {
+  if (agentToken !== undefined && agentToken.length > 0) {
+    return new BearerTokenStore(agentToken);
+  }
+  return new SessionCookieStore();
 }

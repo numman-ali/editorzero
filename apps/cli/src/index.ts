@@ -24,12 +24,23 @@
 import { defineCommand, runMain } from "citty";
 
 import { authCommand } from "./auth";
-import { SessionCookieStore } from "./credential-store";
+import { createCredentialStore } from "./credential-store";
 import { createRootCommands } from "./generator/root";
 import { cliRegistry } from "./registry";
 
+// `EDITORZERO_AGENT_TOKEN`, when set, makes the CLI authenticate as an
+// owned agent (ADR 0044 Decision 4): every capability command presents the
+// token as an `Authorization: Bearer` credential instead of the cookie
+// written by `ez auth login`. Read ONCE here at the entry — the
+// `no-process-env` confinement boundary — and trimmed (env vars sourced
+// from `$(cat token)` or here-strings commonly carry a trailing newline).
+// The pure `createCredentialStore` does the cookie-vs-bearer selection.
+// (Bracket access: `process.env` is an index signature — dot access is a
+// TS4111 error under `noPropertyAccessFromIndexSignature`.)
+const agentToken = process.env["EDITORZERO_AGENT_TOKEN"]?.trim();
+
 const registryCommands = createRootCommands(cliRegistry, {
-  storeFactory: () => new SessionCookieStore(),
+  storeFactory: () => createCredentialStore(agentToken),
   fetch,
   stdout: process.stdout,
 });

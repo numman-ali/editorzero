@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { SessionCookieStore } from "./credential-store";
+import { BearerTokenStore, createCredentialStore, SessionCookieStore } from "./credential-store";
+
+// Prefix + exactly 43 base62 chars — a shape-valid agent token (the
+// store does not itself validate; the server's bearer arm does). Kept in
+// sync with `isWellFormedAgentToken`'s contract in @editorzero/capabilities.
+const AGENT_TOKEN = "ez_agent_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefg";
 
 const created: string[] = [];
 
@@ -92,5 +97,49 @@ describe("SessionCookieStore", () => {
   it("defaults the path to ~/.editorzero/credentials when no options given", () => {
     const store = new SessionCookieStore();
     expect(store.path).toMatch(/\.editorzero\/credentials$/u);
+  });
+});
+
+describe("BearerTokenStore", () => {
+  it("read returns an `Authorization: Bearer` header carrying the token", async () => {
+    const store = new BearerTokenStore(AGENT_TOKEN);
+    expect(await store.read()).toEqual({ authorization: `Bearer ${AGENT_TOKEN}` });
+  });
+
+  it("read is stable across calls — the token is the credential, no logged-out state", async () => {
+    const store = new BearerTokenStore(AGENT_TOKEN);
+    const first = await store.read();
+    const second = await store.read();
+    expect(first).toEqual(second);
+    expect(first).not.toBeNull();
+  });
+
+  it("write throws — the credential is env-sourced, not CLI-writable", async () => {
+    const store = new BearerTokenStore(AGENT_TOKEN);
+    await expect(store.write({ authorization: "Bearer other" })).rejects.toThrow(
+      /EDITORZERO_AGENT_TOKEN/u,
+    );
+  });
+
+  it("clear is a no-op (nothing local to remove) and leaves read intact", async () => {
+    const store = new BearerTokenStore(AGENT_TOKEN);
+    await expect(store.clear()).resolves.toBeUndefined();
+    // A 401-driven clear must NOT wipe the credential — the token lives in
+    // the environment; re-minting is an owner action, not a local clear.
+    expect(await store.read()).toEqual({ authorization: `Bearer ${AGENT_TOKEN}` });
+  });
+});
+
+describe("createCredentialStore", () => {
+  it("returns a BearerTokenStore when a non-empty agent token is present", () => {
+    expect(createCredentialStore(AGENT_TOKEN)).toBeInstanceOf(BearerTokenStore);
+  });
+
+  it("returns a SessionCookieStore when the token is undefined", () => {
+    expect(createCredentialStore(undefined)).toBeInstanceOf(SessionCookieStore);
+  });
+
+  it("returns a SessionCookieStore when the token is the empty string (e.g. `EDITORZERO_AGENT_TOKEN=`)", () => {
+    expect(createCredentialStore("")).toBeInstanceOf(SessionCookieStore);
   });
 });

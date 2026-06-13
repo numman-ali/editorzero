@@ -18,7 +18,7 @@
 
 import { defineCommand } from "citty";
 
-import { SessionCookieStore } from "../credential-store";
+import { createCredentialStore, SessionCookieStore } from "../credential-store";
 import { emitError } from "../io";
 import { promptPasswordInteractive, readPasswordFromStdin } from "../prompt-password";
 import { runLogin } from "./login";
@@ -91,9 +91,16 @@ const whoamiCommand = defineCommand({
     "base-url": { type: "string", default: "http://localhost:3000" },
   },
   async run({ args }) {
+    // `whoami` is the principal-orientation command — it must reflect the
+    // SAME credential the capability commands use. When EDITORZERO_AGENT_TOKEN
+    // is set, that's the agent token, so an agent can verify "who am I"
+    // resolves to its own `AgentPrincipal` (ADR 0044). `login`/`logout` stay
+    // cookie-only above: an agent presents a token, it never logs in or out.
+    // (Bracket access: `process.env` is an index signature — TS4111.)
+    const agentToken = process.env["EDITORZERO_AGENT_TOKEN"]?.trim();
     const exitCode = await runWhoami(
       { baseUrl: args["base-url"] },
-      { store: new SessionCookieStore(), fetch, stdout: process.stdout },
+      { store: createCredentialStore(agentToken), fetch, stdout: process.stdout },
     );
     process.exitCode = exitCode;
   },
