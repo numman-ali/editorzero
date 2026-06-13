@@ -58,7 +58,11 @@ describe("agent family — registry facts", () => {
     expect(agentTokenList.requires).toEqual(["workspace:read"]);
   });
 
-  it("every verb is agent-allowed and UI-pending (api/cli/mcp; the Agents screen trails)", () => {
+  it("every verb is agent-allowed and on all four surfaces (the Agents screen has landed)", () => {
+    // ADR 0044 Decision 7: the Agents-screen UI cells landed in lockstep
+    // (`proves-capability-cell: agent.*` in packages/e2e + the parity
+    // matrix's UI_PENDING ledger). All eight verbs now carry "ui" — the
+    // earlier api/cli/mcp-only pin is retired.
     for (const cap of [
       agentCreate,
       agentGet,
@@ -70,7 +74,7 @@ describe("agent family — registry facts", () => {
       agentUpdate,
     ]) {
       expect(cap.agentAllowed).toEqual({});
-      expect(cap.surfaces).toEqual(["api", "cli", "mcp"]);
+      expect(cap.surfaces).toEqual(["api", "cli", "mcp", "ui"]);
     }
   });
 

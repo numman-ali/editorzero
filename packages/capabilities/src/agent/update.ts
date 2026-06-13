@@ -44,7 +44,7 @@ export const agentUpdate: Capability<AgentUpdateInput, AgentUpdateOutput> = {
   output: AgentUpdateOutputSchema,
   requires: ["agent:create"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "agent", id: input.agent_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

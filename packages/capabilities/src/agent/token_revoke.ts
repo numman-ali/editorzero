@@ -38,7 +38,7 @@ export const agentTokenRevoke: Capability<AgentTokenRevokeInput, AgentTokenRevok
   output: AgentTokenRevokeOutputSchema,
   requires: ["agent:revoke"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "token", id: input.token_id }),
     effectOnAllow: (_input, output): AuditEffect => ({

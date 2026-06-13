@@ -13,11 +13,13 @@ import { NewCollection } from "./new-collection";
  *
  * The primary nav carries ONLY screens that exist (the e2e honesty bar —
  * same rule that kept SSO buttons off the login). Today: the documents
- * list at `/` (the doc.list ui cell) and the Spaces screen at `/space`
- * (the space.list cell — singular route, `/spaces` is the reserved API
- * domain). The mock's remaining entries (Overview, Shared with me,
- * Trash) join as their routes + capability cells land (ADR 0040;
- * `UI_PENDING` in contract-tests governs).
+ * list at `/` (the doc.list cell), the Spaces screen at `/space` (the
+ * space.list cell), the Agents screen at `/agent` (the agent.list cell —
+ * ADR 0044), and the Audit trail at `/audit` (the audit.list cell) — all
+ * SINGULAR routes, their plurals being reserved API domains. The mock's
+ * remaining entries (Overview, Shared with me, Trash) join as their
+ * routes + capability cells land (ADR 0040; `UI_PENDING` in
+ * contract-tests governs).
  *
  * The workspace block under the lockup is the `workspace.get` cell — an
  * IDENTITY block, not the mock's switcher: the deployment IS one
@@ -93,6 +95,16 @@ export function SideContent({
             ◫
           </span>
           Spaces
+        </Link>
+        <Link
+          to="/agent"
+          activeProps={{ className: "on", "aria-current": "page" }}
+          onClick={onNavigate}
+        >
+          <span className="ic" aria-hidden="true">
+            ◇
+          </span>
+          Agents
         </Link>
         <Link
           to="/audit"

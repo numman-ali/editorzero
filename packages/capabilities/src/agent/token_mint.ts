@@ -62,7 +62,7 @@ export const agentTokenMint: Capability<AgentTokenMintInput, AgentTokenMintOutpu
   output: AgentTokenMintOutputSchema,
   requires: ["agent:create"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "agent", id: input.agent_id }),
     // Built from ROW fields only — `output.token` (the secret) is not

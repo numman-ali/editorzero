@@ -54,7 +54,7 @@ export const agentCreate: Capability<AgentCreateInput, AgentCreateOutput> = {
   requires: ["agent:create"],
   agentAllowed: {},
   // UI trails (Agents screen — UI_PENDING in the parity ledger).
-  surfaces: ["api", "cli", "mcp"],
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "agent" }),
     effectOnAllow: (_input, output): AuditEffect => ({

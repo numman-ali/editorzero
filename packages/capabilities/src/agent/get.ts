@@ -48,7 +48,7 @@ export const agentGet: Capability<AgentGetInput, AgentGetOutput> = {
   output: AgentGetOutputSchema,
   requires: ["workspace:read"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: (input) => ({ kind: "agent", id: input.agent_id }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

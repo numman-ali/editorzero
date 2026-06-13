@@ -39,7 +39,7 @@ export const agentList: Capability<AgentListInput, AgentListOutput> = {
   output: AgentListOutputSchema,
   requires: ["workspace:read"],
   agentAllowed: {},
-  surfaces: ["api", "cli", "mcp"],
+  surfaces: ["api", "cli", "mcp", "ui"],
   audit: {
     subjectFrom: () => ({ kind: "workspace" }),
     effectOnAllow: () => ({ kind: "audit.access_log" }),

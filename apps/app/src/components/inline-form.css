@@ -87,3 +87,37 @@
 .inlineform-danger:hover {
   border-color: var(--warn-ink);
 }
+
+/* The agent token_mint show-once reveal — a bordered block that replaces
+   the mint control until dismissed. The secret is never recoverable, so
+   the block reads as a deliberate, slightly alarming handoff rather than
+   incidental chrome (ultra border, warn-ink instruction). */
+.token-reveal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  border: var(--rule) solid var(--ultra);
+  background: var(--surface);
+  padding: 12px;
+  border-radius: var(--radius);
+}
+
+/* The plaintext bearer secret. Mono, selectable, and forced to wrap — it
+   is ~52 chars and must never overflow the panel for the one moment it
+   is visible. */
+.token-reveal-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-1);
+  letter-spacing: 0.02em;
+  word-break: break-all;
+  user-select: all;
+}
+
+.token-reveal-warn {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warn-ink);
+}
