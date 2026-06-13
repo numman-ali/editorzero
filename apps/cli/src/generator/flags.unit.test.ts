@@ -36,6 +36,36 @@ describe("deriveFlags", () => {
     });
   });
 
+  it("marks ZodDefault fields as non-required (a default backfills an omitted flag)", () => {
+    // Regression: `agent.token_mint`'s `expires_at` is
+    // `z.coerce.number().nullable().default(null)` — a ZodDefault, NOT a
+    // ZodOptional. Before the fix the CLI forced `--expires_at` on every
+    // mint; the e2e dogfood surfaced it.
+    expect(
+      deriveFlags(
+        z.object({
+          tier: z.string(),
+          expires_at: z.coerce.number().nullable().default(null),
+        }),
+      ),
+    ).toEqual({
+      tier: { type: "string", required: true },
+      expires_at: { type: "string", required: false },
+    });
+  });
+
+  it("keeps a bare ZodNullable field required (null is a value, not an omission)", () => {
+    expect(
+      deriveFlags(
+        z.object({
+          parent_id: z.string().nullable(),
+        }),
+      ),
+    ).toEqual({
+      parent_id: { type: "string", required: true },
+    });
+  });
+
   it("rejects non-ZodObject schemas", () => {
     expect(() => deriveFlags(z.string())).toThrow(/not a ZodObject \(typeName=ZodString\)/);
   });

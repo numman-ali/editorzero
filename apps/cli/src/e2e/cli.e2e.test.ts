@@ -40,6 +40,15 @@
  *      (empty) HOME emits AXI `auth_expired` + exit 1 without
  *      touching the network. Inverse of (a); proves the no-creds
  *      short-circuit over a real subprocess stdout.
+ *   c. Agent bearer (ADR 0044) — an owner mints an agent + read-only
+ *      token via `ez agent create` / `ez agent token_mint`, then a
+ *      process carrying ONLY `EDITORZERO_AGENT_TOKEN` (pristine HOME,
+ *      no cookie) resolves `ez auth whoami` to the AGENT principal and
+ *      runs `ez doc list`. Proves the env-var → `BearerTokenStore`
+ *      selection in the compiled binary, which the unit lane cannot see
+ *      (`index.ts` is coverage-excluded). The fixture registers the
+ *      agent-lifecycle capabilities and wires `resolveAgentToken` so the
+ *      mint routes exist and the bearer arm is live.
  *
  * Why this is the right gap to close. Phase 3 surface-adapter work
  * (ADR 0021) needs verification that the shipping artifact actually
@@ -68,11 +77,19 @@ import { promisify } from "node:util";
 
 import { createApiApp, createApiDispatcher } from "@editorzero/api-server";
 import { createAuth, runAuthMigrations } from "@editorzero/auth";
-import { createRegistry, docCreate, docList, registerCapability } from "@editorzero/capabilities";
+import {
+  agentCreate,
+  agentTokenMint,
+  createRegistry,
+  docCreate,
+  docList,
+  registerCapability,
+} from "@editorzero/capabilities";
 import {
   createDocUpdatesReader,
   createDocUpdatesWriter,
   createLoadRoles,
+  createResolveAgentToken,
   createSqliteDriver,
   SQLITE_FULL_DDL,
   type SqliteDriver,
@@ -134,6 +151,20 @@ async function runProcess(
   });
 }
 
+/**
+ * A spawn env rooted at `home`, with `EDITORZERO_AGENT_TOKEN` controlled
+ * explicitly: stripped from the ambient environment unless `agentToken`
+ * is passed. Without this, a developer who exports the var in their shell
+ * would silently flip every cookie-path test into bearer mode (ADR 0044)
+ * and break it — the suite must own that switch, not inherit it.
+ */
+function makeBinEnv(home: string, agentToken?: string): NodeJS.ProcessEnv {
+  const { EDITORZERO_AGENT_TOKEN: _ambient, ...rest } = process.env;
+  const env: NodeJS.ProcessEnv = { ...rest, HOME: home };
+  if (agentToken !== undefined) env["EDITORZERO_AGENT_TOKEN"] = agentToken;
+  return env;
+}
+
 describe("ez CLI — compiled-binary round-trip against a real HTTP trunk", () => {
   // `binPath` + `server` + `driver` are `beforeAll` state — compiling
   // the binary and booting the server are the expensive steps and we
@@ -164,7 +195,15 @@ describe("ez CLI — compiled-binary round-trip against a real HTTP trunk", () =
     driver = createSqliteDriver({ path: ":memory:" });
     driver.exec(SQLITE_FULL_DDL);
 
-    const registry = createRegistry([registerCapability(docCreate), registerCapability(docList)]);
+    const registry = createRegistry([
+      registerCapability(docCreate),
+      registerCapability(docList),
+      // Agent lifecycle — enough to mint a credential via the binary
+      // (`ez agent create` → `ez agent token_mint`) so the bearer case
+      // below proves the whole loop through the shipping artifact.
+      registerCapability(agentCreate),
+      registerCapability(agentTokenMint),
+    ]);
     // `doc.create` seeds an empty paragraph via `ctx.transact` — the
     // write-path binding needs a live `HocuspocusSync`, otherwise the
     // dispatcher throws a descriptive "sync not wired" error (see
@@ -194,7 +233,10 @@ describe("ez CLI — compiled-binary round-trip against a real HTTP trunk", () =
     });
     await runAuthMigrations(auth);
     const loadRoles = createLoadRoles(driver);
-    const trunk = createApiApp({ auth, loadRoles, dispatcher });
+    // The bearer arm (ADR 0044 Decision 4) — without it `createApiApp`
+    // leaves the principal resolver cookie-only and an agent token 401s.
+    const resolveAgentToken = createResolveAgentToken(driver);
+    const trunk = createApiApp({ auth, loadRoles, dispatcher, resolveAgentToken });
 
     // `serve(..., listener)` calls the listener with `AddressInfo`
     // once the socket binds; port 0 picks any free port. The same
@@ -242,7 +284,7 @@ describe("ez CLI — compiled-binary round-trip against a real HTTP trunk", () =
   });
 
   it("logs in, creates a doc, and lists it — over real TCP", async () => {
-    const binEnv = { ...process.env, HOME: homeDir };
+    const binEnv = makeBinEnv(homeDir);
 
     // 1. Login — the binary POSTs to /auth/sign-in/email via its real
     //    global fetch, parses Set-Cookie, and persists to
@@ -292,7 +334,7 @@ describe("ez CLI — compiled-binary round-trip against a real HTTP trunk", () =
     // and `runCapability` short-circuits to AXI `auth_expired`
     // before any fetch runs. Proves the no-creds AXI path over a
     // real subprocess stdout — the inverse of test 1's happy path.
-    const binEnv = { ...process.env, HOME: homeDir };
+    const binEnv = makeBinEnv(homeDir);
     const result = await runProcess(binPath, ["doc", "list", "--base-url", baseUrl], {
       env: binEnv,
     });
@@ -300,4 +342,89 @@ describe("ez CLI — compiled-binary round-trip against a real HTTP trunk", () =
     const body = JSON.parse(result.stdout) as { error: { code: string } };
     expect(body.error.code).toBe("auth_expired");
   });
+
+  it("authenticates as the AGENT from EDITORZERO_AGENT_TOKEN alone — no cookie (ADR 0044 inc 4)", async () => {
+    // The headline dogfood of ADR 0044's bearer arm, end-to-end through
+    // the SHIPPING binary: an owner logs in and mints an agent + a
+    // read-only token via `ez agent …`, then a process holding ONLY that
+    // token — a pristine HOME, no credential file — drives the CLI and
+    // resolves to the AGENT principal. Proves the env-var → BearerTokenStore
+    // selection in the compiled `index.ts` wiring (coverage-excluded, so
+    // unprovable by the unit lane) and that the Bearer header survives the
+    // bun-compiled runtime + a real socket.
+    const ownerEnv = makeBinEnv(homeDir);
+
+    // 1. Owner logs in (cookie → this test's HOME) so it can mint.
+    const login = await runProcess(
+      binPath,
+      ["auth", "login", "--email", TEST_EMAIL, "--password-stdin", "--base-url", baseUrl],
+      { env: ownerEnv, stdin: TEST_PASSWORD },
+    );
+    expect(login.exitCode, login.stderr || login.stdout).toBe(0);
+
+    // 2. Create an agent via the registry-derived `ez agent create`.
+    const create = await runProcess(
+      binPath,
+      ["agent", "create", "--name", "E2E bearer agent", "--base-url", baseUrl],
+      { env: ownerEnv },
+    );
+    expect(create.exitCode, create.stderr || create.stdout).toBe(0);
+    const agent = JSON.parse(create.stdout) as { agent_id: string };
+    expect(agent.agent_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
+
+    // 3. Mint a read-only token via `ez agent token_mint` — show-once secret.
+    const mint = await runProcess(
+      binPath,
+      [
+        "agent",
+        "token_mint",
+        "--agent_id",
+        agent.agent_id,
+        "--tier",
+        "read-only",
+        "--base-url",
+        baseUrl,
+      ],
+      { env: ownerEnv },
+    );
+    expect(mint.exitCode, mint.stderr || mint.stdout).toBe(0);
+    const minted = JSON.parse(mint.stdout) as { token: string };
+    expect(minted.token.startsWith("ez_agent_")).toBe(true);
+
+    // 4. A pristine HOME (no credential file) + the token in the env. The
+    //    token ALONE must authenticate: nothing to fall back to, and the
+    //    bearer store never reads HOME.
+    const bearerHome = mkdtempSync(join(tmpdir(), "ez-cli-e2e-bearer-"));
+    try {
+      const bearerEnv = makeBinEnv(bearerHome, minted.token);
+
+      // 4a. `ez auth whoami` resolves to the AGENT (api-key), not a user —
+      //     also exercises the whoami handler's bearer-awareness.
+      const whoami = await runProcess(binPath, ["auth", "whoami", "--base-url", baseUrl], {
+        env: bearerEnv,
+      });
+      expect(whoami.exitCode, whoami.stderr || whoami.stdout).toBe(0);
+      const principal = JSON.parse(whoami.stdout) as {
+        kind: string;
+        id: string;
+        token_kind: string;
+        scopes: readonly string[];
+      };
+      expect(principal.kind).toBe("agent");
+      expect(principal.id).toBe(agent.agent_id);
+      expect(principal.token_kind).toBe("api-key");
+      expect(principal.scopes).toContain("doc:read");
+
+      // 4b. A real capability command authenticates under the same token:
+      //     `ez doc list` succeeds on the read-only scope set.
+      const list = await runProcess(binPath, ["doc", "list", "--base-url", baseUrl], {
+        env: bearerEnv,
+      });
+      expect(list.exitCode, list.stderr || list.stdout).toBe(0);
+      const listBody = JSON.parse(list.stdout) as { docs: readonly unknown[] };
+      expect(Array.isArray(listBody.docs)).toBe(true);
+    } finally {
+      rmSync(bearerHome, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

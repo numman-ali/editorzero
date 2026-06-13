@@ -7,8 +7,13 @@
  * re-validates through the capability's zod schema (belt + braces —
  * the citty parse is shape-shallow, zod is shape-deep + typed).
  *
- * Optionality: a `ZodOptional<T>` field becomes `{ required: false }`;
- * everything else becomes required. We don't try to render richer
+ * Optionality: a field the caller may OMIT becomes `{ required: false }`.
+ * Two wrappers grant that: `ZodOptional<T>` (explicit) and `ZodDefault<T>`
+ * (a default fills the gap — e.g. `agent.token_mint`'s `expires_at`
+ * defaults to `null`, so forcing `--expires_at` would be wrong). A bare
+ * `ZodNullable<T>` stays required: `null` is an allowed VALUE, not license
+ * to drop the flag. Everything else is required. We don't try to render
+ * richer
  * types (numbers as `--n 42`, booleans as `--flag`) in slice 1 — the
  * agent harness pipes strings in via `--field=value` and zod re-parses.
  * A `z.number()` field still shows as `type: "string"` at the citty
@@ -28,6 +33,7 @@
 import type { ArgDef, ArgsDef } from "citty";
 import {
   ZodArray,
+  ZodDefault,
   ZodDiscriminatedUnion,
   ZodNullable,
   ZodObject,
@@ -52,7 +58,10 @@ export function deriveFlags(inputSchema: ZodType<unknown>): ArgsDef {
   const shape = inputSchema.shape as Record<string, ZodType<unknown>>;
   const args: Record<string, ArgDef> = {};
   for (const [key, field] of Object.entries(shape)) {
-    const required = !(field instanceof ZodOptional);
+    // Omittable ⇔ ZodOptional (explicit) or ZodDefault (a default backfills
+    // the missing flag). A bare ZodNullable is NOT omittable — `null` is a
+    // value the caller must still pass.
+    const required = !(field instanceof ZodOptional || field instanceof ZodDefault);
     args[key] = {
       type: "string",
       required,
