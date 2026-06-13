@@ -31,7 +31,14 @@ import type {
   WebhookId,
   WorkspaceId,
 } from "@editorzero/ids";
-import type { AccessMode, GrantRole, Scope, SpaceKind, SpaceType } from "@editorzero/scopes";
+import type {
+  AccessMode,
+  AgentTokenTier,
+  GrantRole,
+  Scope,
+  SpaceKind,
+  SpaceType,
+} from "@editorzero/scopes";
 import type { BlockPostState, BlockVisibility, DocPurgePreimage, Role, SeedBlock } from "./types";
 
 /**
@@ -209,6 +216,50 @@ export type AuditEffect =
       role: GrantRole;
     }
   | { kind: "space.member_update_role"; space_id: SpaceId; user_id: UserId; role: GrantRole }
+  // ── Agent (ADR 0044 — effects land before their capabilities, the Step-7
+  // discipline). Post-state contract mirrors `space.create`: `agent.create`
+  // carries the full `AgentState` projection (minus `revoked_at`, born
+  // null). `agent.revoke` is TERMINAL — no inverse kind exists by design
+  // (the recreate-under-new-id rule); both revoke kinds carry the handler
+  // clock, the ADR 0017-style recovery anchor. This family REPLACES the
+  // full-model "Principals (§3.3)" placeholders (`agent.rename`,
+  // `token.create` with its user-bound arm, `token.revoke`) — zero
+  // emitters ever existed, so the Step-7 reshape-legitimacy rule applies;
+  // user-bound (delegated) credentials are deferred to the identity
+  // cluster, not silently renamed.
+  | {
+      kind: "agent.create";
+      agent_id: AgentId;
+      workspace_id: WorkspaceId;
+      name: string;
+      // NOT NULL in v1 (every agent has a human owner; owner liveness
+      // gates bearer resolution). An agent-created agent chains to the
+      // CREATING agent's owner — authority always grounds in a human.
+      owner_user_id: UserId;
+      // Handler-resolved human attribution (the human behind an agent) —
+      // replay reads this, never the envelope principal.
+      created_by: UserId;
+    }
+  | { kind: "agent.update"; agent_id: AgentId; patch: Partial<{ name: string }> }
+  | { kind: "agent.revoke"; agent_id: AgentId; revoked_at: number }
+  // Token effects carry every column EXCEPT `token_hash` — secrets are
+  // material, not state (ADR 0044 Decision 7): replay reconstructs the
+  // row minus the hash and the projection compare excludes that column.
+  // `tier` + `scopes` together are the §8.4 grant-intent audit rule
+  // (the tier names the intent, the list is what was actually minted).
+  | {
+      kind: "agent.token_mint";
+      token_id: TokenId;
+      agent_id: AgentId;
+      workspace_id: WorkspaceId;
+      token_prefix: string;
+      last4: string;
+      scopes: readonly Scope[];
+      tier: AgentTokenTier;
+      expires_at: number | null;
+      created_by: UserId;
+    }
+  | { kind: "agent.token_revoke"; token_id: TokenId; revoked_at: number }
   // ── Collection (§3.5) ────────────────────────────────────────────────────
   | {
       kind: "collection.create";
@@ -459,18 +510,6 @@ export type AuditEffect =
       is_guest: 0 | 1;
       created_by: UserId;
     }
-  // ── Principals (§3.3) ────────────────────────────────────────────────────
-  | { kind: "agent.create"; agent_id: AgentId; owner_user_id: UserId | null; name: string }
-  | { kind: "agent.rename"; agent_id: AgentId; name: string }
-  | { kind: "agent.revoke"; agent_id: AgentId }
-  | {
-      kind: "token.create";
-      token_id: TokenId;
-      bound_to: { agent_id: AgentId } | { user_id: UserId };
-      scopes: Scope[];
-      expires_at: number | null;
-    }
-  | { kind: "token.revoke"; token_id: TokenId }
   // ── Mirror (§3.15, F50 + F58) ────────────────────────────────────────────
   | {
       kind: "mirror.configure";

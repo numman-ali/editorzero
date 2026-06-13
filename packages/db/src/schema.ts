@@ -40,6 +40,7 @@ import type {
 } from "@editorzero/ids";
 import type {
   AccessMode,
+  AgentTokenTier,
   CapabilityCategory,
   GrantRole,
   Role,
@@ -291,7 +292,7 @@ export interface AgentTokensTable {
   readonly token_prefix: string;
   readonly last4: string;
   readonly scopes: string;
-  readonly tier: "read-only" | "author" | "editor" | "admin" | "custom";
+  readonly tier: AgentTokenTier;
   readonly created_by: UserId;
   readonly created_at: number;
   readonly expires_at: number | null;

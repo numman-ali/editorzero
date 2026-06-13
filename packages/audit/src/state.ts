@@ -36,6 +36,12 @@
  *  2. **Server-minted secrets — never audit-derived, by design.**
  *     - `workspaces.diagnostic_salt` (16 random bytes, F64). Not domain
  *       state; replaying the log must NOT reproduce a secret.
+ *     - `agent_tokens.token_hash` (SHA-256 of the bearer secret, ADR 0044
+ *       Decision 2). The mint effect structurally excludes the secret AND
+ *       its hash, so `AgentTokenState` carries every column EXCEPT
+ *       `token_hash` — replay reconstructs the token's existence, scope
+ *       envelope, and display identity (prefix + last4), never anything
+ *       an attacker could verify a guessed secret against.
  *
  *  3. **`trash_retention_days` / `settings` ARE reconstructed (Codex review HIGH 3).**
  *       `workspace.create` carries both (no longer DDL-default guesses) and
@@ -72,8 +78,24 @@
  * projection — boundary item 4: derivable monotonic bookkeeping.
  */
 
-import type { CollectionId, DocId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
-import type { AccessMode, GrantRole, SpaceKind, SpaceType } from "@editorzero/scopes";
+import type {
+  AgentId,
+  CollectionId,
+  DocId,
+  GrantId,
+  SpaceId,
+  TokenId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
+import type {
+  AccessMode,
+  AgentTokenTier,
+  GrantRole,
+  Scope,
+  SpaceKind,
+  SpaceType,
+} from "@editorzero/scopes";
 
 import type { AuditRecord, Role } from "./types";
 
@@ -200,6 +222,51 @@ export interface GrantState {
 }
 
 /**
+ * Reconstructed `agents` projection (ADR 0044 Decision 1). Soft-revoke
+ * lifecycle, but TERMINAL: `agent.revoke` sets `revoked_at` and no
+ * effect ever clears it (no un-revoke capability exists by design —
+ * recreate-under-new-id is the recovery path). The row stays in the
+ * projection so grants referencing a dead agent id remain explicable.
+ *
+ * `revoked_at` is the handler's `ctx.now()` carried on the effect
+ * (boundary item 1's `deleted_at` exception applies identically);
+ * `created_at`/`updated_at` are NOT reconstructable — dropped.
+ */
+export interface AgentState {
+  readonly id: AgentId;
+  readonly workspace_id: WorkspaceId;
+  readonly name: string;
+  /** Liveness anchor (ADR 0044 Decision 4): bearer resolution requires this user to hold a live membership. */
+  readonly owner_user_id: UserId;
+  readonly created_by: UserId;
+  /** Epoch-ms the agent was revoked, or `null` if live. Terminal — never resets. */
+  readonly revoked_at: number | null;
+}
+
+/**
+ * Reconstructed `agent_tokens` projection (ADR 0044 Decision 2) —
+ * every column EXCEPT `token_hash` (boundary item 2: secrets are
+ * material, not state; the mint effect structurally cannot carry it).
+ * Same terminal-revoke lifecycle as `AgentState`.
+ */
+export interface AgentTokenState {
+  readonly id: TokenId;
+  readonly workspace_id: WorkspaceId;
+  readonly agent_id: AgentId;
+  /** Display identity — `ez_agent_` + first chars of the secret (never enough to verify against). */
+  readonly token_prefix: string;
+  readonly last4: string;
+  /** Per-token scope envelope (⊆ AGENT_MINTABLE_SCOPES; ADR 0044 Decision 1). */
+  readonly scopes: readonly Scope[];
+  /** Grant-intent label: which §8.4 tier the minter picked, or `custom`. `scopes` is the authority. */
+  readonly tier: AgentTokenTier;
+  readonly expires_at: number | null;
+  readonly created_by: UserId;
+  /** Epoch-ms the token was revoked, or `null` if live. Terminal — never resets. */
+  readonly revoked_at: number | null;
+}
+
+/**
  * The reconstructed projection. Entities are keyed by id (members by a
  * `${workspace_id}::${user_id}` composite, space members by
  * `${space_id}::${user_id}`) so equality is order-independent — a
@@ -219,6 +286,8 @@ export interface PersistentWorkspaceState {
   readonly spaces: Readonly<Record<string, SpaceState>>;
   readonly space_members: Readonly<Record<string, SpaceMemberState>>;
   readonly grants: Readonly<Record<string, GrantState>>;
+  readonly agents: Readonly<Record<string, AgentState>>;
+  readonly agent_tokens: Readonly<Record<string, AgentTokenState>>;
 }
 
 /** The starting point for a replay — an empty workspace universe. */
@@ -230,6 +299,8 @@ export const EMPTY_STATE: PersistentWorkspaceState = {
   spaces: {},
   space_members: {},
   grants: {},
+  agents: {},
+  agent_tokens: {},
 };
 
 /** Composite key for the `members` projection. */

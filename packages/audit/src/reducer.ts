@@ -21,8 +21,8 @@
  *                     admin operational actions). No-op, forever.
  *   - `"deferred"`  — durable state, but NO shipped capability emits it
  *                     yet (the full-model kinds: comments, attachments,
- *                     acls, agents, tokens, mirror, domains, webhooks,
- *                     purge). No-op *today*; when its capability ships it
+ *                     mirror, domains, webhooks, purge). No-op *today*;
+ *                     when its capability ships it
  *                     is reclassified to `"state"` (or `"content"`) and
  *                     given a transition + property coverage. This is the
  *                     class that keeps today's behavior from silently
@@ -45,9 +45,20 @@
  * failing assertion, never a quiet no-op.
  */
 
-import type { CollectionId, DocId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
+import type {
+  AgentId,
+  CollectionId,
+  DocId,
+  GrantId,
+  SpaceId,
+  TokenId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
 import type { AuditEffect } from "./effect";
 import {
+  type AgentState,
+  type AgentTokenState,
   type CollectionState,
   type DocState,
   EMPTY_STATE,
@@ -98,6 +109,11 @@ export const REPLAY_CLASS = {
   "space.member_add": "state",
   "space.member_remove": "state",
   "space.member_update_role": "state",
+  "agent.create": "state",
+  "agent.update": "state",
+  "agent.revoke": "state",
+  "agent.token_mint": "state",
+  "agent.token_revoke": "state",
   "acl.grant": "state",
   "acl.revoke": "state",
   "collection.create": "state",
@@ -134,11 +150,6 @@ export const REPLAY_CLASS = {
   "attachment.request_upload": "deferred",
   "attachment.confirm_upload": "deferred",
   "attachment.soft_delete": "deferred",
-  "agent.create": "deferred",
-  "agent.rename": "deferred",
-  "agent.revoke": "deferred",
-  "token.create": "deferred",
-  "token.revoke": "deferred",
   "mirror.configure": "deferred",
   "mirror.enable": "deferred",
   "mirror.disable": "deferred",
@@ -276,6 +287,32 @@ function removeSpaceMember(
   return { ...s, space_members: rest };
 }
 
+function setAgent(s: PersistentWorkspaceState, a: AgentState): PersistentWorkspaceState {
+  return { ...s, agents: { ...s.agents, [a.id]: a } };
+}
+
+function patchAgent(
+  s: PersistentWorkspaceState,
+  id: AgentId,
+  patch: Partial<AgentState>,
+): PersistentWorkspaceState {
+  const cur = s.agents[id];
+  return cur ? setAgent(s, { ...cur, ...patch }) : s;
+}
+
+function setAgentToken(s: PersistentWorkspaceState, t: AgentTokenState): PersistentWorkspaceState {
+  return { ...s, agent_tokens: { ...s.agent_tokens, [t.id]: t } };
+}
+
+function patchAgentToken(
+  s: PersistentWorkspaceState,
+  id: TokenId,
+  patch: Partial<AgentTokenState>,
+): PersistentWorkspaceState {
+  const cur = s.agent_tokens[id];
+  return cur ? setAgentToken(s, { ...cur, ...patch }) : s;
+}
+
 function setGrant(s: PersistentWorkspaceState, g: GrantState): PersistentWorkspaceState {
   return { ...s, grants: { ...s.grants, [g.id]: g } };
 }
@@ -399,6 +436,41 @@ function applyStateEffect(
       return removeSpaceMember(state, effect.space_id, effect.user_id);
     case "space.member_update_role":
       return patchSpaceMember(state, effect.space_id, effect.user_id, { role: effect.role });
+
+    // ── agents + tokens (ADR 0044 — soft-revoke, TERMINAL: no kind ever
+    //    clears revoked_at; rows stay so grants to a dead id remain
+    //    explicable. Token state carries every column except token_hash —
+    //    secrets are material, not state.) ─────────────────────────────────
+    case "agent.create":
+      return setAgent(state, {
+        id: effect.agent_id,
+        workspace_id: effect.workspace_id,
+        name: effect.name,
+        owner_user_id: effect.owner_user_id,
+        created_by: effect.created_by,
+        revoked_at: null,
+      });
+    case "agent.update":
+      return patchAgent(state, effect.agent_id, {
+        ...(effect.patch.name !== undefined ? { name: effect.patch.name } : {}),
+      });
+    case "agent.revoke":
+      return patchAgent(state, effect.agent_id, { revoked_at: effect.revoked_at });
+    case "agent.token_mint":
+      return setAgentToken(state, {
+        id: effect.token_id,
+        workspace_id: effect.workspace_id,
+        agent_id: effect.agent_id,
+        token_prefix: effect.token_prefix,
+        last4: effect.last4,
+        scopes: effect.scopes,
+        tier: effect.tier,
+        expires_at: effect.expires_at,
+        created_by: effect.created_by,
+        revoked_at: null,
+      });
+    case "agent.token_revoke":
+      return patchAgentToken(state, effect.token_id, { revoked_at: effect.revoked_at });
 
     // ── grants (hard-DELETE: grant-then-revoke nets to no entry — H1) ───────
     case "acl.grant":

@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { AGENT_MINTABLE_SCOPES, AGENT_SCOPE_TIERS, SCOPES } from "./index";
+import { AGENT_MINTABLE_SCOPES, AGENT_SCOPE_TIERS, AGENT_TOKEN_TIERS, SCOPES } from "./index";
 
 describe("AGENT_MINTABLE_SCOPES (ADR 0044)", () => {
   it("is exactly SCOPES minus the literal 'admin' scope", () => {
@@ -23,5 +23,9 @@ describe("AGENT_MINTABLE_SCOPES (ADR 0044)", () => {
         expect(mintable.has(scope), `tier ${tier} carries unmintable scope ${scope}`).toBe(true);
       }
     }
+  });
+
+  it("AGENT_TOKEN_TIERS is exactly the named tiers plus 'custom'", () => {
+    expect(AGENT_TOKEN_TIERS).toEqual([...Object.keys(AGENT_SCOPE_TIERS), "custom"]);
   });
 });

@@ -67,7 +67,7 @@ See [Appendix A](appendix-a-capability-matrix.md#appendix-a--capability-matrix) 
 | **attachment** | `attachment.request_upload`, `attachment.confirm_upload`, `attachment.get`, `attachment.delete` |
 | **search** | `search.query`, `search.reindex` (admin) |
 | **permission** | `permission.grant`, `permission.revoke`, `permission.list` |
-| **principal** | `agent.create`, `agent.rename`, `agent.revoke`, `agent.list`, `token.create`, `token.revoke`, `token.list` |
+| **principal** | `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.revoke`, `agent.token_mint`, `agent.token_revoke`, `agent.token_list` (ADR 0044 vocabulary — agent-bound tokens only; user PATs are deferred to the identity cluster, not folded into this family) |
 | **mirror** | `mirror.configure`, `mirror.enable`, `mirror.disable`, `mirror.push_now`, `mirror.reset_state`, `mirror.reset_auth` |
 | **webhook** | `webhook.create`, `webhook.update`, `webhook.list`, `webhook.get`, `webhook.delete`, `webhook.test_delivery`, `webhook.rotate_secret`, `webhook.refresh_dns` |
 | **admin** | `admin.health`, `admin.metrics`, `admin.diagnose`, `admin.purge_runner`, `admin.secret_rotate`, `admin.job_*`, `admin.queue_*`, `admin.reindex_workspace`, `admin.reembed_workspace`, `admin.evict_doc`, `admin.unlock_doc` |

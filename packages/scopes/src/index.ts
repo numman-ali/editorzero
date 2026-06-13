@@ -47,6 +47,16 @@ export const AGENT_MINTABLE_SCOPES = SCOPES.filter(
 
 export type AgentMintableScope = (typeof AGENT_MINTABLE_SCOPES)[number];
 
+/**
+ * The mint-time intent label stored on an agent token row (ADR 0044):
+ * the named tiers plus `"custom"` for an explicit scope list. Display
+ * and audit record ONLY — scopes are expanded at mint and never
+ * re-derived from the label (tiers are computed-once; editing a tier
+ * definition never re-scopes existing tokens).
+ */
+export const AGENT_TOKEN_TIERS = ["read-only", "author", "editor", "admin", "custom"] as const;
+export type AgentTokenTier = (typeof AGENT_TOKEN_TIERS)[number];
+
 // ── Capability categories (§4.1) ───────────────────────────────────────────
 
 export const CAPABILITY_CATEGORIES = ["mutation", "read", "auth", "admin", "system"] as const;

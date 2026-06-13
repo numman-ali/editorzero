@@ -73,12 +73,13 @@ This matrix incorporates red-team fixes F12, F13, F15, F19, F22.
 | `audit.list` (paginated via composite `(before_created_at, before_id)` cursor; filters on subject pair, capability_id, outcome, time range) | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read (collapsible) |
 | `audit.get` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read (collapsible) |
 | `agent.create` | agent:create | H | A | ✓ | ✓ | ✓ | ✓ | 10 | `agent.create` |
-| `agent.rename` | agent:create | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `agent.rename` |
-| `agent.revoke` | agent:revoke | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `agent.revoke` |
+| `agent.get` | workspace:read | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |
 | `agent.list` | workspace:read | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |
-| `token.create` (agent-tokens: agent:create; user PAT: `humanOnly`) | agent:create OR humanOnly | H | A (agent tokens only) | ✓ | ✓ | ✓ | ✓ | 10 | `token.create` |
-| `token.revoke` (agent tokens: agent:revoke; own user PAT: `humanOnly`) | agent:revoke OR humanOnly-self | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `token.revoke` |
-| `token.list` | workspace:read | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |
+| `agent.update` | agent:create | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `agent.update` |
+| `agent.revoke` | agent:revoke | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `agent.revoke` |
+| `agent.token_mint` (ADR 0044: scopes ⊆ `AGENT_MINTABLE_SCOPES` ∩ caller's effective scopes; secret shown once, never audited) | agent:create | H | A | ✓ | ✓ | ✓ | ✓ | 10 | `agent.token_mint` |
+| `agent.token_revoke` (terminal — no un-revoke; recreate under new id) | agent:revoke | H | A | ✓ | ✓ | ✓ | ✓ | 30 | `agent.token_revoke` |
+| `agent.token_list` | workspace:read | H | A | ✓ | ✓ | ✓ | ✓ | 600 | read |
 | `mirror.configure` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 10 | `mirror.configure` |
 | `mirror.enable` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 10 | `mirror.enable` |
 | `mirror.disable` | workspace:admin | H | A | ✓ | ✓ | ✓ | ✓ | 10 | `mirror.disable` |

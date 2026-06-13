@@ -58,6 +58,8 @@
  */
 
 import {
+  type AgentState,
+  type AgentTokenState,
   type AuditEffect,
   type AuditWriteInput,
   type AuditWriter,
@@ -117,6 +119,7 @@ import {
 import { type CapabilityId, CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AccessPath, UserPrincipal } from "@editorzero/principal";
+import { SCOPES, type Scope } from "@editorzero/scopes";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 
@@ -208,6 +211,28 @@ function readIdField(result: unknown, key: string): string {
     if (typeof value === "string") return value;
   }
   throw new Error(`dispatch result missing string field "${key}": ${JSON.stringify(result)}`);
+}
+
+const SCOPE_SET: ReadonlySet<string> = new Set(SCOPES);
+
+function isScope(value: unknown): value is Scope {
+  return typeof value === "string" && SCOPE_SET.has(value);
+}
+
+/**
+ * Parse the `agent_tokens.scopes` JSON column into the typed form the
+ * reducer holds. Unlike `settings` (open object — fallback `{}`), scopes
+ * have a CLOSED vocabulary, so a non-conforming value THROWS: it means
+ * something wrote the column outside the owned mint path, and silently
+ * filtering would hide exactly the drift this property exists to catch.
+ */
+function parseScopesColumn(json: string): readonly Scope[] {
+  const parsed: unknown = JSON.parse(json);
+  if (Array.isArray(parsed)) {
+    const scopes = parsed.filter(isScope);
+    if (scopes.length === parsed.length) return scopes;
+  }
+  throw new Error(`agent_tokens.scopes is not a Scope[] — written outside the mint path: ${json}`);
 }
 
 /**
@@ -395,7 +420,70 @@ async function projectFromDb(d: SqliteDriver, ws: WorkspaceId): Promise<Persiste
     };
   }
 
-  return { workspaces, members, collections, docs, spaces, space_members, grants };
+  // ADR 0044 tables — same posture as the Step-4 block above: no shipped
+  // capability writes them until increment 3, so these are provably empty
+  // today, but selecting them keeps the deep-equal honest the moment
+  // anything touches the live tables ahead of their effects. The token
+  // SELECT deliberately omits `token_hash` (boundary item 2: secrets are
+  // material, not state — the projection must never hold it).
+  const agents: Record<string, AgentState> = {};
+  for (const r of await sys
+    .selectFrom("agents")
+    .select(["id", "workspace_id", "name", "owner_user_id", "created_by", "revoked_at"])
+    .where("workspace_id", "=", ws)
+    .execute()) {
+    agents[r.id] = {
+      id: r.id,
+      workspace_id: r.workspace_id,
+      name: r.name,
+      owner_user_id: r.owner_user_id,
+      created_by: r.created_by,
+      revoked_at: r.revoked_at,
+    };
+  }
+
+  const agent_tokens: Record<string, AgentTokenState> = {};
+  for (const r of await sys
+    .selectFrom("agent_tokens")
+    .select([
+      "id",
+      "workspace_id",
+      "agent_id",
+      "token_prefix",
+      "last4",
+      "scopes",
+      "tier",
+      "expires_at",
+      "created_by",
+      "revoked_at",
+    ])
+    .where("workspace_id", "=", ws)
+    .execute()) {
+    agent_tokens[r.id] = {
+      id: r.id,
+      workspace_id: r.workspace_id,
+      agent_id: r.agent_id,
+      token_prefix: r.token_prefix,
+      last4: r.last4,
+      scopes: parseScopesColumn(r.scopes),
+      tier: r.tier,
+      expires_at: r.expires_at,
+      created_by: r.created_by,
+      revoked_at: r.revoked_at,
+    };
+  }
+
+  return {
+    workspaces,
+    members,
+    collections,
+    docs,
+    spaces,
+    space_members,
+    grants,
+    agents,
+    agent_tokens,
+  };
 }
 
 // ── Harness ──────────────────────────────────────────────────────────────────

@@ -18,6 +18,8 @@
 export type { AclTransition, AclTransitionDroppedGrant, AuditEffect } from "./effect";
 export { applyAuditRow, REPLAY_CLASS, type ReplayClass, replay } from "./reducer";
 export {
+  type AgentState,
+  type AgentTokenState,
   type CollectionState,
   type DocState,
   EMPTY_STATE,

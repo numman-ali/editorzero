@@ -20,11 +20,13 @@
  */
 
 import {
+  AgentId,
   CapabilityId,
   CollectionId,
   DocId,
   GrantId,
   SpaceId,
+  TokenId,
   UserId,
   WorkspaceId,
 } from "@editorzero/ids";
@@ -41,6 +43,9 @@ const COLL2 = CollectionId("018f0000-0000-7000-8000-0000000000c2");
 const DOC = DocId("018f0000-0000-7000-8000-0000000000d1");
 const SPACE = SpaceId("018f0000-0000-7000-8000-0000000000e1");
 const GRANT = GrantId("018f0000-0000-7000-8000-0000000000f1");
+const AGENT = AgentId("018f0000-0000-7000-8000-0000000000a1");
+const AGENT2 = AgentId("018f0000-0000-7000-8000-0000000000a2");
+const TOK = TokenId("018f0000-0000-7000-8000-0000000000b1");
 // A non-user principal id, used to prove `created_by` comes from the effect
 // body, not the envelope `principal_id` (agent writes attribute to a human).
 const AGENT_PRINCIPAL = "018f0000-0000-7000-8000-0000000000f1";
@@ -498,6 +503,31 @@ const STATE_KIND_FIXTURES = {
     user_id: USER,
     role: "owner",
   },
+  "agent.create": {
+    kind: "agent.create",
+    agent_id: AGENT,
+    workspace_id: WS,
+    name: "release-bot",
+    owner_user_id: USER,
+    created_by: USER,
+  },
+  "agent.update": { kind: "agent.update", agent_id: AGENT, patch: { name: "deploy-bot" } },
+  "agent.revoke": { kind: "agent.revoke", agent_id: AGENT, revoked_at: 1 },
+  // The canonical mint fixture — note what it does NOT carry: no
+  // token_hash field exists on the effect (ADR 0044 Decision 7).
+  "agent.token_mint": {
+    kind: "agent.token_mint",
+    token_id: TOK,
+    agent_id: AGENT,
+    workspace_id: WS,
+    token_prefix: "ez_agent_AbC1",
+    last4: "wXyZ",
+    scopes: ["doc:read", "doc:write"],
+    tier: "custom",
+    expires_at: null,
+    created_by: USER,
+  },
+  "agent.token_revoke": { kind: "agent.token_revoke", token_id: TOK, revoked_at: 1 },
   "acl.grant": {
     kind: "acl.grant",
     grant_id: GRANT,
@@ -728,6 +758,134 @@ describe("replay reducer — space family (ADR 0040 Step 7)", () => {
       applyAuditRow(
         EMPTY_STATE,
         allow({ kind: "space.member_update_role", space_id: SPACE, user_id: USER, role: "view" }),
+      ),
+    ).toBe(EMPTY_STATE);
+  });
+});
+
+// ── Agent family semantics (ADR 0044) ──────────────────────────────────────
+//
+// Same Step-7 discipline as the space family: effects + transitions land
+// BEFORE the increment-3 capabilities; these walks are the replay-
+// sufficiency proof until the integration property reaches them.
+
+describe("replay reducer — agent family (ADR 0044)", () => {
+  const create = allow({
+    kind: "agent.create",
+    agent_id: AGENT,
+    workspace_id: WS,
+    name: "release-bot",
+    owner_user_id: USER,
+    created_by: USER2,
+  });
+  const mint = allow({
+    kind: "agent.token_mint",
+    token_id: TOK,
+    agent_id: AGENT,
+    workspace_id: WS,
+    token_prefix: "ez_agent_AbC1",
+    last4: "wXyZ",
+    scopes: ["doc:read", "doc:write"],
+    tier: "author",
+    expires_at: 99,
+    created_by: USER,
+  });
+
+  it("create → update → mint → revoke reconstructs both projections", () => {
+    const state = replay([
+      create,
+      allow({ kind: "agent.update", agent_id: AGENT, patch: { name: "deploy-bot" } }),
+      mint,
+      allow({ kind: "agent.revoke", agent_id: AGENT, revoked_at: 77 }),
+    ]);
+    expect(state.agents[AGENT]).toEqual({
+      id: AGENT,
+      workspace_id: WS,
+      name: "deploy-bot",
+      owner_user_id: USER, // liveness anchor survives rename
+      created_by: USER2, // from the effect body, never the envelope
+      revoked_at: 77, // the handler clock, verbatim
+    });
+    expect(state.agent_tokens[TOK]).toEqual({
+      id: TOK,
+      workspace_id: WS,
+      agent_id: AGENT,
+      token_prefix: "ez_agent_AbC1",
+      last4: "wXyZ",
+      scopes: ["doc:read", "doc:write"],
+      tier: "author",
+      expires_at: 99,
+      created_by: USER,
+      revoked_at: null,
+    });
+  });
+
+  it("the projection NEVER carries the secret or its hash (boundary item 2)", () => {
+    const state = replay([create, mint]);
+    // toEqual above already pins the exact key set; this is the named
+    // invariant assertion — the mint effect structurally cannot carry
+    // token_hash, and the projection must not grow it back.
+    expect(state.agent_tokens[TOK]).not.toHaveProperty("token_hash");
+  });
+
+  it("agent.revoke does NOT cascade to token rows — liveness is a resolution-time join", () => {
+    // ADR 0044 Decision 4: a dead agent kills its tokens at bearer
+    // RESOLUTION (the join fails), not by patching rows. Replay must
+    // not invent a cascade the DB doesn't perform.
+    const state = replay([
+      create,
+      mint,
+      allow({ kind: "agent.revoke", agent_id: AGENT, revoked_at: 5 }),
+    ]);
+    expect(state.agents[AGENT]?.revoked_at).toBe(5);
+    expect(state.agent_tokens[TOK]?.revoked_at).toBeNull();
+  });
+
+  it("token_revoke is terminal and token-scoped", () => {
+    const state = replay([
+      create,
+      mint,
+      allow({ kind: "agent.token_revoke", token_id: TOK, revoked_at: 9 }),
+    ]);
+    expect(state.agent_tokens[TOK]?.revoked_at).toBe(9);
+    expect(state.agents[AGENT]?.revoked_at).toBeNull();
+  });
+
+  it("recreate-under-new-id: the revoked row persists and the name is reusable", () => {
+    // Terminal revoke (no un-revoke kind exists in the union — the
+    // recovery path is a NEW agent). The partial-unique name index
+    // frees the name on revoke, so both rows coexist in the projection
+    // and grants referencing the dead id stay explicable.
+    const state = replay([
+      create,
+      allow({ kind: "agent.revoke", agent_id: AGENT, revoked_at: 3 }),
+      allow({
+        kind: "agent.create",
+        agent_id: AGENT2,
+        workspace_id: WS,
+        name: "release-bot",
+        owner_user_id: USER,
+        created_by: USER,
+      }),
+    ]);
+    expect(state.agents[AGENT]?.revoked_at).toBe(3);
+    expect(state.agents[AGENT2]).toMatchObject({ name: "release-bot", revoked_at: null });
+  });
+
+  it("patches against absent entities are safe no-ops (truncated-log resilience)", () => {
+    expect(
+      applyAuditRow(
+        EMPTY_STATE,
+        allow({ kind: "agent.update", agent_id: AGENT, patch: { name: "x" } }),
+      ),
+    ).toBe(EMPTY_STATE);
+    expect(
+      applyAuditRow(EMPTY_STATE, allow({ kind: "agent.revoke", agent_id: AGENT, revoked_at: 1 })),
+    ).toBe(EMPTY_STATE);
+    expect(
+      applyAuditRow(
+        EMPTY_STATE,
+        allow({ kind: "agent.token_revoke", token_id: TOK, revoked_at: 1 }),
       ),
     ).toBe(EMPTY_STATE);
   });
@@ -1040,5 +1198,12 @@ describe("REPLAY_CLASS", () => {
     expect(REPLAY_CLASS["admin.diagnose"]).toBe("audit-only");
     expect(REPLAY_CLASS["comment.create"]).toBe("deferred");
     expect(REPLAY_CLASS["workspace.purge"]).toBe("deferred");
+    // ADR 0044: all five agent kinds are state-class from birth — token
+    // rows replay minus token_hash; "substrate" is not a replay class.
+    expect(REPLAY_CLASS["agent.create"]).toBe("state");
+    expect(REPLAY_CLASS["agent.update"]).toBe("state");
+    expect(REPLAY_CLASS["agent.revoke"]).toBe("state");
+    expect(REPLAY_CLASS["agent.token_mint"]).toBe("state");
+    expect(REPLAY_CLASS["agent.token_revoke"]).toBe("state");
   });
 });
