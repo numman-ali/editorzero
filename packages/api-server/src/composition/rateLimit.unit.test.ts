@@ -31,6 +31,7 @@ import {
   createRateLimiter,
   DEFAULT_AGENT_RATE_LIMIT,
   DEFAULT_USER_RATE_LIMIT,
+  PERMISSIVE_RATE_LIMITER,
   withRateLimit,
 } from "./rateLimit";
 
@@ -94,6 +95,23 @@ function recordingMeter(): { meter: Meter; adds: MeterAdd[] } {
   };
   return { meter, adds };
 }
+
+describe("PERMISSIVE_RATE_LIMITER", () => {
+  it("admits every request — the stateless opt-out the disabled-throttling boot path uses", () => {
+    // No bucket to exhaust: a user and an agent (distinct kinds) both pass,
+    // and repeated calls stay allowed. This is the SSOT for `getApiApp`'s
+    // `rateLimiter` opt-out (EDITORZERO_RATE_LIMIT_DISABLED).
+    expect(PERMISSIVE_RATE_LIMITER.consume({ principal: alice(), capability_id: CAP })).toEqual({
+      allowed: true,
+    });
+    expect(PERMISSIVE_RATE_LIMITER.consume({ principal: agent(), capability_id: CAP })).toEqual({
+      allowed: true,
+    });
+    expect(PERMISSIVE_RATE_LIMITER.consume({ principal: alice(), capability_id: CAP })).toEqual({
+      allowed: true,
+    });
+  });
+});
 
 // ── createRateLimiter: token-bucket arithmetic ──────────────────────────────
 

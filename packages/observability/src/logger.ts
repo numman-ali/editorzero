@@ -53,6 +53,7 @@ export type LogEvent =
   | "admin.diagnose_generated"
   | "server.listening"
   | "server.draining"
+  | "server.rate_limit_disabled"
   | "server.boot_failed";
 
 /**

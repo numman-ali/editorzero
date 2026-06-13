@@ -18,7 +18,7 @@
  * `apps/app/dist`) the SPA bundle via `attachSpa`.
  */
 
-import { getApiApp } from "@editorzero/api-server";
+import { getApiApp, PERMISSIVE_RATE_LIMITER } from "@editorzero/api-server";
 import { loadEnvConfig } from "@editorzero/config";
 import { consoleLogger } from "@editorzero/observability";
 
@@ -33,7 +33,22 @@ function describeError(error: unknown): string {
 async function main(): Promise<void> {
   const log = consoleLogger();
   const config = loadEnvConfig();
-  const booted = await getApiApp({ config, logger: log });
+  if (config.rate_limit_disabled) {
+    // Loud on purpose: invariant 8 promises ENFORCED limits, so a
+    // disabled limiter in a real deployment is a misconfiguration an
+    // operator must see at boot (the only sanctioned use is the e2e
+    // suite's synthetic request volume — see the config field docs).
+    log.warn("rate limiting DISABLED via EDITORZERO_RATE_LIMIT_DISABLED", {
+      event: "server.rate_limit_disabled",
+    });
+  }
+  const booted = await getApiApp({
+    config,
+    logger: log,
+    // The wrap still runs; this limiter just always allows. Opt out ONLY
+    // when explicitly configured — never the production default.
+    ...(config.rate_limit_disabled && { rateLimiter: PERMISSIVE_RATE_LIMITER }),
+  });
   if (config.spa_dist !== undefined) {
     attachSpa(booted.app, config.spa_dist);
   }

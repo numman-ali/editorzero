@@ -92,6 +92,19 @@ export interface RateLimiter {
   readonly consume: (req: RateLimitRequest) => RateLimitOutcome;
 }
 
+/**
+ * A limiter that admits everything — the SSOT for `getApiApp`'s
+ * `rateLimiter` opt-out (the "always allow" shape `server.ts` documents for
+ * suites that don't exercise throttling, and the
+ * `EDITORZERO_RATE_LIMIT_DISABLED` boot path). The wrap still runs around
+ * the dispatcher — it asks, this answers yes — so the disabled posture
+ * walks the same code path and just never refuses. NOT for production:
+ * invariant 8 promises distinct, ENFORCED limits.
+ */
+export const PERMISSIVE_RATE_LIMITER: RateLimiter = {
+  consume: () => ({ allowed: true }),
+};
+
 export interface CreateRateLimiterOptions {
   /** Defaults to `Date.now`. Tests override for a deterministic clock. */
   readonly now?: () => number;

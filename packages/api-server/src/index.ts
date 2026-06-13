@@ -48,6 +48,7 @@ export {
   type CreateApiDispatcherOptions,
   createApiDispatcher,
 } from "./composition/createApiDispatcher";
+export { PERMISSIVE_RATE_LIMITER, type RateLimiter } from "./composition/rateLimit";
 // The trunk's Hono env — exported so the serve layer (apps/server) can
 // instantiate generically-typed middleware (e.g. `serveStatic<ApiEnv>`)
 // against `BootedApp["app"]` without re-deriving the type.

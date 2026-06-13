@@ -82,6 +82,21 @@ export const runtimeConfigSchema = z.object({
   spa_dist: z.string().min(1).optional(),
   /** Disaster-recovery mode — raises ACME re-issuance cap for 24h (F59). */
   dr_mode: z.coerce.boolean().default(false),
+  /**
+   * Disable the in-memory rate limiter (ADR 0044 — the invariant-8
+   * enforcement wrap). Default OFF: limiting is ON in every real
+   * deployment, and you opt OUT explicitly (the `dr_mode` posture, so
+   * presence of the var — any non-empty value — disables). The one
+   * sanctioned use is a synthetic client that issues requests far faster
+   * than any human: the Playwright e2e suite drives ONE founder user
+   * through dozens of serial specs whose cold-boot fan-out (session +
+   * workspace + collections + the route's own read, per navigation) bursts
+   * past the 600/min user budget and 429s a later cold boot into the route
+   * error boundary. The limiter's own unit + integration suites prove that
+   * behavior; the browser suite has no business re-proving it. NEVER set
+   * this in production.
+   */
+  rate_limit_disabled: z.coerce.boolean().default(false),
 });
 
 export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
@@ -107,6 +122,7 @@ const ENV_MAP = {
   registration_mode: "EDITORZERO_REGISTRATION_MODE",
   hocuspocus_max_ram_bytes: "EDITORZERO_HOCUSPOCUS_MAX_RAM_BYTES",
   dr_mode: "EDITORZERO_DR_MODE",
+  rate_limit_disabled: "EDITORZERO_RATE_LIMIT_DISABLED",
   spa_dist: "EDITORZERO_SPA_DIST",
 } as const satisfies Record<keyof RuntimeConfig, string>;
 

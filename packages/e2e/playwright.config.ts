@@ -62,6 +62,14 @@ export default defineConfig({
         EDITORZERO_PUBLIC_ORIGIN: WEB_ORIGIN,
         BETTER_AUTH_SECRET: E2E_BETTER_AUTH_SECRET,
         EDITORZERO_SPA_DIST: path.join(here, "tmp/spa-dist"),
+        // This suite is ONE founder user driving dozens of serial specs;
+        // each cold-boot navigation fans out session + workspace +
+        // collections + the route's own read, which bursts past the
+        // 600/min user budget (ADR 0044 increment 6) and 429s a later cold
+        // boot into the route error boundary — a synthetic-volume artifact,
+        // not a product fault. The limiter's own unit + integration suites
+        // prove throttling; here we opt out so UI parity is what's tested.
+        EDITORZERO_RATE_LIMIT_DISABLED: "1",
       },
     },
     {
