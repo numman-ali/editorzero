@@ -42,7 +42,7 @@
 import type { Auth } from "@editorzero/auth";
 import type { Registry } from "@editorzero/capabilities";
 import { createRegistry } from "@editorzero/capabilities";
-import type { LoadRoles } from "@editorzero/db";
+import type { LoadRoles, ResolveAgentToken } from "@editorzero/db";
 import type { Dispatcher } from "@editorzero/dispatcher";
 import { hc } from "hono/client";
 import { testClient } from "hono/testing";
@@ -197,6 +197,17 @@ describe("api-server trunk composition", () => {
     // almost certainly a caller bug.
     const fakeLoadRoles: LoadRoles = async () => null;
     expect(() => createApiApp({ loadRoles: fakeLoadRoles })).toThrow(/loadRoles.+without.+auth/i);
+  });
+
+  it("createApiApp({ resolveAgentToken }) without auth throws (ADR 0044 bearer arm)", () => {
+    // The agent bearer arm rides the principal middleware, which only
+    // mounts under the auth pair. Providing it alone would silently
+    // attach no bearer arm — the same partial-shape footgun the triad
+    // guards prevent. Fail loud at boot.
+    const fakeResolveAgentToken: ResolveAgentToken = async () => null;
+    expect(() => createApiApp({ resolveAgentToken: fakeResolveAgentToken })).toThrow(
+      /resolveAgentToken.+without.+auth/i,
+    );
   });
 
   it("createApiApp({ registry }) without dispatcher throws (ADR 0026 MCP mount)", () => {

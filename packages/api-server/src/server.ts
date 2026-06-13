@@ -45,6 +45,7 @@ import {
   createDocUpdatesReader,
   createDocUpdatesWriter,
   createLoadRoles,
+  createResolveAgentToken,
   createSqliteDriver,
   ensureSchema,
   type SqliteDriver,
@@ -226,6 +227,11 @@ export async function getApiApp(options: GetApiAppOptions = {}): Promise<BootedA
     loadRoles,
     dispatcher,
     registry,
+    // ADR 0044 Decision 4 — the HTTP/MCP principal chain gains the owned
+    // agent bearer arm. Same `driver` + `system()` seam as `loadRoles`;
+    // deliberately NOT passed to `createCollabPolicies` above (collab
+    // stays cookie-only until the bearer-at-upgrade increment).
+    resolveAgentToken: createResolveAgentToken(driver),
     ...(options.mcpServerInfo !== undefined && { mcpServerInfo: options.mcpServerInfo }),
     // Sign-out arm of the same tap: Better Auth owns session
     // destruction, so the `/auth/*` mount reports it and the registry

@@ -101,7 +101,7 @@
 import type { Auth } from "@editorzero/auth";
 import { createBetterAuthResolver } from "@editorzero/auth";
 import type { Registry } from "@editorzero/capabilities";
-import type { LoadRoles } from "@editorzero/db";
+import type { LoadRoles, ResolveAgentToken } from "@editorzero/db";
 import type { Dispatcher } from "@editorzero/dispatcher";
 import { EditorZeroError } from "@editorzero/errors";
 import type { SessionId, UserId } from "@editorzero/ids";
@@ -110,8 +110,9 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 import type { ApiEnv } from "./env";
+import { createBearerThenCookieResolver } from "./middleware/agent-bearer";
 import { createDispatcherMiddleware } from "./middleware/dispatcher";
-import { createPrincipalMiddleware } from "./middleware/principal";
+import { createPrincipalMiddleware, type PrincipalResolver } from "./middleware/principal";
 import { agents } from "./routes/agents";
 import { audit } from "./routes/audit";
 import { collections } from "./routes/collections";
@@ -179,6 +180,29 @@ export interface CreateApiAppOptions {
    * see the doc-block on `auth` above for the runtime guard.
    */
   readonly loadRoles?: LoadRoles;
+  /**
+   * Owned agent bearer-token resolver (ADR 0044 Decision 4). When
+   * provided, the HTTP principal middleware gains a bearer arm in front
+   * of the cookie resolver: an `Authorization: Bearer ez_agent_…` header
+   * resolves to an `AgentPrincipal` via this callable, and an
+   * invalid/unknown/revoked/expired agent token 401s WITHOUT falling
+   * back to the ambient session cookie (`middleware/agent-bearer.ts`).
+   * Produced via `createResolveAgentToken(driver)` in `@editorzero/db`,
+   * mirroring the `loadRoles` injection (the factory stays ignorant of
+   * Kysely + `SystemDatabase`).
+   *
+   * Optional and independent of the triad: omit it (the default) to keep
+   * the cookie-only resolver — every existing test + the zero-arg `app`
+   * are unaffected. It REQUIRES `auth` though (the bearer arm rides the
+   * principal middleware, which only mounts with `auth` + `loadRoles`);
+   * the factory throws if given `resolveAgentToken` without `auth`.
+   *
+   * Scope is the HTTP/MCP principal chain ONLY. It is deliberately NOT
+   * wired into the `/auth/*` revocation tap (agents hold no Better Auth
+   * session) nor into the collab WS path (bearer-at-upgrade is a later
+   * increment, gated on the ADR 0043 tap arms).
+   */
+  readonly resolveAgentToken?: ResolveAgentToken;
   /**
    * Dispatcher composition-root instance. Required alongside `auth`
    * + `loadRoles` for `/docs/*` routes to mount a complete
@@ -250,7 +274,8 @@ function isPgRetryableError(err: unknown): boolean {
 }
 
 export function createApiApp(options: CreateApiAppOptions = {}) {
-  const { auth, loadRoles, dispatcher, registry, mcpServerInfo, onAuthRevoked } = options;
+  const { auth, loadRoles, dispatcher, registry, mcpServerInfo, onAuthRevoked, resolveAgentToken } =
+    options;
 
   // ADR 0043 Decision 5 — the sign-out tap rides the `/auth/*` mount.
   if (onAuthRevoked !== undefined && auth === undefined) {
@@ -272,6 +297,19 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     throw new Error(
       "createApiApp: `loadRoles` was provided without `auth`. The two must be " +
         "provided together — `loadRoles` is only consumed by the auth resolver.",
+    );
+  }
+  // ADR 0044 Decision 4 — the bearer arm rides the principal middleware,
+  // which only mounts inside the `auth` + `loadRoles` block below.
+  // Providing `resolveAgentToken` without `auth` would silently attach no
+  // bearer arm (the agent resolver would never run) — the same partial-
+  // shape footgun the triad guards prevent, so fail loud at composition.
+  if (resolveAgentToken !== undefined && auth === undefined) {
+    throw new Error(
+      "createApiApp: `resolveAgentToken` was provided without `auth`. The agent " +
+        "bearer arm rides the principal middleware, which only mounts with `auth` " +
+        "+ `loadRoles`; without them the agent resolver would never run. Provide " +
+        "the auth triad alongside `resolveAgentToken`, or omit it.",
     );
   }
   // ADR 0026 slice-1 — `registry` requires the full triad. Checked
@@ -396,9 +434,21 @@ export function createApiApp(options: CreateApiAppOptions = {}) {
     // even though it shares the `/infra/` prefix with the public
     // `/infra/health` liveness probe. Exact-path attachment keeps
     // `/infra/health` public.
-    const principalMw = createPrincipalMiddleware({
-      resolve: (c) => resolve(c.req.raw.headers),
-    });
+    //
+    // ADR 0044 Decision 4 — when `resolveAgentToken` is provided, the
+    // principal resolver gains a bearer arm IN FRONT of the cookie
+    // resolver (agent `Authorization: Bearer ez_agent_…` → `AgentPrincipal`;
+    // an invalid bearer 401s without cookie fallback). The `/auth/*`
+    // revocation tap above keeps the bare cookie `resolve` — agents hold
+    // no Better Auth session, so the bearer arm has no place there.
+    const principalResolve: PrincipalResolver =
+      resolveAgentToken === undefined
+        ? (c) => resolve(c.req.raw.headers)
+        : createBearerThenCookieResolver({
+            resolveAgentToken,
+            cookieResolve: resolve,
+          });
+    const principalMw = createPrincipalMiddleware({ resolve: principalResolve });
     // Every capability-domain prefix mounted in the trunk chain below
     // MUST appear here AND in the dispatcher block — a mounted domain
     // without these 500s on its first live request (undefined

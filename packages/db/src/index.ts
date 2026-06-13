@@ -53,6 +53,12 @@ export { ensureSchema } from "./ensure-schema";
 export { createLoadRoles, type LoadRoles, type LoadRolesDriver } from "./load-roles";
 export { createOutboxWriter, type OutboxAppendInput, type OutboxWriter } from "./outbox-writer";
 export { createQueryFaultPlugin, describeQueryNode, type QueryTag } from "./query-fault";
+export {
+  type AgentTokenResolution,
+  createResolveAgentToken,
+  type ResolveAgentToken,
+  type ResolveAgentTokenDriver,
+} from "./resolve-agent-token";
 export type {
   AgentsTable,
   AgentTokensTable,
