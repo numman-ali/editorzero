@@ -21,9 +21,15 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { Kysely, Transaction } from "kysely";
 import { createPostgresDriver, type PostgresDriver } from "../../src/drivers/postgres";
-import { FULL_DDL as POSTGRES_FULL_DDL } from "../../src/drivers/postgres-ddl";
+import {
+  FULL_DDL as POSTGRES_FULL_DDL,
+  FULL_DDL_DROP as POSTGRES_FULL_DDL_DROP,
+} from "../../src/drivers/postgres-ddl";
 import { createSqliteDriver, type SqliteDriver } from "../../src/drivers/sqlite";
-import { FULL_DDL as SQLITE_FULL_DDL } from "../../src/drivers/sqlite-ddl";
+import {
+  FULL_DDL as SQLITE_FULL_DDL,
+  FULL_DDL_DROP as SQLITE_FULL_DDL_DROP,
+} from "../../src/drivers/sqlite-ddl";
 import type { SystemDatabase } from "../../src/schema";
 import type { TenantScopedDb } from "../../src/tenant";
 
@@ -60,23 +66,6 @@ export interface Backend {
   readonly close: () => Promise<void>;
 }
 
-const DROP_TABLES_SQL = `
-  DROP TABLE IF EXISTS agent_tokens;
-  DROP TABLE IF EXISTS agents;
-  DROP TABLE IF EXISTS grants;
-  DROP TABLE IF EXISTS space_members;
-  DROP TABLE IF EXISTS spaces;
-  DROP TABLE IF EXISTS outbox;
-  DROP TABLE IF EXISTS audit_events;
-  DROP TABLE IF EXISTS doc_counters;
-  DROP TABLE IF EXISTS doc_updates;
-  DROP TABLE IF EXISTS doc_snapshots;
-  DROP TABLE IF EXISTS workspace_members;
-  DROP TABLE IF EXISTS docs;
-  DROP TABLE IF EXISTS collections;
-  DROP TABLE IF EXISTS workspaces;
-`;
-
 export async function createSqliteBackend(): Promise<Backend> {
   const driver: SqliteDriver = createSqliteDriver({ path: ":memory:" });
   driver.exec(SQLITE_FULL_DDL);
@@ -84,7 +73,8 @@ export async function createSqliteBackend(): Promise<Backend> {
     name: "sqlite",
     driver,
     resetSchema: async () => {
-      driver.exec(DROP_TABLES_SQL);
+      // Derived from the DDL itself — a new table can't be forgotten.
+      driver.exec(SQLITE_FULL_DDL_DROP);
       driver.exec(SQLITE_FULL_DDL);
     },
     close: async () => {
@@ -119,7 +109,7 @@ export async function createPostgresBackend(): Promise<{
       name: "postgres",
       driver,
       resetSchema: async () => {
-        await driver.exec(DROP_TABLES_SQL);
+        await driver.exec(POSTGRES_FULL_DDL_DROP);
         await driver.exec(POSTGRES_FULL_DDL);
       },
       close: async () => {

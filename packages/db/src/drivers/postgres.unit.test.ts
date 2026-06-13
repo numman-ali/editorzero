@@ -40,7 +40,7 @@ import { sql } from "kysely";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createPostgresDriver, type PostgresDriver } from "./postgres";
-import { FULL_DDL } from "./postgres-ddl";
+import { FULL_DDL, FULL_DDL_DROP } from "./postgres-ddl";
 
 /**
  * Pinned image per ADR 0023 §2. Update in tandem with the ADR's pinned
@@ -72,26 +72,12 @@ afterAll(async () => {
 
 beforeEach(async () => {
   if (driver === undefined) return;
-  // Wipe + reapply the full schema. Order matters: child tables before
-  // their parents (FK targets). `IF EXISTS` keeps the first run clean.
-  // Kept in sync with `test/integration/backends.ts` DROP_TABLES_SQL
-  // (plus this file's t_* scratch tables); a forgotten table fails
-  // loudly here as `relation … already exists` on the FULL_DDL reapply.
+  // Wipe + reapply the full schema. `FULL_DDL_DROP` is DERIVED from
+  // `FULL_DDL` (every CREATE TABLE → a CASCADE drop), so a new table
+  // can never be missing here; only this file's t_* scratch tables
+  // need naming.
   await driver.exec(`
-    DROP TABLE IF EXISTS agent_tokens;
-    DROP TABLE IF EXISTS agents;
-    DROP TABLE IF EXISTS grants;
-    DROP TABLE IF EXISTS space_members;
-    DROP TABLE IF EXISTS spaces;
-    DROP TABLE IF EXISTS outbox;
-    DROP TABLE IF EXISTS audit_events;
-    DROP TABLE IF EXISTS doc_counters;
-    DROP TABLE IF EXISTS doc_updates;
-    DROP TABLE IF EXISTS doc_snapshots;
-    DROP TABLE IF EXISTS workspace_members;
-    DROP TABLE IF EXISTS docs;
-    DROP TABLE IF EXISTS collections;
-    DROP TABLE IF EXISTS workspaces;
+    ${FULL_DDL_DROP}
     DROP TABLE IF EXISTS t_bigint;
     DROP TABLE IF EXISTS t_blob;
     DROP TABLE IF EXISTS t_sp;

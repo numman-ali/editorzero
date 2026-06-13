@@ -26,7 +26,10 @@ export {
 } from "./doc-updates-writer";
 export type { PostgresDriver, PostgresDriverOptions } from "./drivers/postgres";
 export { createPostgresDriver } from "./drivers/postgres";
-export { FULL_DDL as POSTGRES_FULL_DDL } from "./drivers/postgres-ddl";
+export {
+  FULL_DDL as POSTGRES_FULL_DDL,
+  FULL_DDL_DROP as POSTGRES_FULL_DDL_DROP,
+} from "./drivers/postgres-ddl";
 export type { SqliteDriver, SqliteDriverOptions } from "./drivers/sqlite";
 export { createSqliteDriver } from "./drivers/sqlite";
 export {

@@ -519,3 +519,18 @@ export const FULL_DDL = [
   AGENTS_DDL,
   AGENT_TOKENS_DDL,
 ].join("\n");
+
+/**
+ * Drop-everything counterpart to `FULL_DDL`, DERIVED from it in
+ * REVERSE create order (children before parents — a table only ever
+ * FKs to earlier tables, and SQLite has no `DROP TABLE … CASCADE`).
+ * Derivation means a new table can never be forgotten by a test
+ * harness's hand-maintained reset list — see the Postgres parallel
+ * for the drift story this closes.
+ */
+export const FULL_DDL_DROP = FULL_DDL.split("\n")
+  .map((line) => /^\s*CREATE TABLE (\w+)/.exec(line)?.[1])
+  .filter((t): t is string => t !== undefined)
+  .reverse()
+  .map((t) => `DROP TABLE IF EXISTS ${t};`)
+  .join("\n");

@@ -95,6 +95,7 @@ import {
   createPostgresDriver,
   createSqliteDriver,
   POSTGRES_FULL_DDL,
+  POSTGRES_FULL_DDL_DROP,
   SQLITE_FULL_DDL,
   type SqliteDriver,
 } from "@editorzero/db";
@@ -2111,21 +2112,8 @@ async function runPlanOnDriver(plan: SeedPlan, driver: FuzzDriver): Promise<Outc
 
 // ── The suite ──────────────────────────────────────────────────────────────
 
-/** Mirrors `packages/db/test/integration/backends.ts` DROP order (FK-safe). */
-const PG_DROP_ALL = `
-  DROP TABLE IF EXISTS grants;
-  DROP TABLE IF EXISTS space_members;
-  DROP TABLE IF EXISTS spaces;
-  DROP TABLE IF EXISTS outbox;
-  DROP TABLE IF EXISTS audit_events;
-  DROP TABLE IF EXISTS doc_counters;
-  DROP TABLE IF EXISTS doc_updates;
-  DROP TABLE IF EXISTS doc_snapshots;
-  DROP TABLE IF EXISTS workspace_members;
-  DROP TABLE IF EXISTS docs;
-  DROP TABLE IF EXISTS collections;
-  DROP TABLE IF EXISTS workspaces;
-`;
+// Derived from the DDL itself (a new table can never be missing here).
+const PG_DROP_ALL = POSTGRES_FULL_DDL_DROP;
 
 let pgContainer: StartedPostgreSqlContainer | null = null;
 
