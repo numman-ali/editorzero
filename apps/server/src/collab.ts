@@ -149,6 +149,7 @@ export function attachCollab(
       // commits and sign-out can close it. The release rides the
       // socket's own close event — entries never outlive transports.
       const release = booted.collabSockets.register({
+        kind: "user",
         user_id: principal.id,
         session_id: principal.session_id,
         socket: client,

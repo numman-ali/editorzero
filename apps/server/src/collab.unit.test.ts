@@ -108,6 +108,8 @@ function refusalBooted(resolver: CollabBooted["resolver"]): CollabBooted {
       },
       closeByUser: () => 0,
       closeBySession: () => 0,
+      closeByAgent: () => 0,
+      closeByToken: () => 0,
       size: () => 0,
     },
   };

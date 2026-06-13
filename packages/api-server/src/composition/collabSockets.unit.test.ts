@@ -1,10 +1,12 @@
 /**
- * Socket registry pins (ADR 0043 Decision 5): targeted closes by user
- * and by session, idempotent release, and resilience to sockets that
- * throw mid-teardown — the properties the revocation tap leans on.
+ * Socket registry pins (ADR 0043 Decision 5 + ADR 0044 Decision 5):
+ * targeted closes by user, session, agent, and token; idempotent
+ * release; cross-kind isolation (a user close never touches an agent
+ * socket and vice-versa); and resilience to sockets that throw
+ * mid-teardown — the properties the revocation tap leans on.
  */
 
-import { SessionId, UserId } from "@editorzero/ids";
+import { AgentId, SessionId, TokenId, UserId } from "@editorzero/ids";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -17,6 +19,10 @@ const ALICE = UserId("018f0000-0000-7000-8000-000000000001");
 const BOB = UserId("018f0000-0000-7000-8000-000000000002");
 const SESSION_A = SessionId("018f0000-0000-7000-8000-00000000a001");
 const SESSION_B = SessionId("018f0000-0000-7000-8000-00000000b002");
+const AGENT_X = AgentId("018f0000-0000-7000-8000-0000000000a1");
+const AGENT_Y = AgentId("018f0000-0000-7000-8000-0000000000a2");
+const TOKEN_1 = TokenId("018f0000-0000-7000-8000-0000000000c1");
+const TOKEN_2 = TokenId("018f0000-0000-7000-8000-0000000000c2");
 
 interface RecordingSocket extends CollabSocketLike {
   readonly closes: Array<{ code?: number; reason?: string }>;
@@ -40,9 +46,9 @@ describe("createCollabSocketRegistry", () => {
     const aliceSocket = socket();
     const aliceSecond = socket();
     const bobSocket = socket();
-    registry.register({ user_id: ALICE, session_id: SESSION_A, socket: aliceSocket });
-    registry.register({ user_id: ALICE, session_id: SESSION_A, socket: aliceSecond });
-    registry.register({ user_id: BOB, session_id: SESSION_B, socket: bobSocket });
+    registry.register({ kind: "user", user_id: ALICE, session_id: SESSION_A, socket: aliceSocket });
+    registry.register({ kind: "user", user_id: ALICE, session_id: SESSION_A, socket: aliceSecond });
+    registry.register({ kind: "user", user_id: BOB, session_id: SESSION_B, socket: bobSocket });
 
     expect(registry.size()).toBe(3);
     expect(registry.closeByUser(ALICE)).toBe(2);
@@ -58,8 +64,8 @@ describe("createCollabSocketRegistry", () => {
     const registry = createCollabSocketRegistry();
     const phone = socket();
     const laptop = socket();
-    registry.register({ user_id: ALICE, session_id: SESSION_A, socket: phone });
-    registry.register({ user_id: ALICE, session_id: SESSION_B, socket: laptop });
+    registry.register({ kind: "user", user_id: ALICE, session_id: SESSION_A, socket: phone });
+    registry.register({ kind: "user", user_id: ALICE, session_id: SESSION_B, socket: laptop });
 
     expect(registry.closeBySession(SESSION_A)).toBe(1);
     expect(phone.closes).toHaveLength(1);
@@ -70,7 +76,7 @@ describe("createCollabSocketRegistry", () => {
   it("never matches a null session_id on session-targeted closes", () => {
     const registry = createCollabSocketRegistry();
     const tokenish = socket();
-    registry.register({ user_id: ALICE, session_id: null, socket: tokenish });
+    registry.register({ kind: "user", user_id: ALICE, session_id: null, socket: tokenish });
     expect(registry.closeBySession(SESSION_A)).toBe(0);
     expect(tokenish.closes).toHaveLength(0);
   });
@@ -78,7 +84,12 @@ describe("createCollabSocketRegistry", () => {
   it("release is idempotent and a released socket is never closed", () => {
     const registry = createCollabSocketRegistry();
     const gone = socket();
-    const release = registry.register({ user_id: ALICE, session_id: SESSION_A, socket: gone });
+    const release = registry.register({
+      kind: "user",
+      user_id: ALICE,
+      session_id: SESSION_A,
+      socket: gone,
+    });
     release();
     release();
     expect(registry.size()).toBe(0);
@@ -94,11 +105,61 @@ describe("createCollabSocketRegistry", () => {
       },
     };
     const wellBehaved = socket();
-    registry.register({ user_id: ALICE, session_id: SESSION_A, socket: hostile });
-    registry.register({ user_id: ALICE, session_id: SESSION_A, socket: wellBehaved });
+    registry.register({ kind: "user", user_id: ALICE, session_id: SESSION_A, socket: hostile });
+    registry.register({ kind: "user", user_id: ALICE, session_id: SESSION_A, socket: wellBehaved });
 
     expect(registry.closeByUser(ALICE)).toBe(2);
     expect(wellBehaved.closes).toHaveLength(1);
+    expect(registry.size()).toBe(0);
+  });
+
+  it("closes an agent's sockets by agent_id, leaving other agents attached", () => {
+    const registry = createCollabSocketRegistry();
+    const xFirst = socket();
+    const xSecond = socket();
+    const ySocket = socket();
+    registry.register({ kind: "agent", agent_id: AGENT_X, token_id: TOKEN_1, socket: xFirst });
+    registry.register({ kind: "agent", agent_id: AGENT_X, token_id: TOKEN_2, socket: xSecond });
+    registry.register({ kind: "agent", agent_id: AGENT_Y, token_id: TOKEN_1, socket: ySocket });
+
+    expect(registry.closeByAgent(AGENT_X)).toBe(2);
+    expect(xFirst.closes).toEqual([
+      { code: COLLAB_REVOKED_CLOSE_CODE, reason: "authorization revoked" },
+    ]);
+    expect(xSecond.closes).toHaveLength(1);
+    expect(ySocket.closes).toHaveLength(0);
+    expect(registry.size()).toBe(1);
+  });
+
+  it("closes a single token's socket without touching the agent's other tokens", () => {
+    const registry = createCollabSocketRegistry();
+    const t1 = socket();
+    const t2 = socket();
+    registry.register({ kind: "agent", agent_id: AGENT_X, token_id: TOKEN_1, socket: t1 });
+    registry.register({ kind: "agent", agent_id: AGENT_X, token_id: TOKEN_2, socket: t2 });
+
+    expect(registry.closeByToken(TOKEN_1)).toBe(1);
+    expect(t1.closes).toHaveLength(1);
+    expect(t2.closes).toHaveLength(0);
+    expect(registry.size()).toBe(1);
+  });
+
+  it("isolates the lanes — a user close never touches an agent socket, and vice-versa", () => {
+    const registry = createCollabSocketRegistry();
+    const userSocket = socket();
+    const agentSocket = socket();
+    registry.register({ kind: "user", user_id: ALICE, session_id: SESSION_A, socket: userSocket });
+    registry.register({ kind: "agent", agent_id: AGENT_X, token_id: TOKEN_1, socket: agentSocket });
+
+    // A user close — even when the agent shares the owner's id space — must
+    // not reach the agent lane (the discriminant gates the match).
+    expect(registry.closeByUser(ALICE)).toBe(1);
+    expect(agentSocket.closes).toHaveLength(0);
+    // Session/agent/token targets are likewise lane-scoped.
+    expect(registry.closeBySession(SESSION_A)).toBe(0); // already closed above
+    expect(registry.closeByAgent(AGENT_X)).toBe(1);
+    expect(userSocket.closes).toHaveLength(1);
+    expect(agentSocket.closes).toHaveLength(1);
     expect(registry.size()).toBe(0);
   });
 });

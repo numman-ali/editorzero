@@ -25,16 +25,21 @@
  * Affected-subject derivation per capability:
  *
  *   - `permission.revoke` / `doc.remove_guest` — the deleted edge is
- *     echoed verbatim in the output (`GrantRowOutputSchema`);
- *     user-kind subjects close. Agent-kind subjects have no sockets
- *     today — the WS bearer arm (ADR 0043 Decision 4, gated on the
- *     ADR 0016 credential slice) extends the registry keys when it
- *     lands.
+ *     echoed verbatim in the output (`GrantRowOutputSchema`); the
+ *     subject closes whether `user` (→ `closeByUser`) or `agent` (→
+ *     `closeByAgent`). ADR 0044 Decision 5 dropped the old agent-kind
+ *     skip — agent sockets exist now on the bearer lane, so a revoked
+ *     agent grant closes the agent's feeds, same posture as a user grant.
+ *   - `agent.revoke` / `agent.token_revoke` (ADR 0044 Decision 5) — the
+ *     terminal echo carries `agent_id` / `token_id`; the whole agent's
+ *     feeds close (`closeByAgent`) or just the one token's (`closeByToken`).
  *   - `space.member_remove` / `space.member_update_role` /
  *     `workspace.member_remove` / `workspace.member_update_role` —
  *     the output echoes the affected `user_id`. Role UPDATES close
  *     too: a narrowed role must drop live read feeds the old role
- *     justified.
+ *     justified. `workspace.member_remove` ALSO closes the removed
+ *     owner's live agents (ADR 0044 Decision 2: owner-liveness gates the
+ *     token resolve, so removing the owner strands the agent's feeds).
  *   - `doc.delete` — closes the doc's ROOM, not user sockets: every
  *     per-document connection on the trashed doc gets the revocation
  *     Close frame (`closeDocConnections` → the sync layer). Exactly
@@ -83,7 +88,7 @@
 
 import type { SqliteDriver } from "@editorzero/db";
 import type { Dispatcher, DispatchInvocation } from "@editorzero/dispatcher";
-import { SpaceId, UserId, type WorkspaceId } from "@editorzero/ids";
+import { AgentId, SpaceId, TokenId, UserId, type WorkspaceId } from "@editorzero/ids";
 import type { Logger } from "@editorzero/observability";
 import { AclTransitionOutputSchema, GrantRowOutputSchema } from "@editorzero/schemas/shared/grant";
 import { SpaceTypeSchema } from "@editorzero/schemas/shared/space";
@@ -101,6 +106,10 @@ const MoveOutputSchema = z.object({ acl_transition: AclTransitionOutputSchema.op
 const SpaceUpdateInputSchema = z
   .object({ space_id: z.string(), space_type: SpaceTypeSchema.optional() })
   .loose();
+/** Terminal echo of `agent.revoke` — `agent_id` is all the tap reads. */
+const AgentRevokeOutputSchema = z.object({ agent_id: z.string() }).loose();
+/** Terminal echo of `agent.token_revoke` — `token_id` is all the tap reads. */
+const TokenRevokeOutputSchema = z.object({ token_id: z.string() }).loose();
 
 export interface RevocationTapDeps {
   readonly registry: CollabSocketRegistry;
@@ -120,10 +129,22 @@ export interface RevocationTap {
   afterCommit(invocation: DispatchInvocation, output: unknown): Promise<void>;
 }
 
+/**
+ * A subject whose collab feeds a revoke-class commit closes. The kind
+ * picks the registry close method (ADR 0044 Decision 5): `user` →
+ * `closeByUser`, `agent` → `closeByAgent` (the owning agent revoked, or
+ * its owner removed from the workspace), `token` → `closeByToken` (a
+ * single agent token revoked).
+ */
+type CloseTarget =
+  | { readonly kind: "user"; readonly user_id: UserId }
+  | { readonly kind: "agent"; readonly agent_id: AgentId }
+  | { readonly kind: "token"; readonly token_id: TokenId };
+
 export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
   const { registry, driver, logger, closeDocConnections } = deps;
 
-  type Extractor = (invocation: DispatchInvocation, output: unknown) => Promise<UserId[]>;
+  type Extractor = (invocation: DispatchInvocation, output: unknown) => Promise<CloseTarget[]>;
 
   async function liveWorkspaceMembers(workspace: WorkspaceId): Promise<UserId[]> {
     const rows = await driver
@@ -178,20 +199,68 @@ export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
   const grantEdgeSubject: Extractor = (_invocation, output) => {
     const parsed = GrantRowOutputSchema.safeParse(output);
     if (!parsed.success) return Promise.reject(new Error("output is not a grant row"));
-    if (parsed.data.subject_kind !== "user") return Promise.resolve([]);
-    return Promise.resolve([UserId(parsed.data.subject_id)]);
+    const { subject_kind, subject_id } = parsed.data;
+    // ADR 0044 Decision 5: the agent-kind skip is GONE — a revoked agent
+    // grant closes the agent's feeds, same posture as a user grant (agent
+    // sockets can now exist on the bearer lane).
+    if (subject_kind === "agent") {
+      return Promise.resolve([{ kind: "agent", agent_id: AgentId(subject_id) }]);
+    }
+    return Promise.resolve([{ kind: "user", user_id: UserId(subject_id) }]);
   };
 
   const memberSubject: Extractor = (_invocation, output) => {
     const parsed = MemberOutputSchema.safeParse(output);
     if (!parsed.success) return Promise.reject(new Error("output carries no user_id"));
-    return Promise.resolve([UserId(parsed.data.user_id)]);
+    return Promise.resolve([{ kind: "user", user_id: UserId(parsed.data.user_id) }]);
+  };
+
+  /**
+   * `workspace.member_remove` — the removed user AND every live agent they
+   * own (ADR 0044 Decision 2: resolution joins the owner's live membership,
+   * so removing the owner kills their agents' tokens). Per-frame
+   * re-resolution would catch the next write; this closes the passive read
+   * feeds too. Revoked agents already hold no sockets, so the
+   * `revoked_at IS NULL` filter is the live set.
+   */
+  const workspaceMemberRemoveSubjects: Extractor = async (invocation, output) => {
+    const parsed = MemberOutputSchema.safeParse(output);
+    if (!parsed.success) throw new Error("output carries no user_id");
+    const owner = UserId(parsed.data.user_id);
+    const targets: CloseTarget[] = [{ kind: "user", user_id: owner }];
+    const ownedAgents = await driver
+      .scoped(invocation.principal.workspace_id)
+      .selectFrom("agents")
+      .select("id")
+      .where("owner_user_id", "=", owner)
+      .where("revoked_at", "is", null)
+      .execute();
+    for (const row of ownedAgents) {
+      targets.push({ kind: "agent", agent_id: AgentId(row.id) });
+    }
+    return targets;
+  };
+
+  const agentRevokeSubject: Extractor = (_invocation, output) => {
+    const parsed = AgentRevokeOutputSchema.safeParse(output);
+    if (!parsed.success) return Promise.reject(new Error("output carries no agent_id"));
+    return Promise.resolve([{ kind: "agent", agent_id: AgentId(parsed.data.agent_id) }]);
+  };
+
+  const tokenRevokeSubject: Extractor = (_invocation, output) => {
+    const parsed = TokenRevokeOutputSchema.safeParse(output);
+    if (!parsed.success) return Promise.reject(new Error("output carries no token_id"));
+    return Promise.resolve([{ kind: "token", token_id: TokenId(parsed.data.token_id) }]);
   };
 
   const spaceArchiveSubjects: Extractor = async (invocation, output) => {
     const parsed = SpaceArchiveOutputSchema.safeParse(output);
     if (!parsed.success) throw new Error("output carries no space_id");
-    return bucketReaders(invocation.principal.workspace_id, SpaceId(parsed.data.space_id));
+    const readers = await bucketReaders(
+      invocation.principal.workspace_id,
+      SpaceId(parsed.data.space_id),
+    );
+    return readers.map((user_id) => ({ kind: "user", user_id }));
   };
 
   const moveCrossingSubjects: Extractor = async (invocation, output) => {
@@ -201,12 +270,15 @@ export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
     // Same-bucket move: no crossing receipt, no reader change.
     if (transition === undefined) return [];
     const workspace = invocation.principal.workspace_id;
-    const affected = new Set<UserId>();
+    const users = new Set<UserId>();
+    const agents = new Set<AgentId>();
     // Dropped grant edges are revocations regardless of placement
     // direction (`adopt_baseline` hard-deletes them; the echo carries
-    // the preimages). Agent-kind subjects skip — no agent sockets.
+    // the preimages) — user AND agent subjects close, the same
+    // permission.revoke posture (ADR 0044 Decision 5; agent skip dropped).
     for (const grant of transition.dropped_grants) {
-      if (grant.subject_kind === "user") affected.add(UserId(grant.subject_id));
+      if (grant.subject_kind === "agent") agents.add(AgentId(grant.subject_id));
+      else users.add(UserId(grant.subject_id));
     }
     // The BEFORE bucket's readers close only when the AFTER bucket
     // excludes them: the root bucket and open spaces keep every
@@ -224,11 +296,17 @@ export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
           .executeTakeFirst()
       )?.type !== "open";
     if (afterRestrictive) {
+      // Placement readers are users only — an agent reads a bucket via a
+      // GRANT (caught above when the move drops it), never via the
+      // org-baseline / space-roster paths `bucketReaders` walks.
       for (const reader of await bucketReaders(workspace, transition.before_space_id)) {
-        affected.add(reader);
+        users.add(reader);
       }
     }
-    return [...affected];
+    const targets: CloseTarget[] = [];
+    for (const user_id of users) targets.push({ kind: "user", user_id });
+    for (const agent_id of agents) targets.push({ kind: "agent", agent_id });
+    return targets;
   };
 
   const spaceTypeNarrowingSubjects: Extractor = async (invocation, _output) => {
@@ -253,7 +331,9 @@ export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
     // Org-baseline readers lose access; the roster retains. Space-
     // grant holders also retain but are over-closed here — accepted
     // bluntness on a rare admin verb.
-    return (await liveWorkspaceMembers(workspace)).filter((id) => !retained.has(id));
+    return (await liveWorkspaceMembers(workspace))
+      .filter((id) => !retained.has(id))
+      .map((user_id) => ({ kind: "user", user_id }));
   };
 
   const REVOKE_CLASS: ReadonlyMap<string, Extractor> = new Map([
@@ -261,12 +341,17 @@ export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
     ["doc.remove_guest", grantEdgeSubject],
     ["space.member_remove", memberSubject],
     ["space.member_update_role", memberSubject],
-    ["workspace.member_remove", memberSubject],
+    // workspace.member_remove also closes the removed owner's live agents
+    // (ADR 0044 Decision 2) — a dedicated extractor, not the shared one.
+    ["workspace.member_remove", workspaceMemberRemoveSubjects],
     ["workspace.member_update_role", memberSubject],
     ["space.archive", spaceArchiveSubjects],
     ["doc.move", moveCrossingSubjects],
     ["collection.move", moveCrossingSubjects],
     ["space.update", spaceTypeNarrowingSubjects],
+    // ADR 0044 Decision 5 agent derivations.
+    ["agent.revoke", agentRevokeSubject],
+    ["agent.token_revoke", tokenRevokeSubject],
   ]);
 
   return {
@@ -278,8 +363,18 @@ export function createRevocationTap(deps: RevocationTapDeps): RevocationTap {
         let closed = 0;
         if (extract !== undefined) {
           const affected = await extract(invocation, output);
-          for (const user_id of affected) {
-            closed += registry.closeByUser(user_id);
+          for (const target of affected) {
+            switch (target.kind) {
+              case "user":
+                closed += registry.closeByUser(target.user_id);
+                break;
+              case "agent":
+                closed += registry.closeByAgent(target.agent_id);
+                break;
+              case "token":
+                closed += registry.closeByToken(target.token_id);
+                break;
+            }
           }
         }
         if (isDocDelete) {

@@ -5,6 +5,7 @@
  */
 
 import {
+  AGENTS_DDL,
   createSqliteDriver,
   GRANTS_DDL,
   SPACE_MEMBERS_DDL,
@@ -13,7 +14,15 @@ import {
   WORKSPACE_MEMBERS_DDL,
 } from "@editorzero/db";
 import type { DispatchInvocation } from "@editorzero/dispatcher";
-import { CapabilityId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
+import {
+  AgentId,
+  CapabilityId,
+  GrantId,
+  SpaceId,
+  TokenId,
+  UserId,
+  WorkspaceId,
+} from "@editorzero/ids";
 import { noopLogger } from "@editorzero/observability";
 import type { UserPrincipal } from "@editorzero/principal";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +41,9 @@ const SPACE = SpaceId("018f0000-0000-7000-8000-00000000c001");
 const SPACE_CLOSED = SpaceId("018f0000-0000-7000-8000-00000000c002");
 const SPACE_OPEN = SpaceId("018f0000-0000-7000-8000-00000000c003");
 const DOC = "018f0000-0000-7000-8000-0000000000d1";
+const AGENT_ONE = AgentId("018f0000-0000-7000-8000-0000000000a1");
+const AGENT_TWO = AgentId("018f0000-0000-7000-8000-0000000000a2");
+const TOKEN_ONE = TokenId("018f0000-0000-7000-8000-0000000000f1");
 
 let driver: SqliteDriver;
 
@@ -41,6 +53,7 @@ beforeEach(() => {
   driver.exec(SPACE_MEMBERS_DDL);
   driver.exec(GRANTS_DDL);
   driver.exec(WORKSPACE_MEMBERS_DDL);
+  driver.exec(AGENTS_DDL);
 });
 
 afterEach(async () => {
@@ -70,12 +83,18 @@ function invocation(capability: string, input: unknown = {}): DispatchInvocation
 
 interface RegistryRecorder extends CollabSocketRegistry {
   readonly closedUsers: string[];
+  readonly closedAgents: string[];
+  readonly closedTokens: string[];
 }
 
 function recordingRegistry(): RegistryRecorder {
   const closedUsers: string[] = [];
+  const closedAgents: string[] = [];
+  const closedTokens: string[] = [];
   return {
     closedUsers,
+    closedAgents,
+    closedTokens,
     register: () => () => {
       /* unused in tap tests */
     },
@@ -84,6 +103,14 @@ function recordingRegistry(): RegistryRecorder {
       return 1;
     },
     closeBySession: () => 0,
+    closeByAgent(agent_id) {
+      closedAgents.push(agent_id);
+      return 1;
+    },
+    closeByToken(token_id) {
+      closedTokens.push(token_id);
+      return 1;
+    },
     size: () => 0,
   };
 }
@@ -172,6 +199,27 @@ function seedWorkspaceMember(user_id: UserId): Promise<unknown> {
     .execute();
 }
 
+function seedAgent(
+  id: AgentId,
+  owner_user_id: UserId,
+  revoked_at: number | null = null,
+): Promise<unknown> {
+  return driver
+    .scoped(WORKSPACE_A)
+    .insertInto("agents")
+    .values({
+      id,
+      workspace_id: WORKSPACE_A,
+      name: `agent-${id.slice(-4)}`,
+      owner_user_id,
+      created_by: owner_user_id,
+      created_at: 1,
+      updated_at: 1,
+      revoked_at,
+    })
+    .execute();
+}
+
 /** A move output, optionally carrying the crossing receipt. */
 function moveOutput(transition?: {
   before_space_id: SpaceId | null;
@@ -208,12 +256,13 @@ describe("createRevocationTap — affected-subject derivation", () => {
     expect(registry.closedUsers).toEqual([GUEST_USER]);
   });
 
-  it("closes nothing for an agent-kind grant subject (no agent sockets yet)", async () => {
+  it("closes the agent on an agent-kind grant subject (ADR 0044 Decision 5 — skip dropped)", async () => {
     const registry = recordingRegistry();
     await tapWith(registry).afterCommit(
       invocation("permission.revoke"),
-      grantRowOutput("agent", "018f0000-0000-7000-8000-00000000f001"),
+      grantRowOutput("agent", AGENT_ONE),
     );
+    expect(registry.closedAgents).toEqual([AGENT_ONE]);
     expect(registry.closedUsers).toEqual([]);
   });
 
@@ -241,6 +290,49 @@ describe("createRevocationTap — affected-subject derivation", () => {
       });
       expect(registry.closedUsers).toEqual([GUEST_USER]);
     }
+  });
+
+  it("closes the whole agent on agent.revoke", async () => {
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(invocation("agent.revoke"), {
+      agent_id: AGENT_ONE,
+      revoked_at: 999,
+    });
+    expect(registry.closedAgents).toEqual([AGENT_ONE]);
+    expect(registry.closedUsers).toEqual([]);
+    expect(registry.closedTokens).toEqual([]);
+  });
+
+  it("closes a single token on agent.token_revoke", async () => {
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(invocation("agent.token_revoke"), {
+      token_id: TOKEN_ONE,
+      revoked_at: 999,
+    });
+    expect(registry.closedTokens).toEqual([TOKEN_ONE]);
+    expect(registry.closedAgents).toEqual([]);
+    expect(registry.closedUsers).toEqual([]);
+  });
+
+  it("workspace.member_remove ALSO closes the removed owner's live agents (ADR 0044 Decision 2)", async () => {
+    // OWNER_USER owns two live agents and one already-revoked agent;
+    // GUEST_USER owns an agent that must NOT close (different owner).
+    await seedAgent(AGENT_ONE, OWNER_USER);
+    await seedAgent(AGENT_TWO, OWNER_USER);
+    await seedAgent(AgentId("018f0000-0000-7000-8000-0000000000a9"), OWNER_USER, /* revoked */ 5);
+    await seedAgent(AgentId("018f0000-0000-7000-8000-0000000000b1"), GUEST_USER);
+
+    const registry = recordingRegistry();
+    await tapWith(registry).afterCommit(invocation("workspace.member_remove"), {
+      workspace_id: WORKSPACE_A,
+      user_id: OWNER_USER,
+      role: "member",
+    });
+
+    expect(registry.closedUsers).toEqual([OWNER_USER]);
+    // Both live owned agents close; the revoked one (no sockets) and the
+    // other owner's agent are untouched. Order-independent compare.
+    expect([...registry.closedAgents].sort()).toEqual([AGENT_ONE, AGENT_TWO].sort());
   });
 
   it("closes the trashed doc's ROOM on doc.delete — per-document close, sockets untouched", async () => {
@@ -518,6 +610,8 @@ describe("withRevocationTap", () => {
         throw new Error("registry exploded");
       },
       closeBySession: () => 0,
+      closeByAgent: () => 0,
+      closeByToken: () => 0,
       size: () => 0,
     };
     const error = vi.fn();
