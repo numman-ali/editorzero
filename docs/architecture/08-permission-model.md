@@ -78,6 +78,8 @@ Alice runs `doc.publish(doc_id=D)` on a doc with some `block.visibility='interna
 
 #### (c) Agent-only API token
 
+> Credential mechanics superseded by [ADR 0044](../adr/0044-agent-credential-substrate.md): tokens are an **owned** `agent_tokens` table minted via `agent.token_mint` (lifecycle split from `agent.create`), not `@better-auth/api-key`. The principal shape, scope intersection, and audit attribution below are unchanged.
+
 A workspace admin creates agent `Bot42` with scopes `[doc:read, doc:write, comment:write]`.
 
 1. Admin runs `agent.create(workspace_id=A, name="Bot42", owner_user_id=Alice)`. Row written; Better Auth issues a key via `@better-auth/api-key` with `referenceId=A`, `permissions=["doc:read","doc:write","comment:write"]`, `rateLimitMax=5000/day`.
@@ -113,6 +115,8 @@ Alice soft-deletes doc D; 10 days later she runs `doc.restore(D)`.
 3. Inverse-restore property test (Phase 3) fuzzes D → delete → restore and asserts state equality modulo `audit_events`.
 
 ### 8.4 Default agent scope tiers (F14 fix)
+
+> Tier mechanics refined by [ADR 0044](../adr/0044-agent-credential-substrate.md): the tier input + intent-capturing audit rule below move to `agent.token_mint` (scopes live on the token; there is no `agents.scope_tier` column), and the "operator grants `admin` explicitly via tier=`custom`" allowance below is **retired** — the mintable universe is `SCOPES \ {"admin"}` for every caller, with a non-amplification rule bounding agent callers to their own effective scopes. The tier definitions, computed-once rule, and the `admin`-tier-excludes-`admin`-scope rule are unchanged.
 
 Operators creating agents reach for a set of defaults; undocumented defaults → inconsistency. `packages/scopes/defaults.ts` exports named tiers and `agent.create` accepts a `template: AgentScopeTier | "custom"` input:
 

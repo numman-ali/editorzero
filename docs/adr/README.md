@@ -77,6 +77,7 @@ Most ADRs are **Accepted**. ADRs 0001–0020 were accepted (v2) at the Phase-2 b
 | [0041](0041-audited-genesis-bootstrap.md) | **Audited genesis bootstrap via system-audit provenance markers** | **Accepted (new, 2026-06-02; closes the invariant-3 genesis gap; relates 0024/0040)** |
 | [0042](0042-trash-listing.md) | **Trash listing: `trash.list` — trash browse by per-kind acting-authority predicates; restorability stays with restore (`/trash` prefix; visible-stream cursor)** | **Proposed (draft 2026-06-12; cross-model Codex review folded same day; extends 0017, applies 0040's read postures; awaiting @numman)** |
 | [0043](0043-audited-ws-write-lane.md) | **The audited WS write lane: broadcast-after-commit substrate (resident Y.Doc = committed-only), `doc.apply_update` raw-delta capability, WS surface as hook-gated adapter; revocation closes gate the readOnly lift** | **Accepted (new, 2026-06-13; cross-model design round folded pre-build; executes ADR 0030 slice-B obligations, extends 0038)** |
+| [0044](0044-agent-credential-substrate.md) | **Agent credential substrate: owned bearer tokens (`agents` + `agent_tokens` in the lockstep; api-key/agent-auth plugins not adopted), 8-capability lifecycle family, resolver bearer arm, WS D4 closure, thin rate-limit enforcement** | **Proposed (draft 2026-06-13; amends 0016, closes ADR 0043 increment 4 + the Step-8 agents-table obligation; cross-model round pending)** |
 
 ## Review trails
 
