@@ -4,7 +4,7 @@ import { isReservedApiPath, RESERVED_API_PREFIXES } from "./reserved-prefixes";
 
 describe("reserved API prefixes (ADR 0035 §2)", () => {
   it("pins the trunk-owned prefix set", () => {
-    // /infra + the six capability domains + the three framework-owned
+    // /infra + the seven capability domains + the three framework-owned
     // prefixes. The registry-coverage gate in packages/contract-tests
     // is what forces a NEW trunk domain into this list; this pin is the
     // local record of the current contract.
@@ -16,6 +16,7 @@ describe("reserved API prefixes (ADR 0035 §2)", () => {
       "/audits",
       "/permissions",
       "/spaces",
+      "/agents",
       "/auth",
       "/mcp",
       "/collab",

@@ -22,14 +22,17 @@
  *
  * **Deliberate asymmetries with `permission.grant`** (Codex
  * guest-family design review, 2026-06-12):
- *   - NO subject standing checks — that is the verb's entire point.
- *     No membership lookup, no `hasBaselineReach`. Cross-workspace
- *     users and unprovisioned agent ids are accepted as written.
- *     Subject-EXISTENCE validation is recorded debt for BOTH subject
- *     kinds (not agents-only): `user` ids are not checked against the
- *     users table, `agent` ids have no table to check until the agents
- *     slice. An edge minted for a nonexistent subject is inert and
- *     revocable, never reachable.
+ *   - NO subject STANDING checks — that is the verb's entire point.
+ *     No membership lookup, no `hasBaselineReach`. But `agent` subjects
+ *     must EXIST as live agent rows in this workspace (ADR 0044
+ *     Decision 3 closed the recorded existence debt for the agent kind
+ *     on BOTH grant lanes — the cross-model MUST-FIX widened it from
+ *     `permission.grant` alone; this does not disturb the recovery
+ *     posture below, which is about the RESOURCE's placement, not the
+ *     subject). `user`-subject existence stays explicitly deferred to
+ *     the identity-resolution cluster — cross-workspace user ids are
+ *     accepted as written, and an edge minted for a nonexistent user
+ *     is inert and revocable, never reachable.
  *   - NO anomalous-placement refusal. `permission.grant`'s anomaly
  *     refusal (slice-1 MUST-FIX) exists because an `is_guest = 0` edge
  *     minted while the ceiling is unevaluable becomes an UNMARKED
@@ -79,6 +82,7 @@ import {
   type DocAddGuestOutput,
   DocAddGuestOutputSchema,
 } from "@editorzero/schemas/doc/add_guest";
+import { AgentIdInputSchema } from "@editorzero/schemas/shared/ids";
 
 import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
@@ -202,10 +206,45 @@ export const docAddGuest: Capability<DocAddGuestInput, DocAddGuestOutput> = {
     }
 
     // Step 2 — administer authority. Deliberately NO anomaly refusal
-    // and NO subject standing checks after this point (see header) —
+    // and NO subject STANDING checks after this point (see header) —
     // anomaly placement still bounds WHO via the ladder (owner-tier
     // only), and the guest marker bounds WHAT the edge can ever confer.
     acl.assertCanAdministerDoc(doc);
+
+    // Step 2b — agent-subject existence (ADR 0044 closure; the same
+    // typed family as permission.grant's arm — user subjects stay
+    // deferred to the identity cluster, see header). Agent ids are
+    // server-minted UUIDv7s, so a non-v7 subject_id CANNOT name a live
+    // row — the malformed shape folds into the same typed refusal
+    // rather than letting the brand constructor throw a 500.
+    if (input.subject_kind === "agent") {
+      const subjectAgentId = AgentIdInputSchema.safeParse(input.subject_id);
+      const agentRow = subjectAgentId.success
+        ? await ctx.db
+            .selectFrom("agents")
+            .select(["id", "revoked_at"])
+            .where("id", "=", subjectAgentId.data)
+            .executeTakeFirst()
+        : undefined;
+      if (agentRow === undefined || agentRow.revoked_at !== null) {
+        throw new ValidationError({
+          message:
+            "doc.add_guest: subject agent does not exist as a live agent in this " +
+            "workspace; create it via agent.create (a revoked agent's id is dead — " +
+            "recreate under a new id).",
+          issues: [
+            {
+              code: "subject_agent_not_live",
+              message:
+                agentRow === undefined
+                  ? "subject_id names no live agents row in this workspace (agent ids are server-minted UUIDv7s)"
+                  : "subject agent is revoked; revocation is terminal",
+              path: ["subject_id"],
+            },
+          ],
+        });
+      }
+    }
 
     // Step 3 — upsert on the unique edge (permission.grant step 4,
     // lanes swapped: non-guest edges conflict, guest edges converge).

@@ -104,3 +104,12 @@ export const UserIdInputSchema = z.string().min(1, "must not be empty");
 export const UserIdOutputSchema = z.string().transform((s): UserId => UserId(s));
 
 export const TokenIdOutputSchema = z.string().transform((s): TokenId => TokenId(s));
+
+// Agent-token ids are server-minted UUIDv7 by construction
+// (`generateTokenId`, ADR 0044) — only the BRAND stays parseAny for the
+// Better-Auth-era v4 *session* token ids that ride `principal.token_id`;
+// those are never addressed through capability input, so the input
+// schema validates the strict v7 form.
+export const TokenIdInputSchema = z
+  .uuid({ version: "v7", message: "must be a UUIDv7" })
+  .transform((s): TokenId => TokenId(s));

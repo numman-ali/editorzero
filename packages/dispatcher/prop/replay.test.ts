@@ -78,6 +78,11 @@ import {
   type WorkspaceState,
 } from "@editorzero/audit";
 import {
+  agentCreate,
+  agentRevoke,
+  agentTokenMint,
+  agentTokenRevoke,
+  agentUpdate,
   collectionCreate,
   collectionDelete,
   collectionMove,
@@ -93,6 +98,7 @@ import {
   docRename,
   docRestore,
   docUnpublish,
+  parseStoredScopes,
   permissionGrant,
   permissionRevoke,
   registerCapability,
@@ -119,7 +125,6 @@ import {
 import { type CapabilityId, CollectionId, DocId, UserId, WorkspaceId } from "@editorzero/ids";
 import { noopLogger, noopTracer } from "@editorzero/observability";
 import type { AccessPath, UserPrincipal } from "@editorzero/principal";
-import { SCOPES, type Scope } from "@editorzero/scopes";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 
@@ -211,28 +216,6 @@ function readIdField(result: unknown, key: string): string {
     if (typeof value === "string") return value;
   }
   throw new Error(`dispatch result missing string field "${key}": ${JSON.stringify(result)}`);
-}
-
-const SCOPE_SET: ReadonlySet<string> = new Set(SCOPES);
-
-function isScope(value: unknown): value is Scope {
-  return typeof value === "string" && SCOPE_SET.has(value);
-}
-
-/**
- * Parse the `agent_tokens.scopes` JSON column into the typed form the
- * reducer holds. Unlike `settings` (open object — fallback `{}`), scopes
- * have a CLOSED vocabulary, so a non-conforming value THROWS: it means
- * something wrote the column outside the owned mint path, and silently
- * filtering would hide exactly the drift this property exists to catch.
- */
-function parseScopesColumn(json: string): readonly Scope[] {
-  const parsed: unknown = JSON.parse(json);
-  if (Array.isArray(parsed)) {
-    const scopes = parsed.filter(isScope);
-    if (scopes.length === parsed.length) return scopes;
-  }
-  throw new Error(`agent_tokens.scopes is not a Scope[] — written outside the mint path: ${json}`);
 }
 
 /**
@@ -465,7 +448,7 @@ async function projectFromDb(d: SqliteDriver, ws: WorkspaceId): Promise<Persiste
       agent_id: r.agent_id,
       token_prefix: r.token_prefix,
       last4: r.last4,
-      scopes: parseScopesColumn(r.scopes),
+      scopes: parseStoredScopes(r.scopes),
       tier: r.tier,
       expires_at: r.expires_at,
       created_by: r.created_by,
@@ -552,6 +535,11 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
     };
 
     const registry = createRegistry([
+      registerCapability(agentCreate),
+      registerCapability(agentRevoke),
+      registerCapability(agentTokenMint),
+      registerCapability(agentTokenRevoke),
+      registerCapability(agentUpdate),
       registerCapability(workspaceUpdate),
       registerCapability(workspaceMemberAdd),
       registerCapability(workspaceMemberUpdateRole),
@@ -915,6 +903,28 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       acl_policy: "keep_grants",
     });
 
+    // ── Agent credential family (ADR 0044). Lifecycle: create → rename →
+    //    mint (custom tier, explicit list) → token-scoped revoke → a second
+    //    mint (named tier, server-side expansion) → terminal agent revoke.
+    //    The second token's row keeps `revoked_at: null` through the agent
+    //    revoke — revocation is a resolver-side conjunction, not a row
+    //    cascade — so the projection equality after the final step would
+    //    catch a replay that retro-patched token rows.
+    const a1 = readIdField(await step(agentCreate.id, { name: "Replay Bot" }), "agent_id");
+    await step(agentUpdate.id, { agent_id: a1, name: "Replay Bot v2" });
+    const t1 = readIdField(
+      await step(agentTokenMint.id, {
+        agent_id: a1,
+        tier: "custom",
+        scopes: ["workspace:read", "doc:read"],
+        expires_at: null,
+      }),
+      "token_id",
+    );
+    await step(agentTokenRevoke.id, { token_id: t1 });
+    await step(agentTokenMint.id, { agent_id: a1, tier: "author", expires_at: null });
+    await step(agentRevoke.id, { agent_id: a1 });
+
     await step(workspaceMemberRemove.id, { user_id: SECOND_USER });
 
     // ── Deferred-kind guard + coverage. Every effect a shipped capability
@@ -955,6 +965,11 @@ describe("invariant 3a — real dispatch → replay → live-DB projection", () 
       "space.member_add",
       "space.member_update_role",
       "space.member_remove",
+      "agent.create",
+      "agent.update",
+      "agent.revoke",
+      "agent.token_mint",
+      "agent.token_revoke",
     ];
     for (const kind of EXPECTED_STATE_KINDS) {
       expect(emittedKinds.has(kind)).toBe(true);

@@ -847,10 +847,16 @@ function generateOps(rnd: () => number, mint: () => string, world: World, foreig
   const foreignGrantIds = foreign.grants.map((g) => g.id);
 
   // Grant/guest subjects: in-tenant users + agents, plus ONE foreign
-  // user id. Subject ids are opaque strings by schema (no standing
-  // validation) — a grant minted for a foreign subject lands as inert
-  // garbage in tenant A (the seeded-H6 posture), NOT a leak: that
-  // subject can never authenticate into workspace A. Not pollution.
+  // user id. USER subject ids are opaque strings by schema (standing
+  // validation deferred to the identity cluster) — a grant minted for
+  // a foreign user lands as inert garbage in tenant A (the seeded-H6
+  // posture), NOT a leak: that subject can never authenticate into
+  // workspace A. AGENT subjects are different since ADR 0044's
+  // existence closure: grant/add_guest require a live same-workspace
+  // `agents` row, so the pool's agents are seeded live by `seedWorld`
+  // and the one foreign subject is deliberately a USER (a foreign
+  // agent would just be a `subject_agent_not_live` refusal, exercising
+  // nothing).
   const subjectPool: Array<{ kind: "user" | "agent"; id: string }> = [
     ...world.users.map((u) => ({ kind: "user" as const, id: u.id })),
     ...world.agents.map((a) => ({ kind: "agent" as const, id: a })),
@@ -1666,6 +1672,31 @@ async function seedWorld(driver: FuzzDriver, world: World): Promise<void> {
         deleted_at: null,
       })
       .execute();
+  }
+  // Agent principals get LIVE `agents` rows (ADR 0044 existence
+  // closure): `permission.grant` / `doc.add_guest` now require a live
+  // same-workspace row for agent-kind subjects, so an unseeded id
+  // would turn every agent-subject op into a `subject_agent_not_live`
+  // refusal and silently stop exercising the agent arms. Owner = the
+  // first rostered user (agents anchor to a human; the fuzzer's
+  // oracles never read ownership).
+  const agentOwner = world.users.find((u) => u.wsRole !== null)?.id ?? world.users[0]?.id;
+  if (agentOwner !== undefined) {
+    for (const a of world.agents) {
+      await db
+        .insertInto("agents")
+        .values({
+          id: a,
+          workspace_id: world.workspace_id,
+          name: `bot-${a.slice(-6)}`,
+          owner_user_id: agentOwner,
+          created_by: agentOwner,
+          created_at: 1,
+          updated_at: 1,
+          revoked_at: null,
+        })
+        .execute();
+    }
   }
   for (const s of world.spaces) {
     await db

@@ -25,6 +25,7 @@
  */
 
 import {
+  AGENTS_DDL,
   COLLECTIONS_DDL,
   createSqliteDriver,
   DOCS_DDL,
@@ -73,6 +74,8 @@ const REMOVED_MEMBER = UserId("018f0000-0000-7000-8000-0000000000a6");
 const PERSONAL_OWNER = UserId("018f0000-0000-7000-8000-0000000000a7");
 
 const BOT = AgentId("018f0000-0000-7000-8000-0000000000b1");
+const BOT_REVOKED = AgentId("018f0000-0000-7000-8000-0000000000b2");
+const BOT_MISSING = AgentId("018f0000-0000-7000-8000-0000000000b9");
 const BOT_TOKEN = TokenId("018f0000-0000-7000-8000-0000000000bb");
 
 const S_CLOSED = SpaceId("018f0000-0000-7000-8000-0000000000e1");
@@ -113,7 +116,28 @@ beforeEach(async () => {
   driver.exec(SPACE_MEMBERS_DDL);
   driver.exec(GRANTS_DDL);
   driver.exec(DOCS_DDL);
+  driver.exec(AGENTS_DDL);
   db = driver.scoped(WORKSPACE_A);
+
+  // Agent subjects (ADR 0044 existence closure): one live, one revoked.
+  for (const [id, revoked_at] of [
+    [BOT, null],
+    [BOT_REVOKED, 600],
+  ] as const) {
+    await db
+      .insertInto("agents")
+      .values({
+        id,
+        workspace_id: WORKSPACE_A,
+        name: `bot-${id.slice(-2)}`,
+        owner_user_id: CREATOR,
+        created_by: CREATOR,
+        created_at: 1,
+        updated_at: 1,
+        revoked_at,
+      })
+      .execute();
+  }
 
   // Workspace-A roster. REMOVED_MEMBER is soft-deleted (offboarded).
   for (const [user_id, role, deleted_at] of [
@@ -383,7 +407,10 @@ describe("permission.grant — fresh INSERT", () => {
     expect(await grantRows()).toHaveLength(1); // only the seeded guest edge
   });
 
-  it("agent SUBJECT skips membership/standing — even into a closed space", async () => {
+  it("agent SUBJECT skips membership/standing — even into a closed space (live row required)", async () => {
+    // BOT is a seeded LIVE agents row: existence passes (ADR 0044
+    // closure), and the STANDING rungs are still skipped — agents
+    // carry no baseline, a grant IS their access.
     const out = await permissionGrant.handler(
       buildCtx(user(CREATOR)),
       parsedInput({ resource_id: D_CLOSED, subject_kind: "agent", subject_id: BOT }),
@@ -391,6 +418,60 @@ describe("permission.grant — fresh INSERT", () => {
     expect(out.subject_kind).toBe("agent");
     expect(out.subject_id).toBe(BOT);
     expect(out.is_guest).toBe(0);
+  });
+
+  it("agent subject with NO agents row is refused (ADR 0044 existence closure)", async () => {
+    const err = await permissionGrant
+      .handler(
+        buildCtx(user(CREATOR)),
+        parsedInput({ resource_id: D_CLOSED, subject_kind: "agent", subject_id: BOT_MISSING }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(JSON.stringify(err.issues)).toContain("subject_agent_not_live");
+    }
+    // No edge minted — the typo-to-inert-edge path is closed.
+    expect(await grantRows()).toHaveLength(1); // only the seeded guest edge
+  });
+
+  it("REVOKED agent subject is refused — revocation is terminal, dead ids gain nothing", async () => {
+    const err = await permissionGrant
+      .handler(
+        buildCtx(user(CREATOR)),
+        parsedInput({ resource_id: D_CLOSED, subject_kind: "agent", subject_id: BOT_REVOKED }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(JSON.stringify(err.issues)).toContain("subject_agent_not_live");
+    }
+    expect(await grantRows()).toHaveLength(1);
+  });
+
+  it("a NON-UUID agent subject_id folds into the same typed refusal — never a 500", async () => {
+    // The schema keeps subject_id opaque (user ids are
+    // Better-Auth-shaped); agent ids are server-minted v7s, so a
+    // malformed shape cannot name a live row. The brand constructor
+    // must not be what reports it.
+    const err = await permissionGrant
+      .handler(
+        buildCtx(user(CREATOR)),
+        parsedInput({
+          resource_id: D_CLOSED,
+          subject_kind: "agent",
+          subject_id: "agent-e2e-sharing",
+        }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(JSON.stringify(err.issues)).toContain("subject_agent_not_live");
+    }
+    expect(await grantRows()).toHaveLength(1);
   });
 });
 

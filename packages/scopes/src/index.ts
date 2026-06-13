@@ -247,6 +247,14 @@ export const METADATA_ONLY_CAPABILITIES = [
   "space.member_update_role",
   "doc.add_guest",
   "doc.remove_guest",
+  // ADR 0044 — the agent-family mutators (identity + credential rows
+  // live in the dispatcher tx; the reads are not listed — this list is
+  // mutations-only by construction).
+  "agent.create",
+  "agent.update",
+  "agent.revoke",
+  "agent.token_mint",
+  "agent.token_revoke",
 ] as const;
 
 export type MetadataOnlyCapabilityId = (typeof METADATA_ONLY_CAPABILITIES)[number];

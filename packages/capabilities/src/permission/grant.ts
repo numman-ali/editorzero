@@ -43,13 +43,18 @@
  *     sharing, if ever needed mid-anomaly, is `doc.add_guest`'s
  *     explicitly-marked job. `permission.revoke` still works on
  *     anomaly docs (removal mints nothing).
- *   - `agent` subjects skip membership/standing checks: agents are not
+ *   - `agent` subjects skip membership/STANDING checks: agents are not
  *     Org members and carry NO baseline — a grant is precisely how an
  *     agent acquires resource access, and `is_guest = 0` stays honest
- *     because there is no baseline ceiling being crossed. Agent-row
- *     existence validation is a recorded obligation for the agents
- *     slice (no `agents` table exists yet); until then a granted-but-
- *     nonexistent agent id is an inert, revocable row.
+ *     because there is no baseline ceiling being crossed. But the
+ *     subject must EXIST as a LIVE agent row in this workspace (ADR
+ *     0044 Decision 3 — the existence closure, applied to BOTH grant
+ *     lanes per the cross-model MUST-FIX): the typo-to-inert-edge path
+ *     stopped being mintable when the `agents` table landed. A REVOKED
+ *     agent is refused too — revocation is terminal, and granting to a
+ *     dead id mints a row that can never authenticate (pre-closure
+ *     edges from before this slice stay inert under the stated
+ *     inert-until-matched rule; they are not retro-deleted).
  *   - Space-resource grants need membership only (any placement logic
  *     is doc-side): a space grant IS how space standing is conferred.
  *
@@ -106,6 +111,7 @@ import {
   type PermissionGrantOutput,
   PermissionGrantOutputSchema,
 } from "@editorzero/schemas/permission/grant";
+import { AgentIdInputSchema } from "@editorzero/schemas/shared/ids";
 
 import { loadDocReadResolver } from "../acl/ceiling";
 import { projectErrorAudit } from "../audit-helpers";
@@ -278,7 +284,42 @@ export const permissionGrant: Capability<PermissionGrantInput, PermissionGrantOu
       acl.assertCanAdministerSpace(SpaceId(input.resource_id));
     }
 
-    // Step 3 — subject rules (user subjects only; see header).
+    // Step 3 — subject rules (see header). Agent subjects: live-row
+    // existence in this workspace (ADR 0044 existence closure) — the
+    // tenant wrapper scopes the lookup, so same-workspace comes free.
+    // The schema keeps `subject_id` opaque (user ids are
+    // Better-Auth-shaped), but agent ids are server-minted UUIDv7s —
+    // a subject_id that is not one CANNOT name a live row, so the
+    // malformed shape folds into the same typed refusal rather than
+    // letting the brand constructor throw a 500.
+    if (input.subject_kind === "agent") {
+      const subjectAgentId = AgentIdInputSchema.safeParse(input.subject_id);
+      const agentRow = subjectAgentId.success
+        ? await ctx.db
+            .selectFrom("agents")
+            .select(["id", "revoked_at"])
+            .where("id", "=", subjectAgentId.data)
+            .executeTakeFirst()
+        : undefined;
+      if (agentRow === undefined || agentRow.revoked_at !== null) {
+        throw new ValidationError({
+          message:
+            "permission.grant: subject agent does not exist as a live agent in this " +
+            "workspace; create it via agent.create (a revoked agent's id is dead — " +
+            "recreate under a new id).",
+          issues: [
+            {
+              code: "subject_agent_not_live",
+              message:
+                agentRow === undefined
+                  ? "subject_id names no live agents row in this workspace (agent ids are server-minted UUIDv7s)"
+                  : "subject agent is revoked; revocation is terminal",
+              path: ["subject_id"],
+            },
+          ],
+        });
+      }
+    }
     if (input.subject_kind === "user") {
       const subjectUserId = UserId(input.subject_id);
       const memberRow = await ctx.db

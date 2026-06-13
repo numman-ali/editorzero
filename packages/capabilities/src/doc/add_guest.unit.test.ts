@@ -30,6 +30,7 @@
  */
 
 import {
+  AGENTS_DDL,
   COLLECTIONS_DDL,
   createSqliteDriver,
   DOCS_DDL,
@@ -76,6 +77,8 @@ const NON_MEMBER = UserId("018f0000-0000-7000-8000-0000000000a5");
 const PERSONAL_OWNER = UserId("018f0000-0000-7000-8000-0000000000a7");
 
 const BOT = AgentId("018f0000-0000-7000-8000-0000000000b1");
+const BOT_REVOKED = AgentId("018f0000-0000-7000-8000-0000000000b2");
+const BOT_MISSING = AgentId("018f0000-0000-7000-8000-0000000000b9");
 const BOT_TOKEN = TokenId("018f0000-0000-7000-8000-0000000000bb");
 
 const S_CLOSED = SpaceId("018f0000-0000-7000-8000-0000000000e1");
@@ -107,7 +110,28 @@ beforeEach(async () => {
   driver.exec(SPACE_MEMBERS_DDL);
   driver.exec(GRANTS_DDL);
   driver.exec(DOCS_DDL);
+  driver.exec(AGENTS_DDL);
   db = driver.scoped(WORKSPACE_A);
+
+  // Agent subjects (ADR 0044 existence closure): one live, one revoked.
+  for (const [id, revoked_at] of [
+    [BOT, null],
+    [BOT_REVOKED, 600],
+  ] as const) {
+    await db
+      .insertInto("agents")
+      .values({
+        id,
+        workspace_id: WORKSPACE_A,
+        name: `bot-${id.slice(-2)}`,
+        owner_user_id: CREATOR,
+        created_by: CREATOR,
+        created_at: 1,
+        updated_at: 1,
+        revoked_at,
+      })
+      .execute();
+  }
 
   for (const [user_id, role] of [
     [CREATOR, "member"],
@@ -390,12 +414,68 @@ describe("doc.add_guest — the deliberate asymmetries with permission.grant", (
     expect(out.is_guest).toBe(1);
   });
 
-  it("agent subject is accepted (no agents table yet — recorded debt for BOTH subject kinds)", async () => {
+  it("agent subject is accepted when a LIVE agents row exists (ADR 0044 closure)", async () => {
     const out = await docAddGuest.handler(
       buildCtx(user(CREATOR)),
       parsedInput({ subject_kind: "agent", subject_id: BOT }),
     );
     expect(out.subject_kind).toBe("agent");
+    expect(out.is_guest).toBe(1);
+  });
+
+  it("agent subject with NO agents row is refused — both grant lanes closed (ADR 0044)", async () => {
+    const err = await docAddGuest
+      .handler(
+        buildCtx(user(CREATOR)),
+        parsedInput({ subject_kind: "agent", subject_id: BOT_MISSING }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(JSON.stringify(err.issues)).toContain("subject_agent_not_live");
+    }
+  });
+
+  it("REVOKED agent subject is refused — revocation is terminal on the guest lane too", async () => {
+    const err = await docAddGuest
+      .handler(
+        buildCtx(user(CREATOR)),
+        parsedInput({ subject_kind: "agent", subject_id: BOT_REVOKED }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(JSON.stringify(err.issues)).toContain("subject_agent_not_live");
+    }
+  });
+
+  it("a NON-UUID agent subject_id folds into the same typed refusal — never a 500", async () => {
+    // Agent ids are server-minted v7s; a malformed shape cannot name a
+    // live row, and the brand constructor must not be what reports it.
+    const err = await docAddGuest
+      .handler(
+        buildCtx(user(CREATOR)),
+        parsedInput({ subject_kind: "agent", subject_id: "agent-e2e-sharing" }),
+      )
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    if (err instanceof ValidationError) {
+      expect(JSON.stringify(err.issues)).toContain("subject_agent_not_live");
+    }
+  });
+
+  it("user-subject existence stays DEFERRED (identity cluster) — cross-workspace user accepted", async () => {
+    // The closure is agent-kind only; a user id with no roster row in
+    // this workspace still mints a (marked, inert-until-real) edge —
+    // that is the verb's cross-workspace job until the identity slice.
+    const out = await docAddGuest.handler(
+      buildCtx(user(CREATOR)),
+      parsedInput({ subject_kind: "user", subject_id: NON_MEMBER }),
+    );
+    expect(out.subject_kind).toBe("user");
     expect(out.is_guest).toBe(1);
   });
 

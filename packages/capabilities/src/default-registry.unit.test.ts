@@ -8,6 +8,14 @@ import { createDefaultRegistry } from "./default-registry";
 // check: dropping a `registerCapability(...)` line — or adding one without
 // updating the contract — fails here. Update both together on purpose.
 const EXPECTED_IDS = [
+  "agent.create",
+  "agent.get",
+  "agent.list",
+  "agent.revoke",
+  "agent.token_list",
+  "agent.token_mint",
+  "agent.token_revoke",
+  "agent.update",
   "audit.get",
   "audit.list",
   "collection.create",

@@ -341,16 +341,26 @@ test("permission.list: the Sharing disclosure renders the ACL edges with the gue
   await page.getByRole("button", { name: "Show" }).click();
   await expect(page.getByText("No explicit grants")).toBeVisible();
 
-  // Mint one standing-backed agent edge (agent subjects are standing-
-  // exempt — the only deterministically mintable subject while the
-  // deployment has a single user) and one guest edge, over the same
-  // wire every surface uses.
+  // Mint a real agent first: ADR 0044's existence closure now requires
+  // a live `agents` row for any agent-kind grant subject (a fabricated
+  // id earns a typed `subject_agent_not_live` refusal). Agent ids are
+  // server-minted UUIDv7s, so capture the id to build the truncated
+  // display label the panel renders. One standing-backed agent edge +
+  // one guest edge, over the same wire every surface uses.
+  const createdAgent = await page.request.post("/agents/create", {
+    data: { name: "sharing-bot" },
+  });
+  expect(createdAgent.ok()).toBe(true);
+  const agentBody: { agent_id?: string } = await createdAgent.json();
+  const agentId = agentBody.agent_id ?? "";
+  expect(agentId).not.toBe("");
+
   const granted = await page.request.post("/permissions/grant", {
     data: {
       resource_kind: "doc",
       resource_id: doc.doc_id,
       subject_kind: "agent",
-      subject_id: "agent-e2e-sharing",
+      subject_id: agentId,
       role: "view",
     },
   });
@@ -370,7 +380,7 @@ test("permission.list: the Sharing disclosure renders the ACL edges with the gue
   await expect(rows.nth(0)).toContainText("user user-e2e…");
   await expect(rows.nth(0)).toContainText("comment");
   await expect(rows.nth(0)).toContainText("guest");
-  await expect(rows.nth(1)).toContainText("agent agent-e2…");
+  await expect(rows.nth(1)).toContainText(`agent ${agentId.slice(0, 8)}…`);
   await expect(rows.nth(1)).toContainText("view");
   await expect(rows.nth(1)).not.toContainText("guest");
   await expectNoAxeViolations(page); // the open panel with the table

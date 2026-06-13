@@ -52,6 +52,7 @@ export const RESERVED_API_PREFIXES = [
   "/audits",
   "/permissions",
   "/spaces",
+  "/agents",
   "/auth",
   "/mcp",
   "/collab",

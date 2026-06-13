@@ -23,6 +23,14 @@
  * type-compatible cell has a route.
  */
 
+import { agentCreate } from "./agent/create";
+import { agentGet } from "./agent/get";
+import { agentList } from "./agent/list";
+import { agentRevoke } from "./agent/revoke";
+import { agentTokenList } from "./agent/token_list";
+import { agentTokenMint } from "./agent/token_mint";
+import { agentTokenRevoke } from "./agent/token_revoke";
+import { agentUpdate } from "./agent/update";
 import { auditGet } from "./audit/get";
 import { auditList } from "./audit/list";
 import { collectionCreate } from "./collection/create";
@@ -71,6 +79,14 @@ import { workspaceUpdate } from "./workspace/update";
  */
 export function createDefaultRegistry(): Registry {
   return createRegistry([
+    registerCapability(agentCreate),
+    registerCapability(agentGet),
+    registerCapability(agentList),
+    registerCapability(agentRevoke),
+    registerCapability(agentTokenList),
+    registerCapability(agentTokenMint),
+    registerCapability(agentTokenRevoke),
+    registerCapability(agentUpdate),
     registerCapability(auditGet),
     registerCapability(auditList),
     registerCapability(collectionCreate),

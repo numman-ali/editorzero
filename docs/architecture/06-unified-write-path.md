@@ -168,7 +168,10 @@ metadata-only set = {
   permission.grant, permission.revoke,
   space.create, space.update, space.archive, space.restore,
   space.member_add, space.member_remove, space.member_update_role,
-  doc.add_guest, doc.remove_guest
+  doc.add_guest, doc.remove_guest,
+  -- agent-family mutators (ADR 0044; identity + credential rows in the dispatcher tx) --
+  agent.create, agent.update, agent.revoke,
+  agent.token_mint, agent.token_revoke
 }
 ```
 

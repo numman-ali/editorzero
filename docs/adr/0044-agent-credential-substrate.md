@@ -64,7 +64,7 @@ This supersedes one §8.4 architecture detail: there is no `agents.scope_tier` c
 
 ## Decision 3 — The capability family (8) + the grant-validation closure
 
-`agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.revoke`, `agent.token_mint`, `agent.token_revoke`, `agent.token_list`. All metadata-only (dispatcher-tx; `METADATA_ONLY_CAPABILITIES` grows by 8).
+`agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.revoke`, `agent.token_mint`, `agent.token_revoke`, `agent.token_list`. The five mutators are metadata-only (dispatcher-tx; `METADATA_ONLY_CAPABILITIES` grows by **5** — the set is mutations-only, reads never enter it). *(Corrected 2026-06-13 at increment 3; originally said "grows by 8".)*
 
 - **Authority:** `agent:create` gates create/update/token_mint; `agent:revoke` gates revoke/token_revoke. Per `ROLE_SCOPES`, only owner/admin hold these. Reads (`get`/`list`/`token_list`): admin-tier sees all; a non-admin member sees agents they **own**. Agents themselves can hold `agent:*` scopes (the admin tier includes them) — an agent creating an agent sets `owner_user_id` to its *own* owner (authority chains to a human; no ownerless rows by construction).
 - **`agent.token_mint` returns the secret once.** The output schema carries it; the **audit effect schema structurally excludes it** (effect carries `token_id`, `agent_id`, `token_prefix`, `last4`, `scopes`, `expires_at`). This is the one capability where output ≠ effect by design, and the unit test pins that the effect never contains the secret or hash.
@@ -106,7 +106,7 @@ Single-process is honest — the deployment is one trunk process (ADR 0027); a m
 
 **Build order (each increment = commit(s) with its tests):**
 1. Schema slice: `agents` + `agent_tokens` lockstep ×3, `TENANT_SCOPE_COLUMNS`, brands/schemas.
-2. Effects + replay: the three state kinds + two substrate kinds, reducer + walks + fixtures.
+2. Effects + replay: the five agent effect kinds — all state-class from birth (token kinds replay as state too; only `token_hash` stays out of replayed state, Decision 7) — reducer + walks + fixtures. *(Corrected 2026-06-13 at increment 2; originally "three state kinds + two substrate kinds".)*
 3. Capabilities + routes/CLI/MCP + the `permission.grant` existence closure + fuzz arm.
 4. Resolver bearer arm + CLI bearer transport.
 5. WS: registry growth + tap arms, then bearer at upgrade (D4 closes; ADR 0043's build order completes).

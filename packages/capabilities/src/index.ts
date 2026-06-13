@@ -37,6 +37,21 @@ export { loadDocReadResolver } from "./acl/ceiling";
 // barrel dependency-light and lets consumers choose which capabilities
 // to include (e.g., an admin-only surface that omits public ones).
 
+export { agentCreate } from "./agent/create";
+export { agentGet } from "./agent/get";
+export { agentList } from "./agent/list";
+export { agentRevoke } from "./agent/revoke";
+export { parseStoredScopes } from "./agent/stored-scopes";
+export { agentTokenList } from "./agent/token_list";
+export { agentTokenMint } from "./agent/token_mint";
+export { agentTokenRevoke } from "./agent/token_revoke";
+export {
+  AGENT_TOKEN_PREFIX,
+  hashAgentToken,
+  type MintedAgentToken,
+  mintAgentToken,
+} from "./agent/token-crypto";
+export { agentUpdate } from "./agent/update";
 export { auditGet } from "./audit/get";
 export { auditList } from "./audit/list";
 export { collectionCreate } from "./collection/create";
