@@ -291,10 +291,63 @@ export const GRANTS_DDL = `
 ` as const;
 
 /**
+ * \`agents\` — agent principals (ADR 0044); dialect-parallel to the
+ * SQLite block (see its docstring for the owner-liveness, terminal-
+ * revocation, and F99 composite-FK-target rationale). Timestamps are
+ * BIGINT epoch-ms (the cross-backend \`number\` rule).
+ */
+export const AGENTS_DDL = `
+  CREATE TABLE agents (
+    id            TEXT    PRIMARY KEY,
+    workspace_id  TEXT    NOT NULL,
+    name          TEXT    NOT NULL,
+    owner_user_id TEXT    NOT NULL,
+    created_by    TEXT    NOT NULL,
+    created_at    BIGINT  NOT NULL,
+    updated_at    BIGINT  NOT NULL,
+    revoked_at    BIGINT,
+    UNIQUE (id, workspace_id)
+  );
+  CREATE UNIQUE INDEX agents_name_unique
+    ON agents(workspace_id, name)
+    WHERE revoked_at IS NULL;
+  CREATE INDEX agents_by_owner
+    ON agents(workspace_id, owner_user_id);
+` as const;
+
+/**
+ * \`agent_tokens\` — owned bearer credentials (ADR 0044 Decision 1);
+ * dialect-parallel to the SQLite block (global \`token_hash\`
+ * uniqueness, composite FK to \`agents(id, workspace_id)\`, JSON
+ * \`scopes\`, display-only \`tier\`).
+ */
+export const AGENT_TOKENS_DDL = `
+  CREATE TABLE agent_tokens (
+    id            TEXT    PRIMARY KEY,
+    workspace_id  TEXT    NOT NULL,
+    agent_id      TEXT    NOT NULL,
+    token_hash    TEXT    NOT NULL,
+    token_prefix  TEXT    NOT NULL,
+    last4         TEXT    NOT NULL,
+    scopes        TEXT    NOT NULL,
+    tier          TEXT    NOT NULL CHECK (tier IN ('read-only','author','editor','admin','custom')),
+    created_by    TEXT    NOT NULL,
+    created_at    BIGINT  NOT NULL,
+    expires_at    BIGINT,
+    revoked_at    BIGINT,
+    FOREIGN KEY (agent_id, workspace_id) REFERENCES agents(id, workspace_id)
+  );
+  CREATE UNIQUE INDEX agent_tokens_hash_unique
+    ON agent_tokens(token_hash);
+  CREATE INDEX agent_tokens_by_agent
+    ON agent_tokens(workspace_id, agent_id);
+` as const;
+
+/**
  * Full DDL applied at driver bootstrap. Same concatenation order as
  * the SQLite parallel — \`docs\` must precede the child tables that FK
- * into it, and \`spaces\` precedes \`space_members\`. Other orderings
- * are free.
+ * into it, \`spaces\` precedes \`space_members\`, and \`agents\`
+ * precedes \`agent_tokens\`. Other orderings are free.
  */
 export const FULL_DDL = [
   WORKSPACES_DDL,
@@ -309,4 +362,6 @@ export const FULL_DDL = [
   SPACES_DDL,
   SPACE_MEMBERS_DDL,
   GRANTS_DDL,
+  AGENTS_DDL,
+  AGENT_TOKENS_DDL,
 ].join("\n");

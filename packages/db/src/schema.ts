@@ -84,6 +84,8 @@ export const TENANT_SCOPE_COLUMNS = {
   spaces: "workspace_id",
   space_members: "workspace_id",
   grants: "workspace_id",
+  agents: "workspace_id",
+  agent_tokens: "workspace_id",
 } as const satisfies Record<keyof Database, "workspace_id" | "id">;
 
 export type TenantScopedTable = keyof typeof TENANT_SCOPE_COLUMNS;
@@ -221,6 +223,79 @@ export interface GrantsTable {
   readonly is_guest: 0 | 1;
   readonly created_by: UserId;
   readonly created_at: number;
+}
+
+/**
+ * `agents` — agent principals (ADR 0044, amending ADR 0016). One row =
+ * one agent identity; credentials live in `agent_tokens` (the lifecycle
+ * split: the agent row is *who*, the token is *may-do*).
+ *
+ * `owner_user_id` is NOT NULL in v1 — every agent has a human owner,
+ * which keeps the `created_by` attribution ladder total (an owner-scoped
+ * agent's writes attribute to its owner; see `doc.create`). **Owner
+ * liveness gates authentication**: bearer resolution joins a live
+ * `workspace_members` row for the owner, so a removed member's agents
+ * stop resolving without any cascade touching these rows. There is no
+ * SQL FK to Better Auth's `user` table (boundary rule, ADR 0030).
+ *
+ * `revoked_at` is TERMINAL — no un-revoke capability exists by design
+ * (a security action, not a trash operation; recovery is recreation
+ * under a new id). Grants referencing a revoked agent's id stay as
+ * inert rows: subject-id-bound, and server-minted UUIDv7 ids make
+ * accidental re-match effectively impossible. The partial-unique name
+ * index frees the name on revocation (the established live-name
+ * pattern); audit rows carry the stable agent id, never just the name.
+ */
+export interface AgentsTable {
+  readonly id: AgentId;
+  readonly workspace_id: WorkspaceId;
+  readonly name: string;
+  readonly owner_user_id: UserId;
+  readonly created_by: UserId;
+  readonly created_at: number;
+  readonly updated_at: number;
+  readonly revoked_at: number | null;
+}
+
+/**
+ * `agent_tokens` — owned bearer credentials for agents (ADR 0044
+ * Decision 1; `@better-auth/api-key` deliberately not adopted). Rows
+ * are minted/revoked exclusively through capabilities in the
+ * dispatcher tx, so token row + audit row commit atomically
+ * (invariant 3).
+ *
+ * `token_hash` = SHA-256 hex of the full `ez_agent_…` secret, under a
+ * GLOBAL unique index (live + revoked rows alike): the schema encodes
+ * "one secret resolves to at most one row" — resolution is a
+ * full-digest indexed lookup over 256-bit entropy, and a duplicate
+ * match is structural corruption by definition. The plaintext secret
+ * exists only in the `agent.token_mint` output (show-once); the hash
+ * never enters an audit effect — replay reconstructs token rows MINUS
+ * this column (secrets are material, not state).
+ *
+ * `scopes` is a JSON-serialised array bounded by the non-amplification
+ * rule (`AGENT_MINTABLE_SCOPES`; agent callers mint ⊆ their own
+ * effective scopes). `tier` is the mint-time intent label
+ * (`AgentScopeTier | "custom"`) — display/audit record only, never
+ * re-derived into scopes (tiers are computed-once at mint).
+ *
+ * Composite FK to `agents(id, workspace_id)` makes a wrong-tenant
+ * `agent_id` pairing unrepresentable (the F99 pattern — `agents` must
+ * precede this table in `FULL_DDL`).
+ */
+export interface AgentTokensTable {
+  readonly id: TokenId;
+  readonly workspace_id: WorkspaceId;
+  readonly agent_id: AgentId;
+  readonly token_hash: string;
+  readonly token_prefix: string;
+  readonly last4: string;
+  readonly scopes: string;
+  readonly tier: "read-only" | "author" | "editor" | "admin" | "custom";
+  readonly created_by: UserId;
+  readonly created_at: number;
+  readonly expires_at: number | null;
+  readonly revoked_at: number | null;
 }
 
 /**
@@ -517,6 +592,8 @@ export interface Database {
   readonly spaces: SpacesTable;
   readonly space_members: SpaceMembersTable;
   readonly grants: GrantsTable;
+  readonly agents: AgentsTable;
+  readonly agent_tokens: AgentTokensTable;
 }
 
 /**

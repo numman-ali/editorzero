@@ -30,6 +30,8 @@ export { FULL_DDL as POSTGRES_FULL_DDL } from "./drivers/postgres-ddl";
 export type { SqliteDriver, SqliteDriverOptions } from "./drivers/sqlite";
 export { createSqliteDriver } from "./drivers/sqlite";
 export {
+  AGENT_TOKENS_DDL,
+  AGENTS_DDL,
   AUDIT_EVENTS_DDL,
   COLLECTIONS_DDL,
   DOC_COUNTERS_DDL,
@@ -49,6 +51,8 @@ export { createLoadRoles, type LoadRoles, type LoadRolesDriver } from "./load-ro
 export { createOutboxWriter, type OutboxAppendInput, type OutboxWriter } from "./outbox-writer";
 export { createQueryFaultPlugin, describeQueryNode, type QueryTag } from "./query-fault";
 export type {
+  AgentsTable,
+  AgentTokensTable,
   AuditEventsTable,
   CollectionsTable,
   Database,

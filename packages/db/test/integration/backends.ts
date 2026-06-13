@@ -61,6 +61,8 @@ export interface Backend {
 }
 
 const DROP_TABLES_SQL = `
+  DROP TABLE IF EXISTS agent_tokens;
+  DROP TABLE IF EXISTS agents;
   DROP TABLE IF EXISTS grants;
   DROP TABLE IF EXISTS space_members;
   DROP TABLE IF EXISTS spaces;

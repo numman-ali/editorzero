@@ -433,12 +433,75 @@ export const GRANTS_DDL = `
 ` as const;
 
 /**
+ * \`agents\` — agent principals (ADR 0044). \`owner_user_id\` NOT NULL
+ * (v1: every agent has a human owner; owner liveness gates bearer
+ * resolution — no SQL FK to Better Auth's \`user\`, boundary rule).
+ * \`revoked_at\` is terminal; the partial-unique name index frees the
+ * name on revocation (live-name pattern). \`UNIQUE (id, workspace_id)\`
+ * is the F99 composite-FK target for \`agent_tokens\`. The by-owner
+ * index serves the revocation tap's \`workspace.member_remove\` arm
+ * ("close sockets of agents owned by the removed user").
+ */
+export const AGENTS_DDL = `
+  CREATE TABLE agents (
+    id            TEXT    PRIMARY KEY,
+    workspace_id  TEXT    NOT NULL,
+    name          TEXT    NOT NULL,
+    owner_user_id TEXT    NOT NULL,
+    created_by    TEXT    NOT NULL,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    revoked_at    INTEGER,
+    UNIQUE (id, workspace_id)
+  );
+  CREATE UNIQUE INDEX agents_name_unique
+    ON agents(workspace_id, name)
+    WHERE revoked_at IS NULL;
+  CREATE INDEX agents_by_owner
+    ON agents(workspace_id, owner_user_id);
+` as const;
+
+/**
+ * \`agent_tokens\` — owned bearer credentials (ADR 0044 Decision 1).
+ * \`token_hash\` (SHA-256 hex of the full secret) is GLOBALLY unique
+ * across live + revoked rows — the schema encodes "one secret, at most
+ * one row"; resolution is a full-digest indexed lookup. The composite
+ * FK to \`agents(id, workspace_id)\` makes a wrong-tenant \`agent_id\`
+ * pairing unrepresentable (F99) — \`agents\` precedes this table in
+ * \`FULL_DDL\`. \`scopes\` is a JSON array validated at the capability
+ * boundary; \`tier\` is the mint-time intent label, display-only
+ * (never re-derived into scopes — tiers are computed-once at mint).
+ */
+export const AGENT_TOKENS_DDL = `
+  CREATE TABLE agent_tokens (
+    id            TEXT    PRIMARY KEY,
+    workspace_id  TEXT    NOT NULL,
+    agent_id      TEXT    NOT NULL,
+    token_hash    TEXT    NOT NULL,
+    token_prefix  TEXT    NOT NULL,
+    last4         TEXT    NOT NULL,
+    scopes        TEXT    NOT NULL,
+    tier          TEXT    NOT NULL CHECK (tier IN ('read-only','author','editor','admin','custom')),
+    created_by    TEXT    NOT NULL,
+    created_at    INTEGER NOT NULL,
+    expires_at    INTEGER,
+    revoked_at    INTEGER,
+    FOREIGN KEY (agent_id, workspace_id) REFERENCES agents(id, workspace_id)
+  );
+  CREATE UNIQUE INDEX agent_tokens_hash_unique
+    ON agent_tokens(token_hash);
+  CREATE INDEX agent_tokens_by_agent
+    ON agent_tokens(workspace_id, agent_id);
+` as const;
+
+/**
  * The full DDL applied at driver bootstrap. Concatenation order
  * matters only for FK references — `docs` must come before
- * `doc_snapshots` / `doc_updates` / `doc_counters`, and `spaces`
- * before `space_members`. `collections` is self-referential and has
- * no FK dependency on `docs`, so either order works; listing it first
- * alongside docs keeps the document-domain tables grouped at the top.
+ * `doc_snapshots` / `doc_updates` / `doc_counters`, `spaces`
+ * before `space_members`, and `agents` before `agent_tokens`.
+ * `collections` is self-referential and has no FK dependency on
+ * `docs`, so either order works; listing it first alongside docs
+ * keeps the document-domain tables grouped at the top.
  */
 export const FULL_DDL = [
   WORKSPACES_DDL,
@@ -453,4 +516,6 @@ export const FULL_DDL = [
   SPACES_DDL,
   SPACE_MEMBERS_DDL,
   GRANTS_DDL,
+  AGENTS_DDL,
+  AGENT_TOKENS_DDL,
 ].join("\n");

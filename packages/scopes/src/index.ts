@@ -31,6 +31,22 @@ export const SCOPES = [
 
 export type Scope = (typeof SCOPES)[number];
 
+/**
+ * The universe an agent token's scopes may draw from (ADR 0044
+ * Decision 1, the non-amplification rule). Exactly `SCOPES` minus the
+ * literal `"admin"` scope: NO agent token ever carries it, from any
+ * caller — every `admin`-scoped capability is `humanOnly` (§8.5), so
+ * the scope would be dead weight on an agent, and §8.4's old
+ * "operator grants `admin` via tier=custom" allowance is retired.
+ * The second half of the rule (an agent caller mints ⊆ its own
+ * effective scopes) is enforced at `agent.token_mint`, not here.
+ */
+export const AGENT_MINTABLE_SCOPES = SCOPES.filter(
+  (s): s is Exclude<Scope, "admin"> => s !== "admin",
+);
+
+export type AgentMintableScope = (typeof AGENT_MINTABLE_SCOPES)[number];
+
 // ── Capability categories (§4.1) ───────────────────────────────────────────
 
 export const CAPABILITY_CATEGORIES = ["mutation", "read", "auth", "admin", "system"] as const;

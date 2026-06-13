@@ -13,7 +13,7 @@
  * AST surgery is the implementation; the invariant is the output.
  */
 
-import { DocId, GrantId, SpaceId, UserId, WorkspaceId } from "@editorzero/ids";
+import { AgentId, DocId, GrantId, SpaceId, TokenId, UserId, WorkspaceId } from "@editorzero/ids";
 import { sql } from "kysely";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -34,6 +34,41 @@ const SPACE_A = SpaceId("018f0000-0000-7000-8000-0000000000e1");
 const SPACE_B = SpaceId("018f0000-0000-7000-8000-0000000000e2");
 const GRANT_A = GrantId("018f0000-0000-7000-8000-0000000000f1");
 const GRANT_B = GrantId("018f0000-0000-7000-8000-0000000000f2");
+const AGENT_A = AgentId("018f0000-0000-7000-8000-000000000a01");
+const AGENT_B = AgentId("018f0000-0000-7000-8000-000000000a02");
+const TOK_A = TokenId("018f0000-0000-7000-8000-000000000b01");
+const TOK_B = TokenId("018f0000-0000-7000-8000-000000000b02");
+
+function seedAgent(id: AgentId, workspace_id: WorkspaceId, owner: UserId) {
+  return {
+    id,
+    workspace_id,
+    name: `agent-${id.slice(-4)}`,
+    owner_user_id: owner,
+    created_by: owner,
+    created_at: 1,
+    updated_at: 1,
+    revoked_at: null,
+  };
+}
+
+function seedAgentToken(id: TokenId, workspace_id: WorkspaceId, agent_id: AgentId, by: UserId) {
+  return {
+    id,
+    workspace_id,
+    agent_id,
+    // Fixture digests only need uniqueness, not provenance.
+    token_hash: `hash-${id}`,
+    token_prefix: "ez_agent_fix",
+    last4: "fixt",
+    scopes: '["doc:read"]',
+    tier: "read-only" as const,
+    created_by: by,
+    created_at: 1,
+    expires_at: null,
+    revoked_at: null,
+  };
+}
 
 // ── Fixture harness ──────────────────────────────────────────────────────
 //
@@ -665,6 +700,50 @@ describe("WorkspaceScopingPlugin — new tenant-scoped tables", () => {
     const seenFromA = await a.selectFrom("grants").selectAll().execute();
     expect(seenFromA.map((r) => r.id)).toEqual([GRANT_A]);
   });
+
+  it("agents SELECT is scoped to the caller's workspace", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+
+    await a
+      .insertInto("agents")
+      .values(seedAgent(AGENT_A, WORKSPACE_A, ALICE))
+      .execute();
+    await b
+      .insertInto("agents")
+      .values(seedAgent(AGENT_B, WORKSPACE_B, BOB))
+      .execute();
+
+    const seenFromA = await a.selectFrom("agents").selectAll().execute();
+    expect(seenFromA.map((r) => r.id)).toEqual([AGENT_A]);
+  });
+
+  it("agent_tokens SELECT is scoped to the caller's workspace", async () => {
+    const a = driver.scoped(WORKSPACE_A);
+    const b = driver.scoped(WORKSPACE_B);
+
+    // Parent agents first — `agent_tokens` carries the composite FK.
+    await a
+      .insertInto("agents")
+      .values(seedAgent(AGENT_A, WORKSPACE_A, ALICE))
+      .execute();
+    await b
+      .insertInto("agents")
+      .values(seedAgent(AGENT_B, WORKSPACE_B, BOB))
+      .execute();
+
+    await a
+      .insertInto("agent_tokens")
+      .values(seedAgentToken(TOK_A, WORKSPACE_A, AGENT_A, ALICE))
+      .execute();
+    await b
+      .insertInto("agent_tokens")
+      .values(seedAgentToken(TOK_B, WORKSPACE_B, AGENT_B, BOB))
+      .execute();
+
+    const seenFromA = await a.selectFrom("agent_tokens").selectAll().execute();
+    expect(seenFromA.map((r) => r.id)).toEqual([TOK_A]);
+  });
 });
 
 // ── Self-scoped table: `workspaces` ──────────────────────────────────────
@@ -931,5 +1010,27 @@ describe("Composite (doc_id, workspace_id) FK (F99)", () => {
 
     const seen = await sys.selectFrom("doc_snapshots").select("id").execute();
     expect(seen).toEqual([{ id: "snap-ok" }]);
+  });
+
+  it("agent_tokens rejects a mismatched workspace_id even through driver.system()", async () => {
+    const sys = driver.system();
+    const a = driver.scoped(WORKSPACE_A);
+
+    await a
+      .insertInto("agents")
+      .values(seedAgent(AGENT_A, WORKSPACE_A, ALICE))
+      .execute();
+
+    await expect(() =>
+      sys
+        .insertInto("agent_tokens")
+        .values({
+          ...seedAgentToken(TOK_A, WORKSPACE_A, AGENT_A, ALICE),
+          // Agent A belongs to workspace A; claiming workspace B here
+          // must fail at the composite FK (ADR 0044 / F99).
+          workspace_id: WORKSPACE_B,
+        })
+        .execute(),
+    ).rejects.toThrow(/FOREIGN KEY constraint failed/i);
   });
 });

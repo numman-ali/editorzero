@@ -201,6 +201,9 @@ export const generateSpaceId = (): SpaceId => SpaceId(uuidV7());
 export const generateGrantId = (): GrantId => GrantId(uuidV7());
 export const generateBlockId = (): BlockId => BlockId(uuidV7());
 export const generateAgentId = (): AgentId => AgentId(uuidV7());
+// Owned agent-token rows mint v7 ids (ADR 0044); the brand stays
+// `parseAny` because Better-Auth-era session/token ids may be UUIDv4.
+export const generateTokenId = (): TokenId => TokenId(uuidV7());
 export const generateCommentId = (): CommentId => CommentId(uuidV7());
 export const generateAttachmentId = (): AttachmentId => AttachmentId(uuidV7());
 export const generateUploadId = (): UploadId => UploadId(uuidV7());

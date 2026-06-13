@@ -6,9 +6,9 @@
  * instruments the compiled SQL on both dialects against the `docs` table.
  * This file extends the floor to every member of `TENANT_SCOPE_COLUMNS`
  * (`collections`, `docs`, `doc_snapshots`, `doc_updates`, `audit_events`,
- * `workspace_members`, `spaces`, `space_members`, `grants`; `workspaces`
- * is self-scoped on `id` and covered by the dedicated
- * WorkspaceScopingPlugin self-scope suite)
+ * `workspace_members`, `spaces`, `space_members`, `grants`, `agents`,
+ * `agent_tokens`; `workspaces` is self-scoped on `id` and covered by the
+ * dedicated WorkspaceScopingPlugin self-scope suite)
  * — the plugin is table-blind by design (it keys off list membership),
  * so the invariant we care about is not "does it work on table X" but
  * "does it actually run against table X on Postgres". `tenant.unit.test.ts`
@@ -22,11 +22,13 @@
  */
 
 import {
+  AgentId,
   CapabilityId,
   CollectionId,
   DocId,
   GrantId,
   SpaceId,
+  TokenId,
   UserId,
   WorkspaceId,
 } from "@editorzero/ids";
@@ -52,6 +54,31 @@ const SPACE_A = SpaceId("018f0000-0000-7000-8000-0000000000e1");
 const SPACE_B = SpaceId("018f0000-0000-7000-8000-0000000000e2");
 const GRANT_A = GrantId("018f0000-0000-7000-8000-0000000000f1");
 const GRANT_B = GrantId("018f0000-0000-7000-8000-0000000000f2");
+const AGENT_A = AgentId("018f0000-0000-7000-8000-000000000a01");
+const AGENT_B = AgentId("018f0000-0000-7000-8000-000000000a02");
+const TOK_A = TokenId("018f0000-0000-7000-8000-000000000b01");
+const TOK_B = TokenId("018f0000-0000-7000-8000-000000000b02");
+
+function seedAgent(id: AgentId, workspace_id: WorkspaceId, owner: UserId) {
+  return {
+    id,
+    workspace_id,
+    name: `agent-${id.slice(-4)}`,
+    owner_user_id: owner,
+    created_by: owner,
+    created_at: 1,
+    updated_at: 1,
+    revoked_at: null,
+  };
+}
+
+async function seedAgentsBothWorkspaces(backend: Backend) {
+  await backend.driver
+    .system()
+    .insertInto("agents")
+    .values([seedAgent(AGENT_A, WORKSPACE_A, ALICE), seedAgent(AGENT_B, WORKSPACE_B, BOB)])
+    .execute();
+}
 
 function seedSpace(id: SpaceId, workspace_id: WorkspaceId, created_by: UserId) {
   return {
@@ -147,6 +174,8 @@ describe.each(backends)("tenant-table isolation — $name", ({ setup }) => {
         "spaces",
         "workspace_members",
         "workspaces",
+        "agents",
+        "agent_tokens",
       ].sort(),
     );
   });
@@ -424,5 +453,57 @@ describe.each(backends)("tenant-table isolation — $name", ({ setup }) => {
     const a = backend.driver.scoped(WORKSPACE_A);
     const seen = await a.selectFrom("grants").select("id").execute();
     expect(seen.map((r) => r.id)).toEqual([GRANT_A]);
+  });
+
+  it("agents: workspace-A handle returns only workspace-A rows", async () => {
+    await seedAgentsBothWorkspaces(backend);
+
+    const a = backend.driver.scoped(WORKSPACE_A);
+    const seen = await a.selectFrom("agents").select("id").execute();
+    expect(seen.map((r) => r.id)).toEqual([AGENT_A]);
+  });
+
+  it("agent_tokens: workspace-A handle returns only workspace-A rows", async () => {
+    // Parent agents first — the composite FK (ADR 0044 / F99).
+    await seedAgentsBothWorkspaces(backend);
+
+    await backend.driver
+      .system()
+      .insertInto("agent_tokens")
+      .values([
+        {
+          id: TOK_A,
+          workspace_id: WORKSPACE_A,
+          agent_id: AGENT_A,
+          token_hash: `hash-${TOK_A}`,
+          token_prefix: "ez_agent_fix",
+          last4: "fixa",
+          scopes: '["doc:read"]',
+          tier: "read-only",
+          created_by: ALICE,
+          created_at: 1,
+          expires_at: null,
+          revoked_at: null,
+        },
+        {
+          id: TOK_B,
+          workspace_id: WORKSPACE_B,
+          agent_id: AGENT_B,
+          token_hash: `hash-${TOK_B}`,
+          token_prefix: "ez_agent_fix",
+          last4: "fixb",
+          scopes: '["doc:read"]',
+          tier: "read-only",
+          created_by: BOB,
+          created_at: 1,
+          expires_at: null,
+          revoked_at: null,
+        },
+      ])
+      .execute();
+
+    const a = backend.driver.scoped(WORKSPACE_A);
+    const seen = await a.selectFrom("agent_tokens").select("id").execute();
+    expect(seen.map((r) => r.id)).toEqual([TOK_A]);
   });
 });
