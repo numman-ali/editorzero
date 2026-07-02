@@ -19,6 +19,13 @@
  *     slice. Block identity is the `id` attribute (server-minted
  *     `BlockId`, `null` until first save for browser-created nodes),
  *     rendered as `data-block-id` in the DOM.
+ *   - Two hygiene layers keep ids unique inside a live editor: the id
+ *     attribute opts out of split-copying (`keepOnSplit: false` — Enter
+ *     must mint, not clone) and `EzBlockIdHygiene` clears any duplicate
+ *     that still lands (copy/paste re-parses `data-block-id`). The
+ *     server refuses duplicate ids outright (`duplicate_block_id`) and
+ *     mints ids for cleared ones — the client's job is only ever to
+ *     SEND cleared ids, never to invent them.
  *   - Node names (`paragraph`, `heading`) are also the wire `type`
  *     values in the block JSON — `./pm.ts` maps 1:1.
  *   - The `code` mark excludes all other marks (`excludes: "_"`),
@@ -33,8 +40,9 @@
 // Nothing in this module touches a DOM at runtime until an Editor
 // mounts it in a browser.
 
-import { type Extensions, getSchema, Mark, mergeAttributes, Node } from "@tiptap/core";
+import { Extension, type Extensions, getSchema, Mark, mergeAttributes, Node } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
+import { Plugin, type Transaction } from "@tiptap/pm/state";
 
 /** Heading levels the owned schema accepts — mirrors `headingAttributes`. */
 export const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const;
@@ -42,6 +50,14 @@ export const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const;
 const blockIdAttribute = {
   id: {
     default: null,
+    // Splitting a block (Enter) copies attributes onto the new node by
+    // default. A copied id is a DUPLICATE the server write gate refuses
+    // (`duplicate_block_id`, @editorzero/sync foreign-update) — and on
+    // the collab lane a refused update poisons the session: every
+    // resync re-offers it until a full reload. The split-off block must
+    // fall back to `default: null` → the `""` wire sentinel → the
+    // server mints its id (the foreign-update repair lane).
+    keepOnSplit: false,
     /* v8 ignore next 2 -- @preserve: runs only when a browser editor parses pasted/loaded DOM. */
     parseHTML: (element: HTMLElement) => element.getAttribute("data-block-id"),
     renderHTML: (attributes: Record<string, unknown>) =>
@@ -152,11 +168,67 @@ const EzCode = Mark.create({
 });
 
 /**
+ * Duplicate-block-id backstop. `keepOnSplit: false` on the id attribute
+ * kills the split vector at the source, but a live editor can still
+ * duplicate an id: copy/paste re-parses `data-block-id` from the
+ * clipboard HTML straight back into the doc. The server refuses any
+ * update whose post-apply tree repeats an id (`duplicate_block_id`),
+ * and on the collab lane a refused update poisons the session until a
+ * full reload — so duplicates must die client-side, before the y-sync
+ * plugin ships them.
+ *
+ * After every doc-changing transaction, walk the top-level blocks and
+ * clear (null) the id of every block whose id already appeared — first
+ * occurrence in doc order keeps it. A cleared id serializes as the `""`
+ * wire sentinel and the server mints a fresh `BlockId`, so a pasted
+ * copy becomes a legitimate new block. Cut/paste (a move) is untouched:
+ * the original is gone by paste time, the id stays unique and survives
+ * — identity follows the move, history stays attached.
+ *
+ * The top-level walk matches the flat `doc → block+` shape; a future
+ * nesting slice must extend it to descendants.
+ *
+ * Exported as a factory so unit tests exercise it DOM-free (plain
+ * `EditorState.create` + `apply`); `EzBlockIdHygiene` mounts it in the
+ * browser editor. `getSchema` never calls `addProseMirrorPlugins`, so
+ * the server's schema path is untouched.
+ */
+export function blockIdHygienePlugin(): Plugin {
+  return new Plugin({
+    appendTransaction(transactions, _oldState, newState) {
+      if (!transactions.some((transaction) => transaction.docChanged)) return null;
+      const seen = new Set<string>();
+      let fix: Transaction | null = null;
+      newState.doc.forEach((node, offset) => {
+        const id: unknown = node.attrs["id"];
+        if (typeof id !== "string" || id === "") return;
+        if (seen.has(id)) {
+          fix ??= newState.tr;
+          fix.setNodeAttribute(offset, "id", null);
+          return;
+        }
+        seen.add(id);
+      });
+      return fix;
+    },
+  });
+}
+
+/* v8 ignore start -- @preserve: instantiated only by a live browser Editor; the plugin body is unit-tested via blockIdHygienePlugin(). */
+const EzBlockIdHygiene = Extension.create({
+  name: "blockIdHygiene",
+  addProseMirrorPlugins() {
+    return [blockIdHygienePlugin()];
+  },
+});
+/* v8 ignore stop */
+
+/**
  * The owned extension set. A fresh array per call (extensions carry
  * per-editor state once bound); the members are module singletons.
  */
 export function editorExtensions(): Extensions {
-  return [EzDocument, EzText, EzParagraph, EzHeading, EzBold, EzItalic, EzCode];
+  return [EzDocument, EzText, EzParagraph, EzHeading, EzBold, EzItalic, EzCode, EzBlockIdHygiene];
 }
 
 let compiledSchema: Schema | undefined;

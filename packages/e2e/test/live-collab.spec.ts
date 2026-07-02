@@ -15,6 +15,11 @@ import { CREDENTIALS } from "./credentials";
  *
  *  - a second tab on the same doc receives the typed line LIVE (no
  *    reload — only the post-commit broadcast can deliver it);
+ *  - Enter splits (end-of-block AND mid-block) broadcast as NEW blocks
+ *    with the session still Live: the id attribute is `keepOnSplit:
+ *    false`, so the split-off block ships id-less and the server mints
+ *    — before that fix the copied id tripped the write gate's
+ *    `duplicate_block_id` refusal and the session reset-looped;
  *  - the audit trail carries `doc.apply_update` allow rows for the
  *    edit (the lane is the dispatcher, not a raw socket);
  *  - a full reload renders the content from the server's persisted
@@ -38,6 +43,9 @@ test.describe.configure({ mode: "serial" });
 
 const DOC_TITLE = "Collab proving ground";
 const LIVE_LINE = "Typed live over the WS lane.";
+const SPLIT_LINE = "Enter mints a fresh block id.";
+/** Suffix of SPLIT_LINE — the cursor walks left over it to split mid-block. */
+const MID_SPLIT_TAIL = "block id.";
 
 async function signIn(page: Page): Promise<void> {
   const res = await page.request.post("/auth/sign-in/email", {
@@ -83,6 +91,28 @@ test("doc.apply_update: a typed edit broadcasts live to a second tab, lands on t
   // The line arrives in tab B without any navigation: only the
   // post-commit broadcast (ADR 0043 Decision 1) can put it there.
   await expect(surfaceB.locator("p").first()).toHaveText(LIVE_LINE);
+
+  // REGRESSION (2026-07-02): splitting a block must NOT copy its id.
+  // Tiptap's splitBlock copies attributes onto the new node unless the
+  // attribute opts out; before `keepOnSplit: false` the split-off block
+  // carried its sibling's id, the WS write gate refused the update
+  // (`duplicate_block_id`), and the refused delta re-offered on every
+  // resync — "The live session was reset by the server", unrecoverable
+  // without a reload. Both split shapes must broadcast as new
+  // server-minted blocks with the session still Live.
+  await page.keyboard.press("Enter");
+  await page.keyboard.type(SPLIT_LINE);
+  await expect(surfaceB.locator("p")).toHaveCount(2);
+  await expect(surfaceB.locator("p").nth(1)).toHaveText(SPLIT_LINE);
+
+  // Mid-block split: same copied-attrs vector, both halves non-empty.
+  for (let i = 0; i < MID_SPLIT_TAIL.length; i += 1) {
+    await page.keyboard.press("ArrowLeft");
+  }
+  await page.keyboard.press("Enter");
+  await expect(surfaceB.locator("p")).toHaveCount(3);
+  await expect(page.getByRole("status")).toHaveText("Live");
+  await expect(pageB.getByRole("status")).toHaveText("Live");
 
   // The lane is the dispatcher: the keystrokes produced audited
   // doc.apply_update allow rows. (`/audits` — the API domain; the

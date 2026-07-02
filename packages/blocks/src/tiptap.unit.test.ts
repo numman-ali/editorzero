@@ -9,10 +9,12 @@
  * exactly as documented in the module header.
  */
 
-import type { MarkType, NodeType, Mark as PmMark } from "@tiptap/pm/model";
+import { getAttributesFromExtensions } from "@tiptap/core";
+import type { MarkType, NodeType, Mark as PmMark, Node as PmNode } from "@tiptap/pm/model";
+import { EditorState } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
 
-import { editorExtensions, getEditorSchema, HEADING_LEVELS } from "./tiptap";
+import { blockIdHygienePlugin, editorExtensions, getEditorSchema, HEADING_LEVELS } from "./tiptap";
 
 const schema = getEditorSchema();
 
@@ -104,5 +106,83 @@ describe("renderHTML via spec.toDOM (DOM-free)", () => {
     expect(renderMark("bold")).toEqual(["strong", {}, 0]);
     expect(renderMark("italic")).toEqual(["em", {}, 0]);
     expect(renderMark("code")).toEqual(["code", {}, 0]);
+  });
+});
+
+describe("block id hygiene", () => {
+  function paragraphWithId(id: string | null, text: string): PmNode {
+    return nodeType("paragraph").create({ id }, text === "" ? undefined : schema.text(text));
+  }
+
+  function stateWithPlugin(paragraphs: PmNode[]): EditorState {
+    return EditorState.create({
+      doc: nodeType("doc").create(null, paragraphs),
+      plugins: [blockIdHygienePlugin()],
+    });
+  }
+
+  it("pins keepOnSplit: false on the id attribute — Enter must mint, not clone", () => {
+    // getSplittedAttributes (the helper tiptap's splitBlock uses) keeps
+    // exactly the attributes whose keepOnSplit resolves true, so this
+    // pins the split behavior without a live editor.
+    const idAttributes = getAttributesFromExtensions(editorExtensions()).filter(
+      (extensionAttribute) => extensionAttribute.name === "id",
+    );
+    expect(idAttributes.map((extensionAttribute) => extensionAttribute.type).sort()).toEqual([
+      "heading",
+      "paragraph",
+    ]);
+    for (const extensionAttribute of idAttributes) {
+      expect(extensionAttribute.attribute.keepOnSplit).toBe(false);
+    }
+  });
+
+  it("clears a pasted duplicate id after the doc change — first occurrence keeps it", () => {
+    const state = stateWithPlugin([
+      paragraphWithId("blk-a", "one"),
+      paragraphWithId("blk-b", "two"),
+    ]);
+    // Paste-shaped change: a copy of blk-a lands at the end of the doc.
+    const tr = state.tr.insert(state.doc.content.size, paragraphWithId("blk-a", "one copy"));
+    const next = state.apply(tr);
+    expect(next.doc.childCount).toBe(3);
+    expect(next.doc.child(0).attrs["id"]).toBe("blk-a");
+    expect(next.doc.child(1).attrs["id"]).toBe("blk-b");
+    // Cleared, not re-invented: null → "" wire sentinel → server mints.
+    expect(next.doc.child(2).attrs["id"]).toBeNull();
+    expect(next.doc.child(2).textContent).toBe("one copy");
+  });
+
+  it("clears every later duplicate when an id repeats more than twice", () => {
+    const state = stateWithPlugin([paragraphWithId("blk-a", "one")]);
+    const tr = state.tr;
+    tr.insert(tr.doc.content.size, paragraphWithId("blk-a", "two"));
+    tr.insert(tr.doc.content.size, paragraphWithId("blk-a", "three"));
+    const next = state.apply(tr);
+    expect(next.doc.child(0).attrs["id"]).toBe("blk-a");
+    expect(next.doc.child(1).attrs["id"]).toBeNull();
+    expect(next.doc.child(2).attrs["id"]).toBeNull();
+  });
+
+  it("leaves unique ids and unminted (null / empty-sentinel) ids untouched", () => {
+    const state = stateWithPlugin([
+      paragraphWithId("blk-a", "one"),
+      paragraphWithId(null, "draft"),
+    ]);
+    const tr = state.tr;
+    tr.insert(tr.doc.content.size, paragraphWithId(null, "another draft"));
+    tr.insert(tr.doc.content.size, paragraphWithId("", "sentinel"));
+    const next = state.apply(tr);
+    expect(next.doc.child(0).attrs["id"]).toBe("blk-a");
+    expect(next.doc.child(1).attrs["id"]).toBeNull();
+    expect(next.doc.child(2).attrs["id"]).toBeNull();
+    expect(next.doc.child(3).attrs["id"]).toBe("");
+  });
+
+  it("appends nothing when the transaction does not change the doc", () => {
+    const state = stateWithPlugin([paragraphWithId("blk-a", "one")]);
+    const next = state.apply(state.tr);
+    // Same doc object — no corrective transaction fired.
+    expect(next.doc).toBe(state.doc);
   });
 });
